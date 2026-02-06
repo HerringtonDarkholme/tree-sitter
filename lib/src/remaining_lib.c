@@ -13,5 +13,5 @@
 // stack.c — replaced by src_rust/stack.rs
 // subtree.c — replaced by src_rust/subtree.rs
 #include "./tree_cursor.c"
-#include "./tree.c"
+// tree.c — replaced by src_rust/tree.rs
 #include "./wasm_store.c"
