@@ -10,7 +10,7 @@
 #include "./parser.c"
 // point.c — replaced by src_rust/point.rs
 #include "./query.c"
-#include "./stack.c"
+// stack.c — replaced by src_rust/stack.rs
 // subtree.c — replaced by src_rust/subtree.rs
 #include "./tree_cursor.c"
 #include "./tree.c"

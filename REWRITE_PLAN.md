@@ -88,19 +88,19 @@ config.file(src_path.join("remaining_lib.c"));
 - At link time, all symbols resolve regardless of source language
 
 ### Transition state example
-After rewriting `alloc.c` and `point.c`:
+Current state after completing Tiers 0–2:
 ```c
 // remaining_lib.c
-// #include "./alloc.c"       ← REMOVED (now in Rust)
+// alloc.c — replaced by src_rust/alloc.rs
 #include "./get_changed_ranges.c"
-#include "./language.c"
-#include "./lexer.c"
+// language.c — replaced by src_rust/language.rs
+// lexer.c — replaced by src_rust/lexer.rs
 #include "./node.c"
 #include "./parser.c"
-// #include "./point.c"       ← REMOVED (now in Rust)
+// point.c — replaced by src_rust/point.rs
 #include "./query.c"
-#include "./stack.c"
-#include "./subtree.c"
+// stack.c — replaced by src_rust/stack.rs
+// subtree.c — replaced by src_rust/subtree.rs
 #include "./tree_cursor.c"
 #include "./tree.c"
 #include "./wasm_store.c"
@@ -251,14 +251,19 @@ After rewriting `alloc.c` and `point.c`:
 - 31 `#[no_mangle] extern "C"` public functions + internal helpers
 - All 269 tests pass with C subtree.c fully removed
 
-#### Tier 2 — Components Depending on Subtree
-| # | File | ~Lines | Depends on | Replaces |
-|---|------|--------|------------|----------|
-| 7 | `language.rs` | 300 | wasm_store (via extern "C" during transition) | `language.c/h` |
-| 8 | `lexer.rs` | 500 | length, unicode | `lexer.c/h` |
-| 9 | `stack.rs` | 900 | alloc, subtree, language | `stack.c/h` |
+#### Tier 2 — Components Depending on Subtree ✅ ALL DONE
+| # | File | ~Lines | Depends on | Status |
+|---|------|--------|------------|--------|
+| 7 | `language.rs` | 300 | wasm_store (via extern "C" during transition) | **DONE** — replaces `language.c/h` |
+| 8 | `lexer.rs` | 500 | length, unicode | **DONE** — replaces `lexer.c/h` |
+| 9 | `stack.rs` | 900 | alloc, subtree, language | **DONE** — replaces `stack.c/h` |
 
 **Note:** `subtree.c` calls `language.c` functions (e.g. `ts_language_symbol_name`), and `language.c` is needed by many downstream files. However, `language.c` itself only depends on `wasm_store.c` (for WASM ref counting). During the transition, `language.rs` can call the remaining C `wasm_store` functions via `extern "C"`. So language.c can be rewritten right after subtree.c.
+
+**Implementation notes for Tier 2:**
+- `language.rs`: 59 `#[no_mangle] extern "C"` functions including lookahead iterator. `TSLanguageData` partial `repr(C)` struct for accessing `TSLanguage` fields.
+- `lexer.rs`: 22 functions (13 internal + 9 exported). Vtable callbacks as `unsafe extern "C" fn`. C-variadic logging via `lexer_log_shim.c` shim.
+- `stack.rs`: ~50 functions across generic `Array<T>` helpers, node management, stack internals, accessors, and mutation/lifecycle. `SubtreeArray` non-Copy handled via `ptr::read`/`ptr::write`. macOS `stderr` linked via `#[link_name = "__stderrp"]`.
 
 #### Tier 3 — Tree Navigation
 | # | File | ~Lines | Depends on | Replaces |
