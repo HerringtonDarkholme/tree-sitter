@@ -239,17 +239,17 @@ After rewriting `alloc.c` and `point.c`:
 | 4 | `error_costs.rs` | 11 | **DONE** (header-only, no .c to remove) | `error_costs.h` |
 | 5 | `unicode.rs` | 170 | **DONE** (header-only, no .c to remove) | `unicode/*.h` |
 
-#### Tier 1 — Core Data Structure
-| # | File | ~Lines | Depends on | Replaces |
-|---|------|--------|------------|----------|
-| 6 | `subtree.rs` | 1000+ | alloc, length, language (symbol fns), error_costs | `subtree.c/h` |
+#### Tier 1 — Core Data Structure ✅ DONE
+| # | File | ~Lines | Depends on | Status |
+|---|------|--------|------------|--------|
+| 6 | `subtree.rs` | 2100+ | alloc, length, language (symbol fns), error_costs | **DONE** — replaces `subtree.c/h` |
 
-**subtree.c is the hardest and most critical file.** It defines:
-- `Subtree` / `MutableSubtree` — union of inline (small leaf) and heap-allocated nodes
-- Bitfield packing for node metadata (visible, named, extra, has_changes, etc.)
-- Atomic reference counting
-- `SubtreePool` — free-list for recycling subtree allocations
-- ~60 functions including `ts_subtree_new_leaf`, `ts_subtree_new_error`, `ts_subtree_balance`, `ts_subtree_edit`, `ts_subtree_string`
+**subtree.c was the hardest and most critical file.** Key implementation notes:
+- `SubtreeInlineData`: packed `flags: u8` for 7 boolean bitfields + `rows_and_lookahead: u8` for two 4-bit fields
+- `SubtreeHeapData`: packed `flags: u16` for 11 boolean bitfields with getter/setter methods
+- `TSLanguageData`: partial `repr(C)` struct mirroring `TSLanguage` layout for accessing fields used by `static inline` functions in `language.h`
+- 31 `#[no_mangle] extern "C"` public functions + internal helpers
+- All 269 tests pass with C subtree.c fully removed
 
 #### Tier 2 — Components Depending on Subtree
 | # | File | ~Lines | Depends on | Replaces |
@@ -285,39 +285,83 @@ After rewriting `alloc.c` and `point.c`:
 
 ---
 
+## Lessons Learned from subtree.rs Rewrite
+
+### Mistake 1: C Bitfield Layout Mismatch (CRITICAL)
+
+We wrote the entire subtree.rs (~2100 lines, 60+ functions) using individual Rust `bool` fields for C bitfields. Each Rust `bool` takes 1 byte; C bitfields pack multiple flags into a single byte/word. This meant:
+
+- `SubtreeInlineData`: 16 bytes in Rust vs 8 bytes in C (must fit in a pointer-sized word!)
+- `SubtreeHeapData`: 11 bool fields = 11 bytes in Rust vs 2 bytes in C, pushing the union data to a completely wrong offset
+
+**The fix** required replacing all bool fields with packed integers (`u8`/`u16`) and implementing getter/setter methods via `impl` blocks. Every field access throughout the file had to change from `self.visible` to `self.visible()` and `self.visible = true` to `self.set_visible(true)`.
+
+**Rule: ALWAYS use packed integers with bit manipulation for C bitfields. Never use individual Rust `bool` fields in `repr(C)` structs that must match C bitfield layout. Do this from the start — retrofitting is extremely painful.**
+
+### Mistake 2: Missing `#[no_mangle] extern "C"` Until the End
+
+We implemented all 31 public functions as `pub unsafe fn` without `#[no_mangle] extern "C"`. This meant they couldn't replace the C symbols at link time. We only discovered this during verification.
+
+**Rule: Add `#[no_mangle] pub unsafe extern "C" fn` from the very first function you write. The attribute is the whole point of the rewrite.**
+
+### Mistake 3: False Test Confidence
+
+Tests passed throughout development because `remaining_lib.c` still included `subtree.c`. Since the Rust functions lacked `#[no_mangle]`, the C symbols always won at link time. Our Rust code compiled but was **never called**. We had zero test coverage of the Rust implementation.
+
+**Rule: Remove the C `#include` and run tests EARLY — ideally after writing the very first batch of functions. Don't wait until the entire file is done. Catching ABI issues on function #3 is much better than catching them on function #60.**
+
+### Mistake 4: No Layout Size Assertions
+
+The plan said to add `static_assert!(size_of::<T>() == N)` checks, but we never did. If we had checked `size_of::<SubtreeInlineData>() == 8` or `size_of::<Subtree>() == 8`, we would have caught the mismatch immediately on the first build.
+
+**Rule: Add compile-time size assertions for EVERY `repr(C)` struct that must match a C layout. Do this at struct definition time, before writing any functions.**
+
+### Corrected Process for Future Files
+
+The key insight: **validate ABI compatibility incrementally**, not as a final step. The process below front-loads the dangerous parts.
+
+---
+
 ## Steps 5–9: Per-File Rewrite Loop
 
 For **each file** in the order above, repeat:
 
-### 5. Rewrite the file
+### 5. Define types with correct layout FIRST
+- Read the C header for all struct/union/typedef definitions
+- For every `repr(C)` struct:
+  - **C bitfields** → use packed `u8`/`u16`/`u32` with bit constants and getter/setter methods
+  - **C sub-byte fields** (e.g. `uint8_t x:4`) → pack into shared bytes
+  - Add `const _: () = assert!(std::mem::size_of::<T>() == N);` for the expected C size
+  - Add `const _: () = assert!(std::mem::align_of::<T>() == M);` if alignment matters
+- **Validate**: `cargo build` must pass with correct sizes before writing any function bodies
+
+### 6. Write functions with `#[no_mangle] extern "C"` from the start
 - Read the C source **line by line**. Translate every function, every branch, every edge case.
-- Use idiomatic Rust: `Option` for nullable, `Vec` for arrays, `enum` for tagged unions, `Arc`/`AtomicU32` for ref counting.
-- Keep `#[repr(C)]` only for types that cross the FFI boundary.
-- Export public `ts_*` API functions as `#[no_mangle] pub unsafe extern "C" fn`.
-- For calls to not-yet-rewritten C modules, declare them in an `extern "C" { ... }` block.
+- **Every public function** gets `#[no_mangle] pub unsafe extern "C" fn` immediately
+- Use idiomatic Rust where possible: `Vec` for local arrays, etc.
+- For calls to not-yet-rewritten C modules, declare them in an `extern "C" { ... }` block
+- For C `static inline` functions in headers: reimplement in Rust (no exported symbol to link against)
 
-### 6. Write tests
-- Unit tests in the module: `#[cfg(test)] mod tests { ... }`
-- Test every public function including edge cases visible in the C code
-- Run `cargo xtask test` — full integration suite must pass
+### 7. Activate early — remove C include after first batch
+- After writing the first 5-10 functions, **remove** the C `#include` from `remaining_lib.c`
+- Run `cargo build` — linker errors reveal missing functions or ABI mismatches
+- Run `cargo xtask test` — catches runtime behavior differences
+- **If tests fail**: fix immediately while the scope is small. Don't accumulate 50 functions before testing.
+- Continue implementing remaining functions, running tests after each batch
 
-### 7. Verify the rewrite
+### 8. Verify the complete rewrite
 - Read the Rust implementation **side-by-side** with the C original
 - Ensure **no logic is skipped**: every `if`, every loop bound, every error path
 - Check for: null pointer risks, integer overflow, alignment, off-by-one errors
-- Verify `#[repr(C)]` correctness for any FFI types
+- Verify `#[repr(C)]` correctness and size assertions pass
 - Check `unsafe` blocks are minimal and justified
+- Run `cargo xtask test` — full integration suite must pass
 
-### 8. Human review
+### 9. Human review and commit
 - Present the rewrite for human review
 - Address all feedback before proceeding
 - **Do not proceed to the next file until human approves**
-
-### 9. Activate and commit
-- Remove the corresponding `#include` from `lib/src/remaining_lib.c`
-- Run `cargo build && cargo xtask test` — both must pass
 - Commit the change
-- Proceed to next file
 
 ---
 
@@ -351,16 +395,19 @@ cargo xtask generate-fixtures   # Build test parsers from grammars
 
 ## Risks & Mitigations
 
-| Risk | Mitigation |
-|------|------------|
-| Subtle behavior differences in C→Rust translation | Side-by-side review of every function; full test suite at each step |
-| `#[repr(C)]` struct layout mismatches | Add `static_assert!(size_of::<T>() == N)` checks; compare with C sizes |
-| Undefined behavior in unsafe Rust | Minimize unsafe blocks; run Miri; careful review |
-| Mixed C/Rust linking issues during transition | Test on macOS, Linux, Windows at each tier boundary |
-| `subtree.h` bitfield layouts | Use explicit bit manipulation in Rust (no bitfield crate) |
-| Performance regression | Benchmark parsing throughput before/after (especially parser.rs) |
-| `array.h` C macro generics | Replace with `Vec<T>` — simpler and idiomatic |
-| Circular deps between C and Rust during transition | Linker resolves all symbols at link time; declare `extern "C"` as needed |
+| Risk | Mitigation | Learned from |
+|------|------------|--------------|
+| **C bitfield layout mismatch** | NEVER use Rust `bool` for C bitfields. Use packed `u8`/`u16` with bit constants and getter/setter `impl` methods. Add compile-time `size_of` assertions. | subtree.rs: 16-byte struct should have been 8 bytes |
+| **Missing `#[no_mangle] extern "C"`** | Add FFI attributes on EVERY public function FROM THE START. Not as a final step. | subtree.rs: 31 functions implemented without FFI attributes |
+| **False test confidence** | Remove the C `#include` EARLY (after first batch of functions), not after the entire file is done. Tests that pass with C still compiled prove nothing about the Rust code. | subtree.rs: all tests passed while Rust code was never called |
+| `#[repr(C)]` struct layout mismatches (non-bitfield) | Add `const _: () = assert!(size_of::<T>() == N);` for EVERY `repr(C)` struct at definition time | subtree.rs: SubtreeHeapData union offset was wrong by 8 bytes |
+| `static inline` functions in C headers | These have no exported symbol — must reimplement in Rust. Use partial `repr(C)` struct (e.g. `TSLanguageData`) to access fields. | subtree.rs: `ts_language_alias_sequence`, `ts_language_field_map` |
+| Subtle behavior differences in C→Rust translation | Side-by-side review of every function; full test suite at each step |  |
+| Undefined behavior in unsafe Rust | Minimize unsafe blocks; run Miri; careful review |  |
+| Mixed C/Rust linking issues during transition | Test on macOS, Linux, Windows at each tier boundary |  |
+| Performance regression | Benchmark parsing throughput before/after (especially parser.rs) |  |
+| `array.h` C macro generics | Replace with `Vec<T>` — simpler and idiomatic |  |
+| Circular deps between C and Rust during transition | Linker resolves all symbols at link time; declare `extern "C"` as needed |  |
 
 ---
 

@@ -11,7 +11,7 @@
 // point.c — replaced by src_rust/point.rs
 #include "./query.c"
 #include "./stack.c"
-#include "./subtree.c"
+// subtree.c — replaced by src_rust/subtree.rs
 #include "./tree_cursor.c"
 #include "./tree.c"
 #include "./wasm_store.c"
