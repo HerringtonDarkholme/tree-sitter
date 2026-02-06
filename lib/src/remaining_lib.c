@@ -6,7 +6,7 @@
 // get_changed_ranges.c — replaced by src_rust/get_changed_ranges.rs
 // language.c — replaced by src_rust/language.rs
 // lexer.c — replaced by src_rust/lexer.rs
-#include "./node.c"
+// node.c — replaced by src_rust/node.rs
 #include "./parser.c"
 // point.c — replaced by src_rust/point.rs
 #include "./query.c"
