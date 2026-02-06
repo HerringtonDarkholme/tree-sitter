@@ -3,7 +3,7 @@
 // When all files are rewritten, this file will be deleted entirely.
 
 // alloc.c — replaced by src_rust/alloc.rs
-#include "./get_changed_ranges.c"
+// get_changed_ranges.c — replaced by src_rust/get_changed_ranges.rs
 // language.c — replaced by src_rust/language.rs
 // lexer.c — replaced by src_rust/lexer.rs
 #include "./node.c"
