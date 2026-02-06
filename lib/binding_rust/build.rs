@@ -53,6 +53,7 @@ fn main() {
         .define("_DARWIN_C_SOURCE", None)
         .warnings(false)
         .file(src_path.join("remaining_lib.c"))
+        .file(src_path.join("lexer_log_shim.c"))
         .compile("tree-sitter");
 
     println!("cargo:include={}", include_path.display());

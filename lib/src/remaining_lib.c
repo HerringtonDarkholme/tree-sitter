@@ -5,7 +5,7 @@
 // alloc.c — replaced by src_rust/alloc.rs
 #include "./get_changed_ranges.c"
 // language.c — replaced by src_rust/language.rs
-#include "./lexer.c"
+// lexer.c — replaced by src_rust/lexer.rs
 #include "./node.c"
 #include "./parser.c"
 // point.c — replaced by src_rust/point.rs
