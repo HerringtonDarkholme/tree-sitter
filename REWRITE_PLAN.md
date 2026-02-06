@@ -120,47 +120,168 @@ After rewriting `alloc.c` and `point.c`:
 
 ## Step 4: Topological Rewrite Order
 
-Based on the dependency analysis of include graphs and function call chains:
+### Dependency Graph (from `#include` and cross-file function calls)
 
-### Tier 0 — Pure Leaf Utilities (no deps on other .c files)
-| # | File | ~Lines | Replaces | Rationale |
-|---|------|--------|----------|-----------|
-| 1 | `alloc.rs` | 50 | `alloc.c/h` | Zero deps. Global allocator fn pointers. Quick win to validate the mixed-compilation workflow. |
-| 2 | `point.rs` | 20 | `point.c/h` | Zero deps. Trivial point arithmetic. |
-| 3 | `length.rs` | 50 | `length.h` | Inline math. Depends on point types only. |
-| 4 | `error_costs.rs` | 10 | `error_costs.h` | Constants only. |
-| 5 | `unicode.rs` | 200 | `unicode/*.h` | UTF-8/16 decode. Self-contained. |
+```
+                    ┌──────────────────────────────────────────────────┐
+                    │              Tier 0: Leaf Utilities               │
+                    │  alloc.c/h   point.c/h   error_costs.h           │
+                    │  length.h (uses point.h)                         │
+                    │  array.h (uses alloc.h)                          │
+                    │  unicode/*.h                                      │
+                    └──────────┬───────────────────────────────────────┘
+                               │
+            ┌──────────────────┼──────────────────────┐
+            ▼                  ▼                      ▼
+     ┌─────────────┐   ┌─────────────┐        ┌─────────────┐
+     │  subtree.c   │   │   lexer.c   │        │ language.c  │
+     │              │   │             │        │             │
+     │ uses: alloc, │   │ uses:       │        │ uses:       │
+     │ length,      │   │ length,     │        │ wasm_store  │
+     │ language*,   │   │ unicode     │        │ (for wasm   │
+     │ error_costs  │   │             │        │  ref count) │
+     └──────┬───────┘   └──────┬──────┘        └──────┬──────┘
+            │                  │                      │
+            │   ┌──────────────┼──────────────────────┤
+            ▼   ▼              │                      ▼
+     ┌─────────────┐           │               ┌─────────────┐
+     │   stack.c    │           │               │tree_cursor.c│
+     │              │           │               │             │
+     │ uses: alloc, │           │               │ uses:       │
+     │ subtree,     │           │               │ language,   │
+     │ language     │           │               │ tree,       │
+     └──────┬───────┘           │               │ subtree     │
+            │                   │               └──────┬──────┘
+            │                   │                      │
+            │    ┌──────────────┤──────────────────────┤
+            │    ▼              │                      ▼
+            │  ┌─────────────┐ │        ┌──────────────────────┐
+            │  │   tree.c    │ │        │ get_changed_ranges.c │
+            │  │             │ │        │                      │
+            │  │ uses:       │ │        │ uses: subtree,       │
+            │  │ subtree,    │ │        │ language, tree_cursor│
+            │  │ tree_cursor,│ │        │ error_costs          │
+            │  │ get_changed │ │        └──────────┬───────────┘
+            │  │ _ranges,    │ │                   │
+            │  │ language    │ │                   │
+            │  └──────┬──────┘ │                   │
+            │         │        │                   │
+            │    ┌────┤        │                   │
+            │    ▼    ▼        │                   │
+            │  ┌─────────────┐ │                   │
+            │  │   node.c    │ │                   │
+            │  │             │ │                   │
+            │  │ uses:       │ │                   │
+            │  │ subtree,    │ │                   │
+            │  │ language,   │ │                   │
+            │  │ tree, point │ │                   │
+            │  └─────────────┘ │                   │
+            │                  │                   │
+            ▼                  ▼                   ▼
+     ┌─────────────────────────────────────────────────────┐
+     │                     parser.c                         │
+     │ uses: ALL (alloc, subtree, stack, lexer, language,   │
+     │   tree, get_changed_ranges, reusable_node,           │
+     │   reduce_action, error_costs, length, wasm_store)    │
+     └─────────────────────────────────────────────────────┘
 
-### Tier 1 — Core Data Structure
-| # | File | ~Lines | Replaces | Rationale |
-|---|------|--------|----------|-----------|
-| 6 | `subtree.rs` | 1000+ | `subtree.c/h` | Central node representation. Uses alloc, length, error_costs, atomic ref counting, memory pooling. The inline/heap union layout with bitfields is the hardest part. **This is the critical milestone** — once subtree works, the rest follows. |
+     ┌─────────────────────────────────────────────────────┐
+     │                     query.c                          │
+     │ uses: alloc, language, tree_cursor, point, unicode   │
+     │ (relatively self-contained, can be done before       │
+     │  or after parser.c)                                  │
+     └─────────────────────────────────────────────────────┘
 
-### Tier 2 — Components Depending on Subtree
-| # | File | ~Lines | Replaces | Rationale |
-|---|------|--------|----------|-----------|
-| 7 | `language.rs` | 300 | `language.c/h` | Reads `TSLanguage` parse tables. Depends on subtree types. |
-| 8 | `lexer.rs` | 500 | `lexer.c/h` | Input buffering, char decoding. Depends on length, unicode, subtree types. |
-| 9 | `stack.rs` | 900 | `stack.c/h` | Branching parse stack. Depends on subtree, language. |
+     ┌─────────────────────────────────────────────────────┐
+     │                   wasm_store.c                       │
+     │ uses: alloc, language, lexer, array                  │
+     │ (feature-gated, deferred)                            │
+     └─────────────────────────────────────────────────────┘
+```
 
-### Tier 3 — Tree Navigation
-| # | File | ~Lines | Replaces | Rationale |
-|---|------|--------|----------|-----------|
-| 10 | `tree.rs` | 140 | `tree.c/h` | TSTree lifecycle. Thin wrapper around subtree root. |
-| 11 | `tree_cursor.rs` | 720 | `tree_cursor.c/h` | Cursor traversal. Depends on subtree, language, tree. |
-| 12 | `node.rs` | 870 | `node.c` | TSNode API (~37 public functions). Depends on subtree, tree, language. |
-| 13 | `get_changed_ranges.rs` | 560 | `get_changed_ranges.c/h` | Incremental diff. Depends on subtree, language, tree_cursor. |
+### Per-File Dependency List
 
-### Tier 4 — The Engine
-| # | File | ~Lines | Replaces | Rationale |
-|---|------|--------|----------|-----------|
-| 14 | `query.rs` | 4450 | `query.c` | Query parser & matcher. Largest file. Depends on language, tree_cursor. Relatively self-contained. |
-| 15 | `parser.rs` | 2260 | `parser.c` | LR parsing engine. Depends on ALL other modules. **Must be last core file.** |
+| C File | Depends on (calls functions from) | Depended on by |
+|--------|-----------------------------------|----------------|
+| `alloc.c` | *(nothing)* | everything (via `ts_malloc`/`ts_free` macros) |
+| `point.c` | *(nothing)* (inline point.h only) | node.c (calls `ts_point_edit`) |
+| `length.h` | point.h (inline) | subtree, lexer, stack, tree, parser |
+| `error_costs.h` | *(nothing)* | subtree, get_changed_ranges, parser |
+| `unicode/*.h` | *(nothing)* | lexer, query |
+| `array.h` | alloc.h (for `ts_malloc`/`ts_free`) | subtree, stack, tree, parser, query, wasm_store |
+| `subtree.c` | alloc, length, language (symbol names), error_costs | stack, tree_cursor, tree, node, get_changed_ranges, parser |
+| `lexer.c` | length, unicode | parser, wasm_store |
+| `language.c` | wasm_store (for `ts_wasm_language_*` ref counting) | subtree, stack, tree_cursor, tree, node, get_changed_ranges, parser, query |
+| `stack.c` | alloc, subtree, language, length | parser |
+| `tree_cursor.c` | language, tree, subtree | get_changed_ranges, tree, query |
+| `get_changed_ranges.c` | subtree, language, tree_cursor, error_costs | tree, parser |
+| `tree.c` | subtree, tree_cursor, get_changed_ranges, language | node, parser |
+| `node.c` | subtree, language, tree, point | parser |
+| `parser.c` | **ALL**: alloc, subtree, stack, lexer, language, tree, node, get_changed_ranges, reusable_node, reduce_action, error_costs, length, wasm_store | *(top-level)* |
+| `query.c` | alloc, language, tree_cursor, point, unicode | *(top-level)* |
+| `wasm_store.c` | alloc, language, lexer, array | language (circular for ref counting) |
 
-### Tier 5 — Optional (Deferred)
-| # | File | ~Lines | Replaces | Decision |
-|---|------|--------|----------|----------|
-| 16 | `wasm_store.rs` | 1940 | `wasm_store.c/h` | Deferred. Decide after core is done. Feature-gated behind `wasm`. |
+### Circular Dependency: language.c ↔ wasm_store.c
+
+`language.c` calls `ts_wasm_language_retain`/`ts_wasm_language_release` (in wasm_store.c) for WASM ref counting. `wasm_store.c` calls `ts_language_*` functions. This cycle is broken during the transition by:
+- Keeping `wasm_store.c` in C until last (deferred to Tier 5)
+- Rust `language.rs` calls wasm functions via `extern "C"` declarations
+- Only matters when the `wasm` feature is enabled
+
+### Rewrite Order (Revised)
+
+#### Tier 0 — Pure Leaf Utilities (no deps on other .c files)
+| # | File | ~Lines | Status | Replaces |
+|---|------|--------|--------|----------|
+| 1 | `alloc.rs` | 113 | **DONE** | `alloc.c/h` |
+| 2 | `point.rs` | 93 | **DONE** | `point.c/h` |
+| 3 | `length.rs` | 80 | done (header-only, no .c to remove) | `length.h` |
+| 4 | `error_costs.rs` | 11 | done (header-only, no .c to remove) | `error_costs.h` |
+| 5 | `unicode.rs` | 170 | done (header-only, no .c to remove) | `unicode/*.h` |
+
+#### Tier 1 — Core Data Structure
+| # | File | ~Lines | Depends on | Replaces |
+|---|------|--------|------------|----------|
+| 6 | `subtree.rs` | 1000+ | alloc, length, language (symbol fns), error_costs | `subtree.c/h` |
+
+**subtree.c is the hardest and most critical file.** It defines:
+- `Subtree` / `MutableSubtree` — union of inline (small leaf) and heap-allocated nodes
+- Bitfield packing for node metadata (visible, named, extra, has_changes, etc.)
+- Atomic reference counting
+- `SubtreePool` — free-list for recycling subtree allocations
+- ~60 functions including `ts_subtree_new_leaf`, `ts_subtree_new_error`, `ts_subtree_balance`, `ts_subtree_edit`, `ts_subtree_string`
+
+#### Tier 2 — Components Depending on Subtree
+| # | File | ~Lines | Depends on | Replaces |
+|---|------|--------|------------|----------|
+| 7 | `language.rs` | 300 | wasm_store (via extern "C" during transition) | `language.c/h` |
+| 8 | `lexer.rs` | 500 | length, unicode | `lexer.c/h` |
+| 9 | `stack.rs` | 900 | alloc, subtree, language | `stack.c/h` |
+
+**Note:** `subtree.c` calls `language.c` functions (e.g. `ts_language_symbol_name`), and `language.c` is needed by many downstream files. However, `language.c` itself only depends on `wasm_store.c` (for WASM ref counting). During the transition, `language.rs` can call the remaining C `wasm_store` functions via `extern "C"`. So language.c can be rewritten right after subtree.c.
+
+#### Tier 3 — Tree Navigation
+| # | File | ~Lines | Depends on | Replaces |
+|---|------|--------|------------|----------|
+| 10 | `tree_cursor.rs` | 720 | language, tree, subtree | `tree_cursor.c/h` |
+| 11 | `get_changed_ranges.rs` | 560 | subtree, language, tree_cursor, error_costs | `get_changed_ranges.c/h` |
+| 12 | `tree.rs` | 140 | subtree, tree_cursor, get_changed_ranges, language | `tree.c/h` |
+| 13 | `node.rs` | 870 | subtree, language, tree, point | `node.c` |
+
+**Note on ordering within Tier 3:** `tree.c` depends on `tree_cursor.c` and `get_changed_ranges.c`, so those must come first. `tree_cursor.c` depends on `tree.c` for the `TSTree` struct definition (but only reads the struct, doesn't call tree.c functions extensively), so we can provide the struct from Rust while `tree.c` is still in C. `node.c` depends on `tree.c` so it comes last.
+
+#### Tier 4 — The Engine
+| # | File | ~Lines | Depends on | Replaces |
+|---|------|--------|------------|----------|
+| 14 | `query.rs` | 4450 | alloc, language, tree_cursor, point, unicode | `query.c` |
+| 15 | `parser.rs` | 2260 | **ALL** of the above | `parser.c` |
+
+`query.c` and `parser.c` are independent of each other — either can be done first. `query.c` is larger but simpler in structure. `parser.c` must be last because it depends on everything.
+
+#### Tier 5 — Optional (Deferred)
+| # | File | ~Lines | Depends on | Decision |
+|---|------|--------|------------|----------|
+| 16 | `wasm_store.rs` | 1940 | alloc, language, lexer | Deferred. Feature-gated behind `wasm`. |
 
 ---
 

@@ -5,6 +5,7 @@ use crate::ffi::TSPoint;
 use super::point::{point_add, point_sub};
 
 #[derive(Clone, Copy, Debug)]
+#[repr(C)]
 pub struct Length {
     pub bytes: u32,
     pub extent: TSPoint,
