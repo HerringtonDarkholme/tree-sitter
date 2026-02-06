@@ -6,6 +6,9 @@
 // The C library uses ICU macros (U8_NEXT, U16_NEXT, etc.) for decoding.
 // This module provides equivalent Rust functions.
 
+/// Error sentinel value, equivalent to C's `U_SENTINEL` / `TS_DECODE_ERROR`.
+pub const TS_DECODE_ERROR: i32 = -1;
+
 /// Decode one UTF-8 code point from `string[..length]`.
 /// Returns (bytes_consumed, code_point). On error, code_point is -1.
 #[inline]
@@ -145,7 +148,7 @@ pub unsafe extern "C" fn ts_decode_utf8(
     consumed
 }
 
-pub unsafe extern "C" fn ts_decode_utf16le(
+pub unsafe extern "C" fn ts_decode_utf16_le(
     string: *const u8,
     length: u32,
     code_point: *mut i32,
@@ -164,7 +167,7 @@ pub unsafe extern "C" fn ts_decode_utf16le(
     consumed
 }
 
-pub unsafe extern "C" fn ts_decode_utf16be(
+pub unsafe extern "C" fn ts_decode_utf16_be(
     string: *const u8,
     length: u32,
     code_point: *mut i32,
