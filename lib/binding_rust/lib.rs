@@ -5,6 +5,9 @@
 pub mod ffi;
 mod util;
 
+#[path = "../src_rust/mod.rs"]
+mod core_impl;
+
 #[cfg(not(feature = "std"))]
 extern crate alloc;
 #[cfg(not(feature = "std"))]

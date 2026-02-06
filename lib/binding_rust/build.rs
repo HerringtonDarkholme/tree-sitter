@@ -52,7 +52,7 @@ fn main() {
         .define("_BSD_SOURCE", None)
         .define("_DARWIN_C_SOURCE", None)
         .warnings(false)
-        .file(src_path.join("lib.c"))
+        .file(src_path.join("remaining_lib.c"))
         .compile("tree-sitter");
 
     println!("cargo:include={}", include_path.display());
