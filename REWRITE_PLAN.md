@@ -27,7 +27,7 @@ These headers **must remain unchanged**. The Rust implementation must produce id
 
 ---
 
-## Step 1: Scaffold — Rust Module Structure
+## Step 1: Scaffold — Rust Module Structure ✅ DONE
 
 Create `lib/src_rust/` as an internal module within the `tree-sitter` crate:
 
@@ -68,7 +68,7 @@ Each module starts as a **stub** with the correct type signatures and `todo!()` 
 
 ---
 
-## Step 2: Change Build Script
+## Step 2: Change Build Script ✅ DONE
 
 Modify `lib/binding_rust/build.rs` to support **mixed C/Rust compilation**.
 
@@ -108,7 +108,7 @@ After rewriting `alloc.c` and `point.c`:
 
 ---
 
-## Step 3: Make It Compile
+## Step 3: Make It Compile ✅ DONE
 
 1. Create all stub files with correct signatures (all bodies are `todo!()`)
 2. Ensure `cargo build` succeeds with the mixed C/Rust setup
@@ -230,14 +230,14 @@ After rewriting `alloc.c` and `point.c`:
 
 ### Rewrite Order (Revised)
 
-#### Tier 0 — Pure Leaf Utilities (no deps on other .c files)
+#### Tier 0 — Pure Leaf Utilities (no deps on other .c files) ✅ ALL DONE
 | # | File | ~Lines | Status | Replaces |
 |---|------|--------|--------|----------|
 | 1 | `alloc.rs` | 113 | **DONE** | `alloc.c/h` |
 | 2 | `point.rs` | 93 | **DONE** | `point.c/h` |
-| 3 | `length.rs` | 80 | done (header-only, no .c to remove) | `length.h` |
-| 4 | `error_costs.rs` | 11 | done (header-only, no .c to remove) | `error_costs.h` |
-| 5 | `unicode.rs` | 170 | done (header-only, no .c to remove) | `unicode/*.h` |
+| 3 | `length.rs` | 80 | **DONE** (header-only, no .c to remove) | `length.h` |
+| 4 | `error_costs.rs` | 11 | **DONE** (header-only, no .c to remove) | `error_costs.h` |
+| 5 | `unicode.rs` | 170 | **DONE** (header-only, no .c to remove) | `unicode/*.h` |
 
 #### Tier 1 — Core Data Structure
 | # | File | ~Lines | Depends on | Replaces |
