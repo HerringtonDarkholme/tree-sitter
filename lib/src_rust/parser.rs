@@ -25,7 +25,11 @@ use super::language::{
     TSParseActionTypeShift,
 };
 use super::length::{length_add, length_sub, length_zero, Length};
-use super::lexer::{ColumnData, Lexer};
+use super::lexer::{
+    ts_lexer_delete, ts_lexer_finish, ts_lexer_included_ranges, ts_lexer_init, ts_lexer_mark_end,
+    ts_lexer_reset, ts_lexer_set_included_ranges, ts_lexer_set_input, ts_lexer_start, ColumnData,
+    Lexer,
+};
 use super::stack::{
     array_assign, array_back, array_clear, array_delete, array_erase, array_front,
     array_get, array_grow, array_init, array_new, array_pop, array_push, array_reserve,
@@ -156,25 +160,6 @@ extern "C" {
         other_data: *const i8,
         other_length: u32,
     ) -> bool;
-
-    // lexer.rs
-    fn ts_lexer_init(self_: *mut Lexer);
-    fn ts_lexer_set_input(self_: *mut Lexer, input: TSInput);
-    fn ts_lexer_start(self_: *mut Lexer);
-    fn ts_lexer_finish(self_: *mut Lexer, lookahead_end_byte: *mut u32);
-    fn ts_lexer_advance_to_end(self_: *mut Lexer);
-    fn ts_lexer_mark_end(self_: *mut Lexer);
-    fn ts_lexer_included_ranges(
-        self_: *const Lexer,
-        count: *mut u32,
-    ) -> *const TSRange;
-    fn ts_lexer_set_included_ranges(
-        self_: *mut Lexer,
-        ranges: *const TSRange,
-        count: u32,
-    ) -> bool;
-    fn ts_lexer_reset(self_: *mut Lexer, position: Length);
-    fn ts_lexer_delete(self_: *mut Lexer);
 
     // language.rs
     fn ts_language_next_state(

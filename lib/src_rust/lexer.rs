@@ -440,8 +440,7 @@ extern "C" {
 // ===========================================================================
 
 /// Initialize a Lexer, setting up the TSLexer vtable and default state.
-#[no_mangle]
-pub unsafe extern "C" fn ts_lexer_init(self_: *mut Lexer) {
+pub unsafe fn ts_lexer_init(self_: *mut Lexer) {
     let s = &mut *self_;
     s.data.advance = Some(ts_lexer__advance);
     s.data.mark_end = Some(ts_lexer__mark_end);
@@ -474,14 +473,12 @@ pub unsafe extern "C" fn ts_lexer_init(self_: *mut Lexer) {
 }
 
 /// Free the lexer's included_ranges allocation.
-#[no_mangle]
-pub unsafe extern "C" fn ts_lexer_delete(self_: *mut Lexer) {
+pub unsafe fn ts_lexer_delete(self_: *mut Lexer) {
     ts_free((*self_).included_ranges as *mut c_void);
 }
 
 /// Set the input source for the lexer.
-#[no_mangle]
-pub unsafe extern "C" fn ts_lexer_set_input(self_: *mut Lexer, input: TSInput) {
+pub unsafe fn ts_lexer_set_input(self_: *mut Lexer, input: TSInput) {
     let s = &mut *self_;
     s.input = input;
     ts_lexer__clear_chunk(s);
@@ -489,8 +486,7 @@ pub unsafe extern "C" fn ts_lexer_set_input(self_: *mut Lexer, input: TSInput) {
 }
 
 /// Move the lexer to the given position (no-op if already there).
-#[no_mangle]
-pub unsafe extern "C" fn ts_lexer_reset(self_: *mut Lexer, position: Length) {
+pub unsafe fn ts_lexer_reset(self_: *mut Lexer, position: Length) {
     let s = &mut *self_;
     if position.bytes != s.current_position.bytes {
         ts_lexer_goto(s, position);
@@ -498,8 +494,7 @@ pub unsafe extern "C" fn ts_lexer_reset(self_: *mut Lexer, position: Length) {
 }
 
 /// Prepare the lexer to start scanning a new token.
-#[no_mangle]
-pub unsafe extern "C" fn ts_lexer_start(self_: *mut Lexer) {
+pub unsafe fn ts_lexer_start(self_: *mut Lexer) {
     let s = &mut *self_;
     s.token_start_position = s.current_position;
     s.token_end_position = LENGTH_UNDEFINED;
@@ -522,8 +517,7 @@ pub unsafe extern "C" fn ts_lexer_start(self_: *mut Lexer) {
 }
 
 /// Finalize the current token scan.
-#[no_mangle]
-pub unsafe extern "C" fn ts_lexer_finish(
+pub unsafe fn ts_lexer_finish(
     self_: *mut Lexer,
     lookahead_end_byte: *mut u32,
 ) {
@@ -553,14 +547,12 @@ pub unsafe extern "C" fn ts_lexer_finish(
 }
 
 /// Mark the end of the current token.
-#[no_mangle]
-pub unsafe extern "C" fn ts_lexer_mark_end(self_: *mut Lexer) {
+pub unsafe fn ts_lexer_mark_end(self_: *mut Lexer) {
     ts_lexer__mark_end(&mut (*self_).data);
 }
 
 /// Set the included ranges for the lexer. Returns false if ranges are invalid.
-#[no_mangle]
-pub unsafe extern "C" fn ts_lexer_set_included_ranges(
+pub unsafe fn ts_lexer_set_included_ranges(
     self_: *mut Lexer,
     mut ranges: *const TSRange,
     mut count: u32,
@@ -593,8 +585,7 @@ pub unsafe extern "C" fn ts_lexer_set_included_ranges(
 }
 
 /// Get the current included ranges.
-#[no_mangle]
-pub unsafe extern "C" fn ts_lexer_included_ranges(
+pub unsafe fn ts_lexer_included_ranges(
     self_: *const Lexer,
     count: *mut u32,
 ) -> *mut TSRange {
