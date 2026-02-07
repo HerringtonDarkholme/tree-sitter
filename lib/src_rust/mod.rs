@@ -34,7 +34,7 @@ pub mod tree_cursor;
 
 // Tier 4 — The engine
 pub mod parser;
-pub mod query;
+// query.c — not migrated, remains in C
 
 // Internal helpers (no corresponding .c file)
 pub mod reduce_action;
