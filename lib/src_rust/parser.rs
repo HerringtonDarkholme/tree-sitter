@@ -31,6 +31,18 @@ use super::stack::{
     array_get, array_grow, array_init, array_new, array_pop, array_push, array_reserve,
     array_splice, array_swap, Array, Stack, StackSlice, StackSliceArray, StackSummary,
     StackSummaryEntry, StackVersion, STACK_VERSION_NONE,
+    // Stack functions (now Rust-only)
+    ts_stack_can_merge, ts_stack_clear, ts_stack_copy_version, ts_stack_delete,
+    ts_stack_dynamic_precedence, ts_stack_error_cost, ts_stack_get_summary,
+    ts_stack_halt, ts_stack_halted_version_count, ts_stack_has_advanced_since_error,
+    ts_stack_is_active, ts_stack_is_halted, ts_stack_is_paused,
+    ts_stack_last_external_token, ts_stack_merge, ts_stack_new,
+    ts_stack_node_count_since_error, ts_stack_pause, ts_stack_pop_all,
+    ts_stack_pop_count, ts_stack_pop_error, ts_stack_pop_pending, ts_stack_position,
+    ts_stack_print_dot_graph, ts_stack_push, ts_stack_record_summary,
+    ts_stack_remove_version, ts_stack_renumber_version, ts_stack_resume,
+    ts_stack_set_last_external_token, ts_stack_state, ts_stack_swap_versions,
+    ts_stack_version_count,
 };
 use super::subtree::{
     ts_builtin_sym_end, ts_builtin_sym_error, ts_builtin_sym_error_repeat,
@@ -54,113 +66,6 @@ use super::tree::TSTree;
 // ---------------------------------------------------------------------------
 
 extern "C" {
-    // stack.rs
-    fn ts_stack_new(pool: *mut SubtreePool) -> *mut Stack;
-    fn ts_stack_delete(self_: *mut Stack);
-    fn ts_stack_clear(self_: *mut Stack);
-    fn ts_stack_version_count(self_: *const Stack) -> u32;
-    fn ts_stack_state(self_: *const Stack, version: StackVersion) -> TSStateId;
-    fn ts_stack_position(self_: *const Stack, version: StackVersion) -> Length;
-    fn ts_stack_last_external_token(
-        self_: *const Stack,
-        version: StackVersion,
-    ) -> Subtree;
-    fn ts_stack_set_last_external_token(
-        self_: *mut Stack,
-        version: StackVersion,
-        token: Subtree,
-    );
-    fn ts_stack_error_cost(self_: *const Stack, version: StackVersion) -> u32;
-    fn ts_stack_node_count_since_error(
-        self_: *const Stack,
-        version: StackVersion,
-    ) -> u32;
-    fn ts_stack_push(
-        self_: *mut Stack,
-        version: StackVersion,
-        subtree: Subtree,
-        pending: bool,
-        state: TSStateId,
-    );
-    fn ts_stack_pop_count(
-        self_: *mut Stack,
-        version: StackVersion,
-        count: u32,
-    ) -> StackSliceArray;
-    fn ts_stack_pop_pending(
-        self_: *mut Stack,
-        version: StackVersion,
-    ) -> StackSliceArray;
-    fn ts_stack_pop_error(
-        self_: *mut Stack,
-        version: StackVersion,
-    ) -> SubtreeArray;
-    fn ts_stack_pop_all(
-        self_: *mut Stack,
-        version: StackVersion,
-    ) -> StackSliceArray;
-    fn ts_stack_dynamic_precedence(
-        self_: *const Stack,
-        version: StackVersion,
-    ) -> i32;
-    fn ts_stack_renumber_version(
-        self_: *mut Stack,
-        v1: StackVersion,
-        v2: StackVersion,
-    );
-    fn ts_stack_remove_version(self_: *mut Stack, version: StackVersion);
-    fn ts_stack_copy_version(
-        self_: *mut Stack,
-        version: StackVersion,
-    ) -> StackVersion;
-    fn ts_stack_merge(
-        self_: *mut Stack,
-        v1: StackVersion,
-        v2: StackVersion,
-    ) -> bool;
-    fn ts_stack_halt(self_: *mut Stack, version: StackVersion);
-    fn ts_stack_is_halted(self_: *const Stack, version: StackVersion) -> bool;
-    fn ts_stack_is_active(self_: *const Stack, version: StackVersion) -> bool;
-    fn ts_stack_is_paused(self_: *const Stack, version: StackVersion) -> bool;
-    fn ts_stack_pause(
-        self_: *mut Stack,
-        version: StackVersion,
-        lookahead: Subtree,
-    );
-    fn ts_stack_resume(
-        self_: *mut Stack,
-        version: StackVersion,
-    ) -> Subtree;
-    fn ts_stack_get_summary(
-        self_: *const Stack,
-        version: StackVersion,
-    ) -> *mut StackSummary;
-    fn ts_stack_print_dot_graph(
-        self_: *const Stack,
-        language: *const TSLanguage,
-        f: *mut c_void,
-    );
-    fn ts_stack_can_merge(
-        self_: *const Stack,
-        v1: StackVersion,
-        v2: StackVersion,
-    ) -> bool;
-    fn ts_stack_swap_versions(
-        self_: *mut Stack,
-        v1: StackVersion,
-        v2: StackVersion,
-    );
-    fn ts_stack_record_summary(
-        self_: *mut Stack,
-        version: StackVersion,
-        max_depth: u32,
-    );
-    fn ts_stack_halted_version_count(self_: *const Stack) -> u32;
-    fn ts_stack_has_advanced_since_error(
-        self_: *const Stack,
-        version: StackVersion,
-    ) -> bool;
-
     // subtree.rs
     fn ts_subtree_pool_new(size: u32) -> SubtreePool;
     fn ts_subtree_pool_delete(self_: *mut SubtreePool);
