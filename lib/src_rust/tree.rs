@@ -7,7 +7,10 @@ use crate::ffi::{TSLanguage, TSNode, TSPoint, TSRange, TSSymbol};
 
 use super::alloc::{ts_calloc, ts_free, ts_malloc};
 use super::length::{length_add, Length};
-use super::subtree::{ts_subtree_padding, Subtree};
+use super::subtree::{
+    ts_subtree_edit, ts_subtree_padding, ts_subtree_pool_delete, ts_subtree_pool_new,
+    ts_subtree_print_dot_graph, ts_subtree_release, ts_subtree_retain, Subtree,
+};
 
 // ---------------------------------------------------------------------------
 // Extern C functions (still in C or other Rust modules)
@@ -17,14 +20,6 @@ extern "C" {
     // language.rs
     fn ts_language_copy(self_: *const TSLanguage) -> *const TSLanguage;
     fn ts_language_delete(self_: *const TSLanguage);
-
-    // subtree.rs
-    fn ts_subtree_retain(self_: Subtree);
-    fn ts_subtree_release(pool: *mut SubtreePool, self_: Subtree);
-    fn ts_subtree_pool_new(size: u32) -> SubtreePool;
-    fn ts_subtree_pool_delete(self_: *mut SubtreePool);
-    fn ts_subtree_edit(self_: Subtree, edit: *const TSInputEdit, pool: *mut SubtreePool) -> Subtree;
-    fn ts_subtree_print_dot_graph(self_: Subtree, language: *const TSLanguage, f: *mut c_void);
 
     // get_changed_ranges.c (still in C)
     fn ts_range_edit(range: *mut TSRange, edit: *const TSInputEdit);

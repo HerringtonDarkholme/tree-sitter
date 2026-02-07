@@ -13,7 +13,7 @@ use super::subtree::{
     ts_builtin_sym_error, ts_subtree_child_count, ts_subtree_children,
     ts_subtree_error_cost, ts_subtree_extra, ts_subtree_has_changes,
     ts_subtree_missing, ts_subtree_named, ts_subtree_padding,
-    ts_subtree_size, ts_subtree_symbol, ts_subtree_total_bytes,
+    ts_subtree_size, ts_subtree_string, ts_subtree_symbol, ts_subtree_total_bytes,
     ts_subtree_visible, ts_subtree_visible_descendant_count,
     Subtree, SubtreeHeapData, NULL_SUBTREE, TS_TREE_STATE_NONE,
     TSFieldMapEntry, TSSymbolMetadata,
@@ -50,15 +50,6 @@ extern "C" {
         name: *const i8,
         name_length: u32,
     ) -> TSFieldId;
-
-    // subtree.rs (exported)
-    fn ts_subtree_string(
-        self_: Subtree,
-        alias_symbol: TSSymbol,
-        alias_is_named: bool,
-        language: *const TSLanguage,
-        include_all: bool,
-    ) -> *mut i8;
 
     // tree.rs (exported)
     fn ts_tree_root_node(self_: *const TSTree) -> TSNode;

@@ -409,8 +409,7 @@ static EMPTY_EXTERNAL_SCANNER_STATE: ExternalScannerState = ExternalScannerState
 // ExternalScannerState functions
 // ===========================================================================
 
-#[no_mangle]
-pub unsafe extern "C" fn ts_external_scanner_state_init(
+pub unsafe fn ts_external_scanner_state_init(
     self_: *mut ExternalScannerState,
     data: *const u8,
     length: u32,
@@ -424,8 +423,7 @@ pub unsafe extern "C" fn ts_external_scanner_state_init(
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn ts_external_scanner_state_copy(
+pub unsafe fn ts_external_scanner_state_copy(
     self_: *const ExternalScannerState,
 ) -> ExternalScannerState {
     let mut result = ExternalScannerState {
@@ -443,15 +441,13 @@ pub unsafe extern "C" fn ts_external_scanner_state_copy(
     result
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn ts_external_scanner_state_delete(self_: *mut ExternalScannerState) {
+pub unsafe fn ts_external_scanner_state_delete(self_: *mut ExternalScannerState) {
     if (*self_).length > EXTERNAL_SCANNER_STATE_INLINE_SIZE as u32 {
         ts_free((*self_).data.long_data as *mut c_void);
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn ts_external_scanner_state_data(
+pub unsafe fn ts_external_scanner_state_data(
     self_: *const ExternalScannerState,
 ) -> *const u8 {
     if (*self_).length > EXTERNAL_SCANNER_STATE_INLINE_SIZE as u32 {
@@ -461,8 +457,7 @@ pub unsafe extern "C" fn ts_external_scanner_state_data(
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn ts_external_scanner_state_eq(
+pub unsafe fn ts_external_scanner_state_eq(
     self_: *const ExternalScannerState,
     buffer: *const u8,
     length: u32,
@@ -509,8 +504,7 @@ unsafe fn array_push_subtree(arr: *mut SubtreeArray, element: Subtree) {
 // SubtreeArray functions
 // ===========================================================================
 
-#[no_mangle]
-pub unsafe extern "C" fn ts_subtree_array_copy(self_: SubtreeArray, dest: *mut SubtreeArray) {
+pub unsafe fn ts_subtree_array_copy(self_: SubtreeArray, dest: *mut SubtreeArray) {
     (*dest).size = self_.size;
     (*dest).capacity = self_.capacity;
     (*dest).contents = self_.contents;
@@ -524,16 +518,14 @@ pub unsafe extern "C" fn ts_subtree_array_copy(self_: SubtreeArray, dest: *mut S
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn ts_subtree_array_clear(pool: *mut SubtreePool, self_: *mut SubtreeArray) {
+pub unsafe fn ts_subtree_array_clear(pool: *mut SubtreePool, self_: *mut SubtreeArray) {
     for i in 0..(*self_).size {
         ts_subtree_release(pool, *(*self_).contents.add(i as usize));
     }
     (*self_).size = 0;
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn ts_subtree_array_delete(pool: *mut SubtreePool, self_: *mut SubtreeArray) {
+pub unsafe fn ts_subtree_array_delete(pool: *mut SubtreePool, self_: *mut SubtreeArray) {
     ts_subtree_array_clear(pool, self_);
     if !(*self_).contents.is_null() {
         ts_free((*self_).contents as *mut c_void);
@@ -543,8 +535,7 @@ pub unsafe extern "C" fn ts_subtree_array_delete(pool: *mut SubtreePool, self_: 
     (*self_).capacity = 0;
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn ts_subtree_array_remove_trailing_extras(
+pub unsafe fn ts_subtree_array_remove_trailing_extras(
     self_: *mut SubtreeArray,
     destination: *mut SubtreeArray,
 ) {
@@ -561,8 +552,7 @@ pub unsafe extern "C" fn ts_subtree_array_remove_trailing_extras(
     ts_subtree_array_reverse(destination);
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn ts_subtree_array_reverse(self_: *mut SubtreeArray) {
+pub unsafe fn ts_subtree_array_reverse(self_: *mut SubtreeArray) {
     let limit = (*self_).size / 2;
     for i in 0..limit {
         let reverse_index = (*self_).size as usize - 1 - i as usize;
@@ -636,8 +626,7 @@ unsafe fn mutable_array_reserve(arr: *mut MutableSubtreeArray, new_capacity: u32
 // SubtreePool functions
 // ===========================================================================
 
-#[no_mangle]
-pub unsafe extern "C" fn ts_subtree_pool_new(capacity: u32) -> SubtreePool {
+pub unsafe fn ts_subtree_pool_new(capacity: u32) -> SubtreePool {
     let mut pool = SubtreePool {
         free_trees: mutable_array_new(),
         tree_stack: mutable_array_new(),
@@ -646,8 +635,7 @@ pub unsafe extern "C" fn ts_subtree_pool_new(capacity: u32) -> SubtreePool {
     pool
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn ts_subtree_pool_delete(self_: *mut SubtreePool) {
+pub unsafe fn ts_subtree_pool_delete(self_: *mut SubtreePool) {
     if !(*self_).free_trees.contents.is_null() {
         for i in 0..(*self_).free_trees.size {
             let tree = *(*self_).free_trees.contents.add(i as usize);
@@ -1027,8 +1015,7 @@ unsafe fn ts_subtree_set_has_changes(self_: *mut MutableSubtree) {
 
 // --- #34: new_leaf ---
 
-#[no_mangle]
-pub unsafe extern "C" fn ts_subtree_new_leaf(
+pub unsafe fn ts_subtree_new_leaf(
     pool: *mut SubtreePool,
     symbol: TSSymbol,
     padding: Length,
@@ -1101,8 +1088,7 @@ pub unsafe extern "C" fn ts_subtree_new_leaf(
 
 // --- #35: new_error ---
 
-#[no_mangle]
-pub unsafe extern "C" fn ts_subtree_new_error(
+pub unsafe fn ts_subtree_new_error(
     pool: *mut SubtreePool,
     lookahead_char: i32,
     padding: Length,
@@ -1132,8 +1118,7 @@ pub unsafe extern "C" fn ts_subtree_new_error(
 
 // --- #36: clone ---
 
-#[no_mangle]
-pub unsafe extern "C" fn ts_subtree_clone(self_: Subtree) -> MutableSubtree {
+pub unsafe fn ts_subtree_clone(self_: Subtree) -> MutableSubtree {
     let alloc_size = ts_subtree_alloc_size((*self_.ptr).child_count);
     let new_children = ts_malloc(alloc_size) as *mut Subtree;
     let old_children = ts_subtree_children(self_);
@@ -1156,8 +1141,7 @@ pub unsafe extern "C" fn ts_subtree_clone(self_: Subtree) -> MutableSubtree {
 
 // --- #37: new_node ---
 
-#[no_mangle]
-pub unsafe extern "C" fn ts_subtree_new_node(
+pub unsafe fn ts_subtree_new_node(
     symbol: TSSymbol,
     children: *mut SubtreeArray,
     production_id: u32,
@@ -1211,8 +1195,7 @@ pub unsafe extern "C" fn ts_subtree_new_node(
 
 // --- #38: new_error_node ---
 
-#[no_mangle]
-pub unsafe extern "C" fn ts_subtree_new_error_node(
+pub unsafe fn ts_subtree_new_error_node(
     children: *mut SubtreeArray,
     extra: bool,
     language: *const TSLanguage,
@@ -1224,8 +1207,7 @@ pub unsafe extern "C" fn ts_subtree_new_error_node(
 
 // --- #39: new_missing_leaf ---
 
-#[no_mangle]
-pub unsafe extern "C" fn ts_subtree_new_missing_leaf(
+pub unsafe fn ts_subtree_new_missing_leaf(
     pool: *mut SubtreePool,
     symbol: TSSymbol,
     padding: Length,
@@ -1249,8 +1231,7 @@ pub unsafe extern "C" fn ts_subtree_new_missing_leaf(
 
 // --- #40: set_symbol ---
 
-#[no_mangle]
-pub unsafe extern "C" fn ts_subtree_set_symbol(
+pub unsafe fn ts_subtree_set_symbol(
     self_: *mut MutableSubtree,
     symbol: TSSymbol,
     language: *const TSLanguage,
@@ -1270,8 +1251,7 @@ pub unsafe extern "C" fn ts_subtree_set_symbol(
 
 // --- #41: make_mut ---
 
-#[no_mangle]
-pub unsafe extern "C" fn ts_subtree_make_mut(pool: *mut SubtreePool, self_: Subtree) -> MutableSubtree {
+pub unsafe fn ts_subtree_make_mut(pool: *mut SubtreePool, self_: Subtree) -> MutableSubtree {
     if self_.data.is_inline() {
         return MutableSubtree { data: self_.data };
     }
@@ -1285,8 +1265,7 @@ pub unsafe extern "C" fn ts_subtree_make_mut(pool: *mut SubtreePool, self_: Subt
 
 // --- #42: retain ---
 
-#[no_mangle]
-pub unsafe extern "C" fn ts_subtree_retain(self_: Subtree) {
+pub unsafe fn ts_subtree_retain(self_: Subtree) {
     if self_.data.is_inline() {
         return;
     }
@@ -1298,8 +1277,7 @@ pub unsafe extern "C" fn ts_subtree_retain(self_: Subtree) {
 
 // --- #43: release ---
 
-#[no_mangle]
-pub unsafe extern "C" fn ts_subtree_release(pool: *mut SubtreePool, self_: Subtree) {
+pub unsafe fn ts_subtree_release(pool: *mut SubtreePool, self_: Subtree) {
     if self_.data.is_inline() {
         return;
     }
@@ -1347,8 +1325,7 @@ pub unsafe extern "C" fn ts_subtree_release(pool: *mut SubtreePool, self_: Subtr
 // Subtree tree-balancing / summarization
 // ===========================================================================
 
-#[no_mangle]
-pub unsafe extern "C" fn ts_subtree_compress(
+pub unsafe fn ts_subtree_compress(
     self_: MutableSubtree,
     count: u32,
     language: *const TSLanguage,
@@ -1412,8 +1389,7 @@ pub unsafe extern "C" fn ts_subtree_compress(
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn ts_subtree_summarize_children(
+pub unsafe fn ts_subtree_summarize_children(
     self_: MutableSubtree,
     language: *const TSLanguage,
 ) {
@@ -1574,8 +1550,7 @@ pub unsafe extern "C" fn ts_subtree_summarize_children(
 // Subtree comparison / query
 // ===========================================================================
 
-#[no_mangle]
-pub unsafe extern "C" fn ts_subtree_compare(
+pub unsafe fn ts_subtree_compare(
     left: Subtree,
     right: Subtree,
     pool: *mut SubtreePool,
@@ -1622,8 +1597,7 @@ pub unsafe extern "C" fn ts_subtree_compare(
     0
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn ts_subtree_edit(
+pub unsafe fn ts_subtree_edit(
     mut self_: Subtree,
     input_edit: *const TSInputEdit,
     pool: *mut SubtreePool,
@@ -1776,8 +1750,7 @@ pub unsafe extern "C" fn ts_subtree_edit(
     self_
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn ts_subtree_last_external_token(mut tree: Subtree) -> Subtree {
+pub unsafe fn ts_subtree_last_external_token(mut tree: Subtree) -> Subtree {
     if !ts_subtree_has_external_tokens(tree) {
         return NULL_SUBTREE;
     }
@@ -1796,8 +1769,7 @@ pub unsafe extern "C" fn ts_subtree_last_external_token(mut tree: Subtree) -> Su
     tree
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn ts_subtree_external_scanner_state(
+pub unsafe fn ts_subtree_external_scanner_state(
     self_: Subtree,
 ) -> *const ExternalScannerState {
     if !self_.ptr.is_null()
@@ -1811,8 +1783,7 @@ pub unsafe extern "C" fn ts_subtree_external_scanner_state(
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn ts_subtree_external_scanner_state_eq(self_: Subtree, other: Subtree) -> bool {
+pub unsafe fn ts_subtree_external_scanner_state_eq(self_: Subtree, other: Subtree) -> bool {
     let state_self = ts_subtree_external_scanner_state(self_);
     let state_other = ts_subtree_external_scanner_state(other);
     ts_external_scanner_state_eq(
@@ -2094,8 +2065,7 @@ unsafe fn ts_subtree__write_to_string(
     cursor as usize - string as usize
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn ts_subtree_string(
+pub unsafe fn ts_subtree_string(
     self_: Subtree,
     alias_symbol: TSSymbol,
     alias_is_named: bool,
@@ -2212,8 +2182,7 @@ unsafe fn ts_subtree__print_dot_graph(
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn ts_subtree_print_dot_graph(
+pub unsafe fn ts_subtree_print_dot_graph(
     self_: Subtree,
     language: *const TSLanguage,
     f: *mut c_void,

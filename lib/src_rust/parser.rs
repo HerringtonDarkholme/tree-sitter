@@ -62,6 +62,15 @@ use super::subtree::{
     ts_subtree_total_bytes, ts_subtree_total_size, ts_subtree_visible,
     ExternalScannerState, MutableSubtree, MutableSubtreeArray, Subtree,
     SubtreeArray, SubtreePool, NULL_SUBTREE, TS_TREE_STATE_NONE,
+    // Subtree functions (now Rust-only)
+    ts_external_scanner_state_data, ts_external_scanner_state_eq,
+    ts_external_scanner_state_init, ts_subtree_array_clear, ts_subtree_array_delete,
+    ts_subtree_array_remove_trailing_extras, ts_subtree_compare, ts_subtree_compress,
+    ts_subtree_edit, ts_subtree_external_scanner_state, ts_subtree_external_scanner_state_eq,
+    ts_subtree_last_external_token, ts_subtree_make_mut, ts_subtree_new_error,
+    ts_subtree_new_error_node, ts_subtree_new_leaf, ts_subtree_new_missing_leaf,
+    ts_subtree_new_node, ts_subtree_pool_delete, ts_subtree_pool_new,
+    ts_subtree_print_dot_graph, ts_subtree_release, ts_subtree_retain, ts_subtree_set_symbol,
 };
 use super::tree::TSTree;
 
@@ -70,97 +79,6 @@ use super::tree::TSTree;
 // ---------------------------------------------------------------------------
 
 extern "C" {
-    // subtree.rs
-    fn ts_subtree_pool_new(size: u32) -> SubtreePool;
-    fn ts_subtree_pool_delete(self_: *mut SubtreePool);
-    fn ts_subtree_retain(self_: Subtree);
-    fn ts_subtree_release(pool: *mut SubtreePool, self_: Subtree);
-    fn ts_subtree_new_leaf(
-        pool: *mut SubtreePool,
-        symbol: TSSymbol,
-        padding: Length,
-        size: Length,
-        lookahead_bytes: u32,
-        parse_state: TSStateId,
-        has_external_tokens: bool,
-        depends_on_column: bool,
-        is_keyword: bool,
-        language: *const TSLanguage,
-    ) -> Subtree;
-    fn ts_subtree_new_node(
-        symbol: TSSymbol,
-        children: *mut SubtreeArray,
-        production_id: u32,
-        language: *const TSLanguage,
-    ) -> MutableSubtree;
-    fn ts_subtree_new_error_node(
-        children: *mut SubtreeArray,
-        extra: bool,
-        language: *const TSLanguage,
-    ) -> Subtree;
-    fn ts_subtree_new_missing_leaf(
-        pool: *mut SubtreePool,
-        symbol: TSSymbol,
-        padding: Length,
-        lookahead_bytes: u32,
-        language: *const TSLanguage,
-    ) -> Subtree;
-    fn ts_subtree_edit(
-        self_: Subtree,
-        edit: *const crate::ffi::TSInputEdit,
-        pool: *mut SubtreePool,
-    ) -> Subtree;
-    fn ts_subtree_compare(a: Subtree, b: Subtree, pool: *mut SubtreePool) -> i32;
-    fn ts_subtree_last_external_token(self_: Subtree) -> Subtree;
-    fn ts_subtree_external_scanner_state_eq(a: Subtree, b: Subtree) -> bool;
-    fn ts_subtree_print_dot_graph(
-        self_: Subtree,
-        language: *const TSLanguage,
-        f: *mut c_void,
-    );
-    fn ts_subtree_make_mut(
-        pool: *mut SubtreePool,
-        self_: Subtree,
-    ) -> MutableSubtree;
-    fn ts_subtree_set_symbol(
-        self_: *mut MutableSubtree,
-        symbol: TSSymbol,
-        language: *const TSLanguage,
-    );
-    fn ts_subtree_compress(
-        self_: MutableSubtree,
-        count: u32,
-        language: *const TSLanguage,
-        stack: *mut Array<MutableSubtree>,
-    );
-    fn ts_subtree_new_error(
-        pool: *mut SubtreePool,
-        character: i32,
-        padding: Length,
-        size: Length,
-        lookahead_bytes: u32,
-        parse_state: TSStateId,
-        language: *const TSLanguage,
-    ) -> Subtree;
-    fn ts_subtree_external_scanner_state(self_: Subtree) -> *const ExternalScannerState;
-    fn ts_subtree_array_clear(pool: *mut SubtreePool, self_: *mut SubtreeArray);
-    fn ts_subtree_array_delete(pool: *mut SubtreePool, self_: *mut SubtreeArray);
-    fn ts_subtree_array_remove_trailing_extras(
-        self_: *mut SubtreeArray,
-        extras: *mut SubtreeArray,
-    );
-    fn ts_external_scanner_state_data(self_: *const ExternalScannerState) -> *const i8;
-    fn ts_external_scanner_state_init(
-        self_: *mut ExternalScannerState,
-        data: *const i8,
-        length: u32,
-    );
-    fn ts_external_scanner_state_eq(
-        self_: *const ExternalScannerState,
-        other_data: *const i8,
-        other_length: u32,
-    ) -> bool;
-
     // language.rs
     fn ts_language_next_state(
         self_: *const TSLanguage,
@@ -883,7 +801,7 @@ unsafe fn ts_parser__external_scanner_deserialize(
     external_token: Subtree,
 ) {
     let lang = (*self_).language as *const TSLanguageFull;
-    let mut data: *const i8 = ptr::null();
+    let mut data: *const u8 = ptr::null();
     let mut length: u32 = 0;
     if !external_token.ptr.is_null() {
         let state = ts_subtree_external_scanner_state(external_token);
@@ -895,7 +813,7 @@ unsafe fn ts_parser__external_scanner_deserialize(
         ts_wasm_store_call_scanner_deserialize(
             (*self_).wasm_store,
             (*self_).external_scanner_payload as usize as u32,
-            data,
+            data as *const i8,
             length,
         );
         if ts_wasm_store_has_error((*self_).wasm_store) {
@@ -904,7 +822,7 @@ unsafe fn ts_parser__external_scanner_deserialize(
     } else {
         ((*lang).external_scanner.deserialize.unwrap())(
             (*self_).external_scanner_payload,
-            data,
+            data as *const i8,
             length,
         );
     }
@@ -1033,7 +951,7 @@ unsafe fn ts_parser__lex(
                 external_scanner_state_len = ts_parser__external_scanner_serialize(self_);
                 external_scanner_state_changed = !ts_external_scanner_state_eq(
                     ts_subtree_external_scanner_state(external_token),
-                    (*self_).lexer.debug_buffer.as_ptr() as *const i8,
+                    (*self_).lexer.debug_buffer.as_ptr(),
                     external_scanner_state_len,
                 );
 
@@ -1175,7 +1093,7 @@ unsafe fn ts_parser__lex(
             ts_external_scanner_state_init(
                 ptr::addr_of_mut!((*mut_result.ptr).data.external_scanner_state)
                     as *mut ExternalScannerState,
-                (*self_).lexer.debug_buffer.as_ptr() as *const i8,
+                (*self_).lexer.debug_buffer.as_ptr(),
                 external_scanner_state_len,
             );
             (*mut_result.ptr).set_has_external_scanner_state_change(external_scanner_state_changed);
@@ -2644,7 +2562,7 @@ unsafe fn ts_parser__balance_subtree(self_: *mut TSParser) -> bool {
                         tree,
                         i,
                         (*self_).language,
-                        &mut (*self_).tree_pool.tree_stack as *mut MutableSubtreeArray as *mut Array<MutableSubtree>,
+                        &mut (*self_).tree_pool.tree_stack as *mut MutableSubtreeArray,
                     );
                     n -= i;
 

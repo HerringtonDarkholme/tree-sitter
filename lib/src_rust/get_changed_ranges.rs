@@ -12,26 +12,14 @@ use super::length::{length_add, length_min, length_zero, Length, LENGTH_MAX};
 use super::point::{point_add, point_sub, POINT_MAX};
 use super::subtree::{
     ts_builtin_sym_error, ts_subtree_child_count, ts_subtree_children,
-    ts_subtree_error_cost, ts_subtree_extra, ts_subtree_has_changes,
-    ts_subtree_has_external_tokens, ts_subtree_padding,
-    ts_subtree_parse_state, ts_subtree_size, ts_subtree_symbol,
-    ts_subtree_total_size, ts_subtree_visible, Subtree, NULL_SUBTREE,
-    TS_TREE_STATE_NONE,
+    ts_subtree_error_cost, ts_subtree_extra, ts_subtree_external_scanner_state_eq,
+    ts_subtree_has_changes, ts_subtree_has_external_tokens,
+    ts_subtree_last_external_token, ts_subtree_padding, ts_subtree_parse_state,
+    ts_subtree_size, ts_subtree_symbol, ts_subtree_total_size, ts_subtree_visible,
+    Subtree, NULL_SUBTREE, TS_TREE_STATE_NONE,
 };
 use super::language::ts_language_alias_at;
 use super::tree_cursor::{TreeCursor, TreeCursorEntry, TreeCursorEntryArray};
-
-// ---------------------------------------------------------------------------
-// Extern C functions (exported from other Rust modules)
-// ---------------------------------------------------------------------------
-
-extern "C" {
-    fn ts_subtree_last_external_token(self_: Subtree) -> Subtree;
-    fn ts_subtree_external_scanner_state_eq(
-        a: Subtree,
-        b: Subtree,
-    ) -> bool;
-}
 
 // ---------------------------------------------------------------------------
 // Types
