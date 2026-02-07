@@ -1,4 +1,4 @@
-#![allow(dead_code, unused_variables, unused_imports, non_upper_case_globals, non_snake_case)]
+#![allow(dead_code, non_upper_case_globals, non_snake_case)]
 
 //! Rust replacement for language.c/h — Language metadata and parse table access.
 //!
@@ -13,7 +13,7 @@
 use std::ffi::c_void;
 use std::ptr;
 
-use crate::ffi::{TSLanguage, TSPoint, TSStateId, TSSymbol, TSFieldId};
+use crate::ffi::{TSLanguage, TSStateId, TSSymbol, TSFieldId};
 
 // Re-use types already defined in subtree.rs
 use super::subtree::TSSymbolMetadata;

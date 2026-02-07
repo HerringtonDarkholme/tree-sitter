@@ -4,9 +4,9 @@
 use core::ffi::c_void;
 use std::ptr;
 
-use crate::ffi::{TSInputEdit, TSLanguage, TSPoint, TSRange, TSSymbol};
+use crate::ffi::{TSInputEdit, TSLanguage, TSRange, TSSymbol};
 
-use super::alloc::{ts_calloc, ts_free, ts_realloc};
+use super::alloc::{ts_calloc, ts_realloc};
 use super::error_costs::ERROR_STATE;
 use super::length::{length_add, length_min, length_zero, Length, LENGTH_MAX};
 use super::point::{point_add, point_sub, POINT_MAX};

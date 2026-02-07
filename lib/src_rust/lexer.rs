@@ -1,4 +1,4 @@
-#![allow(dead_code, unused_variables, unused_imports, non_upper_case_globals, non_snake_case)]
+#![allow(dead_code, non_upper_case_globals, non_snake_case)]
 
 //! Rust replacement for lexer.c/h — Input buffering and character decoding.
 //!
@@ -16,9 +16,8 @@ use std::ffi::c_void;
 use std::ptr;
 
 use crate::ffi::{
-    TSInput, TSInputEncoding, TSInputEncodingCustom, TSInputEncodingUTF16BE,
-    TSInputEncodingUTF16LE, TSInputEncodingUTF8, TSLogger, TSLogType, TSLogTypeLex, TSPoint,
-    TSRange, TSSymbol,
+    TSInput, TSInputEncodingUTF16BE, TSInputEncodingUTF16LE, TSInputEncodingUTF8,
+    TSLogger, TSPoint, TSRange,
 };
 
 use super::alloc::{ts_free, ts_realloc};

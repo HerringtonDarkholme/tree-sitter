@@ -15,7 +15,7 @@ use super::subtree::{
     ts_subtree_missing, ts_subtree_named, ts_subtree_padding,
     ts_subtree_size, ts_subtree_string, ts_subtree_symbol, ts_subtree_total_bytes,
     ts_subtree_visible, ts_subtree_visible_descendant_count,
-    Subtree, SubtreeHeapData, NULL_SUBTREE, TS_TREE_STATE_NONE,
+    Subtree, NULL_SUBTREE, TS_TREE_STATE_NONE,
     TSFieldMapEntry, TSSymbolMetadata,
 };
 use super::subtree::ts_subtree_parse_state;

@@ -8,7 +8,7 @@ use crate::ffi::{
     TSFieldId, TSLanguage, TSNode, TSPoint, TSSymbol, TSTreeCursor,
 };
 
-use super::alloc::{ts_calloc, ts_free, ts_malloc, ts_realloc};
+use super::alloc::{ts_calloc, ts_free, ts_realloc};
 use super::length::{
     length_add, length_is_undefined, length_zero, Length, LENGTH_UNDEFINED,
 };

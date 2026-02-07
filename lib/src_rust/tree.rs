@@ -67,8 +67,6 @@ use crate::ffi::TSInputEdit;
 // Forward-declared types from other modules (not yet rewritten)
 // ---------------------------------------------------------------------------
 
-use super::subtree::SubtreePool;
-
 /// TreeCursorEntry — mirrors tree_cursor.h
 #[repr(C)]
 pub struct TreeCursorEntry {

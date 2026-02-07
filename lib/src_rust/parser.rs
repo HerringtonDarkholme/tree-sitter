@@ -5,36 +5,35 @@ use core::ffi::c_void;
 use std::ptr;
 
 use crate::ffi::{
-    TSInput, TSInputEncoding, TSInputEncodingUTF8, TSLanguage, TSLogger, TSLogType,
+    TSInput, TSInputEncoding, TSInputEncodingUTF8, TSLanguage, TSLogger,
     TSLogTypeParse, TSParseOptions, TSParseState, TSPoint, TSRange, TSStateId, TSSymbol,
-    TSTree as FfiTSTree, TSWasmStore,
+    TSWasmStore,
 };
 
-use super::alloc::{ts_calloc, ts_free, ts_malloc, ts_realloc};
+use super::alloc::{ts_calloc, ts_free};
 use super::error_costs::{
-    ERROR_COST_PER_RECOVERY, ERROR_COST_PER_SKIPPED_CHAR, ERROR_COST_PER_SKIPPED_LINE,
+    ERROR_COST_PER_SKIPPED_CHAR, ERROR_COST_PER_SKIPPED_LINE,
     ERROR_COST_PER_SKIPPED_TREE, ERROR_STATE,
 };
 use super::get_changed_ranges::TSRangeArray;
 use super::language::{
-    ts_language_actions, ts_language_alias_sequence, ts_language_enabled_external_tokens,
-    ts_language_field_map, ts_language_has_actions, ts_language_has_reduce_action,
-    TableEntry, TSLanguageFull, TSLexer, TSLexerMode, TSLexMode,
-    TSParseAction, TSParseActionReduce, TSParseActionShift,
+    ts_language_actions, ts_language_enabled_external_tokens,
+    ts_language_has_actions, ts_language_has_reduce_action,
+    TableEntry, TSLanguageFull, TSLexer, TSLexerMode,
     TSParseActionTypeAccept, TSParseActionTypeRecover, TSParseActionTypeReduce,
     TSParseActionTypeShift,
 };
-use super::length::{length_add, length_sub, length_zero, Length};
+use super::length::{length_sub, length_zero};
 use super::lexer::{
     ts_lexer_delete, ts_lexer_finish, ts_lexer_included_ranges, ts_lexer_init, ts_lexer_mark_end,
-    ts_lexer_reset, ts_lexer_set_included_ranges, ts_lexer_set_input, ts_lexer_start, ColumnData,
+    ts_lexer_reset, ts_lexer_set_included_ranges, ts_lexer_set_input, ts_lexer_start,
     Lexer,
 };
 use super::stack::{
-    array_assign, array_back, array_clear, array_delete, array_erase, array_front,
-    array_get, array_grow, array_init, array_new, array_pop, array_push, array_reserve,
-    array_splice, array_swap, Array, Stack, StackSlice, StackSliceArray, StackSummary,
-    StackSummaryEntry, StackVersion, STACK_VERSION_NONE,
+    array_assign, array_back, array_clear, array_delete, array_erase,
+    array_get, array_init, array_new, array_pop, array_push, array_reserve,
+    array_splice, array_swap, Array, Stack, StackSliceArray, StackSummary,
+    StackVersion, STACK_VERSION_NONE,
     // Stack functions (now Rust-only)
     ts_stack_can_merge, ts_stack_clear, ts_stack_copy_version, ts_stack_delete,
     ts_stack_dynamic_precedence, ts_stack_error_cost, ts_stack_get_summary,
@@ -56,17 +55,17 @@ use super::subtree::{
     ts_subtree_has_external_scanner_state_change, ts_subtree_is_error,
     ts_subtree_is_eof, ts_subtree_is_fragile, ts_subtree_is_keyword,
     ts_subtree_leaf_parse_state, ts_subtree_leaf_symbol,
-    ts_subtree_lookahead_bytes, ts_subtree_missing, ts_subtree_padding,
+    ts_subtree_lookahead_bytes, ts_subtree_missing,
     ts_subtree_parse_state, ts_subtree_repeat_depth, ts_subtree_set_extra,
     ts_subtree_size, ts_subtree_symbol, ts_subtree_to_mut_unsafe,
-    ts_subtree_total_bytes, ts_subtree_total_size, ts_subtree_visible,
+    ts_subtree_total_bytes, ts_subtree_total_size,
     ExternalScannerState, MutableSubtree, MutableSubtreeArray, Subtree,
     SubtreeArray, SubtreePool, NULL_SUBTREE, TS_TREE_STATE_NONE,
     // Subtree functions (now Rust-only)
     ts_external_scanner_state_data, ts_external_scanner_state_eq,
     ts_external_scanner_state_init, ts_subtree_array_clear, ts_subtree_array_delete,
     ts_subtree_array_remove_trailing_extras, ts_subtree_compare, ts_subtree_compress,
-    ts_subtree_edit, ts_subtree_external_scanner_state, ts_subtree_external_scanner_state_eq,
+    ts_subtree_external_scanner_state, ts_subtree_external_scanner_state_eq,
     ts_subtree_last_external_token, ts_subtree_make_mut, ts_subtree_new_error,
     ts_subtree_new_error_node, ts_subtree_new_leaf, ts_subtree_new_missing_leaf,
     ts_subtree_new_node, ts_subtree_pool_delete, ts_subtree_pool_new,

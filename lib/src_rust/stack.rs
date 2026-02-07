@@ -1,4 +1,4 @@
-#![allow(dead_code, unused_variables, unused_imports, non_upper_case_globals, non_snake_case)]
+#![allow(dead_code, non_upper_case_globals, non_snake_case)]
 
 //! Rust replacement for stack.c/h — GLR parse stack with version management.
 //!
@@ -22,7 +22,7 @@ use super::subtree::{
     ts_subtree_named, ts_subtree_padding, ts_subtree_release, ts_subtree_retain,
     ts_subtree_size, ts_subtree_symbol, ts_subtree_total_bytes, ts_subtree_total_size,
     ts_subtree_visible, ts_subtree_visible_descendant_count, ExternalScannerState,
-    MutableSubtreeArray, Subtree, SubtreeArray, SubtreePool, NULL_SUBTREE,
+    Subtree, SubtreeArray, SubtreePool, NULL_SUBTREE,
 };
 use super::subtree::{ts_subtree_array_copy, ts_subtree_array_delete, ts_subtree_array_reverse};
 use super::language::ts_language_write_symbol_as_dot_string;
