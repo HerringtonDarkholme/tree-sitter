@@ -176,13 +176,13 @@ extern "C" {
 // Array helper functions (generic, mirrors array.h)
 // ---------------------------------------------------------------------------
 
-unsafe fn array_init<T>(arr: *mut Array<T>) {
+pub unsafe fn array_init<T>(arr: *mut Array<T>) {
     (*arr).size = 0;
     (*arr).capacity = 0;
     (*arr).contents = ptr::null_mut();
 }
 
-unsafe fn array_delete<T>(arr: *mut Array<T>) {
+pub unsafe fn array_delete<T>(arr: *mut Array<T>) {
     if !(*arr).contents.is_null() {
         ts_free((*arr).contents as *mut c_void);
     }
@@ -191,11 +191,11 @@ unsafe fn array_delete<T>(arr: *mut Array<T>) {
     (*arr).capacity = 0;
 }
 
-unsafe fn array_clear<T>(arr: *mut Array<T>) {
+pub unsafe fn array_clear<T>(arr: *mut Array<T>) {
     (*arr).size = 0;
 }
 
-unsafe fn array_reserve<T>(arr: *mut Array<T>, new_capacity: u32) {
+pub unsafe fn array_reserve<T>(arr: *mut Array<T>, new_capacity: u32) {
     if new_capacity > (*arr).capacity {
         let elem_size = std::mem::size_of::<T>();
         if (*arr).contents.is_null() {
@@ -209,7 +209,7 @@ unsafe fn array_reserve<T>(arr: *mut Array<T>, new_capacity: u32) {
     }
 }
 
-unsafe fn array_grow<T>(arr: *mut Array<T>, count: u32) {
+pub unsafe fn array_grow<T>(arr: *mut Array<T>, count: u32) {
     let new_size = (*arr).size + count;
     if new_size > (*arr).capacity {
         let mut new_capacity = (*arr).capacity * 2;
@@ -223,28 +223,28 @@ unsafe fn array_grow<T>(arr: *mut Array<T>, count: u32) {
     }
 }
 
-unsafe fn array_push<T>(arr: *mut Array<T>, element: T) {
+pub unsafe fn array_push<T>(arr: *mut Array<T>, element: T) {
     array_grow(arr, 1);
     ptr::write((*arr).contents.add((*arr).size as usize), element);
     (*arr).size += 1;
 }
 
-unsafe fn array_pop<T>(arr: *mut Array<T>) -> T {
+pub unsafe fn array_pop<T>(arr: *mut Array<T>) -> T {
     (*arr).size -= 1;
     ptr::read((*arr).contents.add((*arr).size as usize))
 }
 
-unsafe fn array_get<T>(arr: *const Array<T>, index: u32) -> *mut T {
+pub unsafe fn array_get<T>(arr: *const Array<T>, index: u32) -> *mut T {
     debug_assert!(index < (*arr).size);
     (*arr).contents.add(index as usize)
 }
 
-unsafe fn array_back<T>(arr: *const Array<T>) -> *mut T {
+pub unsafe fn array_back<T>(arr: *const Array<T>) -> *mut T {
     debug_assert!((*arr).size > 0);
     (*arr).contents.add((*arr).size as usize - 1)
 }
 
-unsafe fn array_erase<T>(arr: *mut Array<T>, index: u32) {
+pub unsafe fn array_erase<T>(arr: *mut Array<T>, index: u32) {
     debug_assert!(index < (*arr).size);
     let elem_size = std::mem::size_of::<T>();
     let contents = (*arr).contents as *mut u8;
@@ -256,7 +256,7 @@ unsafe fn array_erase<T>(arr: *mut Array<T>, index: u32) {
     (*arr).size -= 1;
 }
 
-unsafe fn array_insert<T>(arr: *mut Array<T>, index: u32, element: T) {
+pub unsafe fn array_insert<T>(arr: *mut Array<T>, index: u32, element: T) {
     let elem_size = std::mem::size_of::<T>();
     array_grow(arr, 1);
     let contents = (*arr).contents as *mut u8;
@@ -269,6 +269,78 @@ unsafe fn array_insert<T>(arr: *mut Array<T>, index: u32, element: T) {
     }
     *(*arr).contents.add(index as usize) = element;
     (*arr).size += 1;
+}
+
+pub unsafe fn array_front<T>(arr: *const Array<T>) -> *mut T {
+    array_get(arr, 0)
+}
+
+pub unsafe fn array_new<T>() -> Array<T> {
+    Array {
+        contents: ptr::null_mut(),
+        size: 0,
+        capacity: 0,
+    }
+}
+
+pub unsafe fn array_splice<T>(
+    arr: *mut Array<T>,
+    index: u32,
+    old_count: u32,
+    new_count: u32,
+    new_contents: *const T,
+) {
+    let elem_size = std::mem::size_of::<T>();
+    let new_size = (*arr).size + new_count - old_count;
+    let old_end = index + old_count;
+    let new_end = index + new_count;
+    debug_assert!(old_end <= (*arr).size);
+
+    array_reserve(arr, new_size);
+
+    let contents = (*arr).contents as *mut u8;
+    if (*arr).size > old_end {
+        memmove(
+            contents.add(new_end as usize * elem_size) as *mut c_void,
+            contents.add(old_end as usize * elem_size) as *const c_void,
+            ((*arr).size - old_end) as usize * elem_size,
+        );
+    }
+    if new_count > 0 {
+        if !new_contents.is_null() {
+            memcpy(
+                contents.add(index as usize * elem_size) as *mut c_void,
+                new_contents as *const c_void,
+                new_count as usize * elem_size,
+            );
+        }
+    }
+    (*arr).size = new_size;
+}
+
+pub unsafe fn array_swap<T>(self_: *mut Array<T>, other: *mut Array<T>) {
+    let tmp_contents = (*self_).contents;
+    let tmp_size = (*self_).size;
+    let tmp_capacity = (*self_).capacity;
+    (*self_).contents = (*other).contents;
+    (*self_).size = (*other).size;
+    (*self_).capacity = (*other).capacity;
+    (*other).contents = tmp_contents;
+    (*other).size = tmp_size;
+    (*other).capacity = tmp_capacity;
+}
+
+pub unsafe fn array_assign<T>(self_: *mut Array<T>, other: *const Array<T>) {
+    let elem_size = std::mem::size_of::<T>();
+    array_reserve(self_, (*other).size);
+    (*self_).size = (*other).size;
+    if (*other).size > 0 {
+        memcpy(
+            (*self_).contents as *mut c_void,
+            (*other).contents as *const c_void,
+            (*other).size as usize * elem_size,
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------

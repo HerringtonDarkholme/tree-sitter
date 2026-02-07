@@ -7,7 +7,7 @@
 // language.c — replaced by src_rust/language.rs
 // lexer.c — replaced by src_rust/lexer.rs
 // node.c — replaced by src_rust/node.rs
-#include "./parser.c"
+// parser.c — replaced by src_rust/parser.rs
 // point.c — replaced by src_rust/point.rs
 #include "./query.c"
 // stack.c — replaced by src_rust/stack.rs
