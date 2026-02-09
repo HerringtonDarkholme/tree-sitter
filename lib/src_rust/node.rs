@@ -52,7 +52,7 @@ extern "C" {
     ) -> TSFieldId;
 
     // tree.rs (exported)
-    fn ts_tree_root_node(self_: *const TSTree) -> TSNode;
+    fn ts_tree_root_node(self_: *const crate::ffi::TSTree) -> TSNode;
 
     // point.rs (exported)
     fn ts_point_edit(
@@ -745,7 +745,7 @@ pub unsafe extern "C" fn ts_node_named_child_count(self_: TSNode) -> u32 {
 #[no_mangle]
 pub unsafe extern "C" fn ts_node_parent(self_: TSNode) -> TSNode {
     let tree = self_.tree as *const TSTree;
-    let mut node = ts_tree_root_node(tree);
+    let mut node = ts_tree_root_node(tree as *const crate::ffi::TSTree);
     if node.id == self_.id { return ts_node__null(); }
 
     loop {
