@@ -3,6 +3,7 @@ use std::{env, fs, path::PathBuf};
 fn main() {
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
     let target = env::var("TARGET").unwrap();
+    let core_impl = CoreImpl::from_env();
 
     #[cfg(feature = "bindgen")]
     generate_bindings(&out_dir);
@@ -15,6 +16,12 @@ fn main() {
 
     let mut config = cc::Build::new();
 
+    println!("cargo:rerun-if-env-changed=TREE_SITTER_CORE_IMPL");
+    println!("cargo:rustc-check-cfg=cfg(tree_sitter_c_core)");
+    if core_impl == CoreImpl::C {
+        println!("cargo:rustc-cfg=tree_sitter_c_core");
+    }
+
     println!("cargo:rerun-if-env-changed=CARGO_FEATURE_WASM");
     if env::var("CARGO_FEATURE_WASM").is_ok() {
         config
@@ -26,15 +33,16 @@ fn main() {
     let manifest_path = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     let include_path = manifest_path.join("include");
     let src_path = manifest_path.join("src");
-    let wasm_path = src_path.join("wasm");
+    let core_src_path = core_impl.source_path(&src_path);
+    let wasm_path = core_src_path.join("wasm");
 
     if target.starts_with("wasm32-unknown") {
         configure_wasm_build(&mut config);
     }
 
-    for entry in fs::read_dir(&src_path).unwrap() {
+    for entry in fs::read_dir(&core_src_path).unwrap() {
         let entry = entry.unwrap();
-        let path = src_path.join(entry.file_name());
+        let path = core_src_path.join(entry.file_name());
         println!("cargo:rerun-if-changed={}", path.to_str().unwrap());
     }
 
@@ -44,7 +52,7 @@ fn main() {
         .flag_if_supported("-Wshadow")
         .flag_if_supported("-Wno-unused-parameter")
         .flag_if_supported("-Wno-incompatible-pointer-types")
-        .include(&src_path)
+        .include(&core_src_path)
         .include(&wasm_path)
         .include(&include_path)
         .define("_POSIX_C_SOURCE", "200112L")
@@ -52,11 +60,62 @@ fn main() {
         .define("_BSD_SOURCE", None)
         .define("_DARWIN_C_SOURCE", None)
         .warnings(false)
-        .file(src_path.join("remaining_lib.c"))
-        .file(src_path.join("lexer_log_shim.c"))
-        .compile("tree-sitter");
+        .file(core_src_path.join(core_impl.library_source()));
+
+    if core_impl == CoreImpl::Rust {
+        config.file(src_path.join("lexer_log_shim.c"));
+    }
+
+    config.compile("tree-sitter");
 
     println!("cargo:include={}", include_path.display());
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CoreImpl {
+    Rust,
+    C,
+}
+
+impl CoreImpl {
+    fn from_env() -> Self {
+        println!("cargo:rerun-if-env-changed=TREE_SITTER_C_CORE_SRC_DIR");
+        match env::var("TREE_SITTER_CORE_IMPL") {
+            Ok(value) if matches!(value.as_str(), "c" | "C" | "c-core" | "lib.c") => Self::C,
+            Ok(value)
+                if matches!(
+                    value.as_str(),
+                    "rust" | "Rust" | "rust-core" | "remaining_lib.c" | ""
+                ) =>
+            {
+                Self::Rust
+            }
+            Ok(value) => {
+                panic!("TREE_SITTER_CORE_IMPL must be 'rust' or 'c', got '{value}'");
+            }
+            Err(_) => Self::Rust,
+        }
+    }
+
+    const fn library_source(self) -> &'static str {
+        match self {
+            Self::Rust => "remaining_lib.c",
+            Self::C => "lib.c",
+        }
+    }
+
+    fn source_path(self, default_src_path: &std::path::Path) -> PathBuf {
+        match self {
+            Self::Rust => default_src_path.to_path_buf(),
+            Self::C => env::var("TREE_SITTER_C_CORE_SRC_DIR")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| {
+                    panic!(
+                        "TREE_SITTER_C_CORE_SRC_DIR must point to a pre-rewrite lib/src directory when TREE_SITTER_CORE_IMPL=c"
+                    );
+                }),
+        }
+    }
 }
 
 fn configure_wasm_build(config: &mut cc::Build) {

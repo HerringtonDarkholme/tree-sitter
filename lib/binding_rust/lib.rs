@@ -5,6 +5,7 @@
 pub mod ffi;
 mod util;
 
+#[cfg(not(tree_sitter_c_core))]
 #[path = "../src_rust/mod.rs"]
 mod core_impl;
 
