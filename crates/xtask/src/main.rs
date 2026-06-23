@@ -1,11 +1,15 @@
+mod ast_grep_gate;
 mod benchmark;
 mod build_wasm;
 mod bump;
 mod check_wasm_exports;
 mod clippy;
+mod core_parity;
 mod embed_sources;
 mod fetch;
 mod generate;
+mod migration_gate;
+mod perf_gate;
 mod test;
 mod test_schema;
 mod upgrade_wasmtime;
@@ -20,6 +24,8 @@ use semver::Version;
 #[derive(Subcommand)]
 #[command(about="Run various tasks", author=crate_authors!("\n"), styles=get_styles())]
 enum Commands {
+    /// Run ast-grep tests against this local Tree-sitter crate.
+    AstGrepGate(AstGrepGate),
     /// Runs `cargo benchmark` with some optional environment variables set.
     Benchmark(Benchmark),
     /// Compile the Tree-sitter Wasm library. This will create two files in the
@@ -33,6 +39,8 @@ enum Commands {
     CheckWasmExports(CheckWasmExports),
     /// Runs `cargo clippy`.
     Clippy(Clippy),
+    /// Compare Rust core behavior against the original C core.
+    CoreParity(CoreParity),
     /// Fetches emscripten.
     FetchEmscripten,
     /// Fetches the fixtures for testing tree-sitter.
@@ -45,6 +53,10 @@ enum Commands {
     GenerateTestSchema,
     /// Generate the list of exports from Tree-sitter Wasm files.
     GenerateWasmExports,
+    /// Run the broader Rust-core migration gate.
+    MigrationGate(MigrationGate),
+    /// Compare Rust-core benchmark performance against the old C core.
+    PerfGate(PerfGate),
     /// Run the test suite
     Test(Test),
     /// Run the Wasm test suite
@@ -67,6 +79,26 @@ struct Benchmark {
     /// Whether to run the benchmarks in debug mode.
     #[arg(long, short = 'g')]
     debug: bool,
+}
+
+#[derive(Args)]
+struct AstGrepGate {
+    /// ast-grep repository path. Defaults to ../../ast-grep from this repo.
+    #[arg(long)]
+    ast_grep_path: Option<std::path::PathBuf>,
+    /// ast-grep package(s) to test. Defaults to core/config/language/CLI packages.
+    #[arg(long, short = 'p')]
+    packages: Vec<String>,
+    /// Version to expose from the temporary tree-sitter compatibility crate.
+    /// Defaults to ast-grep's locked tree-sitter version.
+    #[arg(long)]
+    tree_sitter_version: Option<String>,
+    /// Include outline, dynamic, and lsp packages in addition to the core gate.
+    #[arg(long)]
+    full: bool,
+    /// Also compile-check ast-grep's NAPI and Python binding crates.
+    #[arg(long)]
+    bindings: bool,
 }
 
 #[derive(Args)]
@@ -119,10 +151,110 @@ struct Clippy {
 }
 
 #[derive(Args)]
+struct CoreParity {
+    /// tree-sitter-typescript repository path. Defaults to ../tree-sitter-typescript.
+    #[arg(long)]
+    tree_sitter_typescript_path: Option<std::path::PathBuf>,
+    /// TypeScript repository path. Defaults to ../typescript.
+    #[arg(long)]
+    typescript_path: Option<std::path::PathBuf>,
+    /// Maximum number of TypeScript source samples to parse.
+    #[arg(long, default_value = "6")]
+    sample_limit: usize,
+    /// Maximum number of tree-sitter-typescript corpus examples to parse.
+    #[arg(long, default_value = "8")]
+    corpus_sample_limit: usize,
+    /// Git revision whose lib/src directory contains the original C core.
+    #[arg(long, default_value = "c9f80282ad355a88a389d75173d918de84ef3e79")]
+    c_core_rev: String,
+}
+
+#[derive(Args)]
 struct GenerateFixtures {
     /// Generates the parser to Wasm
     #[arg(long, short)]
     wasm: bool,
+}
+
+#[derive(Args)]
+struct MigrationGate {
+    /// ast-grep repository path. Defaults to ../../ast-grep from this repo.
+    #[arg(long)]
+    ast_grep_path: Option<std::path::PathBuf>,
+    /// tree-sitter-typescript repository path. Defaults to ../tree-sitter-typescript.
+    #[arg(long)]
+    tree_sitter_typescript_path: Option<std::path::PathBuf>,
+    /// TypeScript repository path. Defaults to ../typescript.
+    #[arg(long)]
+    typescript_path: Option<std::path::PathBuf>,
+    /// Maximum number of TypeScript source samples to parse.
+    #[arg(long, default_value = "6")]
+    sample_limit: usize,
+    /// Maximum number of tree-sitter-typescript corpus examples to parse.
+    #[arg(long, default_value = "8")]
+    corpus_sample_limit: usize,
+    /// Git revision whose lib/src directory contains the original C core.
+    #[arg(long, default_value = "c9f80282ad355a88a389d75173d918de84ef3e79")]
+    c_core_rev: String,
+    /// Version to expose from the temporary tree-sitter compatibility crate.
+    /// Defaults to ast-grep's locked tree-sitter version.
+    #[arg(long)]
+    tree_sitter_version: Option<String>,
+    /// Run `cargo xtask fetch-fixtures` before workspace tests.
+    #[arg(long)]
+    fetch_fixtures: bool,
+    /// Include outline, dynamic, and LSP ast-grep packages.
+    #[arg(long)]
+    ast_grep_full: bool,
+    /// Compile-check ast-grep's NAPI and Python binding crates.
+    #[arg(long)]
+    ast_grep_bindings: bool,
+    /// Pass `--offline` to Cargo test commands.
+    #[arg(long)]
+    offline: bool,
+    /// Skip old-C-core vs Rust-core differential checks.
+    #[arg(long)]
+    skip_core_parity: bool,
+    /// Skip the tree-sitter workspace Rust test suite.
+    #[arg(long)]
+    skip_workspace_tests: bool,
+    /// Skip ast-grep consumer tests.
+    #[arg(long)]
+    skip_ast_grep: bool,
+    /// Also build the SwiftPM package.
+    #[arg(long)]
+    swift_build: bool,
+}
+
+#[derive(Args)]
+struct PerfGate {
+    /// Language(s) to benchmark. Defaults to a representative core parser set.
+    #[arg(long = "language", alias = "languages", short = 'l')]
+    languages: Vec<String>,
+    /// The number of times to parse each sample.
+    #[arg(long, default_value = "10")]
+    repetitions: usize,
+    /// Maximum number of mismatched-language error samples per other language.
+    #[arg(long, default_value = "8")]
+    error_limit: usize,
+    /// TypeScript repository path. Defaults to ../typescript when present.
+    #[arg(long)]
+    typescript_path: Option<std::path::PathBuf>,
+    /// Git revision whose lib/src directory contains the original C core.
+    #[arg(long, default_value = "c9f80282ad355a88a389d75173d918de84ef3e79")]
+    c_core_rev: String,
+    /// Maximum allowed per-case Rust slowdown versus C before strict mode fails.
+    #[arg(long, default_value = "5.0")]
+    max_regression_percent: f64,
+    /// Required weighted overall Rust speedup over C before strict mode passes.
+    #[arg(long, default_value = "0.0")]
+    min_overall_speedup_percent: f64,
+    /// Print results without failing on regressions.
+    #[arg(long)]
+    report_only: bool,
+    /// Pass `--offline` to Cargo benchmark commands.
+    #[arg(long)]
+    offline: bool,
 }
 
 #[derive(Args)]
@@ -218,12 +350,14 @@ fn run() -> Result<()> {
     let command = Commands::from_arg_matches(&Commands::augment_subcommands(cli).get_matches())?;
 
     match command {
+        Commands::AstGrepGate(ast_grep_gate_options) => ast_grep_gate::run(&ast_grep_gate_options)?,
         Commands::Benchmark(benchmark_options) => benchmark::run(&benchmark_options)?,
         Commands::BuildWasm(build_wasm_options) => build_wasm::run_wasm(&build_wasm_options)?,
         Commands::BuildWasmStdlib => build_wasm::run_wasm_stdlib()?,
         Commands::BumpVersion(bump_options) => bump::run(bump_options)?,
         Commands::CheckWasmExports(check_options) => check_wasm_exports::run(&check_options)?,
         Commands::Clippy(clippy_options) => clippy::run(&clippy_options)?,
+        Commands::CoreParity(core_parity_options) => core_parity::run(&core_parity_options)?,
         Commands::FetchEmscripten => fetch::run_emscripten()?,
         Commands::FetchFixtures => {
             fetch::run_fixtures()?;
@@ -234,6 +368,10 @@ fn run() -> Result<()> {
         }
         Commands::GenerateTestSchema => test_schema::run_test_schema()?,
         Commands::GenerateWasmExports => generate::run_wasm_exports()?,
+        Commands::MigrationGate(migration_gate_options) => {
+            migration_gate::run(&migration_gate_options)?;
+        }
+        Commands::PerfGate(perf_gate_options) => perf_gate::run(&perf_gate_options)?,
         Commands::Test(test_options) => test::run(&test_options)?,
         Commands::TestWasm => test::run_wasm()?,
         Commands::UpgradeWasmtime(upgrade_wasmtime_options) => {
