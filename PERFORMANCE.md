@@ -109,3 +109,36 @@ Regressions above the 5% per-case threshold:
 | Case | Rust bytes/ms | C bytes/ms | Slowdown |
 | --- | ---: | ---: | ---: |
 | `compound-statement-without-trailing-newline.py` | 3020.9 | 3223.9 | 6.30% |
+
+### 2026-06-24 14:11 EDT
+
+- Repo head: `555f5c3b`
+- Batch base: `05532c15`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: 10 small Rust-core raw-pointer/reference cleanups through `Use stack slice mutable cleanup`
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 26568.9 | 25293.2 | +5.04% |
+| TypeScript error parses | 32 | 1730.1 | 1668.5 | +3.69% |
+| JavaScript normal parses | 2 | 17740.5 | 16046.7 | +10.56% |
+| JavaScript error parses | 37 | 2116.3 | 2013.5 | +5.11% |
+| Overall parser throughput | 82 | 2387.9 | 2288.6 | +4.34% |
+
+Prior checkpoint at `331d0c5d` reported Rust overall throughput of 2352.1
+bytes/ms on the same TypeScript/JavaScript gate, so this batch improved
+absolute Rust throughput by 1.52%. The Rust-vs-C delta rose from +3.42% to
++4.34%.
+
+Regressions above the 5% per-case threshold:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `javascript error compound-statement-without-trailing-newline.py` | 2849.2 | 3278.4 | 13.09% |
+| `typescript error compound-statement-without-trailing-newline.py` | 987.1 | 1061.7 | 7.02% |
+| `typescript error crlf-line-endings.py` | 1366.1 | 1443.9 | 5.39% |
