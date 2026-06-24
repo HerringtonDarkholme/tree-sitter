@@ -601,13 +601,13 @@ unsafe fn ts_parser__log(self_: &mut TSParser) {
 }
 
 unsafe fn ts_parser__breakdown_top_of_stack(
-    self_: *mut TSParser,
+    self_: &mut TSParser,
     version: StackVersion,
 ) -> bool {
     let mut did_break_down = false;
 
     loop {
-        let pop = ts_stack_pop_pending((*self_).stack, version);
+        let pop = ts_stack_pop_pending(self_.stack, version);
         if pop.size == 0 {
             break;
         }
@@ -616,7 +616,7 @@ unsafe fn ts_parser__breakdown_top_of_stack(
         let mut pending = false;
         for i in 0..pop.size {
             let mut slice = stack_slice_array_read(&pop, i);
-            let mut state = ts_stack_state(&*(*self_).stack, slice.version);
+            let mut state = ts_stack_state(&*self_.stack, slice.version);
             let parent = subtree_array_get(&slice.subtrees, 0);
 
             let n = ts_subtree_child_count(parent);
@@ -627,24 +627,27 @@ unsafe fn ts_parser__breakdown_top_of_stack(
                 if ts_subtree_is_error(child) {
                     state = ERROR_STATE;
                 } else if !ts_subtree_extra(child) {
-                    state = ts_language_next_state((*self_).language, state, ts_subtree_symbol(child));
+                    state = ts_language_next_state(self_.language, state, ts_subtree_symbol(child));
                 }
 
                 ts_subtree_retain(child);
-                ts_stack_push((*self_).stack, slice.version, child, pending, state);
+                ts_stack_push(self_.stack, slice.version, child, pending, state);
             }
 
             for j in 1..slice.subtrees.size {
                 let tree = subtree_array_get(&slice.subtrees, j);
-                ts_stack_push((*self_).stack, slice.version, tree, false, state);
+                ts_stack_push(self_.stack, slice.version, tree, false, state);
             }
 
-            ts_subtree_release(&mut (*self_).tree_pool, parent);
+            ts_subtree_release(&mut self_.tree_pool, parent);
             array_delete(&mut slice.subtrees as *mut SubtreeArray as *mut Array<Subtree>);
 
-            LOG!(self_, b"breakdown_top_of_stack tree:%s\0".as_ptr() as *const i8,
-                SYM_NAME!(self_, ts_subtree_symbol(parent)));
-            LOG_STACK!(self_);
+            LOG!(
+                self_ as *mut TSParser,
+                b"breakdown_top_of_stack tree:%s\0".as_ptr() as *const i8,
+                SYM_NAME!(self_ as *mut TSParser, ts_subtree_symbol(parent))
+            );
+            LOG_STACK!(self_ as *mut TSParser);
         }
 
         if !pending {
@@ -1304,7 +1307,7 @@ unsafe fn ts_parser__reuse_node(
                 reason, SYM_NAME!(self_, ts_subtree_symbol(result)));
             if !reusable_node_descend(&mut (*self_).reusable_node) {
                 reusable_node_advance(&mut (*self_).reusable_node);
-                ts_parser__breakdown_top_of_stack(self_, version);
+                ts_parser__breakdown_top_of_stack(&mut *self_, version);
                 *state = ts_stack_state(&*(*self_).stack, version);
             }
             continue;
@@ -2474,7 +2477,7 @@ unsafe fn ts_parser__advance(
         // the stack was reused from an old tree, then it wasn't actually valid to
         // reuse that previous subtree. Remove it from the stack, and in its place,
         // push each of its children. Then try again to process the current lookahead.
-        if ts_parser__breakdown_top_of_stack(self_, version) {
+        if ts_parser__breakdown_top_of_stack(&mut *self_, version) {
             state = ts_stack_state(&*(*self_).stack, version);
             ts_subtree_release(&mut (*self_).tree_pool, lookahead);
             needs_lex = true;
