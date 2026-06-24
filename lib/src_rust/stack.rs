@@ -406,6 +406,14 @@ unsafe fn stack_node_pool_get(self_: &Array<*mut StackNode>, index: u32) -> *mut
 }
 
 #[inline]
+unsafe fn stack_summary_array_get(
+    self_: &StackSummary,
+    index: u32,
+) -> &StackSummaryEntry {
+    &*array_get(self_, index)
+}
+
+#[inline]
 unsafe fn stack_iterator_array_get(self_: &Array<StackIterator>, index: u32) -> &StackIterator {
     &*array_get(self_, index)
 }
@@ -900,7 +908,7 @@ unsafe extern "C" fn summarize_stack_callback(
     }
     let mut i = (*session.summary).size as i32 - 1;
     while i + 1 > 0 {
-        let entry = &*array_get(session.summary, i as u32);
+        let entry = stack_summary_array_get(&*session.summary, i as u32);
         if entry.depth < depth {
             break;
         }
@@ -1444,10 +1452,11 @@ pub unsafe fn ts_stack_print_dot_graph(
         if !head.summary.is_null() {
             fprintf(f, b"\nsummary:\0".as_ptr() as *const i8);
             for j in 0..(*head.summary).size {
+                let entry = stack_summary_array_get(&*head.summary, j);
                 fprintf(
                     f,
                     b" %u\0".as_ptr() as *const i8,
-                    (*array_get(head.summary, j)).state as u32,
+                    entry.state as u32,
                 );
             }
         }
