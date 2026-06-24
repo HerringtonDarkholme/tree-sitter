@@ -1525,14 +1525,14 @@ pub unsafe fn ts_stack_print_dot_graph(
 
                 fprintf(f, b"];\n\0".as_ptr() as *const i8);
 
-                let next_iterator: *mut StackIterator;
+                let next_iterator: &mut StackIterator;
                 if j == 0 {
-                    next_iterator = array_get(&mut (*self_).iterators, i);
+                    next_iterator = stack_iterator_array_get_mut(&mut (*self_).iterators, i);
                 } else {
                     array_push(&mut (*self_).iterators, ptr::read(&iterator));
-                    next_iterator = array_back(&(*self_).iterators);
+                    next_iterator = stack_iterator_array_back_mut(&(*self_).iterators);
                 }
-                (*next_iterator).node = link.node;
+                next_iterator.node = link.node;
             }
 
             array_push(&mut visited_nodes, node);
