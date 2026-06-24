@@ -555,3 +555,62 @@ Source-code analysis:
   overall Rust checkpoint delta is -2.64%, below the agreed 5% investigation
   threshold. No specific source-level culprit was identified and no rollback
   was performed.
+
+### 2026-06-24 17:42 EDT
+
+- Repo head: `737fab65`
+- Batch base: `6236fb6d`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: 10 small Rust-only parser helper raw-pointer/reference
+  cleanups through `Use reference for parser state recovery`
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 24974.0 | 25770.9 | -3.09% |
+| TypeScript error parses | 32 | 1640.9 | 1604.9 | +2.24% |
+| JavaScript normal parses | 2 | 17572.5 | 16538.7 | +6.25% |
+| JavaScript error parses | 37 | 2069.9 | 1991.0 | +3.96% |
+| Overall parser throughput | 82 | 2291.6 | 2227.8 | +2.87% |
+
+Prior checkpoint at `138d96b9` recorded Rust overall throughput of 2267.8
+bytes/ms on the same TypeScript/JavaScript gate, so this batch measured +1.05%
+absolute Rust throughput. That is below the 5% regression investigation
+threshold and in the favorable direction. The Rust-vs-C delta fell from +4.38%
+to +2.87%, with the C comparison baseline moving upward in this run.
+
+Per-case Rust-vs-C regressions above the 5% threshold:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `typescript normal builderStatePublic.ts` | 18802.9 | 20588.6 | 8.67% |
+| `typescript error compound-statement-without-trailing-newline.py` | 860.2 | 917.3 | 6.23% |
+| `typescript error weird-exprs.rs` | 1104.6 | 1176.7 | 6.13% |
+| `typescript error python3-grammar-crlf.py` | 2309.2 | 2441.1 | 5.40% |
+| `typescript error jquery.js` | 14855.7 | 15637.8 | 5.00% |
+
+Source-code analysis:
+
+- This batch changed only Rust-internal parser helper receivers and call sites.
+  It did not change public `#[no_mangle] extern "C"` APIs, generated parser
+  templates, `#[repr(C)]` layouts, parse table data, allocation sizes, or FFI
+  struct field order.
+- The version comparison/status helpers preserve the same error-cost,
+  dynamic-precedence, node-count, stack-position, and merge checks. One helper
+  (`ts_parser__compare_versions`) dropped an unused parser pointer entirely.
+- The token reuse/cache helpers preserve the same token cache lookup and update
+  behavior, including retained returned tokens and releases of replaced cached
+  token/external-token subtrees.
+- The shift, accept, and recover-to-state helpers preserve the same stack
+  pushes/pops, subtree retain/release calls, finished-tree selection, error
+  node construction, trailing-extra handling, and version halt/remove behavior.
+  The edits move raw parser pointer dereferences to the call boundary and use
+  parser references inside the helper body.
+- Current per-case slowdowns are Rust-vs-C comparisons in this run. Since
+  overall Rust throughput improved by about 1% versus the previous Rust
+  checkpoint, no >5% Rust checkpoint regression was observed and no rollback
+  was performed.
