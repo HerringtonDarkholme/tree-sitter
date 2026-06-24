@@ -488,11 +488,11 @@ unsafe fn reusable_node_reset(self_: &mut ReusableNode, tree: Subtree) {
 // ---------------------------------------------------------------------------
 
 unsafe fn ts_reduce_action_set_add(
-    self_: *mut ReduceActionSet,
+    self_: &mut ReduceActionSet,
     new_action: ReduceAction,
 ) {
-    for i in 0..(*self_).size {
-        let action = *array_get(self_ as *const Array<ReduceAction>, i);
+    for i in 0..self_.size {
+        let action = *array_get(self_ as *const ReduceActionSet as *const Array<ReduceAction>, i);
         if action.symbol == new_action.symbol && action.count == new_action.count {
             return;
         }
