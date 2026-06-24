@@ -2742,7 +2742,8 @@ pub unsafe extern "C" fn ts_parser_delete(self_: *mut TSParser) {
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_parser_language(self_: *const TSParser) -> *const TSLanguage {
-    (*self_).language
+    let parser = &*self_;
+    parser.language
 }
 
 #[no_mangle]
@@ -2777,7 +2778,8 @@ pub unsafe extern "C" fn ts_parser_set_language(
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_parser_logger(self_: *const TSParser) -> TSLogger {
-    ts_logger_read_ref(&(*self_).lexer.logger)
+    let parser = &*self_;
+    ts_logger_read_ref(&parser.lexer.logger)
 }
 
 #[no_mangle]
@@ -2785,7 +2787,8 @@ pub unsafe extern "C" fn ts_parser_set_logger(
     self_: *mut TSParser,
     logger: TSLogger,
 ) {
-    (*self_).lexer.logger = logger;
+    let parser = &mut *self_;
+    parser.lexer.logger = logger;
 }
 
 #[no_mangle]
