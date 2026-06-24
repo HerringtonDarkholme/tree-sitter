@@ -395,63 +395,63 @@ unsafe fn reusable_node_new() -> ReusableNode {
     }
 }
 
-unsafe fn reusable_node_clear(self_: *mut ReusableNode) {
-    array_clear(&mut (*self_).stack);
-    (*self_).last_external_token = NULL_SUBTREE;
+unsafe fn reusable_node_clear(self_: &mut ReusableNode) {
+    array_clear(&mut self_.stack);
+    self_.last_external_token = NULL_SUBTREE;
 }
 
-unsafe fn reusable_node_tree(self_: *mut ReusableNode) -> Subtree {
-    if (*self_).stack.size > 0 {
-        (*array_back(&(*self_).stack)).tree
+unsafe fn reusable_node_tree(self_: &mut ReusableNode) -> Subtree {
+    if self_.stack.size > 0 {
+        (*array_back(&self_.stack)).tree
     } else {
         NULL_SUBTREE
     }
 }
 
-unsafe fn reusable_node_byte_offset(self_: *mut ReusableNode) -> u32 {
-    if (*self_).stack.size > 0 {
-        (*array_back(&(*self_).stack)).byte_offset
+unsafe fn reusable_node_byte_offset(self_: &mut ReusableNode) -> u32 {
+    if self_.stack.size > 0 {
+        (*array_back(&self_.stack)).byte_offset
     } else {
         u32::MAX
     }
 }
 
-unsafe fn reusable_node_delete(self_: *mut ReusableNode) {
-    array_delete(&mut (*self_).stack);
+unsafe fn reusable_node_delete(self_: &mut ReusableNode) {
+    array_delete(&mut self_.stack);
 }
 
-unsafe fn reusable_node_advance(self_: *mut ReusableNode) {
-    let last_entry = *array_back(&(*self_).stack);
+unsafe fn reusable_node_advance(self_: &mut ReusableNode) {
+    let last_entry = *array_back(&self_.stack);
     let byte_offset = last_entry.byte_offset + ts_subtree_total_bytes(last_entry.tree);
     if ts_subtree_has_external_tokens(last_entry.tree) {
-        (*self_).last_external_token = ts_subtree_last_external_token(last_entry.tree);
+        self_.last_external_token = ts_subtree_last_external_token(last_entry.tree);
     }
 
     let mut tree;
     let mut next_index;
     loop {
-        let popped_entry = array_pop(&mut (*self_).stack);
+        let popped_entry = array_pop(&mut self_.stack);
         next_index = popped_entry.child_index + 1;
-        if (*self_).stack.size == 0 {
+        if self_.stack.size == 0 {
             return;
         }
-        tree = (*array_back(&(*self_).stack)).tree;
+        tree = (*array_back(&self_.stack)).tree;
         if ts_subtree_child_count(tree) > next_index {
             break;
         }
     }
 
-    array_push(&mut (*self_).stack, StackEntry {
+    array_push(&mut self_.stack, StackEntry {
         tree: *ts_subtree_children(tree).add(next_index as usize),
         child_index: next_index,
         byte_offset,
     });
 }
 
-unsafe fn reusable_node_descend(self_: *mut ReusableNode) -> bool {
-    let last_entry = *array_back(&(*self_).stack);
+unsafe fn reusable_node_descend(self_: &mut ReusableNode) -> bool {
+    let last_entry = *array_back(&self_.stack);
     if ts_subtree_child_count(last_entry.tree) > 0 {
-        array_push(&mut (*self_).stack, StackEntry {
+        array_push(&mut self_.stack, StackEntry {
             tree: *ts_subtree_children(last_entry.tree),
             child_index: 0,
             byte_offset: last_entry.byte_offset,
@@ -462,14 +462,14 @@ unsafe fn reusable_node_descend(self_: *mut ReusableNode) -> bool {
     }
 }
 
-unsafe fn reusable_node_advance_past_leaf(self_: *mut ReusableNode) {
+unsafe fn reusable_node_advance_past_leaf(self_: &mut ReusableNode) {
     while reusable_node_descend(self_) {}
     reusable_node_advance(self_);
 }
 
-unsafe fn reusable_node_reset(self_: *mut ReusableNode, tree: Subtree) {
+unsafe fn reusable_node_reset(self_: &mut ReusableNode, tree: Subtree) {
     reusable_node_clear(self_);
-    array_push(&mut (*self_).stack, StackEntry {
+    array_push(&mut self_.stack, StackEntry {
         tree,
         child_index: 0,
         byte_offset: 0,
@@ -606,7 +606,7 @@ unsafe fn ts_parser__breakdown_lookahead(
     self_: *mut TSParser,
     lookahead: *mut Subtree,
     state: TSStateId,
-    reusable_node: *mut ReusableNode,
+    reusable_node: &mut ReusableNode,
 ) {
     let mut did_descend = false;
     let mut tree = reusable_node_tree(reusable_node);
