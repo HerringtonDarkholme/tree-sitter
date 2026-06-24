@@ -793,3 +793,57 @@ Source-code analysis:
 - The reported per-case slowdowns are Rust-vs-C comparisons in this run, not
   Rust-vs-previous-checkpoint regressions. Overall Rust throughput improved
   versus the previous checkpoint, so no rollback was performed.
+
+### 2026-06-24 19:10 EDT
+
+- Repo head: `b2935073`
+- Batch base: `4598be2c`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: 10 small raw-pointer/reference cleanups through
+  `Use cursor reference in init and delete`
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 26369.4 | 24617.3 | +7.12% |
+| TypeScript error parses | 32 | 1735.4 | 1651.3 | +5.09% |
+| JavaScript normal parses | 2 | 17210.3 | 16195.2 | +6.27% |
+| JavaScript error parses | 37 | 2127.3 | 2000.2 | +6.35% |
+| Overall parser throughput | 82 | 2395.5 | 2268.5 | +5.60% |
+
+Prior checkpoint at `00178fdb` recorded Rust overall throughput of 2343.0
+bytes/ms on the same TypeScript/JavaScript gate. This run measured +2.24%
+Rust throughput versus that checkpoint, so no >5% Rust checkpoint regression
+was observed.
+
+Per-case Rust-vs-C regressions above the 5% threshold:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `typescript normal builderStatePublic.ts` | 18611.4 | 20062.0 | 7.23% |
+
+Source-code analysis:
+
+- This batch changed Rust-internal receiver/body style in `parser.rs`,
+  `point.rs`, `tree.rs`, and `tree_cursor.rs`. It did not change any exported
+  function signatures, `#[no_mangle] extern "C"` ABI, `#[repr(C)]` layouts,
+  allocation sizes, parse tables, generated parser templates, or FFI struct
+  field order.
+- The live generated header inputs `templates/alloc.h`, `templates/array.h`,
+  and `parser.h.inc` were not edited.
+- Parser lifecycle/configuration changes bind `&TSParser` or `&mut TSParser`
+  after the existing raw C entrypoint has been entered. The same reset,
+  language, logger, DOT graph, parse option, allocation, deletion, and WASM
+  store calls happen in the same order.
+- The `point.rs`, `tree.rs`, and `tree_cursor.rs` changes reduce local
+  raw-pointer ceremony or clarify local reference names after the ABI boundary;
+  they do not alter cursor stack operations, tree copying/editing, point edit
+  math, memory ownership, or frees.
+- The reported `builderStatePublic.ts` slowdown is a Rust-vs-C comparison in
+  this run, not a Rust-vs-previous-checkpoint regression. Overall Rust
+  throughput improved versus the previous checkpoint, so no rollback was
+  performed.
