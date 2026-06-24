@@ -2841,29 +2841,30 @@ pub unsafe extern "C" fn ts_parser_included_ranges(
 #[no_mangle]
 pub unsafe extern "C" fn ts_parser_reset(self_: *mut TSParser) {
     ts_parser__external_scanner_destroy(&mut *self_);
-    if !(*self_).wasm_store.is_null() {
-        ts_wasm_store_reset((*self_).wasm_store);
+    let parser = &mut *self_;
+    if !parser.wasm_store.is_null() {
+        ts_wasm_store_reset(parser.wasm_store);
     }
 
-    if !(*self_).old_tree.ptr.is_null() {
-        ts_subtree_release(&mut (*self_).tree_pool, (*self_).old_tree);
-        (*self_).old_tree = NULL_SUBTREE;
+    if !parser.old_tree.ptr.is_null() {
+        ts_subtree_release(&mut parser.tree_pool, parser.old_tree);
+        parser.old_tree = NULL_SUBTREE;
     }
 
-    reusable_node_clear(&mut (*self_).reusable_node);
-    ts_lexer_reset(&mut (*self_).lexer, length_zero());
-    ts_stack_clear(&mut *(*self_).stack);
-    ts_parser__set_cached_token(&mut *self_, 0, NULL_SUBTREE, NULL_SUBTREE);
-    if !(*self_).finished_tree.ptr.is_null() {
-        ts_subtree_release(&mut (*self_).tree_pool, (*self_).finished_tree);
-        (*self_).finished_tree = NULL_SUBTREE;
+    reusable_node_clear(&mut parser.reusable_node);
+    ts_lexer_reset(&mut parser.lexer, length_zero());
+    ts_stack_clear(&mut *parser.stack);
+    ts_parser__set_cached_token(parser, 0, NULL_SUBTREE, NULL_SUBTREE);
+    if !parser.finished_tree.ptr.is_null() {
+        ts_subtree_release(&mut parser.tree_pool, parser.finished_tree);
+        parser.finished_tree = NULL_SUBTREE;
     }
-    (*self_).accept_count = 0;
-    (*self_).has_scanner_error = false;
-    (*self_).has_error = false;
-    (*self_).canceled_balancing = false;
-    (*self_).parse_options = ts_parse_options_none();
-    (*self_).parse_state = ts_parse_state_empty();
+    parser.accept_count = 0;
+    parser.has_scanner_error = false;
+    parser.has_error = false;
+    parser.canceled_balancing = false;
+    parser.parse_options = ts_parse_options_none();
+    parser.parse_state = ts_parse_state_empty();
 }
 
 // ---------------------------------------------------------------------------
