@@ -740,7 +740,7 @@ unsafe fn ts_parser__version_status(
     ErrorStatus {
         cost,
         node_count: ts_stack_node_count_since_error(&mut *(*self_).stack, version),
-        dynamic_precedence: ts_stack_dynamic_precedence((*self_).stack, version),
+        dynamic_precedence: ts_stack_dynamic_precedence(&*(*self_).stack, version),
         is_in_error: is_paused || ts_stack_state((*self_).stack, version) == ERROR_STATE,
     }
 }
@@ -761,7 +761,7 @@ unsafe fn ts_parser__better_version_exists(
     let status = ErrorStatus {
         cost,
         is_in_error,
-        dynamic_precedence: ts_stack_dynamic_precedence((*self_).stack, version),
+        dynamic_precedence: ts_stack_dynamic_precedence(&*(*self_).stack, version),
         node_count: ts_stack_node_count_since_error(&mut *(*self_).stack, version),
     };
 

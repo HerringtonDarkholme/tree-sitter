@@ -1238,10 +1238,10 @@ pub unsafe fn ts_stack_get_summary(
 
 /// Get the dynamic precedence of a version.
 pub unsafe fn ts_stack_dynamic_precedence(
-    self_: *mut Stack,
+    self_: &Stack,
     version: StackVersion,
 ) -> i32 {
-    (*stack_head(&*self_, version).node).dynamic_precedence
+    (*stack_head(self_, version).node).dynamic_precedence
 }
 
 /// Check if a version has advanced since the last error.
