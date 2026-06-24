@@ -396,6 +396,11 @@ unsafe fn stack_slice_array_get(self_: &StackSliceArray, index: u32) -> &StackSl
 }
 
 #[inline]
+unsafe fn stack_slice_array_get_mut(self_: &mut StackSliceArray, index: u32) -> &mut StackSlice {
+    &mut *array_get(self_, index)
+}
+
+#[inline]
 unsafe fn stack_node_pool_get(self_: &Array<*mut StackNode>, index: u32) -> *mut StackNode {
     *array_get(self_, index)
 }
@@ -1111,7 +1116,7 @@ pub unsafe fn ts_stack_pop_pending(
     self_: *mut Stack,
     version: StackVersion,
 ) -> StackSliceArray {
-    let pop = stack__iter(
+    let mut pop = stack__iter(
         self_,
         version,
         pop_pending_callback,
@@ -1119,8 +1124,9 @@ pub unsafe fn ts_stack_pop_pending(
         0,
     );
     if pop.size > 0 {
-        ts_stack_renumber_version(self_, (*array_get(&pop, 0)).version, version);
-        (*array_get(&pop, 0)).version = version;
+        let first_pop = stack_slice_array_get_mut(&mut pop, 0);
+        ts_stack_renumber_version(self_, first_pop.version, version);
+        first_pop.version = version;
     }
     pop
 }
