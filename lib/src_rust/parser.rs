@@ -1353,11 +1353,11 @@ unsafe fn ts_parser__select_tree(
 unsafe fn ts_parser__select_children(
     self_: *mut TSParser,
     left: Subtree,
-    children: *const SubtreeArray,
+    children: &SubtreeArray,
 ) -> bool {
     array_assign(
         &mut (*self_).scratch_trees as *mut SubtreeArray as *mut Array<Subtree>,
-        children as *const Array<Subtree>,
+        children as *const SubtreeArray as *const Array<Subtree>,
     );
 
     let scratch_tree = ts_subtree_new_node(
