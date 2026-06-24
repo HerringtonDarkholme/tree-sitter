@@ -252,8 +252,8 @@ unsafe fn ts_tree_cursor_iterate_children(
 
 unsafe fn ts_tree_cursor_child_iterator_next(
     self_: &mut CursorChildIterator,
-    result: *mut TreeCursorEntry,
-    visible: *mut bool,
+    result: &mut TreeCursorEntry,
+    visible: &mut bool,
 ) -> bool {
     if self_.parent.ptr.is_null() || self_.child_index == (*self_.parent.ptr).child_count {
         return false;
@@ -307,8 +307,8 @@ unsafe fn length_backtrack(a: Length, b: Length) -> Length {
 
 unsafe fn ts_tree_cursor_child_iterator_previous(
     self_: &mut CursorChildIterator,
-    result: *mut TreeCursorEntry,
-    visible: *mut bool,
+    result: &mut TreeCursorEntry,
+    visible: &mut bool,
 ) -> bool {
     if self_.parent.ptr.is_null() || self_.child_index as i8 == -1 {
         return false;
@@ -392,7 +392,7 @@ unsafe fn ts_tree_cursor_goto_first_child_for_byte_and_point(
 
 unsafe fn ts_tree_cursor_goto_sibling_internal(
     _self: *mut TSTreeCursor,
-    advance: unsafe fn(&mut CursorChildIterator, *mut TreeCursorEntry, *mut bool) -> bool,
+    advance: unsafe fn(&mut CursorChildIterator, &mut TreeCursorEntry, &mut bool) -> bool,
 ) -> TreeCursorStep {
     let self_ = _self as *mut TreeCursor;
     let initial_size = (*self_).stack.size;
