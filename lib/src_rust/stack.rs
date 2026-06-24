@@ -1069,16 +1069,17 @@ pub unsafe fn ts_stack_last_external_token(
 
 /// Set the last external token for a version.
 pub unsafe fn ts_stack_set_last_external_token(
-    self_: *mut Stack,
+    self_: &mut Stack,
     version: StackVersion,
     token: Subtree,
 ) {
-    let head = stack_head_mut(&mut *self_, version);
+    let subtree_pool = &mut *self_.subtree_pool;
+    let head = stack_head_array_get_mut(&mut self_.heads, version);
     if !token.ptr.is_null() {
         ts_subtree_retain(token);
     }
     if !head.last_external_token.ptr.is_null() {
-        ts_subtree_release(&mut *(*self_).subtree_pool, head.last_external_token);
+        ts_subtree_release(subtree_pool, head.last_external_token);
     }
     head.last_external_token = token;
 }
