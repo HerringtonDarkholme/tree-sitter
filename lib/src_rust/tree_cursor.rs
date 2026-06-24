@@ -527,16 +527,16 @@ pub unsafe extern "C" fn ts_tree_cursor_delete(_self: *mut TSTreeCursor) {
 pub unsafe extern "C" fn ts_tree_cursor_goto_first_child_internal(
     _self: *mut TSTreeCursor,
 ) -> TreeCursorStep {
-    let self_ = _self as *mut TreeCursor;
-    let mut iterator = ts_tree_cursor_iterate_children(&*self_);
+    let cursor = &mut *(_self as *mut TreeCursor);
+    let mut iterator = ts_tree_cursor_iterate_children(cursor);
     while let Some(child) = ts_tree_cursor_child_iterator_next(&mut iterator) {
         let entry = child.entry;
         if child.visible {
-            array_push(&mut (*self_).stack, entry);
+            array_push(&mut cursor.stack, entry);
             return TreeCursorStep::TreeCursorStepVisible;
         }
         if ts_subtree_visible_child_count(*entry.subtree) > 0 {
-            array_push(&mut (*self_).stack, entry);
+            array_push(&mut cursor.stack, entry);
             return TreeCursorStep::TreeCursorStepHidden;
         }
     }
@@ -560,8 +560,8 @@ pub unsafe extern "C" fn ts_tree_cursor_goto_first_child(
 pub unsafe extern "C" fn ts_tree_cursor_goto_last_child_internal(
     _self: *mut TSTreeCursor,
 ) -> TreeCursorStep {
-    let self_ = _self as *mut TreeCursor;
-    let mut iterator = ts_tree_cursor_iterate_children(&*self_);
+    let cursor = &mut *(_self as *mut TreeCursor);
+    let mut iterator = ts_tree_cursor_iterate_children(cursor);
     if iterator.parent.ptr.is_null() || (*iterator.parent.ptr).child_count == 0 {
         return TreeCursorStep::TreeCursorStepNone;
     }
@@ -579,7 +579,7 @@ pub unsafe extern "C" fn ts_tree_cursor_goto_last_child_internal(
         }
     }
     if !last_entry.subtree.is_null() {
-        array_push(&mut (*self_).stack, last_entry);
+        array_push(&mut cursor.stack, last_entry);
         return last_step;
     }
 
