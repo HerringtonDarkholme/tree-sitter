@@ -358,6 +358,11 @@ unsafe fn stack_slice_array_get(self_: &StackSliceArray, index: u32) -> &StackSl
     &*array_get(self_, index)
 }
 
+#[inline]
+unsafe fn stack_iterator_array_get(self_: &Array<StackIterator>, index: u32) -> &StackIterator {
+    &*array_get(self_, index)
+}
+
 // ---------------------------------------------------------------------------
 // Internal (static) functions
 // ---------------------------------------------------------------------------
@@ -679,7 +684,7 @@ unsafe fn stack__iter(
         let mut i: u32 = 0;
         let mut size = (*self_).iterators.size;
         while i < size {
-            let iterator = &*array_get(&(*self_).iterators, i);
+            let iterator = stack_iterator_array_get(&(*self_).iterators, i);
             let node = iterator.node;
 
             let action = callback(payload, iterator as *const StackIterator);
