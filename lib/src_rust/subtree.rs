@@ -1013,11 +1013,11 @@ fn ts_subtree_can_inline(padding: Length, size: Length, lookahead_bytes: u32) ->
         && lookahead_bytes < 16
 }
 
-unsafe fn ts_subtree_set_has_changes(self_: *mut MutableSubtree) {
-    if (*self_).data.is_inline() {
-        (*self_).data.set_has_changes(true);
+unsafe fn ts_subtree_set_has_changes(self_: &mut MutableSubtree) {
+    if self_.data.is_inline() {
+        self_.data.set_has_changes(true);
     } else {
-        (*(*self_).ptr).set_has_changes(true);
+        (*self_.ptr).set_has_changes(true);
     }
 }
 
