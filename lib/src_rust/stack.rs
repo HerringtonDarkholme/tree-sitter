@@ -437,11 +437,16 @@ unsafe fn stack_iterator_array_read(self_: &Array<StackIterator>, index: u32) ->
 }
 
 #[inline]
+unsafe fn stack_iterator_subtrees_read_ref(self_: &StackIterator) -> SubtreeArray {
+    ptr::read(&self_.subtrees)
+}
+
+#[inline]
 unsafe fn stack_iterator_subtrees_read(
     self_: &Array<StackIterator>,
     index: u32,
 ) -> SubtreeArray {
-    ptr::read(&stack_iterator_array_get(self_, index).subtrees)
+    stack_iterator_subtrees_read_ref(stack_iterator_array_get(self_, index))
 }
 
 #[inline]
@@ -816,7 +821,7 @@ unsafe fn stack__iter(
                     array_push(&mut (*self_).iterators, current_iterator);
                     next_iterator = stack_iterator_array_back_mut(&(*self_).iterators);
                     ts_subtree_array_copy(
-                        ptr::read(&next_iterator.subtrees),
+                        stack_iterator_subtrees_read_ref(next_iterator),
                         &mut next_iterator.subtrees,
                     );
                 }
