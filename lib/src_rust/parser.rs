@@ -1176,24 +1176,24 @@ unsafe fn ts_parser__lex(
 }
 
 unsafe fn ts_parser__get_cached_token(
-    self_: *mut TSParser,
+    self_: &TSParser,
     state: TSStateId,
     position: usize,
     last_external_token: Subtree,
 ) -> Option<(Subtree, TableEntry)> {
-    let cache = &(*self_).token_cache;
+    let cache = &self_.token_cache;
     if !cache.token.ptr.is_null()
         && cache.byte_index == position as u32
         && ts_subtree_external_scanner_state_eq(cache.last_external_token, last_external_token)
     {
         let mut table_entry = TableEntry::empty();
         ts_language_table_entry(
-            (*self_).language,
+            self_.language,
             state,
             ts_subtree_symbol(cache.token),
             &mut table_entry,
         );
-        if ts_parser__can_reuse_first_leaf(&*self_, state, cache.token, &table_entry) {
+        if ts_parser__can_reuse_first_leaf(self_, state, cache.token, &table_entry) {
             ts_subtree_retain(cache.token);
             return Some((cache.token, table_entry));
         }
@@ -2237,7 +2237,7 @@ unsafe fn ts_parser__advance(
     if lookahead.ptr.is_null() {
         did_reuse = false;
         if let Some((token, cached_table_entry)) = ts_parser__get_cached_token(
-            self_,
+            &*self_,
             state,
             position as usize,
             last_external_token,
