@@ -494,12 +494,16 @@ unsafe fn reusable_node_reset(self_: &mut ReusableNode, tree: Subtree) {
 // ReduceActionSet helper
 // ---------------------------------------------------------------------------
 
+unsafe fn reduce_action_set_get(self_: &ReduceActionSet, index: u32) -> &ReduceAction {
+    &*array_get(self_ as *const ReduceActionSet as *const Array<ReduceAction>, index)
+}
+
 unsafe fn ts_reduce_action_set_add(
     self_: &mut ReduceActionSet,
     new_action: ReduceAction,
 ) {
     for i in 0..self_.size {
-        let action = *array_get(self_ as *const ReduceActionSet as *const Array<ReduceAction>, i);
+        let action = reduce_action_set_get(self_, i);
         if action.symbol == new_action.symbol && action.count == new_action.count {
             return;
         }
@@ -1698,7 +1702,7 @@ unsafe fn ts_parser__do_all_potential_reductions(
 
         let mut reduction_version = STACK_VERSION_NONE;
         for j in 0..(*self_).reduce_actions.size {
-            let action = *array_get(&(*self_).reduce_actions as *const ReduceActionSet, j);
+            let action = reduce_action_set_get(&(*self_).reduce_actions, j);
             reduction_version = ts_parser__reduce(
                 self_,
                 version,
