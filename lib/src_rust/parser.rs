@@ -1341,10 +1341,11 @@ unsafe fn ts_parser__reuse_node(
 // ---------------------------------------------------------------------------
 
 unsafe fn ts_parser__select_tree(
-    self_: *mut TSParser,
+    self_: &mut TSParser,
     left: Subtree,
     right: Subtree,
 ) -> bool {
+    let parser = self_ as *mut TSParser;
     if left.ptr.is_null() {
         return true;
     }
@@ -1353,30 +1354,30 @@ unsafe fn ts_parser__select_tree(
     }
 
     if ts_subtree_error_cost(right) < ts_subtree_error_cost(left) {
-        LOG!(self_, b"select_smaller_error symbol:%s, over_symbol:%s\0".as_ptr() as *const i8,
-            SYM_NAME!(self_, ts_subtree_symbol(right)),
-            SYM_NAME!(self_, ts_subtree_symbol(left)));
+        LOG!(parser, b"select_smaller_error symbol:%s, over_symbol:%s\0".as_ptr() as *const i8,
+            SYM_NAME!(parser, ts_subtree_symbol(right)),
+            SYM_NAME!(parser, ts_subtree_symbol(left)));
         return true;
     }
 
     if ts_subtree_error_cost(left) < ts_subtree_error_cost(right) {
-        LOG!(self_, b"select_smaller_error symbol:%s, over_symbol:%s\0".as_ptr() as *const i8,
-            SYM_NAME!(self_, ts_subtree_symbol(left)),
-            SYM_NAME!(self_, ts_subtree_symbol(right)));
+        LOG!(parser, b"select_smaller_error symbol:%s, over_symbol:%s\0".as_ptr() as *const i8,
+            SYM_NAME!(parser, ts_subtree_symbol(left)),
+            SYM_NAME!(parser, ts_subtree_symbol(right)));
         return false;
     }
 
     if ts_subtree_dynamic_precedence(right) > ts_subtree_dynamic_precedence(left) {
-        LOG!(self_, b"select_higher_precedence symbol:%s, prec:%d, over_symbol:%s, other_prec:%d\0".as_ptr() as *const i8,
-            SYM_NAME!(self_, ts_subtree_symbol(right)), ts_subtree_dynamic_precedence(right),
-            SYM_NAME!(self_, ts_subtree_symbol(left)), ts_subtree_dynamic_precedence(left));
+        LOG!(parser, b"select_higher_precedence symbol:%s, prec:%d, over_symbol:%s, other_prec:%d\0".as_ptr() as *const i8,
+            SYM_NAME!(parser, ts_subtree_symbol(right)), ts_subtree_dynamic_precedence(right),
+            SYM_NAME!(parser, ts_subtree_symbol(left)), ts_subtree_dynamic_precedence(left));
         return true;
     }
 
     if ts_subtree_dynamic_precedence(left) > ts_subtree_dynamic_precedence(right) {
-        LOG!(self_, b"select_higher_precedence symbol:%s, prec:%d, over_symbol:%s, other_prec:%d\0".as_ptr() as *const i8,
-            SYM_NAME!(self_, ts_subtree_symbol(left)), ts_subtree_dynamic_precedence(left),
-            SYM_NAME!(self_, ts_subtree_symbol(right)), ts_subtree_dynamic_precedence(right));
+        LOG!(parser, b"select_higher_precedence symbol:%s, prec:%d, over_symbol:%s, other_prec:%d\0".as_ptr() as *const i8,
+            SYM_NAME!(parser, ts_subtree_symbol(left)), ts_subtree_dynamic_precedence(left),
+            SYM_NAME!(parser, ts_subtree_symbol(right)), ts_subtree_dynamic_precedence(right));
         return false;
     }
 
@@ -1384,24 +1385,24 @@ unsafe fn ts_parser__select_tree(
         return true;
     }
 
-    let comparison = ts_subtree_compare(left, right, &mut (*self_).tree_pool);
+    let comparison = ts_subtree_compare(left, right, &mut self_.tree_pool);
     match comparison {
         -1 => {
-            LOG!(self_, b"select_earlier symbol:%s, over_symbol:%s\0".as_ptr() as *const i8,
-                SYM_NAME!(self_, ts_subtree_symbol(left)),
-                SYM_NAME!(self_, ts_subtree_symbol(right)));
+            LOG!(parser, b"select_earlier symbol:%s, over_symbol:%s\0".as_ptr() as *const i8,
+                SYM_NAME!(parser, ts_subtree_symbol(left)),
+                SYM_NAME!(parser, ts_subtree_symbol(right)));
             false
         }
         1 => {
-            LOG!(self_, b"select_earlier symbol:%s, over_symbol:%s\0".as_ptr() as *const i8,
-                SYM_NAME!(self_, ts_subtree_symbol(right)),
-                SYM_NAME!(self_, ts_subtree_symbol(left)));
+            LOG!(parser, b"select_earlier symbol:%s, over_symbol:%s\0".as_ptr() as *const i8,
+                SYM_NAME!(parser, ts_subtree_symbol(right)),
+                SYM_NAME!(parser, ts_subtree_symbol(left)));
             true
         }
         _ => {
-            LOG!(self_, b"select_existing symbol:%s, over_symbol:%s\0".as_ptr() as *const i8,
-                SYM_NAME!(self_, ts_subtree_symbol(left)),
-                SYM_NAME!(self_, ts_subtree_symbol(right)));
+            LOG!(parser, b"select_existing symbol:%s, over_symbol:%s\0".as_ptr() as *const i8,
+                SYM_NAME!(parser, ts_subtree_symbol(left)),
+                SYM_NAME!(parser, ts_subtree_symbol(right)));
             false
         }
     }
@@ -1424,7 +1425,7 @@ unsafe fn ts_parser__select_children(
         self_.language,
     );
 
-    ts_parser__select_tree(self_ as *mut TSParser, left, ts_subtree_from_mut(scratch_tree))
+    ts_parser__select_tree(self_, left, ts_subtree_from_mut(scratch_tree))
 }
 
 // ---------------------------------------------------------------------------
@@ -1649,7 +1650,7 @@ unsafe fn ts_parser__accept(
         self_.accept_count += 1;
 
         if !self_.finished_tree.ptr.is_null() {
-            if ts_parser__select_tree(self_ as *mut TSParser, self_.finished_tree, root) {
+            if ts_parser__select_tree(self_, self_.finished_tree, root) {
                 ts_subtree_release(&mut self_.tree_pool, self_.finished_tree);
                 self_.finished_tree = root;
             } else {
