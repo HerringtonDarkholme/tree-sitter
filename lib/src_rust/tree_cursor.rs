@@ -367,9 +367,8 @@ unsafe fn ts_tree_cursor_goto_first_child_for_byte_and_point(
     let initial_size = (*self_).stack.size;
     let mut visible_child_index: u32 = 0;
 
-    let mut did_descend;
     loop {
-        did_descend = false;
+        let mut did_descend = false;
 
         let mut visible = false;
         let mut entry = TreeCursorEntry::empty();
@@ -714,9 +713,8 @@ pub unsafe extern "C" fn ts_tree_cursor_goto_descendant(
     }
 
     // Descend to the goal node.
-    let mut did_descend = true;
-    while did_descend {
-        did_descend = false;
+    loop {
+        let mut did_descend = false;
         let mut visible = false;
         let mut entry = TreeCursorEntry::empty();
         let mut iterator = ts_tree_cursor_iterate_children(&*self_);
@@ -734,6 +732,9 @@ pub unsafe extern "C" fn ts_tree_cursor_goto_descendant(
                     break;
                 }
             }
+        }
+        if !did_descend {
+            break;
         }
     }
 }
