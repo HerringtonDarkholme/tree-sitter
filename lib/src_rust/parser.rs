@@ -35,6 +35,7 @@ use super::stack::{
     array_assign, array_back, array_clear, array_delete, array_erase,
     array_get, array_init, array_new, array_pop, array_push, array_reserve,
     array_splice, array_swap, Array, Stack, StackSlice, StackSliceArray, StackSummary,
+    StackSummaryEntry,
     StackVersion, STACK_VERSION_NONE,
     // Stack functions (now Rust-only)
     ts_stack_can_merge, ts_stack_clear, ts_stack_copy_version, ts_stack_delete,
@@ -512,6 +513,10 @@ unsafe fn stack_slice_array_read(self_: &StackSliceArray, index: u32) -> StackSl
 
 unsafe fn stack_slice_subtrees_read_ref(self_: &StackSlice) -> SubtreeArray {
     ptr::read(&self_.subtrees)
+}
+
+unsafe fn stack_summary_array_get(self_: &StackSummary, index: u32) -> &StackSummaryEntry {
+    &*array_get(self_ as *const StackSummary, index)
 }
 
 unsafe fn ts_reduce_action_set_add(
@@ -1840,7 +1845,7 @@ unsafe fn ts_parser__recover(
     // Strategy 1: Find a previous state where the lookahead is valid.
     if !summary.is_null() && !ts_subtree_is_error(lookahead) {
         for i in 0..(*summary).size {
-            let entry = *array_get(summary as *const StackSummary, i);
+            let entry = *stack_summary_array_get(&*summary, i);
 
             if entry.state == ERROR_STATE {
                 continue;
