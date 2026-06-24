@@ -579,9 +579,9 @@ pub unsafe fn ts_lexer_set_included_ranges(
 
 /// Get the current included ranges.
 pub unsafe fn ts_lexer_included_ranges(
-    self_: *const Lexer,
+    self_: &Lexer,
     count: *mut u32,
 ) -> *mut TSRange {
-    *count = (*self_).included_range_count;
-    (*self_).included_ranges
+    *count = self_.included_range_count;
+    self_.included_ranges
 }
