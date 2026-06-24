@@ -178,15 +178,29 @@ unsafe fn array_grow(arr: &mut TreeCursorEntryArray, count: u32) {
     }
 }
 
+#[inline]
+unsafe fn tree_cursor_entry_array_write(
+    arr: &mut TreeCursorEntryArray,
+    index: u32,
+    entry: TreeCursorEntry,
+) {
+    ptr::write(arr.contents.add(index as usize), entry);
+}
+
+#[inline]
+unsafe fn tree_cursor_entry_array_read(arr: &TreeCursorEntryArray, index: u32) -> TreeCursorEntry {
+    ptr::read(arr.contents.add(index as usize))
+}
+
 unsafe fn array_push(arr: &mut TreeCursorEntryArray, entry: TreeCursorEntry) {
     array_grow(arr, 1);
-    ptr::write(arr.contents.add(arr.size as usize), entry);
+    tree_cursor_entry_array_write(arr, arr.size, entry);
     arr.size += 1;
 }
 
 unsafe fn array_pop(arr: &mut TreeCursorEntryArray) -> TreeCursorEntry {
     arr.size -= 1;
-    ptr::read(arr.contents.add(arr.size as usize))
+    tree_cursor_entry_array_read(arr, arr.size)
 }
 
 unsafe fn array_delete(arr: &mut TreeCursorEntryArray) {
