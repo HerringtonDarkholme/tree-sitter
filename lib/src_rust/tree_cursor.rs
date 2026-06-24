@@ -779,20 +779,20 @@ pub unsafe extern "C" fn ts_tree_cursor_current_descendant_index(
 pub unsafe extern "C" fn ts_tree_cursor_current_node(
     _self: *const TSTreeCursor,
 ) -> TSNode {
-    let self_ = _self as *const TreeCursor;
-    let last_entry = tree_cursor_entry_array_back(&(*self_).stack);
+    let cursor = &*(_self as *const TreeCursor);
+    let last_entry = tree_cursor_entry_array_back(&cursor.stack);
     let is_extra = ts_subtree_extra(*last_entry.subtree);
-    let mut alias_symbol: TSSymbol = if is_extra { 0 } else { (*self_).root_alias_symbol };
-    if (*self_).stack.size > 1 && !is_extra {
-        let parent_entry = tree_cursor_entry_array_get(&(*self_).stack, (*self_).stack.size - 2);
+    let mut alias_symbol: TSSymbol = if is_extra { 0 } else { cursor.root_alias_symbol };
+    if cursor.stack.size > 1 && !is_extra {
+        let parent_entry = tree_cursor_entry_array_get(&cursor.stack, cursor.stack.size - 2);
         alias_symbol = ts_language_alias_at(
-            (*(*self_).tree).language,
+            (*cursor.tree).language,
             (*(*parent_entry.subtree).ptr).data.children.production_id as u32,
             last_entry.structural_child_index,
         );
     }
     ts_node_new(
-        (*self_).tree,
+        cursor.tree,
         last_entry.subtree,
         last_entry.position,
         alias_symbol,
