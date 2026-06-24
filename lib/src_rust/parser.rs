@@ -1226,13 +1226,13 @@ unsafe fn ts_parser__set_cached_token(
 }
 
 unsafe fn ts_parser__has_included_range_difference(
-    self_: *const TSParser,
+    self_: &TSParser,
     start_position: u32,
     end_position: u32,
 ) -> bool {
     ts_range_array_intersects(
-        &(*self_).included_range_differences,
-        (*self_).included_range_difference_index,
+        &self_.included_range_differences,
+        self_.included_range_difference_index,
         start_position,
         end_position,
     )
@@ -1295,7 +1295,7 @@ unsafe fn ts_parser__reuse_node(
             reason = b"is_missing\0".as_ptr() as *const i8;
         } else if ts_subtree_is_fragile(result) {
             reason = b"is_fragile\0".as_ptr() as *const i8;
-        } else if ts_parser__has_included_range_difference(self_, byte_offset, end_byte_offset) {
+        } else if ts_parser__has_included_range_difference(&*self_, byte_offset, end_byte_offset) {
             reason = b"contains_different_included_range\0".as_ptr() as *const i8;
         }
 
