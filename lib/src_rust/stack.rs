@@ -1246,10 +1246,10 @@ pub unsafe fn ts_stack_dynamic_precedence(
 
 /// Check if a version has advanced since the last error.
 pub unsafe fn ts_stack_has_advanced_since_error(
-    self_: *const Stack,
+    self_: &Stack,
     version: StackVersion,
 ) -> bool {
-    let head = stack_head(&*self_, version);
+    let head = stack_head(self_, version);
     let mut node = head.node;
     if (*node).error_cost == 0 {
         return true;
