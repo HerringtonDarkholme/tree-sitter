@@ -504,6 +504,7 @@ pub unsafe extern "C" fn ts_range_array_get_changed_ranges(
     new_range_count: u32,
     differences: *mut TSRangeArray,
 ) {
+    let differences = &mut *differences;
     let mut new_index: u32 = 0;
     let mut old_index: u32 = 0;
     let mut current_position = length_zero();
@@ -532,21 +533,21 @@ pub unsafe extern "C" fn ts_range_array_get_changed_ranges(
 
         if next_old_position.bytes < next_new_position.bytes {
             if in_old_range != in_new_range {
-                ts_range_array_add(&mut *differences, current_position, next_old_position);
+                ts_range_array_add(differences, current_position, next_old_position);
             }
             if in_old_range { old_index += 1; }
             current_position = next_old_position;
             in_old_range = !in_old_range;
         } else if next_new_position.bytes < next_old_position.bytes {
             if in_old_range != in_new_range {
-                ts_range_array_add(&mut *differences, current_position, next_new_position);
+                ts_range_array_add(differences, current_position, next_new_position);
             }
             if in_new_range { new_index += 1; }
             current_position = next_new_position;
             in_new_range = !in_new_range;
         } else {
             if in_old_range != in_new_range {
-                ts_range_array_add(&mut *differences, current_position, next_new_position);
+                ts_range_array_add(differences, current_position, next_new_position);
             }
             if in_old_range { old_index += 1; }
             if in_new_range { new_index += 1; }
