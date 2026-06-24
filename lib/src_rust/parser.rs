@@ -928,16 +928,16 @@ unsafe fn ts_parser__external_scanner_scan(
 // ---------------------------------------------------------------------------
 
 unsafe fn ts_parser__can_reuse_first_leaf(
-    self_: *mut TSParser,
+    self_: &TSParser,
     state: TSStateId,
     tree: Subtree,
     table_entry: &TableEntry,
 ) -> bool {
-    let lang = (*self_).language as *const TSLanguageFull;
+    let lang = self_.language as *const TSLanguageFull;
     let leaf_symbol = ts_subtree_leaf_symbol(tree);
     let leaf_state = ts_subtree_leaf_parse_state(tree);
-    let current_lex_mode = ts_language_lex_mode_for_state((*self_).language, state);
-    let leaf_lex_mode = ts_language_lex_mode_for_state((*self_).language, leaf_state);
+    let current_lex_mode = ts_language_lex_mode_for_state(self_.language, state);
+    let leaf_lex_mode = ts_language_lex_mode_for_state(self_.language, leaf_state);
 
     // At the end of a non-terminal extra node, the lexer normally returns
     // NULL, which indicates that the parser should look for a reduce action
@@ -1193,7 +1193,7 @@ unsafe fn ts_parser__get_cached_token(
             ts_subtree_symbol(cache.token),
             &mut table_entry,
         );
-        if ts_parser__can_reuse_first_leaf(self_, state, cache.token, &table_entry) {
+        if ts_parser__can_reuse_first_leaf(&*self_, state, cache.token, &table_entry) {
             ts_subtree_retain(cache.token);
             return Some((cache.token, table_entry));
         }
@@ -1312,7 +1312,7 @@ unsafe fn ts_parser__reuse_node(
 
         let leaf_symbol = ts_subtree_leaf_symbol(result);
         ts_language_table_entry((*self_).language, *state, leaf_symbol, table_entry);
-        if !ts_parser__can_reuse_first_leaf(self_, *state, result, table_entry) {
+        if !ts_parser__can_reuse_first_leaf(&*self_, *state, result, table_entry) {
             LOG!(self_, b"cant_reuse_node symbol:%s, first_leaf_symbol:%s\0".as_ptr() as *const i8,
                 SYM_NAME!(self_, ts_subtree_symbol(result)),
                 SYM_NAME!(self_, leaf_symbol));
