@@ -2752,8 +2752,9 @@ pub unsafe extern "C" fn ts_parser_set_language(
     language: *const TSLanguage,
 ) -> bool {
     ts_parser_reset(self_);
-    ts_language_delete((*self_).language);
-    (*self_).language = ptr::null();
+    let parser = &mut *self_;
+    ts_language_delete(parser.language);
+    parser.language = ptr::null();
 
     if !language.is_null() {
         let lang_full = language as *const TSLanguageFull;
@@ -2764,15 +2765,15 @@ pub unsafe extern "C" fn ts_parser_set_language(
         }
 
         if ts_language_is_wasm(language) {
-            if (*self_).wasm_store.is_null()
-                || !ts_wasm_store_start((*self_).wasm_store, &mut (*self_).lexer.data, language)
+            if parser.wasm_store.is_null()
+                || !ts_wasm_store_start(parser.wasm_store, &mut parser.lexer.data, language)
             {
                 return false;
             }
         }
     }
 
-    (*self_).language = ts_language_copy(language);
+    parser.language = ts_language_copy(language);
     true
 }
 
