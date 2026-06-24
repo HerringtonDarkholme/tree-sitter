@@ -197,24 +197,25 @@ unsafe fn ts_lexer_goto(self_: &mut Lexer, position: Length) {
     self_.current_position = position;
 
     // Move to the first valid position at or after the given position.
-    let mut found_included_range = false;
-    for i in 0..self_.included_range_count {
-        let included_range = &*self_.included_ranges.add(i as usize);
-        if included_range.end_byte > self_.current_position.bytes
-            && included_range.end_byte > included_range.start_byte
-        {
-            if included_range.start_byte >= self_.current_position.bytes {
-                self_.current_position = Length {
-                    bytes: included_range.start_byte,
-                    extent: included_range.start_point,
-                };
-            }
+    let found_included_range = 'range_search: {
+        for i in 0..self_.included_range_count {
+            let included_range = &*self_.included_ranges.add(i as usize);
+            if included_range.end_byte > self_.current_position.bytes
+                && included_range.end_byte > included_range.start_byte
+            {
+                if included_range.start_byte >= self_.current_position.bytes {
+                    self_.current_position = Length {
+                        bytes: included_range.start_byte,
+                        extent: included_range.start_point,
+                    };
+                }
 
-            self_.current_included_range_index = i;
-            found_included_range = true;
-            break;
+                self_.current_included_range_index = i;
+                break 'range_search true;
+            }
         }
-    }
+        false
+    };
 
     if found_included_range {
         // If the current position is outside of the current chunk of text,
