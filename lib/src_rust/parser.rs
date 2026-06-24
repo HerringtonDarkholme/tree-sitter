@@ -2588,28 +2588,28 @@ unsafe fn ts_parser__condense_stack(self_: &mut TSParser) -> u32 {
     min_error_cost
 }
 
-unsafe fn ts_parser__balance_subtree(self_: *mut TSParser) -> bool {
-    let finished_tree = (*self_).finished_tree;
+unsafe fn ts_parser__balance_subtree(self_: &mut TSParser) -> bool {
+    let finished_tree = self_.finished_tree;
 
     // If we haven't canceled balancing in progress before, then we want to clear the tree stack and
     // push the initial finished tree onto it. Otherwise, if we're resuming balancing after a
     // cancellation, we don't want to clear the tree stack.
-    if !(*self_).canceled_balancing {
-        array_clear(&mut (*self_).tree_pool.tree_stack as *mut MutableSubtreeArray as *mut Array<MutableSubtree>);
+    if !self_.canceled_balancing {
+        array_clear(&mut self_.tree_pool.tree_stack as *mut MutableSubtreeArray as *mut Array<MutableSubtree>);
         if ts_subtree_child_count(finished_tree) > 0 && (*finished_tree.ptr).ref_count == 1 {
             array_push(
-                &mut (*self_).tree_pool.tree_stack as *mut MutableSubtreeArray as *mut Array<MutableSubtree>,
+                &mut self_.tree_pool.tree_stack as *mut MutableSubtreeArray as *mut Array<MutableSubtree>,
                 ts_subtree_to_mut_unsafe(finished_tree),
             );
         }
     }
 
-    while (*self_).tree_pool.tree_stack.size > 0 {
+    while self_.tree_pool.tree_stack.size > 0 {
         if !ts_parser__check_progress(self_, None, None, 1) {
             return false;
         }
 
-        let tree = mutable_subtree_array_back(&(*self_).tree_pool.tree_stack);
+        let tree = mutable_subtree_array_back(&self_.tree_pool.tree_stack);
 
         if (*tree.ptr).data.children.repeat_depth > 0 {
             let tree_subtree = ts_subtree_from_mut(tree);
@@ -2626,8 +2626,8 @@ unsafe fn ts_parser__balance_subtree(self_: *mut TSParser) -> bool {
                     ts_subtree_compress(
                         tree,
                         i,
-                        (*self_).language,
-                        &mut (*self_).tree_pool.tree_stack as *mut MutableSubtreeArray,
+                        self_.language,
+                        &mut self_.tree_pool.tree_stack as *mut MutableSubtreeArray,
                     );
 
                     // We scale the operation count increment in `ts_parser__check_progress` proportionately to the compression
@@ -2642,14 +2642,14 @@ unsafe fn ts_parser__balance_subtree(self_: *mut TSParser) -> bool {
             }
         }
 
-        array_pop(&mut (*self_).tree_pool.tree_stack as *mut MutableSubtreeArray as *mut Array<MutableSubtree>);
+        array_pop(&mut self_.tree_pool.tree_stack as *mut MutableSubtreeArray as *mut Array<MutableSubtree>);
 
         for i in 0..(*tree.ptr).child_count {
             let tree_subtree = ts_subtree_from_mut(tree);
             let child = *ts_subtree_children(tree_subtree).add(i as usize);
             if ts_subtree_child_count(child) > 0 && (*child.ptr).ref_count == 1 {
                 array_push(
-                    &mut (*self_).tree_pool.tree_stack as *mut MutableSubtreeArray as *mut Array<MutableSubtree>,
+                    &mut self_.tree_pool.tree_stack as *mut MutableSubtreeArray as *mut Array<MutableSubtree>,
                     ts_subtree_to_mut_unsafe(child),
                 );
             }
@@ -2880,7 +2880,7 @@ pub unsafe extern "C" fn ts_parser_parse(
         if (*self_).canceled_balancing {
             // goto balance
             debug_assert!(!(*self_).finished_tree.ptr.is_null());
-            if !ts_parser__balance_subtree(self_) {
+            if !ts_parser__balance_subtree(&mut *self_) {
                 (*self_).canceled_balancing = true;
                 return ptr::null_mut();
             }
@@ -3014,7 +3014,7 @@ pub unsafe extern "C" fn ts_parser_parse(
 
     // balance:
     debug_assert!(!(*self_).finished_tree.ptr.is_null());
-    if !ts_parser__balance_subtree(self_) {
+    if !ts_parser__balance_subtree(&mut *self_) {
         (*self_).canceled_balancing = true;
         return ptr::null_mut();
     }
