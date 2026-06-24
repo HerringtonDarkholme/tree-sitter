@@ -1290,7 +1290,7 @@ pub unsafe fn ts_stack_clear(self_: *mut Stack) {
     stack_node_retain((*self_).base_node);
     for i in 0..(*self_).heads.size {
         stack_head_delete(
-            &mut *array_get(&mut (*self_).heads, i),
+            stack_head_mut(&mut *self_, i),
             &mut (*self_).node_pool,
             (*self_).subtree_pool,
         );
