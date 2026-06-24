@@ -531,6 +531,10 @@ unsafe fn ts_range_array_get(self_: &TSRangeArray, index: u32) -> &TSRange {
     &*array_get(self_ as *const TSRangeArray as *const Array<TSRange>, index)
 }
 
+unsafe fn ts_logger_read_ref(self_: &TSLogger) -> TSLogger {
+    ptr::read(self_)
+}
+
 unsafe fn ts_reduce_action_set_add(
     self_: &mut ReduceActionSet,
     new_action: ReduceAction,
@@ -2756,7 +2760,7 @@ pub unsafe extern "C" fn ts_parser_set_language(
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_parser_logger(self_: *const TSParser) -> TSLogger {
-    ptr::read(&(*self_).lexer.logger)
+    ts_logger_read_ref(&(*self_).lexer.logger)
 }
 
 #[no_mangle]
