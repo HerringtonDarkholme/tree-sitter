@@ -1860,16 +1860,17 @@ unsafe fn ts_parser__recover_to_state(
 }
 
 unsafe fn ts_parser__recover(
-    self_: *mut TSParser,
+    self_: &mut TSParser,
     version: StackVersion,
     mut lookahead: Subtree,
 ) {
+    let parser = self_ as *mut TSParser;
     let mut did_recover = false;
-    let previous_version_count = ts_stack_version_count(&*(*self_).stack);
-    let position = ts_stack_position(&*(*self_).stack, version);
-    let summary = ts_stack_get_summary((*self_).stack, version);
-    let node_count_since_error = ts_stack_node_count_since_error(&mut *(*self_).stack, version);
-    let current_error_cost = ts_stack_error_cost(&*(*self_).stack, version);
+    let previous_version_count = ts_stack_version_count(&*self_.stack);
+    let position = ts_stack_position(&*self_.stack, version);
+    let summary = ts_stack_get_summary(self_.stack, version);
+    let node_count_since_error = ts_stack_node_count_since_error(&mut *self_.stack, version);
+    let current_error_cost = ts_stack_error_cost(&*self_.stack, version);
 
     // Strategy 1: Find a previous state where the lookahead is valid.
     if !summary.is_null() && !ts_subtree_is_error(lookahead) {
@@ -1890,8 +1891,8 @@ unsafe fn ts_parser__recover(
             // Check for redundant versions
             let would_merge = 'merge: {
                 for j in 0..previous_version_count {
-                    if ts_stack_state(&*(*self_).stack, j) == entry.state
-                        && ts_stack_position(&*(*self_).stack, j).bytes == position.bytes
+                    if ts_stack_state(&*self_.stack, j) == entry.state
+                        && ts_stack_position(&*self_.stack, j).bytes == position.bytes
                     {
                         break 'merge true;
                     }
@@ -1906,20 +1907,20 @@ unsafe fn ts_parser__recover(
                 + entry.depth * ERROR_COST_PER_SKIPPED_TREE
                 + (position.bytes - entry.position.bytes) * ERROR_COST_PER_SKIPPED_CHAR
                 + (position.extent.row - entry.position.extent.row) * ERROR_COST_PER_SKIPPED_LINE;
-            if ts_parser__better_version_exists(&mut *self_, version, false, new_cost) {
+            if ts_parser__better_version_exists(self_, version, false, new_cost) {
                 break;
             }
 
             if ts_language_has_actions(
-                (*self_).language,
+                self_.language,
                 entry.state,
                 ts_subtree_symbol(lookahead),
             ) {
-                if ts_parser__recover_to_state(&mut *self_, version, depth, entry.state) {
+                if ts_parser__recover_to_state(self_, version, depth, entry.state) {
                     did_recover = true;
-                    LOG!(self_, b"recover_to_previous state:%u, depth:%u\0".as_ptr() as *const i8,
+                    LOG!(parser, b"recover_to_previous state:%u, depth:%u\0".as_ptr() as *const i8,
                         entry.state as u32, depth);
-                    LOG_STACK!(self_);
+                    LOG_STACK!(parser);
                     break;
                 }
             }
@@ -1928,11 +1929,11 @@ unsafe fn ts_parser__recover(
 
     // Remove halted versions
     let mut i = previous_version_count;
-    while i < ts_stack_version_count(&*(*self_).stack) {
-        if !ts_stack_is_active(&*(*self_).stack, i) {
-            LOG!(self_, b"removed paused version:%u\0".as_ptr() as *const i8, i);
-            ts_stack_remove_version(&mut *(*self_).stack, i);
-            LOG_STACK!(self_);
+    while i < ts_stack_version_count(&*self_.stack) {
+        if !ts_stack_is_active(&*self_.stack, i) {
+            LOG!(parser, b"removed paused version:%u\0".as_ptr() as *const i8, i);
+            ts_stack_remove_version(&mut *self_.stack, i);
+            LOG_STACK!(parser);
         } else {
             i += 1;
         }
@@ -1940,28 +1941,28 @@ unsafe fn ts_parser__recover(
 
     // EOF: wrap everything and terminate
     if ts_subtree_is_eof(lookahead) {
-        LOG!(self_, b"recover_eof\0".as_ptr() as *const i8);
+        LOG!(parser, b"recover_eof\0".as_ptr() as *const i8);
         let mut children: SubtreeArray = SubtreeArray {
             contents: ptr::null_mut(),
             size: 0,
             capacity: 0,
         };
-        let parent = ts_subtree_new_error_node(&mut children, false, (*self_).language);
-        ts_stack_push((*self_).stack, version, parent, false, 1);
-        ts_parser__accept(&mut *self_, version, lookahead);
+        let parent = ts_subtree_new_error_node(&mut children, false, self_.language);
+        ts_stack_push(self_.stack, version, parent, false, 1);
+        ts_parser__accept(self_, version, lookahead);
         return;
     }
 
     // Strategy 2: skip the current token
-    if did_recover && ts_stack_version_count(&*(*self_).stack) > MAX_VERSION_COUNT {
-        ts_stack_halt(&mut *(*self_).stack, version);
-        ts_subtree_release(&mut (*self_).tree_pool, lookahead);
+    if did_recover && ts_stack_version_count(&*self_.stack) > MAX_VERSION_COUNT {
+        ts_stack_halt(&mut *self_.stack, version);
+        ts_subtree_release(&mut self_.tree_pool, lookahead);
         return;
     }
 
     if did_recover && ts_subtree_has_external_scanner_state_change(lookahead) {
-        ts_stack_halt(&mut *(*self_).stack, version);
-        ts_subtree_release(&mut (*self_).tree_pool, lookahead);
+        ts_stack_halt(&mut *self_.stack, version);
+        ts_subtree_release(&mut self_.tree_pool, lookahead);
         return;
     }
 
@@ -1969,16 +1970,16 @@ unsafe fn ts_parser__recover(
         + ERROR_COST_PER_SKIPPED_TREE
         + ts_subtree_total_bytes(lookahead) * ERROR_COST_PER_SKIPPED_CHAR
         + ts_subtree_total_size(lookahead).extent.row * ERROR_COST_PER_SKIPPED_LINE;
-    if ts_parser__better_version_exists(&mut *self_, version, false, new_cost) {
-        ts_stack_halt(&mut *(*self_).stack, version);
-        ts_subtree_release(&mut (*self_).tree_pool, lookahead);
+    if ts_parser__better_version_exists(self_, version, false, new_cost) {
+        ts_stack_halt(&mut *self_.stack, version);
+        ts_subtree_release(&mut self_.tree_pool, lookahead);
         return;
     }
 
     // Mark extra tokens
     let mut n: u32 = 0;
     let actions = ts_language_actions(
-        (*self_).language,
+        self_.language,
         1,
         ts_subtree_symbol(lookahead),
         &mut n,
@@ -1987,14 +1988,14 @@ unsafe fn ts_parser__recover(
         && (*actions.add(n as usize - 1)).type_ == TSPARSE_ACTION_TYPE_SHIFT
         && (*actions.add(n as usize - 1)).shift.extra
     {
-        let mut mutable_lookahead = ts_subtree_make_mut(&mut (*self_).tree_pool, lookahead);
+        let mut mutable_lookahead = ts_subtree_make_mut(&mut self_.tree_pool, lookahead);
         ts_subtree_set_extra(&mut mutable_lookahead, true);
         lookahead = ts_subtree_from_mut(mutable_lookahead);
     }
 
     // Wrap the lookahead in an ERROR
-    LOG!(self_, b"skip_token symbol:%s\0".as_ptr() as *const i8,
-        SYM_NAME!(self_, ts_subtree_symbol(lookahead)));
+    LOG!(parser, b"skip_token symbol:%s\0".as_ptr() as *const i8,
+        SYM_NAME!(parser, ts_subtree_symbol(lookahead)));
     let mut children: SubtreeArray = SubtreeArray {
         contents: ptr::null_mut(),
         size: 0,
@@ -2006,32 +2007,31 @@ unsafe fn ts_parser__recover(
         ts_builtin_sym_error_repeat,
         &mut children,
         0,
-        (*self_).language,
+        self_.language,
     );
 
     // Merge with existing error on top of stack
     if node_count_since_error > 0 {
-        let mut pop = ts_stack_pop_count((*self_).stack, version, 1);
+        let mut pop = ts_stack_pop_count(self_.stack, version, 1);
 
         if pop.size > 1 {
             for pi in 1..pop.size {
                 ts_subtree_array_delete(
-                    &mut (*self_).tree_pool,
+                    &mut self_.tree_pool,
                     &mut stack_slice_array_get_mut(&mut pop, pi).subtrees,
                 );
             }
-            while ts_stack_version_count(&*(*self_).stack)
-                > stack_slice_array_get(&pop, 0).version + 1
+            while ts_stack_version_count(&*self_.stack) > stack_slice_array_get(&pop, 0).version + 1
             {
                 ts_stack_remove_version(
-                    &mut *(*self_).stack,
+                    &mut *self_.stack,
                     stack_slice_array_get(&pop, 0).version + 1,
                 );
             }
         }
 
         ts_stack_renumber_version(
-            (*self_).stack,
+            self_.stack,
             stack_slice_array_get(&pop, 0).version,
             version,
         );
@@ -2044,13 +2044,13 @@ unsafe fn ts_parser__recover(
             ts_builtin_sym_error_repeat,
             slot,
             0,
-            (*self_).language,
+            self_.language,
         );
     }
 
     // Push the ERROR
     ts_stack_push(
-        (*self_).stack,
+        self_.stack,
         version,
         ts_subtree_from_mut(error_repeat),
         false,
@@ -2058,21 +2058,21 @@ unsafe fn ts_parser__recover(
     );
     if ts_subtree_has_external_tokens(lookahead) {
         ts_stack_set_last_external_token(
-            &mut *(*self_).stack,
+            &mut *self_.stack,
             version,
             ts_subtree_last_external_token(lookahead),
         );
     }
 
     let mut has_error = true;
-    for vi in 0..ts_stack_version_count(&*(*self_).stack) {
-        let status = ts_parser__version_status(&mut *self_, vi);
+    for vi in 0..ts_stack_version_count(&*self_.stack) {
+        let status = ts_parser__version_status(self_, vi);
         if !status.is_in_error {
             has_error = false;
             break;
         }
     }
-    (*self_).has_error = has_error;
+    self_.has_error = has_error;
 }
 
 unsafe fn ts_parser__handle_error(
@@ -2180,7 +2180,7 @@ unsafe fn ts_parser__handle_error(
     if ts_subtree_child_count(lookahead) > 0 {
         ts_parser__breakdown_lookahead(self_, &mut lookahead, ERROR_STATE);
     }
-    ts_parser__recover(parser, version, lookahead);
+    ts_parser__recover(self_, version, lookahead);
 
     LOG_STACK!(parser);
 }
@@ -2392,7 +2392,7 @@ unsafe fn ts_parser__advance(
                         );
                     }
 
-                    ts_parser__recover(self_, version, lookahead);
+                    ts_parser__recover(&mut *self_, version, lookahead);
                     if did_reuse {
                         reusable_node_advance(&mut (*self_).reusable_node);
                     }
