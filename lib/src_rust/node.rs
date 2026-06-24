@@ -137,7 +137,7 @@ unsafe fn ts_node_child_iterator_done(self_: &NodeChildIterator) -> bool {
 
 unsafe fn ts_node_child_iterator_next(
     self_: &mut NodeChildIterator,
-    result: *mut TSNode,
+    result: &mut TSNode,
 ) -> bool {
     if self_.parent.ptr.is_null() || ts_node_child_iterator_done(self_) {
         return false;
