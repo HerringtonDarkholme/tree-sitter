@@ -363,6 +363,14 @@ unsafe fn stack_iterator_array_get(self_: &Array<StackIterator>, index: u32) -> 
     &*array_get(self_, index)
 }
 
+#[inline]
+unsafe fn stack_iterator_array_get_mut(
+    self_: &mut Array<StackIterator>,
+    index: u32,
+) -> &mut StackIterator {
+    &mut *array_get(self_, index)
+}
+
 // ---------------------------------------------------------------------------
 // Internal (static) functions
 // ---------------------------------------------------------------------------
@@ -703,7 +711,7 @@ unsafe fn stack__iter(
 
             if should_stop {
                 if !should_pop {
-                    let iter = &mut *array_get(&mut (*self_).iterators, i);
+                    let iter = stack_iterator_array_get_mut(&mut (*self_).iterators, i);
                     ts_subtree_array_delete((*self_).subtree_pool, &mut iter.subtrees);
                 }
                 array_erase(&mut (*self_).iterators, i);
