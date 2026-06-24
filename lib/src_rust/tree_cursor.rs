@@ -425,22 +425,21 @@ unsafe fn ts_tree_cursor_goto_first_child_for_byte_and_point(
 }
 
 unsafe fn ts_tree_cursor_goto_sibling_internal(
-    _self: *mut TSTreeCursor,
+    cursor: &mut TreeCursor,
     advance: unsafe fn(&mut CursorChildIterator) -> Option<CursorChild>,
 ) -> TreeCursorStep {
-    let self_ = _self as *mut TreeCursor;
-    let initial_size = (*self_).stack.size;
+    let initial_size = cursor.stack.size;
 
-    while (*self_).stack.size > 1 {
-        let entry = array_pop(&mut (*self_).stack);
-        let mut iterator = ts_tree_cursor_iterate_children(&*self_);
+    while cursor.stack.size > 1 {
+        let entry = array_pop(&mut cursor.stack);
+        let mut iterator = ts_tree_cursor_iterate_children(cursor);
         iterator.child_index = entry.child_index;
         iterator.structural_child_index = entry.structural_child_index;
         iterator.position = entry.position;
         iterator.descendant_index = entry.descendant_index;
 
         if let Some(child) = advance(&mut iterator) {
-            if child.visible && (*self_).stack.size + 1 < initial_size {
+            if child.visible && cursor.stack.size + 1 < initial_size {
                 break;
             }
         }
@@ -448,18 +447,18 @@ unsafe fn ts_tree_cursor_goto_sibling_internal(
         while let Some(child) = advance(&mut iterator) {
             let entry = child.entry;
             if child.visible {
-                array_push(&mut (*self_).stack, entry);
+                array_push(&mut cursor.stack, entry);
                 return TreeCursorStep::TreeCursorStepVisible;
             }
 
             if ts_subtree_visible_child_count(*entry.subtree) > 0 {
-                array_push(&mut (*self_).stack, entry);
+                array_push(&mut cursor.stack, entry);
                 return TreeCursorStep::TreeCursorStepHidden;
             }
         }
     }
 
-    (*self_).stack.size = initial_size;
+    cursor.stack.size = initial_size;
     TreeCursorStep::TreeCursorStepNone
 }
 
@@ -624,7 +623,8 @@ pub unsafe extern "C" fn ts_tree_cursor_goto_first_child_for_point(
 pub unsafe extern "C" fn ts_tree_cursor_goto_next_sibling_internal(
     _self: *mut TSTreeCursor,
 ) -> TreeCursorStep {
-    ts_tree_cursor_goto_sibling_internal(_self, ts_tree_cursor_child_iterator_next)
+    let cursor = &mut *(_self as *mut TreeCursor);
+    ts_tree_cursor_goto_sibling_internal(cursor, ts_tree_cursor_child_iterator_next)
 }
 
 #[no_mangle]
@@ -645,24 +645,25 @@ pub unsafe extern "C" fn ts_tree_cursor_goto_next_sibling(
 pub unsafe extern "C" fn ts_tree_cursor_goto_previous_sibling_internal(
     _self: *mut TSTreeCursor,
 ) -> TreeCursorStep {
-    let self_ = _self as *mut TreeCursor;
+    let cursor = &mut *(_self as *mut TreeCursor);
 
     let step = ts_tree_cursor_goto_sibling_internal(
-        _self, ts_tree_cursor_child_iterator_previous,
+        cursor,
+        ts_tree_cursor_child_iterator_previous,
     );
     if step == TreeCursorStep::TreeCursorStepNone {
         return step;
     }
 
     // if length is already valid, there's no need to recompute it
-    if !length_is_undefined(tree_cursor_entry_array_back(&(*self_).stack).position) {
+    if !length_is_undefined(tree_cursor_entry_array_back(&cursor.stack).position) {
         return step;
     }
 
     // restore position from the parent node
-    let parent = tree_cursor_entry_array_get(&(*self_).stack, (*self_).stack.size - 2);
+    let parent = tree_cursor_entry_array_get(&cursor.stack, cursor.stack.size - 2);
     let mut position = parent.position;
-    let child_index = tree_cursor_entry_array_back(&(*self_).stack).child_index;
+    let child_index = tree_cursor_entry_array_back(&cursor.stack).child_index;
     let children = ts_subtree_children(*parent.subtree);
 
     if child_index > 0 {
@@ -674,7 +675,7 @@ pub unsafe extern "C" fn ts_tree_cursor_goto_previous_sibling_internal(
         position = length_add(position, ts_subtree_padding(*children.add(child_index as usize)));
     }
 
-    tree_cursor_entry_array_back_mut(&mut (*self_).stack).position = position;
+    tree_cursor_entry_array_back_mut(&mut cursor.stack).position = position;
 
     step
 }
