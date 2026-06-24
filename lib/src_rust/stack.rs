@@ -1007,7 +1007,7 @@ pub unsafe fn ts_stack_pop_error(
     self_: *mut Stack,
     version: StackVersion,
 ) -> SubtreeArray {
-    let node = (*array_get(&(*self_).heads, version)).node;
+    let node = stack_head(&*self_, version).node;
     for i in 0..(*node).link_count as usize {
         if !(*node).links[i].subtree.ptr.is_null()
             && ts_subtree_is_error((*node).links[i].subtree)
@@ -1080,7 +1080,7 @@ pub unsafe fn ts_stack_record_summary(
         &mut session as *mut SummarizeStackSession as *mut c_void,
         -1,
     );
-    let head = &mut *array_get(&mut (*self_).heads, version);
+    let head = stack_head_mut(&mut *self_, version);
     if !head.summary.is_null() {
         array_delete(head.summary);
         ts_free(head.summary as *mut c_void);
@@ -1093,7 +1093,7 @@ pub unsafe fn ts_stack_get_summary(
     self_: *mut Stack,
     version: StackVersion,
 ) -> *mut StackSummary {
-    (*array_get(&(*self_).heads, version)).summary
+    stack_head(&*self_, version).summary
 }
 
 /// Get the dynamic precedence of a version.
@@ -1101,7 +1101,7 @@ pub unsafe fn ts_stack_dynamic_precedence(
     self_: *mut Stack,
     version: StackVersion,
 ) -> i32 {
-    (*(*array_get(&(*self_).heads, version)).node).dynamic_precedence
+    (*stack_head(&*self_, version).node).dynamic_precedence
 }
 
 /// Check if a version has advanced since the last error.
@@ -1109,7 +1109,7 @@ pub unsafe fn ts_stack_has_advanced_since_error(
     self_: *const Stack,
     version: StackVersion,
 ) -> bool {
-    let head = &*array_get(&(*self_).heads, version);
+    let head = stack_head(&*self_, version);
     let mut node = head.node;
     if (*node).error_cost == 0 {
         return true;
@@ -1227,8 +1227,8 @@ pub unsafe fn ts_stack_can_merge(
     version1: StackVersion,
     version2: StackVersion,
 ) -> bool {
-    let head1 = &*array_get(&(*self_).heads, version1);
-    let head2 = &*array_get(&(*self_).heads, version2);
+    let head1 = stack_head(&*self_, version1);
+    let head2 = stack_head(&*self_, version2);
     head1.status == StackStatus::Active
         && head2.status == StackStatus::Active
         && (*head1.node).state == (*head2.node).state
@@ -1242,7 +1242,7 @@ pub unsafe fn ts_stack_can_merge(
 
 /// Halt a version.
 pub unsafe fn ts_stack_halt(self_: *mut Stack, version: StackVersion) {
-    (*array_get(&mut (*self_).heads, version)).status = StackStatus::Halted;
+    stack_head_mut(&mut *self_, version).status = StackStatus::Halted;
 }
 
 /// Pause a version with a lookahead token.
@@ -1251,7 +1251,7 @@ pub unsafe fn ts_stack_pause(
     version: StackVersion,
     lookahead: Subtree,
 ) {
-    let head = &mut *array_get(&mut (*self_).heads, version);
+    let head = stack_head_mut(&mut *self_, version);
     head.status = StackStatus::Paused;
     head.lookahead_when_paused = lookahead;
     head.node_count_at_last_error = (*head.node).node_count;
@@ -1277,7 +1277,7 @@ pub unsafe fn ts_stack_resume(
     self_: *mut Stack,
     version: StackVersion,
 ) -> Subtree {
-    let head = &mut *array_get(&mut (*self_).heads, version);
+    let head = stack_head_mut(&mut *self_, version);
     debug_assert!(head.status == StackStatus::Paused);
     let result = head.lookahead_when_paused;
     head.status = StackStatus::Active;
