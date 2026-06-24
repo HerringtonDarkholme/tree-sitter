@@ -315,3 +315,59 @@ Source-code analysis:
 - Because the perf gate reported no per-case regressions above threshold and
   overall Rust throughput changed by less than 0.1%, there is no reproducible
   performance culprit to investigate in this batch. No rollback was performed.
+
+### 2026-06-24 16:11 EDT
+
+- Repo head: `954e5f7c`
+- Batch base: `d85451be`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: 10 small internal raw-pointer/reference cleanups through `Use reference for stack condensation helper`
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 24978.2 | 24849.0 | +0.52% |
+| TypeScript error parses | 32 | 1659.5 | 1621.4 | +2.35% |
+| JavaScript normal parses | 2 | 17804.2 | 15255.7 | +16.71% |
+| JavaScript error parses | 37 | 2067.0 | 1906.5 | +8.42% |
+| Overall parser throughput | 82 | 2306.8 | 2201.9 | +4.76% |
+
+Prior checkpoint at `5a0a2fcf` recorded Rust overall throughput of 2325.9
+bytes/ms on the same TypeScript/JavaScript gate, so this batch measured -0.82%
+absolute Rust throughput. That is below the 5% investigation threshold and in
+line with prior run-to-run noise. The Rust-vs-C delta fell from +5.44% to
++4.76%, mostly because TypeScript error throughput measured lower in this run.
+
+Per-case Rust-vs-C regressions above the 5% threshold:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `typescript normal builderStatePublic.ts` | 17955.3 | 20836.7 | 13.83% |
+| `typescript error release.sh` | 591.4 | 657.8 | 10.09% |
+
+Source-code analysis:
+
+- This batch intentionally focused on replacing private helper signatures and
+  repeated `&(*ptr)` / `&mut (*ptr)` style dereferences with Rust references.
+  It did not change any FFI-facing signature, `#[repr(C)]` type, allocation
+  strategy, parse table access, stack ordering rule, or subtree ownership rule.
+- The scanner lifecycle, serialization, deserialization, and scan helpers still
+  call the same external scanner ABI and wasm store functions with the same
+  payload pointers. The Rust reference is only used inside the parser-owned
+  helper before crossing those ABI boundaries.
+- `Use reference for parser logging helper` affects debug logging and dot graph
+  output. The parser throughput benchmark runs without parser logging, so this
+  is not a plausible source-code explanation for the reported TypeScript cases.
+- `Use reference for stack condensation helper` is the only hot-path parser
+  commit in this batch. It preserves the same calls to `ts_stack_version_count`,
+  `ts_stack_is_halted`, `ts_stack_merge`, `ts_stack_swap_versions`, pause/resume
+  handling, and error-cost comparisons; the change removes repeated raw pointer
+  field dereferences on `TSParser`.
+- Because overall Rust throughput changed by less than 1% versus the previous
+  checkpoint, and because the per-case slowdowns are Rust-vs-C comparisons
+  rather than regressions against the previous Rust checkpoint, no specific
+  culprit was identified and no rollback was performed.
