@@ -2223,9 +2223,9 @@ unsafe fn ts_parser__advance(
     allow_node_reuse: bool,
 ) -> bool {
     let parser = self_ as *mut TSParser;
-    let mut state = ts_stack_state(&*(*self_).stack, version);
-    let position = ts_stack_position(&*(*self_).stack, version).bytes;
-    let last_external_token = ts_stack_last_external_token(&*(*self_).stack, version);
+    let mut state = ts_stack_state(&*self_.stack, version);
+    let position = ts_stack_position(&*self_.stack, version).bytes;
+    let last_external_token = ts_stack_last_external_token(&*self_.stack, version);
 
     let mut did_reuse = true;
     let mut lookahead = NULL_SUBTREE;
@@ -2234,7 +2234,7 @@ unsafe fn ts_parser__advance(
     // If possible, reuse a node from the previous syntax tree.
     if allow_node_reuse {
         lookahead = ts_parser__reuse_node(
-            &mut *self_,
+            self_,
             version,
             &mut state,
             position,
@@ -2248,7 +2248,7 @@ unsafe fn ts_parser__advance(
     if lookahead.ptr.is_null() {
         did_reuse = false;
         if let Some((token, cached_table_entry)) = ts_parser__get_cached_token(
-            &*self_,
+            self_,
             state,
             position as usize,
             last_external_token,
@@ -2263,15 +2263,15 @@ unsafe fn ts_parser__advance(
         // Otherwise, re-run the lexer.
         if needs_lex {
             needs_lex = false;
-            lookahead = ts_parser__lex(&mut *self_, version, state);
-            if (*self_).has_scanner_error {
+            lookahead = ts_parser__lex(self_, version, state);
+            if self_.has_scanner_error {
                 return false;
             }
 
             if !lookahead.ptr.is_null() {
-                ts_parser__set_cached_token(&mut *self_, position, last_external_token, lookahead);
+                ts_parser__set_cached_token(self_, position, last_external_token, lookahead);
                 ts_language_table_entry(
-                    (*self_).language,
+                    self_.language,
                     state,
                     ts_subtree_symbol(lookahead),
                     &mut table_entry,
@@ -2282,7 +2282,7 @@ unsafe fn ts_parser__advance(
             // After the reduction, the lexer needs to be run again.
             else {
                 ts_language_table_entry(
-                    (*self_).language,
+                    self_.language,
                     state,
                     ts_builtin_sym_end,
                     &mut table_entry,
@@ -2292,7 +2292,7 @@ unsafe fn ts_parser__advance(
 
         // If a progress callback was provided, then check every
         // time a fixed number of parse actions has been processed.
-        if !ts_parser__check_progress(&mut *self_, Some(&mut lookahead), Some(position), 1) {
+        if !ts_parser__check_progress(self_, Some(&mut lookahead), Some(position), 1) {
             return false;
         }
 
