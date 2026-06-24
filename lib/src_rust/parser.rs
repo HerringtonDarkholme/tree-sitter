@@ -401,9 +401,13 @@ unsafe fn reusable_node_clear(self_: &mut ReusableNode) {
     self_.last_external_token = NULL_SUBTREE;
 }
 
+unsafe fn stack_entry_array_back(self_: &Array<StackEntry>) -> &StackEntry {
+    &*array_back(self_)
+}
+
 unsafe fn reusable_node_last_entry(self_: &ReusableNode) -> Option<&StackEntry> {
     if self_.stack.size > 0 {
-        Some(&*array_back(&self_.stack))
+        Some(stack_entry_array_back(&self_.stack))
     } else {
         None
     }
