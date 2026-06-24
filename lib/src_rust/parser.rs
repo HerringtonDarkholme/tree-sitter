@@ -1674,25 +1674,26 @@ unsafe fn ts_parser__accept(
 // ---------------------------------------------------------------------------
 
 unsafe fn ts_parser__do_all_potential_reductions(
-    self_: *mut TSParser,
+    self_: &mut TSParser,
     starting_version: StackVersion,
     lookahead_symbol: TSSymbol,
 ) -> bool {
-    let lang = (*self_).language as *const TSLanguageFull;
-    let initial_version_count = ts_stack_version_count(&*(*self_).stack);
+    let parser = self_ as *mut TSParser;
+    let lang = self_.language as *const TSLanguageFull;
+    let initial_version_count = ts_stack_version_count(&*self_.stack);
 
     let mut can_shift_lookahead_symbol = false;
     let mut version = starting_version;
     let mut i: u32 = 0;
     loop {
-        let version_count = ts_stack_version_count(&*(*self_).stack);
+        let version_count = ts_stack_version_count(&*self_.stack);
         if version >= version_count {
             break;
         }
 
         let merged = 'merge: {
             for j in initial_version_count..version {
-                if ts_stack_merge((*self_).stack, j, version) {
+                if ts_stack_merge(self_.stack, j, version) {
                     break 'merge true;
                 }
             }
@@ -1703,9 +1704,9 @@ unsafe fn ts_parser__do_all_potential_reductions(
             continue;
         }
 
-        let state = ts_stack_state(&*(*self_).stack, version);
+        let state = ts_stack_state(&*self_.stack, version);
         let mut has_shift_action = false;
-        array_clear(&mut (*self_).reduce_actions);
+        array_clear(&mut self_.reduce_actions);
 
         let first_symbol: TSSymbol;
         let end_symbol: TSSymbol;
@@ -1720,7 +1721,7 @@ unsafe fn ts_parser__do_all_potential_reductions(
         let mut symbol = first_symbol;
         while symbol < end_symbol {
             let mut entry = TableEntry::empty();
-            ts_language_table_entry((*self_).language, state, symbol, &mut entry);
+            ts_language_table_entry(self_.language, state, symbol, &mut entry);
             for j in 0..entry.action_count {
                 let action = *entry.actions.add(j as usize);
                 match action.type_ {
@@ -1732,7 +1733,7 @@ unsafe fn ts_parser__do_all_potential_reductions(
                     TSPARSE_ACTION_TYPE_REDUCE => {
                         if action.reduce.child_count > 0 {
                             ts_reduce_action_set_add(
-                                &mut (*self_).reduce_actions,
+                                &mut self_.reduce_actions,
                                 ReduceAction {
                                     symbol: action.reduce.symbol,
                                     count: action.reduce.child_count as u32,
@@ -1749,10 +1750,10 @@ unsafe fn ts_parser__do_all_potential_reductions(
         }
 
         let mut reduction_version = STACK_VERSION_NONE;
-        for j in 0..(*self_).reduce_actions.size {
-            let action = reduce_action_set_get(&(*self_).reduce_actions, j);
+        for j in 0..self_.reduce_actions.size {
+            let action = reduce_action_set_get(&self_.reduce_actions, j);
             reduction_version = ts_parser__reduce(
-                self_,
+                parser,
                 version,
                 action.symbol,
                 action.count,
@@ -1766,11 +1767,11 @@ unsafe fn ts_parser__do_all_potential_reductions(
         if has_shift_action {
             can_shift_lookahead_symbol = true;
         } else if reduction_version != STACK_VERSION_NONE && i < MAX_VERSION_COUNT {
-            ts_stack_renumber_version((*self_).stack, reduction_version, version);
+            ts_stack_renumber_version(self_.stack, reduction_version, version);
             i += 1;
             continue;
         } else if lookahead_symbol != 0 {
-            ts_stack_remove_version(&mut *(*self_).stack, version);
+            ts_stack_remove_version(&mut *self_.stack, version);
         }
 
         if version == starting_version {
@@ -2084,7 +2085,7 @@ unsafe fn ts_parser__handle_error(
     // Perform any reductions that can happen in this state, regardless of the lookahead. After
     // skipping one or more invalid tokens, the parser might find a token that would have allowed
     // a reduction to take place.
-    ts_parser__do_all_potential_reductions(self_, version, 0);
+    ts_parser__do_all_potential_reductions(&mut *self_, version, 0);
     let version_count = ts_stack_version_count(&*(*self_).stack);
     let position = ts_stack_position(&*(*self_).stack, version);
 
@@ -2137,7 +2138,7 @@ unsafe fn ts_parser__handle_error(
                     );
 
                     if ts_parser__do_all_potential_reductions(
-                        self_,
+                        &mut *self_,
                         version_with_missing_tree,
                         ts_subtree_leaf_symbol(lookahead),
                     ) {
