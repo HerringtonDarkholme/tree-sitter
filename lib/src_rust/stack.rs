@@ -354,6 +354,20 @@ unsafe fn stack_head_mut(self_: &mut Stack, version: StackVersion) -> &mut Stack
 }
 
 #[inline]
+unsafe fn stack_head_array_read(self_: &Array<StackHead>, version: StackVersion) -> StackHead {
+    ptr::read(array_get(self_, version))
+}
+
+#[inline]
+unsafe fn stack_head_array_write(
+    self_: &mut Array<StackHead>,
+    version: StackVersion,
+    head: StackHead,
+) {
+    ptr::write(array_get(self_, version), head);
+}
+
+#[inline]
 unsafe fn stack_slice_array_get(self_: &StackSliceArray, index: u32) -> &StackSlice {
     &*array_get(self_, index)
 }
@@ -1203,12 +1217,13 @@ pub unsafe fn ts_stack_swap_versions(
     v1: StackVersion,
     v2: StackVersion,
 ) {
-    let temp = ptr::read(array_get(&(*self_).heads, v1));
-    ptr::write(
-        array_get(&mut (*self_).heads, v1),
-        ptr::read(array_get(&(*self_).heads, v2)),
+    let temp = stack_head_array_read(&(*self_).heads, v1);
+    stack_head_array_write(
+        &mut (*self_).heads,
+        v1,
+        stack_head_array_read(&(*self_).heads, v2),
     );
-    ptr::write(array_get(&mut (*self_).heads, v2), temp);
+    stack_head_array_write(&mut (*self_).heads, v2, temp);
 }
 
 /// Copy a version, creating a new one.
