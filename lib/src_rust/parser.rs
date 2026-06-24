@@ -1404,23 +1404,23 @@ unsafe fn ts_parser__select_tree(
 }
 
 unsafe fn ts_parser__select_children(
-    self_: *mut TSParser,
+    self_: &mut TSParser,
     left: Subtree,
     children: &SubtreeArray,
 ) -> bool {
     let scratch_trees =
-        &mut *(&mut (*self_).scratch_trees as *mut SubtreeArray as *mut Array<Subtree>);
+        &mut *(&mut self_.scratch_trees as *mut SubtreeArray as *mut Array<Subtree>);
     let children = &*(children as *const SubtreeArray as *const Array<Subtree>);
     array_assign(scratch_trees, children);
 
     let scratch_tree = ts_subtree_new_node(
         ts_subtree_symbol(left),
-        &mut (*self_).scratch_trees,
+        &mut self_.scratch_trees,
         0,
-        (*self_).language,
+        self_.language,
     );
 
-    ts_parser__select_tree(self_, left, ts_subtree_from_mut(scratch_tree))
+    ts_parser__select_tree(self_ as *mut TSParser, left, ts_subtree_from_mut(scratch_tree))
 }
 
 // ---------------------------------------------------------------------------
@@ -1521,7 +1521,7 @@ unsafe fn ts_parser__reduce(
             );
 
             if ts_parser__select_children(
-                self_,
+                &mut *self_,
                 ts_subtree_from_mut(parent),
                 &next_slice_children,
             ) {
