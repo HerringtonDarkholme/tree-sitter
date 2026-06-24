@@ -506,6 +506,10 @@ unsafe fn stack_slice_array_get_mut(self_: &mut StackSliceArray, index: u32) -> 
     &mut *array_get(self_ as *mut StackSliceArray, index)
 }
 
+unsafe fn stack_slice_array_read(self_: &StackSliceArray, index: u32) -> StackSlice {
+    ptr::read(stack_slice_array_get(self_, index))
+}
+
 unsafe fn ts_reduce_action_set_add(
     self_: &mut ReduceActionSet,
     new_action: ReduceAction,
@@ -581,7 +585,7 @@ unsafe fn ts_parser__breakdown_top_of_stack(
         did_break_down = true;
         let mut pending = false;
         for i in 0..pop.size {
-            let mut slice = ptr::read(array_get(&pop as *const StackSliceArray, i));
+            let mut slice = stack_slice_array_read(&pop, i);
             let mut state = ts_stack_state((*self_).stack, slice.version);
             let parent = *slice.subtrees.contents;
 
@@ -1435,7 +1439,7 @@ unsafe fn ts_parser__reduce(
     let halted_version_count = ts_stack_halted_version_count((*self_).stack);
     let mut i: u32 = 0;
     while i < pop.size {
-        let mut slice = ptr::read(array_get(&pop as *const StackSliceArray, i));
+        let mut slice = stack_slice_array_read(&pop, i);
         let slice_version = slice.version - removed_version_count;
 
         // Limit max versions
@@ -1445,7 +1449,7 @@ unsafe fn ts_parser__reduce(
             removed_version_count += 1;
             while i + 1 < pop.size {
                 LOG!(self_, b"aborting reduce with too many versions\0".as_ptr() as *const i8);
-                let mut next_slice = ptr::read(array_get(&pop as *const StackSliceArray, i + 1));
+                let mut next_slice = stack_slice_array_read(&pop, i + 1);
                 if next_slice.version != slice.version {
                     break;
                 }
@@ -1469,7 +1473,7 @@ unsafe fn ts_parser__reduce(
 
         // Handle merged stack versions
         while i + 1 < pop.size {
-            let mut next_slice = ptr::read(array_get(&pop as *const StackSliceArray, i + 1));
+            let mut next_slice = stack_slice_array_read(&pop, i + 1);
             if next_slice.version != slice.version {
                 break;
             }
@@ -1755,7 +1759,7 @@ unsafe fn ts_parser__recover_to_state(
 
     let mut i: u32 = 0;
     while i < pop.size {
-        let mut slice = ptr::read(array_get(&pop as *const StackSliceArray, i));
+        let mut slice = stack_slice_array_read(&pop, i);
 
         if slice.version == previous_version {
             ts_subtree_array_delete(&mut (*self_).tree_pool, &mut slice.subtrees);
