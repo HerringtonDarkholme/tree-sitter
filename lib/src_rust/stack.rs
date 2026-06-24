@@ -343,6 +343,16 @@ pub unsafe fn array_assign<T>(self_: *mut Array<T>, other: *const Array<T>) {
     }
 }
 
+#[inline]
+unsafe fn stack_head(self_: &Stack, version: StackVersion) -> &StackHead {
+    &*array_get(&self_.heads, version)
+}
+
+#[inline]
+unsafe fn stack_head_mut(self_: &mut Stack, version: StackVersion) -> &mut StackHead {
+    &mut *array_get(&mut self_.heads, version)
+}
+
 // ---------------------------------------------------------------------------
 // Internal (static) functions
 // ---------------------------------------------------------------------------
@@ -895,8 +905,7 @@ pub unsafe fn ts_stack_version_count(self_: *const Stack) -> u32 {
 pub unsafe fn ts_stack_halted_version_count(self_: *mut Stack) -> u32 {
     let mut count = 0u32;
     for i in 0..(*self_).heads.size {
-        let head = &*array_get(&(*self_).heads, i);
-        if head.status == StackStatus::Halted {
+        if stack_head(&*self_, i).status == StackStatus::Halted {
             count += 1;
         }
     }
@@ -905,12 +914,12 @@ pub unsafe fn ts_stack_halted_version_count(self_: *mut Stack) -> u32 {
 
 /// Get the state at the top of a version.
 pub unsafe fn ts_stack_state(self_: *const Stack, version: StackVersion) -> TSStateId {
-    (*(*array_get(&(*self_).heads, version)).node).state
+    (*stack_head(&*self_, version).node).state
 }
 
 /// Get the position of a version.
 pub unsafe fn ts_stack_position(self_: *const Stack, version: StackVersion) -> Length {
-    (*(*array_get(&(*self_).heads, version)).node).position
+    (*stack_head(&*self_, version).node).position
 }
 
 /// Get the last external token for a version.
@@ -918,7 +927,7 @@ pub unsafe fn ts_stack_last_external_token(
     self_: *const Stack,
     version: StackVersion,
 ) -> Subtree {
-    (*array_get(&(*self_).heads, version)).last_external_token
+    stack_head(&*self_, version).last_external_token
 }
 
 /// Set the last external token for a version.
@@ -927,7 +936,7 @@ pub unsafe fn ts_stack_set_last_external_token(
     version: StackVersion,
     token: Subtree,
 ) {
-    let head = &mut *array_get(&mut (*self_).heads, version);
+    let head = stack_head_mut(&mut *self_, version);
     if !token.ptr.is_null() {
         ts_subtree_retain(token);
     }
@@ -939,7 +948,7 @@ pub unsafe fn ts_stack_set_last_external_token(
 
 /// Get the error cost for a version.
 pub unsafe fn ts_stack_error_cost(self_: *const Stack, version: StackVersion) -> u32 {
-    let head = &*array_get(&(*self_).heads, version);
+    let head = stack_head(&*self_, version);
     let mut result = (*head.node).error_cost;
     if head.status == StackStatus::Paused
         || ((*head.node).state == ERROR_STATE
@@ -970,7 +979,7 @@ pub unsafe fn ts_stack_push(
     pending: bool,
     state: TSStateId,
 ) {
-    let head = &mut *array_get(&mut (*self_).heads, version);
+    let head = stack_head_mut(&mut *self_, version);
     let new_node = stack_node_new(head.node, subtree, pending, state, &mut (*self_).node_pool);
     if subtree.ptr.is_null() {
         head.node_count_at_last_error = (*new_node).node_count;
@@ -1250,17 +1259,17 @@ pub unsafe fn ts_stack_pause(
 
 /// Check if a version is active.
 pub unsafe fn ts_stack_is_active(self_: *const Stack, version: StackVersion) -> bool {
-    (*array_get(&(*self_).heads, version)).status == StackStatus::Active
+    stack_head(&*self_, version).status == StackStatus::Active
 }
 
 /// Check if a version is halted.
 pub unsafe fn ts_stack_is_halted(self_: *const Stack, version: StackVersion) -> bool {
-    (*array_get(&(*self_).heads, version)).status == StackStatus::Halted
+    stack_head(&*self_, version).status == StackStatus::Halted
 }
 
 /// Check if a version is paused.
 pub unsafe fn ts_stack_is_paused(self_: *const Stack, version: StackVersion) -> bool {
-    (*array_get(&(*self_).heads, version)).status == StackStatus::Paused
+    stack_head(&*self_, version).status == StackStatus::Paused
 }
 
 /// Resume a paused version, returning its stored lookahead.
