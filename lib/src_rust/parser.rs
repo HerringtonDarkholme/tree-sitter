@@ -765,7 +765,7 @@ unsafe fn ts_parser__better_version_exists(
         node_count: ts_stack_node_count_since_error(&mut *(*self_).stack, version),
     };
 
-    let n = ts_stack_version_count((*self_).stack);
+    let n = ts_stack_version_count(&*(*self_).stack);
     for i in 0..n {
         if i == version
             || !ts_stack_is_active(&*(*self_).stack, i)
@@ -1462,7 +1462,7 @@ unsafe fn ts_parser__reduce(
     is_fragile: bool,
     end_of_non_terminal_extra: bool,
 ) -> StackVersion {
-    let initial_version_count = ts_stack_version_count((*self_).stack);
+    let initial_version_count = ts_stack_version_count(&*(*self_).stack);
 
     let pop = ts_stack_pop_count((*self_).stack, version, count);
     let mut removed_version_count: u32 = 0;
@@ -1591,7 +1591,7 @@ unsafe fn ts_parser__reduce(
         i += 1;
     }
 
-    if ts_stack_version_count((*self_).stack) > initial_version_count {
+    if ts_stack_version_count(&*(*self_).stack) > initial_version_count {
         initial_version_count
     } else {
         STACK_VERSION_NONE
@@ -1672,13 +1672,13 @@ unsafe fn ts_parser__do_all_potential_reductions(
     lookahead_symbol: TSSymbol,
 ) -> bool {
     let lang = (*self_).language as *const TSLanguageFull;
-    let initial_version_count = ts_stack_version_count((*self_).stack);
+    let initial_version_count = ts_stack_version_count(&*(*self_).stack);
 
     let mut can_shift_lookahead_symbol = false;
     let mut version = starting_version;
     let mut i: u32 = 0;
     loop {
-        let version_count = ts_stack_version_count((*self_).stack);
+        let version_count = ts_stack_version_count(&*(*self_).stack);
         if version >= version_count {
             break;
         }
@@ -1857,7 +1857,7 @@ unsafe fn ts_parser__recover(
     mut lookahead: Subtree,
 ) {
     let mut did_recover = false;
-    let previous_version_count = ts_stack_version_count((*self_).stack);
+    let previous_version_count = ts_stack_version_count(&*(*self_).stack);
     let position = ts_stack_position((*self_).stack, version);
     let summary = ts_stack_get_summary((*self_).stack, version);
     let node_count_since_error = ts_stack_node_count_since_error(&mut *(*self_).stack, version);
@@ -1920,7 +1920,7 @@ unsafe fn ts_parser__recover(
 
     // Remove halted versions
     let mut i = previous_version_count;
-    while i < ts_stack_version_count((*self_).stack) {
+    while i < ts_stack_version_count(&*(*self_).stack) {
         if !ts_stack_is_active(&*(*self_).stack, i) {
             LOG!(self_, b"removed paused version:%u\0".as_ptr() as *const i8, i);
             ts_stack_remove_version(&mut *(*self_).stack, i);
@@ -1945,7 +1945,7 @@ unsafe fn ts_parser__recover(
     }
 
     // Strategy 2: skip the current token
-    if did_recover && ts_stack_version_count((*self_).stack) > MAX_VERSION_COUNT {
+    if did_recover && ts_stack_version_count(&*(*self_).stack) > MAX_VERSION_COUNT {
         ts_stack_halt(&mut *(*self_).stack, version);
         ts_subtree_release(&mut (*self_).tree_pool, lookahead);
         return;
@@ -2012,7 +2012,7 @@ unsafe fn ts_parser__recover(
                     &mut stack_slice_array_get_mut(&mut pop, pi).subtrees,
                 );
             }
-            while ts_stack_version_count((*self_).stack)
+            while ts_stack_version_count(&*(*self_).stack)
                 > stack_slice_array_get(&pop, 0).version + 1
             {
                 ts_stack_remove_version(
@@ -2057,7 +2057,7 @@ unsafe fn ts_parser__recover(
     }
 
     let mut has_error = true;
-    for vi in 0..ts_stack_version_count((*self_).stack) {
+    for vi in 0..ts_stack_version_count(&*(*self_).stack) {
         let status = ts_parser__version_status(self_, vi);
         if !status.is_in_error {
             has_error = false;
@@ -2072,13 +2072,13 @@ unsafe fn ts_parser__handle_error(
     version: StackVersion,
     lookahead: Subtree,
 ) {
-    let previous_version_count = ts_stack_version_count((*self_).stack);
+    let previous_version_count = ts_stack_version_count(&*(*self_).stack);
 
     // Perform any reductions that can happen in this state, regardless of the lookahead. After
     // skipping one or more invalid tokens, the parser might find a token that would have allowed
     // a reduction to take place.
     ts_parser__do_all_potential_reductions(self_, version, 0);
-    let version_count = ts_stack_version_count((*self_).stack);
+    let version_count = ts_stack_version_count(&*(*self_).stack);
     let position = ts_stack_position((*self_).stack, version);
 
     // Push a discontinuity onto the stack. Merge all of the stack versions that
@@ -2486,7 +2486,7 @@ unsafe fn ts_parser__condense_stack(self_: &mut TSParser) -> u32 {
     let mut made_changes = false;
     let mut min_error_cost = u32::MAX;
     let mut i: StackVersion = 0;
-    while i < ts_stack_version_count(self_.stack) {
+    while i < ts_stack_version_count(&*self_.stack) {
         // Prune any versions that have been marked for removal.
         if ts_stack_is_halted(&*self_.stack, i) {
             ts_stack_remove_version(&mut *self_.stack, i);
@@ -2547,7 +2547,7 @@ unsafe fn ts_parser__condense_stack(self_: &mut TSParser) -> u32 {
 
     // Enforce a hard upper bound on the number of stack versions by
     // discarding the least promising versions.
-    while ts_stack_version_count(self_.stack) > MAX_VERSION_COUNT {
+    while ts_stack_version_count(&*self_.stack) > MAX_VERSION_COUNT {
         ts_stack_remove_version(&mut *self_.stack, MAX_VERSION_COUNT);
         made_changes = true;
     }
@@ -2555,10 +2555,10 @@ unsafe fn ts_parser__condense_stack(self_: &mut TSParser) -> u32 {
     // If the best-performing stack version is currently paused, or all
     // versions are paused, then resume the best paused version and begin
     // the error recovery process. Otherwise, remove the paused versions.
-    if ts_stack_version_count(self_.stack) > 0 {
+    if ts_stack_version_count(&*self_.stack) > 0 {
         let mut has_unpaused_version = false;
         let mut i: StackVersion = 0;
-        let mut n = ts_stack_version_count(self_.stack);
+        let mut n = ts_stack_version_count(&*self_.stack);
         while i < n {
             if ts_stack_is_paused(&*self_.stack, i) {
                 if !has_unpaused_version && self_.accept_count < MAX_VERSION_COUNT {
@@ -2942,7 +2942,7 @@ pub unsafe extern "C" fn ts_parser_parse(
     loop {
         let mut version: StackVersion = 0;
         loop {
-            version_count = ts_stack_version_count((*self_).stack);
+            version_count = ts_stack_version_count(&*(*self_).stack);
             if version >= version_count {
                 break;
             }
@@ -2953,7 +2953,7 @@ pub unsafe extern "C" fn ts_parser_parse(
                     self_,
                     b"process version:%u, version_count:%u, state:%d, row:%u, col:%u\0".as_ptr() as *const i8,
                     version,
-                    ts_stack_version_count((*self_).stack),
+                    ts_stack_version_count(&*(*self_).stack),
                     ts_stack_state((*self_).stack, version) as i32,
                     ts_stack_position((*self_).stack, version).extent.row,
                     ts_stack_position((*self_).stack, version).extent.column

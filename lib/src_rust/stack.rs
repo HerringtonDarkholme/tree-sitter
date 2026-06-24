@@ -1034,8 +1034,8 @@ pub unsafe fn ts_stack_delete(self_: *mut Stack) {
 }
 
 /// Get the number of versions in the stack.
-pub unsafe fn ts_stack_version_count(self_: *const Stack) -> u32 {
-    (*self_).heads.size
+pub unsafe fn ts_stack_version_count(self_: &Stack) -> u32 {
+    self_.heads.size
 }
 
 /// Get the number of halted versions.
