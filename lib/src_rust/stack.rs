@@ -1232,7 +1232,7 @@ pub unsafe fn ts_stack_copy_version(
     version: StackVersion,
 ) -> StackVersion {
     debug_assert!(version < (*self_).heads.size);
-    let version_head = ptr::read(array_get(&(*self_).heads, version));
+    let version_head = stack_head_array_read(&(*self_).heads, version);
     array_push(&mut (*self_).heads, version_head);
     let head = &mut *array_back(&(*self_).heads);
     stack_node_retain(head.node);
