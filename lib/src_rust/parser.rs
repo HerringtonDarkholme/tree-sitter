@@ -866,10 +866,10 @@ unsafe fn ts_parser__external_scanner_serialize(self_: &mut TSParser) -> u32 {
 }
 
 unsafe fn ts_parser__external_scanner_deserialize(
-    self_: *mut TSParser,
+    self_: &mut TSParser,
     external_token: Subtree,
 ) {
-    let lang = (*self_).language as *const TSLanguageFull;
+    let lang = self_.language as *const TSLanguageFull;
     let mut data: *const u8 = ptr::null();
     let mut length: u32 = 0;
     if !external_token.ptr.is_null() {
@@ -878,19 +878,19 @@ unsafe fn ts_parser__external_scanner_deserialize(
         length = (*state).length;
     }
 
-    if ts_language_is_wasm((*self_).language) {
+    if ts_language_is_wasm(self_.language) {
         ts_wasm_store_call_scanner_deserialize(
-            (*self_).wasm_store,
-            (*self_).external_scanner_payload as usize as u32,
+            self_.wasm_store,
+            self_.external_scanner_payload as usize as u32,
             data as *const i8,
             length,
         );
-        if ts_wasm_store_has_error((*self_).wasm_store) {
-            (*self_).has_scanner_error = true;
+        if ts_wasm_store_has_error(self_.wasm_store) {
+            self_.has_scanner_error = true;
         }
     } else {
         ((*lang).external_scanner.deserialize.unwrap())(
-            (*self_).external_scanner_payload,
+            self_.external_scanner_payload,
             data as *const i8,
             length,
         );
@@ -1009,7 +1009,7 @@ unsafe fn ts_parser__lex(
                 current_position.extent.row,
                 current_position.extent.column);
             ts_lexer_start(&mut (*self_).lexer);
-            ts_parser__external_scanner_deserialize(self_, external_token);
+            ts_parser__external_scanner_deserialize(&mut *self_, external_token);
             found_token = ts_parser__external_scanner_scan(self_, lex_mode.external_lex_state);
             if (*self_).has_scanner_error {
                 return NULL_SUBTREE;
