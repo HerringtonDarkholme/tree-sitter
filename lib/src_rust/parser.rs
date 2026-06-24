@@ -20,8 +20,10 @@ use super::language::{
     ts_language_actions, ts_language_enabled_external_tokens,
     ts_language_has_actions, ts_language_has_reduce_action,
     TableEntry, TSLanguageFull, TSLexer, TSLexerMode,
-    TSParseActionTypeAccept, TSParseActionTypeRecover, TSParseActionTypeReduce,
-    TSParseActionTypeShift,
+    TSParseActionTypeAccept as TSPARSE_ACTION_TYPE_ACCEPT,
+    TSParseActionTypeRecover as TSPARSE_ACTION_TYPE_RECOVER,
+    TSParseActionTypeReduce as TSPARSE_ACTION_TYPE_REDUCE,
+    TSParseActionTypeShift as TSPARSE_ACTION_TYPE_SHIFT,
 };
 use super::length::{length_sub, length_zero};
 use super::lexer::{
@@ -1645,12 +1647,12 @@ unsafe fn ts_parser__do_all_potential_reductions(
             for j in 0..entry.action_count {
                 let action = *entry.actions.add(j as usize);
                 match action.type_ {
-                    TSParseActionTypeShift | TSParseActionTypeRecover => {
+                    TSPARSE_ACTION_TYPE_SHIFT | TSPARSE_ACTION_TYPE_RECOVER => {
                         if !action.shift.extra && !action.shift.repetition {
                             has_shift_action = true;
                         }
                     }
-                    TSParseActionTypeReduce => {
+                    TSPARSE_ACTION_TYPE_REDUCE => {
                         if action.reduce.child_count > 0 {
                             ts_reduce_action_set_add(
                                 &mut (*self_).reduce_actions,
@@ -1903,7 +1905,7 @@ unsafe fn ts_parser__recover(
         &mut n,
     );
     if n > 0
-        && (*actions.add(n as usize - 1)).type_ == TSParseActionTypeShift
+        && (*actions.add(n as usize - 1)).type_ == TSPARSE_ACTION_TYPE_SHIFT
         && (*actions.add(n as usize - 1)).shift.extra
     {
         let mut mutable_lookahead = ts_subtree_make_mut(&mut (*self_).tree_pool, lookahead);
@@ -2225,7 +2227,7 @@ unsafe fn ts_parser__advance(
             let action = *table_entry.actions.add(i as usize);
 
             match action.type_ {
-                TSParseActionTypeShift => {
+                TSPARSE_ACTION_TYPE_SHIFT => {
                     if action.shift.repetition {
                         break;
                     }
@@ -2260,7 +2262,7 @@ unsafe fn ts_parser__advance(
                     return true;
                 }
 
-                TSParseActionTypeReduce => {
+                TSPARSE_ACTION_TYPE_REDUCE => {
                     let is_fragile = table_entry.action_count > 1;
                     let end_of_non_terminal_extra = lookahead.ptr.is_null();
                     LOG!(
@@ -2285,13 +2287,13 @@ unsafe fn ts_parser__advance(
                     }
                 }
 
-                TSParseActionTypeAccept => {
+                TSPARSE_ACTION_TYPE_ACCEPT => {
                     LOG!(self_, b"accept\0".as_ptr() as *const i8);
                     ts_parser__accept(self_, version, lookahead);
                     return true;
                 }
 
-                TSParseActionTypeRecover => {
+                TSPARSE_ACTION_TYPE_RECOVER => {
                     if ts_subtree_child_count(lookahead) > 0 {
                         ts_parser__breakdown_lookahead(
                             self_,
