@@ -437,6 +437,14 @@ unsafe fn stack_iterator_array_read(self_: &Array<StackIterator>, index: u32) ->
 }
 
 #[inline]
+unsafe fn stack_iterator_subtrees_read(
+    self_: &Array<StackIterator>,
+    index: u32,
+) -> SubtreeArray {
+    ptr::read(&stack_iterator_array_get(self_, index).subtrees)
+}
+
+#[inline]
 unsafe fn stack_iterator_array_back_mut(self_: &Array<StackIterator>) -> &mut StackIterator {
     &mut *array_back(self_)
 }
@@ -771,8 +779,7 @@ unsafe fn stack__iter(
             let should_stop = (action & StackActionStop) != 0 || (*node).link_count == 0;
 
             if should_pop {
-                let mut subtrees =
-                    ptr::read(&stack_iterator_array_get(&(*self_).iterators, i).subtrees);
+                let mut subtrees = stack_iterator_subtrees_read(&(*self_).iterators, i);
                 if !should_stop {
                     ts_subtree_array_copy(ptr::read(&subtrees), &mut subtrees);
                 }
