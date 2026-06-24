@@ -739,7 +739,7 @@ unsafe fn ts_parser__version_status(
     }
     ErrorStatus {
         cost,
-        node_count: ts_stack_node_count_since_error((*self_).stack, version),
+        node_count: ts_stack_node_count_since_error(&mut *(*self_).stack, version),
         dynamic_precedence: ts_stack_dynamic_precedence((*self_).stack, version),
         is_in_error: is_paused || ts_stack_state((*self_).stack, version) == ERROR_STATE,
     }
@@ -762,7 +762,7 @@ unsafe fn ts_parser__better_version_exists(
         cost,
         is_in_error,
         dynamic_precedence: ts_stack_dynamic_precedence((*self_).stack, version),
-        node_count: ts_stack_node_count_since_error((*self_).stack, version),
+        node_count: ts_stack_node_count_since_error(&mut *(*self_).stack, version),
     };
 
     let n = ts_stack_version_count((*self_).stack);
@@ -1860,7 +1860,7 @@ unsafe fn ts_parser__recover(
     let previous_version_count = ts_stack_version_count((*self_).stack);
     let position = ts_stack_position((*self_).stack, version);
     let summary = ts_stack_get_summary((*self_).stack, version);
-    let node_count_since_error = ts_stack_node_count_since_error((*self_).stack, version);
+    let node_count_since_error = ts_stack_node_count_since_error(&mut *(*self_).stack, version);
     let current_error_cost = ts_stack_error_cost((*self_).stack, version);
 
     // Strategy 1: Find a previous state where the lookahead is valid.
@@ -2663,7 +2663,7 @@ unsafe fn ts_parser_has_outstanding_parse(self_: &TSParser) -> bool {
     self_.canceled_balancing
         || !self_.external_scanner_payload.is_null()
         || ts_stack_state(self_.stack, 0) != 1
-        || ts_stack_node_count_since_error(self_.stack, 0) != 0
+        || ts_stack_node_count_since_error(&mut *self_.stack, 0) != 0
 }
 
 // ---------------------------------------------------------------------------

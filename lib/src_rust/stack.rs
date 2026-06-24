@@ -1099,10 +1099,10 @@ pub unsafe fn ts_stack_error_cost(self_: *const Stack, version: StackVersion) ->
 
 /// Get the node count since last error for a version.
 pub unsafe fn ts_stack_node_count_since_error(
-    self_: *mut Stack,
+    self_: &mut Stack,
     version: StackVersion,
 ) -> u32 {
-    let head = stack_head_mut(&mut *self_, version);
+    let head = stack_head_mut(self_, version);
     if (*head.node).node_count < head.node_count_at_last_error {
         head.node_count_at_last_error = (*head.node).node_count;
     }
@@ -1503,7 +1503,7 @@ pub unsafe fn ts_stack_print_dot_graph(
             f,
             b"label=%u, fontcolor=blue, weight=10000, labeltooltip=\"node_count: %u\nerror_cost: %u\0".as_ptr() as *const i8,
             i,
-            ts_stack_node_count_since_error(self_, i),
+            ts_stack_node_count_since_error(&mut *self_, i),
             ts_stack_error_cost(self_, i),
         );
 
