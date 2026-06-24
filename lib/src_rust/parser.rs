@@ -523,6 +523,10 @@ unsafe fn mutable_subtree_array_back(self_: &MutableSubtreeArray) -> MutableSubt
     *array_back(self_ as *const MutableSubtreeArray as *const Array<MutableSubtree>)
 }
 
+unsafe fn ts_range_array_get(self_: &TSRangeArray, index: u32) -> &TSRange {
+    &*array_get(self_ as *const TSRangeArray as *const Array<TSRange>, index)
+}
+
 unsafe fn ts_reduce_action_set_add(
     self_: &mut ReduceActionSet,
     new_action: ReduceAction,
@@ -2905,10 +2909,7 @@ pub unsafe extern "C" fn ts_parser_parse(
             LOG!(self_, b"parse_after_edit\0".as_ptr() as *const i8);
             LOG_TREE!(self_, (*self_).old_tree);
             for i in 0..(*self_).included_range_differences.size {
-                let range = array_get(
-                    &(*self_).included_range_differences as *const TSRangeArray as *const Array<TSRange>,
-                    i,
-                );
+                let range = ts_range_array_get(&(*self_).included_range_differences, i);
                 LOG!(
                     self_,
                     b"different_included_range %u - %u\0".as_ptr() as *const i8,
@@ -2982,8 +2983,8 @@ pub unsafe extern "C" fn ts_parser_parse(
 
         while (*self_).included_range_difference_index < (*self_).included_range_differences.size
         {
-            let range = array_get(
-                &(*self_).included_range_differences as *const TSRangeArray as *const Array<TSRange>,
+            let range = ts_range_array_get(
+                &(*self_).included_range_differences,
                 (*self_).included_range_difference_index,
             );
             if (*range).end_byte <= position {
