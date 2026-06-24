@@ -607,13 +607,13 @@ unsafe fn mutable_array_pop(arr: &mut MutableSubtreeArray) -> MutableSubtree {
     *arr.contents.add(arr.size as usize)
 }
 
-unsafe fn mutable_array_delete(arr: *mut MutableSubtreeArray) {
-    if !(*arr).contents.is_null() {
-        ts_free((*arr).contents as *mut c_void);
+unsafe fn mutable_array_delete(arr: &mut MutableSubtreeArray) {
+    if !arr.contents.is_null() {
+        ts_free(arr.contents as *mut c_void);
     }
-    (*arr).contents = ptr::null_mut();
-    (*arr).size = 0;
-    (*arr).capacity = 0;
+    arr.contents = ptr::null_mut();
+    arr.size = 0;
+    arr.capacity = 0;
 }
 
 fn mutable_array_new() -> MutableSubtreeArray {
@@ -624,13 +624,13 @@ fn mutable_array_new() -> MutableSubtreeArray {
     }
 }
 
-unsafe fn mutable_array_reserve(arr: *mut MutableSubtreeArray, new_capacity: u32) {
-    if new_capacity > (*arr).capacity {
-        (*arr).contents = ts_realloc(
-            (*arr).contents as *mut c_void,
+unsafe fn mutable_array_reserve(arr: &mut MutableSubtreeArray, new_capacity: u32) {
+    if new_capacity > arr.capacity {
+        arr.contents = ts_realloc(
+            arr.contents as *mut c_void,
             new_capacity as usize * std::mem::size_of::<MutableSubtree>(),
         ) as *mut MutableSubtree;
-        (*arr).capacity = new_capacity;
+        arr.capacity = new_capacity;
     }
 }
 
