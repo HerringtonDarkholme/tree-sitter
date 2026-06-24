@@ -60,8 +60,8 @@ unsafe fn array_back_range(arr: &mut TSRangeArray) -> &mut TSRange {
 }
 
 #[inline]
-unsafe fn array_get_range(arr: &TSRangeArray, index: u32) -> *mut TSRange {
-    arr.contents.add(index as usize)
+unsafe fn array_get_range(arr: &TSRangeArray, index: u32) -> &TSRange {
+    &*arr.contents.add(index as usize)
 }
 
 unsafe fn array_grow_range(arr: &mut TSRangeArray, count: u32) {
@@ -462,8 +462,8 @@ pub unsafe extern "C" fn ts_range_array_intersects(
 ) -> bool {
     for i in start_index..(*self_).size {
         let range = array_get_range(&*self_, i);
-        if (*range).end_byte > start_byte {
-            if (*range).start_byte >= end_byte {
+        if range.end_byte > start_byte {
+            if range.start_byte >= end_byte {
                 break;
             }
             return true;
@@ -694,7 +694,7 @@ pub unsafe extern "C" fn ts_subtree_get_changed_ranges(
                 &*included_range_differences,
                 included_range_difference_index,
             );
-            if (*range).end_byte <= position.bytes {
+            if range.end_byte <= position.bytes {
                 included_range_difference_index += 1;
             } else {
                 break;
