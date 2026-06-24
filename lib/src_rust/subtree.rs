@@ -445,8 +445,7 @@ pub unsafe fn ts_external_scanner_state_copy(
     result
 }
 
-pub unsafe fn ts_external_scanner_state_delete(self_: *mut ExternalScannerState) {
-    let self_ = &mut *self_;
+pub unsafe fn ts_external_scanner_state_delete(self_: &mut ExternalScannerState) {
     if self_.length > EXTERNAL_SCANNER_STATE_INLINE_SIZE as u32 {
         ts_free(self_.data.long_data as *mut c_void);
     }
@@ -1315,8 +1314,9 @@ pub unsafe fn ts_subtree_release(pool: &mut SubtreePool, self_: Subtree) {
         } else {
             if (*tree.ptr).has_external_tokens() {
                 ts_external_scanner_state_delete(
-                    &mut (*tree.ptr).data.external_scanner_state as *mut std::mem::ManuallyDrop<ExternalScannerState>
-                        as *mut ExternalScannerState,
+                    &mut *(&mut (*tree.ptr).data.external_scanner_state
+                        as *mut std::mem::ManuallyDrop<ExternalScannerState>
+                        as *mut ExternalScannerState),
                 );
             }
             ts_subtree_pool_free(pool, tree);
