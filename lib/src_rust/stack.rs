@@ -381,6 +381,11 @@ unsafe fn stack_head_array_pair_mut(
 }
 
 #[inline]
+unsafe fn stack_head_array_back_mut(self_: &Array<StackHead>) -> &mut StackHead {
+    &mut *array_back(self_)
+}
+
+#[inline]
 unsafe fn stack_slice_array_get(self_: &StackSliceArray, index: u32) -> &StackSlice {
     &*array_get(self_, index)
 }
@@ -1251,7 +1256,7 @@ pub unsafe fn ts_stack_copy_version(
     debug_assert!(version < (*self_).heads.size);
     let version_head = stack_head_array_read(&(*self_).heads, version);
     array_push(&mut (*self_).heads, version_head);
-    let head = &mut *array_back(&(*self_).heads);
+    let head = stack_head_array_back_mut(&(*self_).heads);
     stack_node_retain(head.node);
     if !head.last_external_token.ptr.is_null() {
         ts_subtree_retain(head.last_external_token);
