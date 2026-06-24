@@ -50,6 +50,12 @@ enum IteratorComparison {
     IteratorMatches,
 }
 
+struct VisibleState {
+    tree: Subtree,
+    alias_symbol: TSSymbol,
+    start_byte: u32,
+}
+
 // ---------------------------------------------------------------------------
 // Array helpers for TSRangeArray
 // ---------------------------------------------------------------------------
@@ -229,17 +235,17 @@ unsafe fn iterator_tree_is_visible(self_: &Iterator) -> bool {
     false
 }
 
-unsafe fn iterator_get_visible_state(
-    self_: &Iterator,
-    tree: *mut Subtree,
-    alias_symbol: *mut TSSymbol,
-    start_byte: *mut u32,
-) {
+unsafe fn iterator_get_visible_state(self_: &Iterator) -> VisibleState {
+    let mut result = VisibleState {
+        tree: NULL_SUBTREE,
+        alias_symbol: 0,
+        start_byte: 0,
+    };
     let mut i = self_.cursor.stack.size - 1;
 
     if self_.in_padding {
         if i == 0 {
-            return;
+            return result;
         }
         i -= 1;
     }
@@ -249,16 +255,16 @@ unsafe fn iterator_get_visible_state(
 
         if i > 0 {
             let parent = stack_get(&self_.cursor.stack, i - 1).subtree;
-            *alias_symbol = ts_language_alias_at(
+            result.alias_symbol = ts_language_alias_at(
                 self_.language,
                 (*(*parent).ptr).data.children.production_id as u32,
                 entry.structural_child_index,
             );
         }
 
-        if ts_subtree_visible(*entry.subtree) || *alias_symbol != 0 {
-            *tree = *entry.subtree;
-            *start_byte = entry.position.bytes;
+        if ts_subtree_visible(*entry.subtree) || result.alias_symbol != 0 {
+            result.tree = *entry.subtree;
+            result.start_byte = entry.position.bytes;
             break;
         }
 
@@ -267,6 +273,7 @@ unsafe fn iterator_get_visible_state(
         }
         i -= 1;
     }
+    result
 }
 
 unsafe fn iterator_ascend(self_: &mut Iterator) {
@@ -398,14 +405,10 @@ unsafe fn iterator_compare(
     old_iter: &Iterator,
     new_iter: &Iterator,
 ) -> IteratorComparison {
-    let mut old_tree = NULL_SUBTREE;
-    let mut new_tree = NULL_SUBTREE;
-    let mut old_start: u32 = 0;
-    let mut new_start: u32 = 0;
-    let mut old_alias_symbol: TSSymbol = 0;
-    let mut new_alias_symbol: TSSymbol = 0;
-    iterator_get_visible_state(old_iter, &mut old_tree, &mut old_alias_symbol, &mut old_start);
-    iterator_get_visible_state(new_iter, &mut new_tree, &mut new_alias_symbol, &mut new_start);
+    let old_visible = iterator_get_visible_state(old_iter);
+    let new_visible = iterator_get_visible_state(new_iter);
+    let old_tree = old_visible.tree;
+    let new_tree = new_visible.tree;
     let old_symbol = ts_subtree_symbol(old_tree);
     let new_symbol = ts_subtree_symbol(new_tree);
 
@@ -415,7 +418,7 @@ unsafe fn iterator_compare(
     if old_tree.ptr.is_null() || new_tree.ptr.is_null() {
         return IteratorComparison::IteratorDiffers;
     }
-    if old_alias_symbol != new_alias_symbol || old_symbol != new_symbol {
+    if old_visible.alias_symbol != new_visible.alias_symbol || old_symbol != new_symbol {
         return IteratorComparison::IteratorDiffers;
     }
 
@@ -428,7 +431,7 @@ unsafe fn iterator_compare(
     let old_error_cost = ts_subtree_error_cost(old_tree);
     let new_error_cost = ts_subtree_error_cost(new_tree);
 
-    if old_start != new_start
+    if old_visible.start_byte != new_visible.start_byte
         || old_symbol == ts_builtin_sym_error
         || old_size != new_size
         || old_state == TS_TREE_STATE_NONE
