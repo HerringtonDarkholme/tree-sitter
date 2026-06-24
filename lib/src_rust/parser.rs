@@ -2482,14 +2482,14 @@ unsafe fn ts_parser__advance(
     }
 }
 
-unsafe fn ts_parser__condense_stack(self_: *mut TSParser) -> u32 {
+unsafe fn ts_parser__condense_stack(self_: &mut TSParser) -> u32 {
     let mut made_changes = false;
     let mut min_error_cost = u32::MAX;
     let mut i: StackVersion = 0;
-    while i < ts_stack_version_count((*self_).stack) {
+    while i < ts_stack_version_count(self_.stack) {
         // Prune any versions that have been marked for removal.
-        if ts_stack_is_halted((*self_).stack, i) {
-            ts_stack_remove_version((*self_).stack, i);
+        if ts_stack_is_halted(self_.stack, i) {
+            ts_stack_remove_version(self_.stack, i);
             continue;
         }
 
@@ -2510,13 +2510,13 @@ unsafe fn ts_parser__condense_stack(self_: *mut TSParser) -> u32 {
             match ts_parser__compare_versions(self_, status_j, status_i) {
                 ErrorComparison::TakeLeft => {
                     made_changes = true;
-                    ts_stack_remove_version((*self_).stack, i);
+                    ts_stack_remove_version(self_.stack, i);
                     i -= 1;
                     break;
                 }
 
                 ErrorComparison::PreferLeft | ErrorComparison::None => {
-                    if ts_stack_merge((*self_).stack, j, i) {
+                    if ts_stack_merge(self_.stack, j, i) {
                         made_changes = true;
                         i -= 1;
                         break;
@@ -2525,17 +2525,17 @@ unsafe fn ts_parser__condense_stack(self_: *mut TSParser) -> u32 {
 
                 ErrorComparison::PreferRight => {
                     made_changes = true;
-                    if ts_stack_merge((*self_).stack, j, i) {
+                    if ts_stack_merge(self_.stack, j, i) {
                         i -= 1;
                         break;
                     } else {
-                        ts_stack_swap_versions((*self_).stack, i, j);
+                        ts_stack_swap_versions(self_.stack, i, j);
                     }
                 }
 
                 ErrorComparison::TakeRight => {
                     made_changes = true;
-                    ts_stack_remove_version((*self_).stack, j);
+                    ts_stack_remove_version(self_.stack, j);
                     i -= 1;
                     j = j.wrapping_sub(1);
                 }
@@ -2547,28 +2547,28 @@ unsafe fn ts_parser__condense_stack(self_: *mut TSParser) -> u32 {
 
     // Enforce a hard upper bound on the number of stack versions by
     // discarding the least promising versions.
-    while ts_stack_version_count((*self_).stack) > MAX_VERSION_COUNT {
-        ts_stack_remove_version((*self_).stack, MAX_VERSION_COUNT);
+    while ts_stack_version_count(self_.stack) > MAX_VERSION_COUNT {
+        ts_stack_remove_version(self_.stack, MAX_VERSION_COUNT);
         made_changes = true;
     }
 
     // If the best-performing stack version is currently paused, or all
     // versions are paused, then resume the best paused version and begin
     // the error recovery process. Otherwise, remove the paused versions.
-    if ts_stack_version_count((*self_).stack) > 0 {
+    if ts_stack_version_count(self_.stack) > 0 {
         let mut has_unpaused_version = false;
         let mut i: StackVersion = 0;
-        let mut n = ts_stack_version_count((*self_).stack);
+        let mut n = ts_stack_version_count(self_.stack);
         while i < n {
-            if ts_stack_is_paused((*self_).stack, i) {
-                if !has_unpaused_version && (*self_).accept_count < MAX_VERSION_COUNT {
+            if ts_stack_is_paused(self_.stack, i) {
+                if !has_unpaused_version && self_.accept_count < MAX_VERSION_COUNT {
                     LOG!(self_, b"resume version:%u\0".as_ptr() as *const i8, i);
-                    min_error_cost = ts_stack_error_cost((*self_).stack, i);
-                    let lookahead = ts_stack_resume((*self_).stack, i);
+                    min_error_cost = ts_stack_error_cost(self_.stack, i);
+                    let lookahead = ts_stack_resume(self_.stack, i);
                     ts_parser__handle_error(self_, i, lookahead);
                     has_unpaused_version = true;
                 } else {
-                    ts_stack_remove_version((*self_).stack, i);
+                    ts_stack_remove_version(self_.stack, i);
                     made_changes = true;
                     n -= 1;
                     continue;
@@ -2981,7 +2981,7 @@ pub unsafe extern "C" fn ts_parser_parse(
 
         // After advancing each version of the stack, re-sort the versions by their cost,
         // removing any versions that are no longer worth pursuing.
-        let min_error_cost = ts_parser__condense_stack(self_);
+        let min_error_cost = ts_parser__condense_stack(&mut *self_);
 
         // If there's already a finished parse tree that's better than any in-progress version,
         // then terminate parsing. Clear the parse stack to remove any extra references to subtrees
