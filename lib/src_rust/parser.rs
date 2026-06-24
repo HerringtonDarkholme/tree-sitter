@@ -2218,10 +2218,11 @@ unsafe fn ts_parser__check_progress(
 }
 
 unsafe fn ts_parser__advance(
-    self_: *mut TSParser,
+    self_: &mut TSParser,
     version: StackVersion,
     allow_node_reuse: bool,
 ) -> bool {
+    let parser = self_ as *mut TSParser;
     let mut state = ts_stack_state(&*(*self_).stack, version);
     let position = ts_stack_position(&*(*self_).stack, version).bytes;
     let last_external_token = ts_stack_last_external_token(&*(*self_).stack, version);
@@ -2313,10 +2314,10 @@ unsafe fn ts_parser__advance(
                     let next_state;
                     if action.shift.extra {
                         next_state = state;
-                        LOG!(self_, b"shift_extra\0".as_ptr() as *const i8);
+                        LOG!(parser, b"shift_extra\0".as_ptr() as *const i8);
                     } else {
                         next_state = action.shift.state;
-                        LOG!(self_, b"shift state:%u\0".as_ptr() as *const i8, next_state as u32);
+                        LOG!(parser, b"shift state:%u\0".as_ptr() as *const i8, next_state as u32);
                     }
 
                     if ts_subtree_child_count(lookahead) > 0 {
@@ -2356,9 +2357,9 @@ unsafe fn ts_parser__advance(
                     let is_fragile = table_entry.action_count > 1;
                     let end_of_non_terminal_extra = lookahead.ptr.is_null();
                     LOG!(
-                        self_,
+                        parser,
                         b"reduce sym:%s, child_count:%u\0".as_ptr() as *const i8,
-                        SYM_NAME!(self_, action.reduce.symbol),
+                        SYM_NAME!(parser, action.reduce.symbol),
                         action.reduce.child_count as u32
                     );
                     let reduction_version = ts_parser__reduce(
@@ -2378,7 +2379,7 @@ unsafe fn ts_parser__advance(
                 }
 
                 TSPARSE_ACTION_TYPE_ACCEPT => {
-                    LOG!(self_, b"accept\0".as_ptr() as *const i8);
+                    LOG!(parser, b"accept\0".as_ptr() as *const i8);
                     ts_parser__accept(&mut *self_, version, lookahead);
                     return true;
                 }
@@ -2408,7 +2409,7 @@ unsafe fn ts_parser__advance(
         // processing this version of the stack with the same lookahead symbol.
         if last_reduction_version != STACK_VERSION_NONE {
             ts_stack_renumber_version((*self_).stack, last_reduction_version, version);
-            LOG_STACK!(self_);
+            LOG_STACK!(parser);
             state = ts_stack_state(&*(*self_).stack, version);
 
             // At the end of a non-terminal extra rule, the lexer will return a
@@ -2460,10 +2461,10 @@ unsafe fn ts_parser__advance(
             );
             if table_entry.action_count > 0 {
                 LOG!(
-                    self_,
+                    parser,
                     b"switch from_keyword:%s, to_word_token:%s\0".as_ptr() as *const i8,
-                    TREE_NAME!(self_, lookahead),
-                    SYM_NAME!(self_, (*language).keyword_capture_token)
+                    TREE_NAME!(parser, lookahead),
+                    SYM_NAME!(parser, (*language).keyword_capture_token)
                 );
 
                 let mut mutable_lookahead =
@@ -2494,7 +2495,7 @@ unsafe fn ts_parser__advance(
         // versions that exist. If some other version advances successfully, then
         // this version can simply be removed. But if all versions end up paused,
         // then error recovery is needed.
-        LOG!(self_, b"detect_error lookahead:%s\0".as_ptr() as *const i8, TREE_NAME!(self_, lookahead));
+        LOG!(parser, b"detect_error lookahead:%s\0".as_ptr() as *const i8, TREE_NAME!(parser, lookahead));
         ts_stack_pause((*self_).stack, version, lookahead);
         return true;
     }
@@ -2977,7 +2978,7 @@ pub unsafe extern "C" fn ts_parser_parse(
                     ts_stack_position(&*(*self_).stack, version).extent.column
                 );
 
-                if !ts_parser__advance(self_, version, allow_node_reuse) {
+                if !ts_parser__advance(&mut *self_, version, allow_node_reuse) {
                     if (*self_).has_scanner_error {
                         // goto exit
                         ts_parser_reset(self_);
