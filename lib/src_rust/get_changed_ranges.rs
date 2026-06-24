@@ -563,36 +563,39 @@ pub unsafe extern "C" fn ts_range_edit(
     range: *mut TSRange,
     edit: *const TSInputEdit,
 ) {
-    if (*range).end_byte >= (*edit).old_end_byte {
-        if (*range).end_byte != u32::MAX {
-            (*range).end_byte = (*edit).new_end_byte + ((*range).end_byte - (*edit).old_end_byte);
-            (*range).end_point = point_add(
-                (*edit).new_end_point,
-                point_sub((*range).end_point, (*edit).old_end_point),
+    let range = &mut *range;
+    let edit = &*edit;
+
+    if range.end_byte >= edit.old_end_byte {
+        if range.end_byte != u32::MAX {
+            range.end_byte = edit.new_end_byte + (range.end_byte - edit.old_end_byte);
+            range.end_point = point_add(
+                edit.new_end_point,
+                point_sub(range.end_point, edit.old_end_point),
             );
-            if (*range).end_byte < (*edit).new_end_byte {
-                (*range).end_byte = u32::MAX;
-                (*range).end_point = POINT_MAX;
+            if range.end_byte < edit.new_end_byte {
+                range.end_byte = u32::MAX;
+                range.end_point = POINT_MAX;
             }
         }
-    } else if (*range).end_byte > (*edit).start_byte {
-        (*range).end_byte = (*edit).start_byte;
-        (*range).end_point = (*edit).start_point;
+    } else if range.end_byte > edit.start_byte {
+        range.end_byte = edit.start_byte;
+        range.end_point = edit.start_point;
     }
 
-    if (*range).start_byte >= (*edit).old_end_byte {
-        (*range).start_byte = (*edit).new_end_byte + ((*range).start_byte - (*edit).old_end_byte);
-        (*range).start_point = point_add(
-            (*edit).new_end_point,
-            point_sub((*range).start_point, (*edit).old_end_point),
+    if range.start_byte >= edit.old_end_byte {
+        range.start_byte = edit.new_end_byte + (range.start_byte - edit.old_end_byte);
+        range.start_point = point_add(
+            edit.new_end_point,
+            point_sub(range.start_point, edit.old_end_point),
         );
-        if (*range).start_byte < (*edit).new_end_byte {
-            (*range).start_byte = u32::MAX;
-            (*range).start_point = POINT_MAX;
+        if range.start_byte < edit.new_end_byte {
+            range.start_byte = u32::MAX;
+            range.start_point = POINT_MAX;
         }
-    } else if (*range).start_byte > (*edit).start_byte {
-        (*range).start_byte = (*edit).start_byte;
-        (*range).start_point = (*edit).start_point;
+    } else if range.start_byte > edit.start_byte {
+        range.start_byte = edit.start_byte;
+        range.start_point = edit.start_point;
     }
 }
 
