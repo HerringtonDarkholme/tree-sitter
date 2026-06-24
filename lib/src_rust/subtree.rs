@@ -482,29 +482,29 @@ pub unsafe fn ts_external_scanner_state_eq(
 // ===========================================================================
 
 /// Grow array capacity if needed to fit `count` more elements.
-unsafe fn array_grow(arr: *mut SubtreeArray, count: u32) {
-    let new_size = (*arr).size + count;
-    if new_size > (*arr).capacity {
-        let mut new_capacity = (*arr).capacity * 2;
+unsafe fn array_grow(arr: &mut SubtreeArray, count: u32) {
+    let new_size = arr.size + count;
+    if new_size > arr.capacity {
+        let mut new_capacity = arr.capacity * 2;
         if new_capacity < 8 {
             new_capacity = 8;
         }
         if new_capacity < new_size {
             new_capacity = new_size;
         }
-        (*arr).contents = ts_realloc(
-            (*arr).contents as *mut c_void,
+        arr.contents = ts_realloc(
+            arr.contents as *mut c_void,
             new_capacity as usize * std::mem::size_of::<Subtree>(),
         ) as *mut Subtree;
-        (*arr).capacity = new_capacity;
+        arr.capacity = new_capacity;
     }
 }
 
 /// Push a subtree onto the end of the array.
-unsafe fn array_push_subtree(arr: *mut SubtreeArray, element: Subtree) {
+unsafe fn array_push_subtree(arr: &mut SubtreeArray, element: Subtree) {
     array_grow(arr, 1);
-    *(*arr).contents.add((*arr).size as usize) = element;
-    (*arr).size += 1;
+    *arr.contents.add(arr.size as usize) = element;
+    arr.size += 1;
 }
 
 // ===========================================================================
@@ -549,7 +549,8 @@ pub unsafe fn ts_subtree_array_remove_trailing_extras(
     destination: *mut SubtreeArray,
 ) {
     let self_ = &mut *self_;
-    (*destination).size = 0;
+    let destination = &mut *destination;
+    destination.size = 0;
     while self_.size > 0 {
         let last = *self_.contents.add(self_.size as usize - 1);
         if ts_subtree_extra(last) {
