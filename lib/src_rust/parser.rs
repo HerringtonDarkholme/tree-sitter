@@ -2658,11 +2658,11 @@ unsafe fn ts_parser__balance_subtree(self_: *mut TSParser) -> bool {
     true
 }
 
-unsafe fn ts_parser_has_outstanding_parse(self_: *mut TSParser) -> bool {
-    (*self_).canceled_balancing
-        || !(*self_).external_scanner_payload.is_null()
-        || ts_stack_state((*self_).stack, 0) != 1
-        || ts_stack_node_count_since_error((*self_).stack, 0) != 0
+unsafe fn ts_parser_has_outstanding_parse(self_: &TSParser) -> bool {
+    self_.canceled_balancing
+        || !self_.external_scanner_payload.is_null()
+        || ts_stack_state(self_.stack, 0) != 1
+        || ts_stack_node_count_since_error(self_.stack, 0) != 0
 }
 
 // ---------------------------------------------------------------------------
@@ -2874,7 +2874,7 @@ pub unsafe extern "C" fn ts_parser_parse(
 
     (*self_).operation_count = 0;
 
-    if ts_parser_has_outstanding_parse(self_) {
+    if ts_parser_has_outstanding_parse(&*self_) {
         LOG!(self_, b"resume_parsing\0".as_ptr() as *const i8);
         if (*self_).canceled_balancing {
             // goto balance
