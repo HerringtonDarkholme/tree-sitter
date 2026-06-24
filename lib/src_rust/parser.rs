@@ -843,22 +843,22 @@ unsafe fn ts_parser__external_scanner_destroy(self_: &mut TSParser) {
     self_.external_scanner_payload = ptr::null_mut();
 }
 
-unsafe fn ts_parser__external_scanner_serialize(self_: *mut TSParser) -> u32 {
-    let lang = (*self_).language as *const TSLanguageFull;
+unsafe fn ts_parser__external_scanner_serialize(self_: &mut TSParser) -> u32 {
+    let lang = self_.language as *const TSLanguageFull;
     let length;
-    if ts_language_is_wasm((*self_).language) {
+    if ts_language_is_wasm(self_.language) {
         length = ts_wasm_store_call_scanner_serialize(
-            (*self_).wasm_store,
-            (*self_).external_scanner_payload as usize as u32,
-            (*self_).lexer.debug_buffer.as_mut_ptr() as *mut i8,
+            self_.wasm_store,
+            self_.external_scanner_payload as usize as u32,
+            self_.lexer.debug_buffer.as_mut_ptr() as *mut i8,
         );
-        if ts_wasm_store_has_error((*self_).wasm_store) {
-            (*self_).has_scanner_error = true;
+        if ts_wasm_store_has_error(self_.wasm_store) {
+            self_.has_scanner_error = true;
         }
     } else {
         length = ((*lang).external_scanner.serialize.unwrap())(
-            (*self_).external_scanner_payload,
-            (*self_).lexer.debug_buffer.as_mut_ptr() as *mut i8,
+            self_.external_scanner_payload,
+            self_.lexer.debug_buffer.as_mut_ptr() as *mut i8,
         );
     }
     debug_assert!(length as usize <= TREE_SITTER_SERIALIZATION_BUFFER_SIZE);
@@ -1017,7 +1017,7 @@ unsafe fn ts_parser__lex(
             ts_lexer_finish(&mut (*self_).lexer, &mut lookahead_end_byte);
 
             if found_token {
-                external_scanner_state_len = ts_parser__external_scanner_serialize(self_);
+                external_scanner_state_len = ts_parser__external_scanner_serialize(&mut *self_);
                 external_scanner_state_changed = !ts_external_scanner_state_eq(
                     ts_subtree_external_scanner_state(external_token),
                     (*self_).lexer.debug_buffer.as_ptr(),
