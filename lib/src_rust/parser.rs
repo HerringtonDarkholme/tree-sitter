@@ -1597,14 +1597,14 @@ unsafe fn ts_parser__reduce(
 }
 
 unsafe fn ts_parser__accept(
-    self_: *mut TSParser,
+    self_: &mut TSParser,
     version: StackVersion,
     lookahead: Subtree,
 ) {
     debug_assert!(ts_subtree_is_eof(lookahead));
-    ts_stack_push((*self_).stack, version, lookahead, false, 1);
+    ts_stack_push(self_.stack, version, lookahead, false, 1);
 
-    let pop = ts_stack_pop_all((*self_).stack, version);
+    let pop = ts_stack_pop_all(self_.stack, version);
     for i in 0..pop.size {
         let mut trees = stack_slice_subtrees_read_ref(stack_slice_array_get(&pop, i));
 
@@ -1630,34 +1630,34 @@ unsafe fn ts_parser__accept(
                     ts_subtree_symbol(tree),
                     &mut trees,
                     (*tree.ptr).data.children.production_id as u32,
-                    (*self_).language,
+                    self_.language,
                 ));
-                ts_subtree_release(&mut (*self_).tree_pool, tree);
+                ts_subtree_release(&mut self_.tree_pool, tree);
                 break;
             }
             j -= 1;
         }
 
         debug_assert!(!root.ptr.is_null());
-        (*self_).accept_count += 1;
+        self_.accept_count += 1;
 
-        if !(*self_).finished_tree.ptr.is_null() {
-            if ts_parser__select_tree(self_, (*self_).finished_tree, root) {
-                ts_subtree_release(&mut (*self_).tree_pool, (*self_).finished_tree);
-                (*self_).finished_tree = root;
+        if !self_.finished_tree.ptr.is_null() {
+            if ts_parser__select_tree(self_ as *mut TSParser, self_.finished_tree, root) {
+                ts_subtree_release(&mut self_.tree_pool, self_.finished_tree);
+                self_.finished_tree = root;
             } else {
-                ts_subtree_release(&mut (*self_).tree_pool, root);
+                ts_subtree_release(&mut self_.tree_pool, root);
             }
         } else {
-            (*self_).finished_tree = root;
+            self_.finished_tree = root;
         }
     }
 
     ts_stack_remove_version(
-        &mut *(*self_).stack,
+        &mut *self_.stack,
         stack_slice_array_get(&pop, 0).version,
     );
-    ts_stack_halt(&mut *(*self_).stack, version);
+    ts_stack_halt(&mut *self_.stack, version);
 }
 
 // ---------------------------------------------------------------------------
@@ -1938,7 +1938,7 @@ unsafe fn ts_parser__recover(
         };
         let parent = ts_subtree_new_error_node(&mut children, false, (*self_).language);
         ts_stack_push((*self_).stack, version, parent, false, 1);
-        ts_parser__accept(self_, version, lookahead);
+        ts_parser__accept(&mut *self_, version, lookahead);
         return;
     }
 
@@ -2370,7 +2370,7 @@ unsafe fn ts_parser__advance(
 
                 TSPARSE_ACTION_TYPE_ACCEPT => {
                     LOG!(self_, b"accept\0".as_ptr() as *const i8);
-                    ts_parser__accept(self_, version, lookahead);
+                    ts_parser__accept(&mut *self_, version, lookahead);
                     return true;
                 }
 
