@@ -725,19 +725,20 @@ unsafe fn ts_parser__compare_versions(a: ErrorStatus, b: ErrorStatus) -> ErrorCo
 }
 
 unsafe fn ts_parser__version_status(
-    self_: *mut TSParser,
+    self_: &mut TSParser,
     version: StackVersion,
 ) -> ErrorStatus {
-    let mut cost = ts_stack_error_cost(&*(*self_).stack, version);
-    let is_paused = ts_stack_is_paused(&*(*self_).stack, version);
+    let stack = &mut *self_.stack;
+    let mut cost = ts_stack_error_cost(stack, version);
+    let is_paused = ts_stack_is_paused(stack, version);
     if is_paused {
         cost += ERROR_COST_PER_SKIPPED_TREE;
     }
     ErrorStatus {
         cost,
-        node_count: ts_stack_node_count_since_error(&mut *(*self_).stack, version),
-        dynamic_precedence: ts_stack_dynamic_precedence(&*(*self_).stack, version),
-        is_in_error: is_paused || ts_stack_state(&*(*self_).stack, version) == ERROR_STATE,
+        node_count: ts_stack_node_count_since_error(stack, version),
+        dynamic_precedence: ts_stack_dynamic_precedence(stack, version),
+        is_in_error: is_paused || ts_stack_state(stack, version) == ERROR_STATE,
     }
 }
 
@@ -769,7 +770,7 @@ unsafe fn ts_parser__better_version_exists(
         {
             continue;
         }
-        let status_i = ts_parser__version_status(self_, i);
+        let status_i = ts_parser__version_status(&mut *self_, i);
         match ts_parser__compare_versions(status, status_i) {
             ErrorComparison::TakeRight => return true,
             ErrorComparison::PreferRight => {
@@ -2055,7 +2056,7 @@ unsafe fn ts_parser__recover(
 
     let mut has_error = true;
     for vi in 0..ts_stack_version_count(&*(*self_).stack) {
-        let status = ts_parser__version_status(self_, vi);
+        let status = ts_parser__version_status(&mut *self_, vi);
         if !status.is_in_error {
             has_error = false;
             break;
