@@ -1137,25 +1137,25 @@ unsafe fn ts_parser__get_cached_token(
     state: TSStateId,
     position: usize,
     last_external_token: Subtree,
-    table_entry: &mut TableEntry,
-) -> Subtree {
+) -> Option<(Subtree, TableEntry)> {
     let cache = &(*self_).token_cache;
     if !cache.token.ptr.is_null()
         && cache.byte_index == position as u32
         && ts_subtree_external_scanner_state_eq(cache.last_external_token, last_external_token)
     {
+        let mut table_entry = TableEntry::empty();
         ts_language_table_entry(
             (*self_).language,
             state,
             ts_subtree_symbol(cache.token),
-            table_entry,
+            &mut table_entry,
         );
-        if ts_parser__can_reuse_first_leaf(self_, state, cache.token, table_entry) {
+        if ts_parser__can_reuse_first_leaf(self_, state, cache.token, &table_entry) {
             ts_subtree_retain(cache.token);
-            return cache.token;
+            return Some((cache.token, table_entry));
         }
     }
-    NULL_SUBTREE
+    None
 }
 
 unsafe fn ts_parser__set_cached_token(
@@ -2193,13 +2193,15 @@ unsafe fn ts_parser__advance(
     // reuse the token previously returned by the lexer.
     if lookahead.ptr.is_null() {
         did_reuse = false;
-        lookahead = ts_parser__get_cached_token(
+        if let Some((token, cached_table_entry)) = ts_parser__get_cached_token(
             self_,
             state,
             position as usize,
             last_external_token,
-            &mut table_entry,
-        );
+        ) {
+            lookahead = token;
+            table_entry = cached_table_entry;
+        }
     }
 
     let mut needs_lex = lookahead.ptr.is_null();
