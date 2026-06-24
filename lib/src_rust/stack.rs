@@ -1085,8 +1085,8 @@ pub unsafe fn ts_stack_set_last_external_token(
 }
 
 /// Get the error cost for a version.
-pub unsafe fn ts_stack_error_cost(self_: *const Stack, version: StackVersion) -> u32 {
-    let head = stack_head(&*self_, version);
+pub unsafe fn ts_stack_error_cost(self_: &Stack, version: StackVersion) -> u32 {
+    let head = stack_head(self_, version);
     let mut result = (*head.node).error_cost;
     if head.status == StackStatus::Paused
         || ((*head.node).state == ERROR_STATE
@@ -1504,7 +1504,7 @@ pub unsafe fn ts_stack_print_dot_graph(
             b"label=%u, fontcolor=blue, weight=10000, labeltooltip=\"node_count: %u\nerror_cost: %u\0".as_ptr() as *const i8,
             i,
             ts_stack_node_count_since_error(&mut *self_, i),
-            ts_stack_error_cost(self_, i),
+            ts_stack_error_cost(&*self_, i),
         );
 
         if !head.summary.is_null() {

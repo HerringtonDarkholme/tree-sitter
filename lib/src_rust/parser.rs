@@ -732,7 +732,7 @@ unsafe fn ts_parser__version_status(
     self_: *mut TSParser,
     version: StackVersion,
 ) -> ErrorStatus {
-    let mut cost = ts_stack_error_cost((*self_).stack, version);
+    let mut cost = ts_stack_error_cost(&*(*self_).stack, version);
     let is_paused = ts_stack_is_paused((*self_).stack, version);
     if is_paused {
         cost += ERROR_COST_PER_SKIPPED_TREE;
@@ -1861,7 +1861,7 @@ unsafe fn ts_parser__recover(
     let position = ts_stack_position((*self_).stack, version);
     let summary = ts_stack_get_summary((*self_).stack, version);
     let node_count_since_error = ts_stack_node_count_since_error(&mut *(*self_).stack, version);
-    let current_error_cost = ts_stack_error_cost((*self_).stack, version);
+    let current_error_cost = ts_stack_error_cost(&*(*self_).stack, version);
 
     // Strategy 1: Find a previous state where the lookahead is valid.
     if !summary.is_null() && !ts_subtree_is_error(lookahead) {
@@ -2563,7 +2563,7 @@ unsafe fn ts_parser__condense_stack(self_: &mut TSParser) -> u32 {
             if ts_stack_is_paused(self_.stack, i) {
                 if !has_unpaused_version && self_.accept_count < MAX_VERSION_COUNT {
                     LOG!(self_, b"resume version:%u\0".as_ptr() as *const i8, i);
-                    min_error_cost = ts_stack_error_cost(self_.stack, i);
+                    min_error_cost = ts_stack_error_cost(&*self_.stack, i);
                     let lookahead = ts_stack_resume(self_.stack, i);
                     ts_parser__handle_error(self_, i, lookahead);
                     has_unpaused_version = true;
