@@ -731,3 +731,65 @@ Source-code analysis:
   regression. The changed code does not contain case-specific logic for this
   fixture, and the aggregate Rust result remained within normal run-to-run
   variation versus the prior checkpoint. No rollback was performed.
+
+### 2026-06-24 18:50 EDT
+
+- Repo head: `00178fdb`
+- Batch base: `973693df`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: 10 small raw-pointer/reference cleanups through
+  `Use references in parser range accessors`
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 25449.3 | 23787.9 | +6.98% |
+| TypeScript error parses | 32 | 1684.7 | 1641.6 | +2.62% |
+| JavaScript normal parses | 2 | 17729.1 | 16135.4 | +9.88% |
+| JavaScript error parses | 37 | 2102.9 | 1961.5 | +7.21% |
+| Overall parser throughput | 82 | 2343.0 | 2243.1 | +4.45% |
+
+Prior checkpoint at `cc8f8619` recorded Rust overall throughput of 2313.2
+bytes/ms on the same TypeScript/JavaScript gate. This run measured +1.29%
+Rust throughput versus that checkpoint, so no >5% Rust checkpoint regression
+was observed.
+
+Per-case Rust-vs-C regressions above the 5% threshold:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `javascript error compound-statement-without-trailing-newline.py` | 2859.9 | 3250.4 | 12.01% |
+| `typescript error ast.rs` | 1438.3 | 1617.1 | 11.06% |
+| `javascript error no_newline_at_eof.go` | 1444.4 | 1592.0 | 9.27% |
+| `typescript error parser.ts` | 23162.0 | 25167.6 | 7.97% |
+| `typescript error compound-statement-without-trailing-newline.py` | 904.0 | 964.8 | 6.30% |
+| `typescript error python2-grammar-crlf.py` | 1095.7 | 1154.2 | 5.08% |
+
+Source-code analysis:
+
+- This batch changed Rust-internal receiver/body style in `lexer.rs`,
+  `stack.rs`, and `parser.rs`. It did not change any exported function
+  signatures, `#[no_mangle] extern "C"` ABI, `#[repr(C)]` layouts, allocation
+  sizes, parse tables, generated parser templates, or FFI struct field order.
+- The live generated header inputs `templates/alloc.h`, `templates/array.h`,
+  and `parser.h.inc` were not edited.
+- Lexer lifecycle helpers now take references internally after the FFI/parser
+  boundary has already produced a valid lexer object. The TSLexer vtable
+  callback signatures remain unchanged; `ts_lexer__eof` only binds a shared
+  reference inside the existing callback body.
+- `ts_stack_delete` now takes `&mut Stack` and splits disjoint fields in the
+  deletion loop so the borrow checker can see the same ownership that the
+  previous raw-pointer body used. It preserves the same slice/iterator/head
+  deletion order, node release calls, node-pool frees, and final `ts_free` of
+  the stack allocation.
+- Parser accessor and included-range entrypoints keep their public C ABI
+  signatures. The edits bind `&TSParser` or `&mut TSParser` once inside the
+  body before accessing fields, preserving the same calls to logger and lexer
+  included-range helpers.
+- The reported per-case slowdowns are Rust-vs-C comparisons in this run, not
+  Rust-vs-previous-checkpoint regressions. Overall Rust throughput improved
+  versus the previous checkpoint, so no rollback was performed.
