@@ -2685,25 +2685,26 @@ unsafe fn ts_parser_has_outstanding_parse(self_: &TSParser) -> bool {
 #[no_mangle]
 pub unsafe extern "C" fn ts_parser_new() -> *mut TSParser {
     let self_ = ts_calloc(1, core::mem::size_of::<TSParser>()) as *mut TSParser;
-    ts_lexer_init(&mut (*self_).lexer);
-    array_init(&mut (*self_).reduce_actions);
-    array_reserve(&mut (*self_).reduce_actions as *mut ReduceActionSet, 4);
-    (*self_).tree_pool = ts_subtree_pool_new(32);
-    (*self_).stack = ts_stack_new(&mut (*self_).tree_pool);
-    (*self_).finished_tree = NULL_SUBTREE;
-    (*self_).reusable_node = reusable_node_new();
-    (*self_).dot_graph_file = ptr::null_mut();
-    (*self_).language = ptr::null();
-    (*self_).has_scanner_error = false;
-    (*self_).has_error = false;
-    (*self_).canceled_balancing = false;
-    (*self_).external_scanner_payload = ptr::null_mut();
-    (*self_).operation_count = 0;
-    (*self_).old_tree = NULL_SUBTREE;
+    let parser = &mut *self_;
+    ts_lexer_init(&mut parser.lexer);
+    array_init(&mut parser.reduce_actions);
+    array_reserve(&mut parser.reduce_actions as *mut ReduceActionSet, 4);
+    parser.tree_pool = ts_subtree_pool_new(32);
+    parser.stack = ts_stack_new(&mut parser.tree_pool);
+    parser.finished_tree = NULL_SUBTREE;
+    parser.reusable_node = reusable_node_new();
+    parser.dot_graph_file = ptr::null_mut();
+    parser.language = ptr::null();
+    parser.has_scanner_error = false;
+    parser.has_error = false;
+    parser.canceled_balancing = false;
+    parser.external_scanner_payload = ptr::null_mut();
+    parser.operation_count = 0;
+    parser.old_tree = NULL_SUBTREE;
     let new_array: Array<TSRange> = array_new();
-    (*self_).included_range_differences = core::mem::transmute(new_array);
-    (*self_).included_range_difference_index = 0;
-    ts_parser__set_cached_token(&mut *self_, 0, NULL_SUBTREE, NULL_SUBTREE);
+    parser.included_range_differences = core::mem::transmute(new_array);
+    parser.included_range_difference_index = 0;
+    ts_parser__set_cached_token(parser, 0, NULL_SUBTREE, NULL_SUBTREE);
     self_
 }
 
