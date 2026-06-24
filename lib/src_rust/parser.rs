@@ -1631,13 +1631,14 @@ unsafe fn ts_parser__do_all_potential_reductions(
             break;
         }
 
-        let mut merged = false;
-        for j in initial_version_count..version {
-            if ts_stack_merge((*self_).stack, j, version) {
-                merged = true;
-                break;
+        let merged = 'merge: {
+            for j in initial_version_count..version {
+                if ts_stack_merge((*self_).stack, j, version) {
+                    break 'merge true;
+                }
             }
-        }
+            false
+        };
         if merged {
             i += 1;
             continue;
