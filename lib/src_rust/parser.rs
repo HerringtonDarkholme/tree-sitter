@@ -816,31 +816,31 @@ unsafe fn ts_parser__call_keyword_lex_fn(self_: &mut TSParser) -> bool {
 // Internal helpers — external scanner
 // ---------------------------------------------------------------------------
 
-unsafe fn ts_parser__external_scanner_create(self_: *mut TSParser) {
-    let lang = (*self_).language as *const TSLanguageFull;
-    if !(*self_).language.is_null() && !(*lang).external_scanner.states.is_null() {
-        if ts_language_is_wasm((*self_).language) {
-            (*self_).external_scanner_payload =
-                ts_wasm_store_call_scanner_create((*self_).wasm_store) as usize as *mut c_void;
-            if ts_wasm_store_has_error((*self_).wasm_store) {
-                (*self_).has_scanner_error = true;
+unsafe fn ts_parser__external_scanner_create(self_: &mut TSParser) {
+    let lang = self_.language as *const TSLanguageFull;
+    if !self_.language.is_null() && !(*lang).external_scanner.states.is_null() {
+        if ts_language_is_wasm(self_.language) {
+            self_.external_scanner_payload =
+                ts_wasm_store_call_scanner_create(self_.wasm_store) as usize as *mut c_void;
+            if ts_wasm_store_has_error(self_.wasm_store) {
+                self_.has_scanner_error = true;
             }
         } else if let Some(create_fn) = (*lang).external_scanner.create {
-            (*self_).external_scanner_payload = create_fn();
+            self_.external_scanner_payload = create_fn();
         }
     }
 }
 
-unsafe fn ts_parser__external_scanner_destroy(self_: *mut TSParser) {
-    let lang = (*self_).language as *const TSLanguageFull;
-    if !(*self_).language.is_null()
-        && !(*self_).external_scanner_payload.is_null()
+unsafe fn ts_parser__external_scanner_destroy(self_: &mut TSParser) {
+    let lang = self_.language as *const TSLanguageFull;
+    if !self_.language.is_null()
+        && !self_.external_scanner_payload.is_null()
         && (*lang).external_scanner.destroy.is_some()
-        && !ts_language_is_wasm((*self_).language)
+        && !ts_language_is_wasm(self_.language)
     {
-        ((*lang).external_scanner.destroy.unwrap())((*self_).external_scanner_payload);
+        ((*lang).external_scanner.destroy.unwrap())(self_.external_scanner_payload);
     }
-    (*self_).external_scanner_payload = ptr::null_mut();
+    self_.external_scanner_payload = ptr::null_mut();
 }
 
 unsafe fn ts_parser__external_scanner_serialize(self_: *mut TSParser) -> u32 {
@@ -2820,7 +2820,7 @@ pub unsafe extern "C" fn ts_parser_included_ranges(
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_parser_reset(self_: *mut TSParser) {
-    ts_parser__external_scanner_destroy(self_);
+    ts_parser__external_scanner_destroy(&mut *self_);
     if !(*self_).wasm_store.is_null() {
         ts_wasm_store_reset((*self_).wasm_store);
     }
@@ -2900,7 +2900,7 @@ pub unsafe extern "C" fn ts_parser_parse(
             return result;
         }
     } else {
-        ts_parser__external_scanner_create(self_);
+        ts_parser__external_scanner_create(&mut *self_);
         if (*self_).has_scanner_error {
             // goto exit
             ts_parser_reset(self_);
