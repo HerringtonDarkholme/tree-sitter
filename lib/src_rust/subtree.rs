@@ -414,46 +414,52 @@ pub unsafe fn ts_external_scanner_state_init(
     data: *const u8,
     length: u32,
 ) {
-    (*self_).length = length;
+    let self_ = &mut *self_;
+    self_.length = length;
     if length > EXTERNAL_SCANNER_STATE_INLINE_SIZE as u32 {
-        (*self_).data.long_data = ts_malloc(length as usize) as *mut u8;
-        ptr::copy_nonoverlapping(data, (*self_).data.long_data, length as usize);
+        self_.data.long_data = ts_malloc(length as usize) as *mut u8;
+        ptr::copy_nonoverlapping(data, self_.data.long_data, length as usize);
     } else {
-        ptr::copy_nonoverlapping(data, (*self_).data.short_data.as_mut_ptr(), length as usize);
+        ptr::copy_nonoverlapping(data, self_.data.short_data.as_mut_ptr(), length as usize);
     }
 }
 
 pub unsafe fn ts_external_scanner_state_copy(
     self_: *const ExternalScannerState,
 ) -> ExternalScannerState {
+    let self_ = &*self_;
     let mut result = ExternalScannerState {
-        data: ExternalScannerStateData { short_data: (*self_).data.short_data },
-        length: (*self_).length,
+        data: ExternalScannerStateData {
+            short_data: self_.data.short_data,
+        },
+        length: self_.length,
     };
-    if (*self_).length > EXTERNAL_SCANNER_STATE_INLINE_SIZE as u32 {
-        result.data.long_data = ts_malloc((*self_).length as usize) as *mut u8;
+    if self_.length > EXTERNAL_SCANNER_STATE_INLINE_SIZE as u32 {
+        result.data.long_data = ts_malloc(self_.length as usize) as *mut u8;
         ptr::copy_nonoverlapping(
-            (*self_).data.long_data,
+            self_.data.long_data,
             result.data.long_data,
-            (*self_).length as usize,
+            self_.length as usize,
         );
     }
     result
 }
 
 pub unsafe fn ts_external_scanner_state_delete(self_: *mut ExternalScannerState) {
-    if (*self_).length > EXTERNAL_SCANNER_STATE_INLINE_SIZE as u32 {
-        ts_free((*self_).data.long_data as *mut c_void);
+    let self_ = &mut *self_;
+    if self_.length > EXTERNAL_SCANNER_STATE_INLINE_SIZE as u32 {
+        ts_free(self_.data.long_data as *mut c_void);
     }
 }
 
 pub unsafe fn ts_external_scanner_state_data(
     self_: *const ExternalScannerState,
 ) -> *const u8 {
-    if (*self_).length > EXTERNAL_SCANNER_STATE_INLINE_SIZE as u32 {
-        (*self_).data.long_data
+    let self_ = &*self_;
+    if self_.length > EXTERNAL_SCANNER_STATE_INLINE_SIZE as u32 {
+        self_.data.long_data
     } else {
-        (*self_).data.short_data.as_ptr()
+        self_.data.short_data.as_ptr()
     }
 }
 
@@ -462,7 +468,8 @@ pub unsafe fn ts_external_scanner_state_eq(
     buffer: *const u8,
     length: u32,
 ) -> bool {
-    (*self_).length == length
+    let self_ref = &*self_;
+    self_ref.length == length
         && libc_memcmp(
             ts_external_scanner_state_data(self_) as *const c_void,
             buffer as *const c_void,
