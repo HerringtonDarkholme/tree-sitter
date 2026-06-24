@@ -1098,8 +1098,9 @@ pub unsafe fn ts_stack_pop_error(
             );
             if pop.size > 0 {
                 debug_assert!(pop.size == 1);
-                ts_stack_renumber_version(self_, (*array_get(&pop, 0)).version, version);
-                return ptr::read(&(*array_get(&pop, 0)).subtrees);
+                let first_pop = stack_slice_array_get(&pop, 0);
+                ts_stack_renumber_version(self_, first_pop.version, version);
+                return ptr::read(&first_pop.subtrees);
             }
             break;
         }
