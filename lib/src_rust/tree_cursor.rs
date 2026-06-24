@@ -68,6 +68,19 @@ pub struct TreeCursorEntry {
     pub descendant_index: u32,
 }
 
+impl TreeCursorEntry {
+    #[inline]
+    fn empty() -> Self {
+        Self {
+            subtree: ptr::null(),
+            position: length_zero(),
+            child_index: 0,
+            structural_child_index: 0,
+            descendant_index: 0,
+        }
+    }
+}
+
 /// Array(TreeCursorEntry) — inline repr
 #[repr(C)]
 pub struct TreeCursorEntryArray {
@@ -359,7 +372,7 @@ unsafe fn ts_tree_cursor_goto_first_child_for_byte_and_point(
         did_descend = false;
 
         let mut visible = false;
-        let mut entry = std::mem::zeroed::<TreeCursorEntry>();
+        let mut entry = TreeCursorEntry::empty();
         let mut iterator = ts_tree_cursor_iterate_children(&*self_);
         while ts_tree_cursor_child_iterator_next(&mut iterator, &mut entry, &mut visible) {
             let entry_end = length_add(entry.position, ts_subtree_size(*entry.subtree));
@@ -406,7 +419,7 @@ unsafe fn ts_tree_cursor_goto_sibling_internal(
         iterator.descendant_index = entry.descendant_index;
 
         let mut visible = false;
-        let mut entry = std::mem::zeroed::<TreeCursorEntry>();
+        let mut entry = TreeCursorEntry::empty();
         advance(&mut iterator, &mut entry, &mut visible);
         if visible && (*self_).stack.size + 1 < initial_size {
             break;
@@ -493,7 +506,7 @@ pub unsafe extern "C" fn ts_tree_cursor_goto_first_child_internal(
 ) -> TreeCursorStep {
     let self_ = _self as *mut TreeCursor;
     let mut visible = false;
-    let mut entry = std::mem::zeroed::<TreeCursorEntry>();
+    let mut entry = TreeCursorEntry::empty();
     let mut iterator = ts_tree_cursor_iterate_children(&*self_);
     while ts_tree_cursor_child_iterator_next(&mut iterator, &mut entry, &mut visible) {
         if visible {
@@ -527,13 +540,13 @@ pub unsafe extern "C" fn ts_tree_cursor_goto_last_child_internal(
 ) -> TreeCursorStep {
     let self_ = _self as *mut TreeCursor;
     let mut visible = false;
-    let mut entry = std::mem::zeroed::<TreeCursorEntry>();
+    let mut entry = TreeCursorEntry::empty();
     let mut iterator = ts_tree_cursor_iterate_children(&*self_);
     if iterator.parent.ptr.is_null() || (*iterator.parent.ptr).child_count == 0 {
         return TreeCursorStep::TreeCursorStepNone;
     }
 
-    let mut last_entry = std::mem::zeroed::<TreeCursorEntry>();
+    let mut last_entry = TreeCursorEntry::empty();
     let mut last_step = TreeCursorStep::TreeCursorStepNone;
     while ts_tree_cursor_child_iterator_next(&mut iterator, &mut entry, &mut visible) {
         if visible {
@@ -705,7 +718,7 @@ pub unsafe extern "C" fn ts_tree_cursor_goto_descendant(
     while did_descend {
         did_descend = false;
         let mut visible = false;
-        let mut entry = std::mem::zeroed::<TreeCursorEntry>();
+        let mut entry = TreeCursorEntry::empty();
         let mut iterator = ts_tree_cursor_iterate_children(&*self_);
         if iterator.descendant_index > goal_descendant_index {
             return;
