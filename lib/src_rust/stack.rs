@@ -386,6 +386,11 @@ unsafe fn stack_slice_array_get(self_: &StackSliceArray, index: u32) -> &StackSl
 }
 
 #[inline]
+unsafe fn stack_node_pool_get(self_: &Array<*mut StackNode>, index: u32) -> *mut StackNode {
+    *array_get(self_, index)
+}
+
+#[inline]
 unsafe fn stack_iterator_array_get(self_: &Array<StackIterator>, index: u32) -> &StackIterator {
     &*array_get(self_, index)
 }
@@ -943,7 +948,7 @@ pub unsafe fn ts_stack_delete(self_: *mut Stack) {
     array_clear(&mut (*self_).heads);
     if !(*self_).node_pool.contents.is_null() {
         for i in 0..(*self_).node_pool.size {
-            ts_free(*array_get(&(*self_).node_pool, i) as *mut c_void);
+            ts_free(stack_node_pool_get(&(*self_).node_pool, i) as *mut c_void);
         }
         array_delete(&mut (*self_).node_pool);
     }
