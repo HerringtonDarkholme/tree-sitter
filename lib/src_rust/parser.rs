@@ -1976,7 +1976,7 @@ unsafe fn ts_parser__recover(
             for pi in 1..pop.size {
                 ts_subtree_array_delete(
                     &mut (*self_).tree_pool,
-                    &mut (*array_get(&pop as *const StackSliceArray, pi)).subtrees,
+                    &mut stack_slice_array_get_mut(&mut pop, pi).subtrees,
                 );
             }
             while ts_stack_version_count((*self_).stack)
