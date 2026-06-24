@@ -1034,8 +1034,8 @@ pub unsafe extern "C" fn ts_tree_cursor_current_field_name(
 ) -> *const i8 {
     let id = ts_tree_cursor_current_field_id(_self);
     if id != 0 {
-        let self_ = _self as *const TreeCursor;
-        let lang = (*(*self_).tree).language as *const TSLanguageFull;
+        let cursor = &*(_self as *const TreeCursor);
+        let lang = (*cursor.tree).language as *const TSLanguageFull;
         return *(*lang).field_names.add(id as usize);
     }
     ptr::null()
