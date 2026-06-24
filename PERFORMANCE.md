@@ -485,3 +485,73 @@ Source-code analysis:
   not regressions against the previous Rust checkpoint. Since overall Rust
   throughput improved by about 2%, no source-level culprit was identified and
   no rollback was performed.
+
+### 2026-06-24 17:23 EDT
+
+- Repo head: `138d96b9`
+- Batch base: `f6b8c2b0`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: 10 small internal raw-pointer/reference cleanups plus one
+  comment-only boundary clarification, through `Use reference for child
+  selection`
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 24506.6 | 23772.8 | +3.09% |
+| TypeScript error parses | 32 | 1632.4 | 1574.2 | +3.70% |
+| JavaScript normal parses | 2 | 16720.5 | 15903.5 | +5.14% |
+| JavaScript error parses | 37 | 2034.1 | 1927.8 | +5.52% |
+| Overall parser throughput | 82 | 2267.8 | 2172.7 | +4.38% |
+
+Prior checkpoint at `b9ae4832` recorded Rust overall throughput of 2329.2
+bytes/ms on the same TypeScript/JavaScript gate, so this batch measured -2.64%
+absolute Rust throughput. That is below the 5% regression investigation
+threshold. The Rust-vs-C delta rose from +3.53% to +4.38%, with both Rust and
+C baselines moving downward between runs.
+
+Per-case Rust-vs-C regressions above the 5% threshold:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `typescript error ast.rs` | 1100.7 | 1537.7 | 28.42% |
+| `typescript normal transform.ts` | 20251.8 | 23206.0 | 12.73% |
+| `typescript normal packageJsonCache.ts` | 16669.9 | 18332.6 | 9.07% |
+| `javascript error performanceCore.ts` | 5123.3 | 5480.4 | 6.52% |
+| `typescript normal performanceCore.ts` | 22375.0 | 23746.1 | 5.77% |
+| `typescript error rule.cc` | 574.9 | 605.9 | 5.11% |
+
+Source-code analysis:
+
+- This batch continued replacing Rust-core raw pointer receivers with
+  references where the caller already had a valid stack, subtree, or parser
+  reference. It did not change `#[repr(C)]` layouts, allocation sizes, parse
+  table data, generated parser templates, or public `#[no_mangle] extern "C"`
+  APIs.
+- The stack changes (`halt`, `clear`, `remove_version`, `version_count`,
+  `state`, and `position`) preserve the same `StackHead` lookups, state
+  comparisons, version removal order, node release calls, and base-node retain
+  behavior. The main difference is that callers perform the raw pointer
+  boundary conversion before entering these helpers.
+- The generic array transfer helpers now take Rust references. `array_swap`
+  still swaps the same three `Array<T>` fields via `std::mem::swap`;
+  `array_assign` still reserves capacity, sets size, and copies the same byte
+  count from the source contents.
+- The subtree array copy/reverse helpers preserve the same allocation, retain,
+  and swap behavior. Their names still appear in the old private
+  `lib/src/subtree.h`, but the Rust versions are not C-exported symbols and are
+  not referenced by `alloc.h`, `array.h`, or `parser.h.inc`; this is private
+  C-header drift rather than public ABI drift.
+- The parser child-selection helper now takes `&mut TSParser`. The tree
+  selection behavior remains unchanged: scratch trees are assigned, a scratch
+  node is created with the same language pointer, and the existing
+  `ts_parser__select_tree` path is called.
+- Several current per-case Rust-vs-C slowdowns also appeared in nearby
+  checkpoints (`transform.ts` and `performanceCore.ts` in particular), and the
+  overall Rust checkpoint delta is -2.64%, below the agreed 5% investigation
+  threshold. No specific source-level culprit was identified and no rollback
+  was performed.
