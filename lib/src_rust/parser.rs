@@ -34,7 +34,7 @@ use super::lexer::{
 use super::stack::{
     array_assign, array_back, array_clear, array_delete, array_erase,
     array_get, array_init, array_new, array_pop, array_push, array_reserve,
-    array_splice, array_swap, Array, Stack, StackSliceArray, StackSummary,
+    array_splice, array_swap, Array, Stack, StackSlice, StackSliceArray, StackSummary,
     StackVersion, STACK_VERSION_NONE,
     // Stack functions (now Rust-only)
     ts_stack_can_merge, ts_stack_clear, ts_stack_copy_version, ts_stack_delete,
@@ -496,6 +496,10 @@ unsafe fn reusable_node_reset(self_: &mut ReusableNode, tree: Subtree) {
 
 unsafe fn reduce_action_set_get(self_: &ReduceActionSet, index: u32) -> &ReduceAction {
     &*array_get(self_ as *const ReduceActionSet as *const Array<ReduceAction>, index)
+}
+
+unsafe fn stack_slice_array_get(self_: &StackSliceArray, index: u32) -> &StackSlice {
+    &*array_get(self_ as *const StackSliceArray, index)
 }
 
 unsafe fn ts_reduce_action_set_add(
@@ -1616,7 +1620,7 @@ unsafe fn ts_parser__accept(
 
     ts_stack_remove_version(
         (*self_).stack,
-        (*array_get(&pop as *const StackSliceArray, 0)).version,
+        stack_slice_array_get(&pop, 0).version,
     );
     ts_stack_halt((*self_).stack, version);
 }
@@ -1972,18 +1976,18 @@ unsafe fn ts_parser__recover(
                 );
             }
             while ts_stack_version_count((*self_).stack)
-                > (*array_get(&pop as *const StackSliceArray, 0)).version + 1
+                > stack_slice_array_get(&pop, 0).version + 1
             {
                 ts_stack_remove_version(
                     (*self_).stack,
-                    (*array_get(&pop as *const StackSliceArray, 0)).version + 1,
+                    stack_slice_array_get(&pop, 0).version + 1,
                 );
             }
         }
 
         ts_stack_renumber_version(
             (*self_).stack,
-            (*array_get(&pop as *const StackSliceArray, 0)).version,
+            stack_slice_array_get(&pop, 0).version,
             version,
         );
         let slot = &mut (*array_get(&pop as *const StackSliceArray, 0)).subtrees;
