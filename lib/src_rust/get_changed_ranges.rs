@@ -70,6 +70,11 @@ unsafe fn array_get_range(arr: &TSRangeArray, index: u32) -> &TSRange {
     &*arr.contents.add(index as usize)
 }
 
+#[inline]
+unsafe fn array_write_range(arr: &mut TSRangeArray, index: u32, range: TSRange) {
+    ptr::write(arr.contents.add(index as usize), range);
+}
+
 unsafe fn array_grow_range(arr: &mut TSRangeArray, count: u32) {
     let new_size = arr.size + count;
     if new_size > arr.capacity {
@@ -91,7 +96,7 @@ unsafe fn array_grow_range(arr: &mut TSRangeArray, count: u32) {
 
 unsafe fn array_push_range(arr: &mut TSRangeArray, range: TSRange) {
     array_grow_range(arr, 1);
-    ptr::write(arr.contents.add(arr.size as usize), range);
+    array_write_range(arr, arr.size, range);
     arr.size += 1;
 }
 
@@ -107,6 +112,16 @@ unsafe fn stack_back(arr: &TreeCursorEntryArray) -> &TreeCursorEntry {
 #[inline]
 unsafe fn stack_get(arr: &TreeCursorEntryArray, index: u32) -> &TreeCursorEntry {
     &*arr.contents.add(index as usize)
+}
+
+#[inline]
+unsafe fn stack_write(arr: &mut TreeCursorEntryArray, index: u32, entry: TreeCursorEntry) {
+    ptr::write(arr.contents.add(index as usize), entry);
+}
+
+#[inline]
+unsafe fn stack_read(arr: &TreeCursorEntryArray, index: u32) -> TreeCursorEntry {
+    ptr::read(arr.contents.add(index as usize))
 }
 
 #[inline]
@@ -138,13 +153,13 @@ unsafe fn stack_grow(arr: &mut TreeCursorEntryArray, count: u32) {
 
 unsafe fn stack_push(arr: &mut TreeCursorEntryArray, entry: TreeCursorEntry) {
     stack_grow(arr, 1);
-    ptr::write(arr.contents.add(arr.size as usize), entry);
+    stack_write(arr, arr.size, entry);
     arr.size += 1;
 }
 
 unsafe fn stack_pop(arr: &mut TreeCursorEntryArray) -> TreeCursorEntry {
     arr.size -= 1;
-    ptr::read(arr.contents.add(arr.size as usize))
+    stack_read(arr, arr.size)
 }
 
 #[inline]
