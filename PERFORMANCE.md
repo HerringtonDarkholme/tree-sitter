@@ -428,3 +428,60 @@ Source-code analysis:
   batch. The overall Rust checkpoint delta is about -1%, and no >5% Rust
   checkpoint regression was observed, so no specific source culprit was
   identified and no rollback was performed.
+
+### 2026-06-24 16:49 EDT
+
+- Repo head: `b9ae4832`
+- Batch base: `aa46cf23`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: 10 small internal stack raw-pointer/reference cleanups through `Use reference for stack halted check`
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 25460.3 | 24537.9 | +3.76% |
+| TypeScript error parses | 32 | 1677.2 | 1659.1 | +1.09% |
+| JavaScript normal parses | 2 | 17722.6 | 16614.8 | +6.67% |
+| JavaScript error parses | 37 | 2084.5 | 1939.9 | +7.45% |
+| Overall parser throughput | 82 | 2329.2 | 2249.8 | +3.53% |
+
+Prior checkpoint at `4f8c04bc` recorded Rust overall throughput of 2281.9
+bytes/ms on the same TypeScript/JavaScript gate, so this batch measured +2.07%
+absolute Rust throughput. That is below the 5% regression investigation
+threshold and in the favorable direction. The Rust-vs-C delta fell from +4.19%
+to +3.53%, with both Rust and C baselines moving upward between runs.
+
+Per-case Rust-vs-C regressions above the 5% threshold:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `typescript normal transform.ts` | 20274.0 | 24041.5 | 15.67% |
+| `javascript error compound-statement-without-trailing-newline.py` | 3039.0 | 3251.5 | 6.53% |
+| `typescript normal refactorProvider.ts` | 21703.7 | 23202.4 | 6.46% |
+
+Source-code analysis:
+
+- This batch only changed internal stack helper receivers from raw pointers to
+  Rust references where callers already had parser-owned stack access. It did
+  not change FFI-facing signatures, `#[repr(C)]` layouts, stack allocation,
+  parse table access, link ordering, node ownership, or external scanner
+  behavior.
+- The changed helpers are narrow accessors and status queries:
+  `ts_stack_halted_version_count`, `ts_stack_last_external_token`,
+  `ts_stack_set_last_external_token`, `ts_stack_node_count_since_error`,
+  `ts_stack_has_advanced_since_error`, `ts_stack_error_cost`,
+  `ts_stack_dynamic_precedence`, `ts_stack_is_paused`, `ts_stack_is_active`,
+  and `ts_stack_is_halted`.
+- The status and metric helpers preserve the same `stack_head` lookups and
+  `StackStatus` comparisons. `ts_stack_node_count_since_error` and
+  `ts_stack_set_last_external_token` still perform the same mutations and
+  retain/release operations; the only change is moving the raw pointer
+  dereference to the caller boundary.
+- The per-case slowdowns are Rust-vs-C comparisons in the current noisy gate,
+  not regressions against the previous Rust checkpoint. Since overall Rust
+  throughput improved by about 2%, no source-level culprit was identified and
+  no rollback was performed.
