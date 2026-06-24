@@ -1274,13 +1274,16 @@ pub unsafe fn ts_stack_has_advanced_since_error(
 }
 
 /// Remove a version from the stack.
-pub unsafe fn ts_stack_remove_version(self_: *mut Stack, version: StackVersion) {
+pub unsafe fn ts_stack_remove_version(self_: &mut Stack, version: StackVersion) {
+    let heads = &mut self_.heads;
+    let node_pool = &mut self_.node_pool;
+    let subtree_pool = &mut *self_.subtree_pool;
     stack_head_delete(
-        stack_head_mut(&mut *self_, version),
-        &mut (*self_).node_pool,
-        &mut *(*self_).subtree_pool,
+        stack_head_array_get_mut(heads, version),
+        node_pool,
+        subtree_pool,
     );
-    array_erase(&mut (*self_).heads, version);
+    array_erase(heads, version);
 }
 
 /// Renumber version v1 to v2 (move v1 into v2's slot, removing v2).
@@ -1361,7 +1364,7 @@ pub unsafe fn ts_stack_merge(
     if (*head1.node).state == ERROR_STATE {
         head1.node_count_at_last_error = (*head1.node).node_count;
     }
-    ts_stack_remove_version(self_, version2);
+    ts_stack_remove_version(&mut *self_, version2);
     true
 }
 
