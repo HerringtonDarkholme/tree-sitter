@@ -660,20 +660,20 @@ pub unsafe fn ts_subtree_pool_delete(self_: *mut SubtreePool) {
     }
 }
 
-unsafe fn ts_subtree_pool_allocate(self_: *mut SubtreePool) -> *mut SubtreeHeapData {
-    if (*self_).free_trees.size > 0 {
-        mutable_array_pop(&mut (*self_).free_trees).ptr
+unsafe fn ts_subtree_pool_allocate(self_: &mut SubtreePool) -> *mut SubtreeHeapData {
+    if self_.free_trees.size > 0 {
+        mutable_array_pop(&mut self_.free_trees).ptr
     } else {
         ts_malloc(std::mem::size_of::<SubtreeHeapData>()) as *mut SubtreeHeapData
     }
 }
 
-unsafe fn ts_subtree_pool_free(self_: *mut SubtreePool, tree: *mut SubtreeHeapData) {
-    if (*self_).free_trees.capacity > 0
-        && (*self_).free_trees.size + 1 <= TS_MAX_TREE_POOL_SIZE
+unsafe fn ts_subtree_pool_free(self_: &mut SubtreePool, tree: *mut SubtreeHeapData) {
+    if self_.free_trees.capacity > 0
+        && self_.free_trees.size + 1 <= TS_MAX_TREE_POOL_SIZE
     {
         mutable_array_push(
-            &mut (*self_).free_trees,
+            &mut self_.free_trees,
             MutableSubtree { ptr: tree },
         );
     } else {
@@ -1064,7 +1064,7 @@ pub unsafe fn ts_subtree_new_leaf(
             },
         }
     } else {
-        let data = ts_subtree_pool_allocate(pool);
+        let data = ts_subtree_pool_allocate(&mut *pool);
         *data = SubtreeHeapData {
             ref_count: 1,
             padding,
@@ -1328,7 +1328,7 @@ pub unsafe fn ts_subtree_release(pool: *mut SubtreePool, self_: Subtree) {
                         as *mut ExternalScannerState,
                 );
             }
-            ts_subtree_pool_free(pool, tree.ptr);
+            ts_subtree_pool_free(&mut *pool, tree.ptr);
         }
     }
 }
@@ -1685,7 +1685,7 @@ pub unsafe fn ts_subtree_edit(
                 result.data.size_bytes = size.bytes as u8;
             } else {
                 // Promote inline node to heap
-                let data = ts_subtree_pool_allocate(pool);
+                let data = ts_subtree_pool_allocate(&mut *pool);
                 *data = SubtreeHeapData {
                     ref_count: 1,
                     padding,
