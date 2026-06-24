@@ -440,8 +440,8 @@ extern "C" {
 // ===========================================================================
 
 /// Initialize a Lexer, setting up the TSLexer vtable and default state.
-pub unsafe fn ts_lexer_init(self_: *mut Lexer) {
-    let s = &mut *self_;
+pub unsafe fn ts_lexer_init(self_: &mut Lexer) {
+    let s = self_;
     s.data.advance = Some(ts_lexer__advance);
     s.data.mark_end = Some(ts_lexer__mark_end);
     s.data.get_column = Some(ts_lexer__get_column);
