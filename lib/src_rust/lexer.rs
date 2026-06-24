@@ -478,11 +478,10 @@ pub unsafe fn ts_lexer_delete(self_: *mut Lexer) {
 }
 
 /// Set the input source for the lexer.
-pub unsafe fn ts_lexer_set_input(self_: *mut Lexer, input: TSInput) {
-    let s = &mut *self_;
-    s.input = input;
-    ts_lexer__clear_chunk(s);
-    ts_lexer_goto(s, s.current_position);
+pub unsafe fn ts_lexer_set_input(self_: &mut Lexer, input: TSInput) {
+    self_.input = input;
+    ts_lexer__clear_chunk(self_);
+    ts_lexer_goto(self_, self_.current_position);
 }
 
 /// Move the lexer to the given position (no-op if already there).
