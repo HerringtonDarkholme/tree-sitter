@@ -985,7 +985,7 @@ unsafe fn ts_parser__lex(
     }
 
     let start_position = ts_stack_position((*self_).stack, version);
-    let external_token = ts_stack_last_external_token((*self_).stack, version);
+    let external_token = ts_stack_last_external_token(&*(*self_).stack, version);
 
     let mut found_external_token = false;
     let mut error_mode = parse_state == ERROR_STATE;
@@ -2216,7 +2216,7 @@ unsafe fn ts_parser__advance(
 ) -> bool {
     let mut state = ts_stack_state((*self_).stack, version);
     let position = ts_stack_position((*self_).stack, version).bytes;
-    let last_external_token = ts_stack_last_external_token((*self_).stack, version);
+    let last_external_token = ts_stack_last_external_token(&*(*self_).stack, version);
 
     let mut did_reuse = true;
     let mut lookahead = NULL_SUBTREE;

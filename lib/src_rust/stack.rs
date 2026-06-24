@@ -1061,10 +1061,10 @@ pub unsafe fn ts_stack_position(self_: *const Stack, version: StackVersion) -> L
 
 /// Get the last external token for a version.
 pub unsafe fn ts_stack_last_external_token(
-    self_: *const Stack,
+    self_: &Stack,
     version: StackVersion,
 ) -> Subtree {
-    stack_head(&*self_, version).last_external_token
+    stack_head(self_, version).last_external_token
 }
 
 /// Set the last external token for a version.
