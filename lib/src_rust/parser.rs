@@ -2440,7 +2440,6 @@ unsafe fn ts_parser__condense_stack(self_: *mut TSParser) -> u32 {
                     made_changes = true;
                     ts_stack_remove_version((*self_).stack, i);
                     i -= 1;
-                    j = i;
                     break;
                 }
 
@@ -2448,7 +2447,6 @@ unsafe fn ts_parser__condense_stack(self_: *mut TSParser) -> u32 {
                     if ts_stack_merge((*self_).stack, j, i) {
                         made_changes = true;
                         i -= 1;
-                        j = i;
                         break;
                     }
                 }
@@ -2457,7 +2455,6 @@ unsafe fn ts_parser__condense_stack(self_: *mut TSParser) -> u32 {
                     made_changes = true;
                     if ts_stack_merge((*self_).stack, j, i) {
                         i -= 1;
-                        j = i;
                         break;
                     } else {
                         ts_stack_swap_versions((*self_).stack, i, j);
@@ -2553,7 +2550,7 @@ unsafe fn ts_parser__balance_subtree(self_: *mut TSParser) -> bool {
             let repeat_delta =
                 ts_subtree_repeat_depth(child1) as i64 - ts_subtree_repeat_depth(child2) as i64;
             if repeat_delta > 0 {
-                let mut n = repeat_delta as u32;
+                let n = repeat_delta as u32;
 
                 let mut i = n / 2;
                 while i > 0 {
@@ -2563,7 +2560,6 @@ unsafe fn ts_parser__balance_subtree(self_: *mut TSParser) -> bool {
                         (*self_).language,
                         &mut (*self_).tree_pool.tree_stack as *mut MutableSubtreeArray,
                     );
-                    n -= i;
 
                     // We scale the operation count increment in `ts_parser__check_progress` proportionately to the compression
                     // size since larger values of i take longer to process. Shifting by 4 empirically provides good check

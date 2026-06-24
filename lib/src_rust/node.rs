@@ -206,7 +206,7 @@ unsafe fn ts_node__relevant_child_count(
 // ---------------------------------------------------------------------------
 
 unsafe fn ts_node__child(
-    mut self_: TSNode,
+    self_: TSNode,
     mut child_index: u32,
     include_anonymous: bool,
 ) -> TSNode {
