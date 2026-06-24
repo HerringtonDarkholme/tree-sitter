@@ -2488,7 +2488,7 @@ unsafe fn ts_parser__condense_stack(self_: &mut TSParser) -> u32 {
     let mut i: StackVersion = 0;
     while i < ts_stack_version_count(self_.stack) {
         // Prune any versions that have been marked for removal.
-        if ts_stack_is_halted(self_.stack, i) {
+        if ts_stack_is_halted(&*self_.stack, i) {
             ts_stack_remove_version(self_.stack, i);
             continue;
         }
