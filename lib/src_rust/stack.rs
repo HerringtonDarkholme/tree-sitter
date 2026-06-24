@@ -692,7 +692,8 @@ unsafe fn stack__iter(
             let should_stop = (action & StackActionStop) != 0 || (*node).link_count == 0;
 
             if should_pop {
-                let mut subtrees = ptr::read(&(*array_get(&(*self_).iterators, i)).subtrees);
+                let mut subtrees =
+                    ptr::read(&stack_iterator_array_get(&(*self_).iterators, i).subtrees);
                 if !should_stop {
                     ts_subtree_array_copy(ptr::read(&subtrees), &mut subtrees);
                 }
