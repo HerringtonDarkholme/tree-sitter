@@ -604,7 +604,7 @@ unsafe fn ts_parser__breakdown_top_of_stack(
 
 unsafe fn ts_parser__breakdown_lookahead(
     self_: *mut TSParser,
-    lookahead: *mut Subtree,
+    lookahead: &mut Subtree,
     state: TSStateId,
     reusable_node: &mut ReusableNode,
 ) {
