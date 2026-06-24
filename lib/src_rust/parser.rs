@@ -973,19 +973,23 @@ unsafe fn ts_parser__can_reuse_first_leaf(
 }
 
 unsafe fn ts_parser__lex(
-    self_: *mut TSParser,
+    self_: &mut TSParser,
     version: StackVersion,
     parse_state: TSStateId,
 ) -> Subtree {
-    let lang = (*self_).language as *const TSLanguageFull;
-    let mut lex_mode = ts_language_lex_mode_for_state((*self_).language, parse_state);
+    let parser = self_ as *mut TSParser;
+    let lang = self_.language as *const TSLanguageFull;
+    let mut lex_mode = ts_language_lex_mode_for_state(self_.language, parse_state);
     if lex_mode.lex_state == u16::MAX {
-        LOG!(self_, b"no_lookahead_after_non_terminal_extra\0".as_ptr() as *const i8);
+        LOG!(
+            parser,
+            b"no_lookahead_after_non_terminal_extra\0".as_ptr() as *const i8
+        );
         return NULL_SUBTREE;
     }
 
-    let start_position = ts_stack_position(&*(*self_).stack, version);
-    let external_token = ts_stack_last_external_token(&*(*self_).stack, version);
+    let start_position = ts_stack_position(&*self_.stack, version);
+    let external_token = ts_stack_last_external_token(&*self_.stack, version);
 
     let mut found_external_token = false;
     let mut error_mode = parse_state == ERROR_STATE;
@@ -997,51 +1001,51 @@ unsafe fn ts_parser__lex(
     let mut lookahead_end_byte: u32 = 0;
     let mut external_scanner_state_len: u32 = 0;
     let mut external_scanner_state_changed = false;
-    ts_lexer_reset(&mut (*self_).lexer, start_position);
+    ts_lexer_reset(&mut self_.lexer, start_position);
 
     loop {
         let mut found_token;
-        let current_position = (*self_).lexer.current_position;
-        let column_data = (*self_).lexer.column_data;
+        let current_position = self_.lexer.current_position;
+        let column_data = self_.lexer.column_data;
 
         if lex_mode.external_lex_state != 0 {
-            LOG!(self_, b"lex_external state:%d, row:%u, column:%u\0".as_ptr() as *const i8,
+            LOG!(parser, b"lex_external state:%d, row:%u, column:%u\0".as_ptr() as *const i8,
                 lex_mode.external_lex_state as i32,
                 current_position.extent.row,
                 current_position.extent.column);
-            ts_lexer_start(&mut (*self_).lexer);
-            ts_parser__external_scanner_deserialize(&mut *self_, external_token);
-            found_token = ts_parser__external_scanner_scan(&mut *self_, lex_mode.external_lex_state);
-            if (*self_).has_scanner_error {
+            ts_lexer_start(&mut self_.lexer);
+            ts_parser__external_scanner_deserialize(self_, external_token);
+            found_token = ts_parser__external_scanner_scan(self_, lex_mode.external_lex_state);
+            if self_.has_scanner_error {
                 return NULL_SUBTREE;
             }
-            ts_lexer_finish(&mut (*self_).lexer, &mut lookahead_end_byte);
+            ts_lexer_finish(&mut self_.lexer, &mut lookahead_end_byte);
 
             if found_token {
-                external_scanner_state_len = ts_parser__external_scanner_serialize(&mut *self_);
+                external_scanner_state_len = ts_parser__external_scanner_serialize(self_);
                 external_scanner_state_changed = !ts_external_scanner_state_eq(
                     ts_subtree_external_scanner_state(external_token),
-                    (*self_).lexer.debug_buffer.as_ptr(),
+                    self_.lexer.debug_buffer.as_ptr(),
                     external_scanner_state_len,
                 );
 
-                if (*self_).lexer.token_end_position.bytes <= current_position.bytes
+                if self_.lexer.token_end_position.bytes <= current_position.bytes
                     && !external_scanner_state_changed
                 {
                     let symbol = *(*lang).external_scanner.symbol_map.add(
-                        (*self_).lexer.data.result_symbol as usize,
+                        self_.lexer.data.result_symbol as usize,
                     );
                     let next_parse_state =
-                        ts_language_next_state((*self_).language, parse_state, symbol);
+                        ts_language_next_state(self_.language, parse_state, symbol);
                     let token_is_extra = next_parse_state == parse_state;
                     if error_mode
-                        || !ts_stack_has_advanced_since_error(&*(*self_).stack, version)
+                        || !ts_stack_has_advanced_since_error(&*self_.stack, version)
                         || token_is_extra
                     {
-                        LOG!(self_,
+                        LOG!(parser,
                             b"ignore_empty_external_token symbol:%s\0".as_ptr() as *const i8,
-                            SYM_NAME!(self_, *(*lang).external_scanner.symbol_map.add(
-                                (*self_).lexer.data.result_symbol as usize
+                            SYM_NAME!(parser, *(*lang).external_scanner.symbol_map.add(
+                                self_.lexer.data.result_symbol as usize
                             )));
                         found_token = false;
                     }
@@ -1054,45 +1058,45 @@ unsafe fn ts_parser__lex(
                 break;
             }
 
-            ts_lexer_reset(&mut (*self_).lexer, current_position);
-            (*self_).lexer.column_data = column_data;
+            ts_lexer_reset(&mut self_.lexer, current_position);
+            self_.lexer.column_data = column_data;
         }
 
-        LOG!(self_, b"lex_internal state:%d, row:%u, column:%u\0".as_ptr() as *const i8,
+        LOG!(parser, b"lex_internal state:%d, row:%u, column:%u\0".as_ptr() as *const i8,
             lex_mode.lex_state as i32,
             current_position.extent.row,
             current_position.extent.column);
-        ts_lexer_start(&mut (*self_).lexer);
-        found_token = ts_parser__call_main_lex_fn(&mut *self_, lex_mode);
-        ts_lexer_finish(&mut (*self_).lexer, &mut lookahead_end_byte);
+        ts_lexer_start(&mut self_.lexer);
+        found_token = ts_parser__call_main_lex_fn(self_, lex_mode);
+        ts_lexer_finish(&mut self_.lexer, &mut lookahead_end_byte);
         if found_token {
             break;
         }
 
         if !error_mode {
             error_mode = true;
-            lex_mode = ts_language_lex_mode_for_state((*self_).language, ERROR_STATE);
-            ts_lexer_reset(&mut (*self_).lexer, start_position);
+            lex_mode = ts_language_lex_mode_for_state(self_.language, ERROR_STATE);
+            ts_lexer_reset(&mut self_.lexer, start_position);
             continue;
         }
 
         if !skipped_error {
-            LOG!(self_, b"skip_unrecognized_character\0".as_ptr() as *const i8);
+            LOG!(parser, b"skip_unrecognized_character\0".as_ptr() as *const i8);
             skipped_error = true;
-            error_start_position = (*self_).lexer.token_start_position;
-            error_end_position = (*self_).lexer.token_start_position;
-            first_error_character = (*self_).lexer.data.lookahead;
+            error_start_position = self_.lexer.token_start_position;
+            error_end_position = self_.lexer.token_start_position;
+            first_error_character = self_.lexer.data.lookahead;
         }
 
-        if (*self_).lexer.current_position.bytes == error_end_position.bytes {
-            if ((*self_).lexer.data.eof.unwrap())(&(*self_).lexer.data as *const _) {
-                (*self_).lexer.data.result_symbol = ts_builtin_sym_error;
+        if self_.lexer.current_position.bytes == error_end_position.bytes {
+            if (self_.lexer.data.eof.unwrap())(&self_.lexer.data as *const _) {
+                self_.lexer.data.result_symbol = ts_builtin_sym_error;
                 break;
             }
-            ((*self_).lexer.data.advance.unwrap())(&mut (*self_).lexer.data, false);
+            (self_.lexer.data.advance.unwrap())(&mut self_.lexer.data, false);
         }
 
-        error_end_position = (*self_).lexer.current_position;
+        error_end_position = self_.lexer.current_position;
     }
 
     let result;
@@ -1101,52 +1105,51 @@ unsafe fn ts_parser__lex(
         let size = length_sub(error_end_position, error_start_position);
         let lookahead_bytes = lookahead_end_byte - error_end_position.bytes;
         result = ts_subtree_new_error(
-            &mut (*self_).tree_pool,
+            &mut self_.tree_pool,
             first_error_character,
             padding,
             size,
             lookahead_bytes,
             parse_state,
-            (*self_).language,
+            self_.language,
         );
     } else {
         let mut is_keyword = false;
-        let mut symbol = (*self_).lexer.data.result_symbol;
-        let padding = length_sub((*self_).lexer.token_start_position, start_position);
+        let mut symbol = self_.lexer.data.result_symbol;
+        let padding = length_sub(self_.lexer.token_start_position, start_position);
         let size = length_sub(
-            (*self_).lexer.token_end_position,
-            (*self_).lexer.token_start_position,
+            self_.lexer.token_end_position,
+            self_.lexer.token_start_position,
         );
-        let lookahead_bytes =
-            lookahead_end_byte - (*self_).lexer.token_end_position.bytes;
+        let lookahead_bytes = lookahead_end_byte - self_.lexer.token_end_position.bytes;
 
         if found_external_token {
             symbol = *(*lang).external_scanner.symbol_map.add(symbol as usize);
         } else if symbol == (*lang).keyword_capture_token && symbol != 0 {
-            let end_byte = (*self_).lexer.token_end_position.bytes;
-            ts_lexer_reset(&mut (*self_).lexer, (*self_).lexer.token_start_position);
-            ts_lexer_start(&mut (*self_).lexer);
+            let end_byte = self_.lexer.token_end_position.bytes;
+            ts_lexer_reset(&mut self_.lexer, self_.lexer.token_start_position);
+            ts_lexer_start(&mut self_.lexer);
 
-            is_keyword = ts_parser__call_keyword_lex_fn(&mut *self_);
+            is_keyword = ts_parser__call_keyword_lex_fn(self_);
 
             if is_keyword
-                && (*self_).lexer.token_end_position.bytes == end_byte
+                && self_.lexer.token_end_position.bytes == end_byte
                 && (ts_language_has_actions(
-                    (*self_).language,
+                    self_.language,
                     parse_state,
-                    (*self_).lexer.data.result_symbol,
+                    self_.lexer.data.result_symbol,
                 ) || ts_language_is_reserved_word(
-                    (*self_).language,
+                    self_.language,
                     parse_state,
-                    (*self_).lexer.data.result_symbol,
+                    self_.lexer.data.result_symbol,
                 ))
             {
-                symbol = (*self_).lexer.data.result_symbol;
+                symbol = self_.lexer.data.result_symbol;
             }
         }
 
         result = ts_subtree_new_leaf(
-            &mut (*self_).tree_pool,
+            &mut self_.tree_pool,
             symbol,
             padding,
             size,
@@ -1155,7 +1158,7 @@ unsafe fn ts_parser__lex(
             found_external_token,
             called_get_column,
             is_keyword,
-            (*self_).language,
+            self_.language,
         );
 
         if found_external_token {
@@ -1163,7 +1166,7 @@ unsafe fn ts_parser__lex(
             ts_external_scanner_state_init(
                 ptr::addr_of_mut!((*mut_result.ptr).data.external_scanner_state)
                     as *mut ExternalScannerState,
-                (*self_).lexer.debug_buffer.as_ptr(),
+                self_.lexer.debug_buffer.as_ptr(),
                 external_scanner_state_len,
             );
             (*mut_result.ptr).set_has_external_scanner_state_change(external_scanner_state_changed);
@@ -1171,8 +1174,8 @@ unsafe fn ts_parser__lex(
     }
 
     LOG_LOOKAHEAD!(
-        self_,
-        SYM_NAME!(self_, ts_subtree_symbol(result)),
+        parser,
+        SYM_NAME!(parser, ts_subtree_symbol(result)),
         ts_subtree_total_size(result).bytes
     );
     result
@@ -2255,7 +2258,7 @@ unsafe fn ts_parser__advance(
         // Otherwise, re-run the lexer.
         if needs_lex {
             needs_lex = false;
-            lookahead = ts_parser__lex(self_, version, state);
+            lookahead = ts_parser__lex(&mut *self_, version, state);
             if (*self_).has_scanner_error {
                 return false;
             }
