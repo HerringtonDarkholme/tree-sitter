@@ -997,7 +997,7 @@ pub unsafe fn ts_stack_new(subtree_pool: *mut SubtreePool) -> *mut Stack {
     (*self_).subtree_pool = subtree_pool;
     (*self_).base_node =
         stack_node_new(ptr::null_mut(), NULL_SUBTREE, false, 1, &mut (*self_).node_pool);
-    ts_stack_clear(self_);
+    ts_stack_clear(&mut *self_);
 
     self_
 }
@@ -1430,20 +1430,23 @@ pub unsafe fn ts_stack_resume(
 }
 
 /// Clear all versions, resetting to initial state.
-pub unsafe fn ts_stack_clear(self_: *mut Stack) {
-    stack_node_retain((*self_).base_node.as_mut());
-    for i in 0..(*self_).heads.size {
+pub unsafe fn ts_stack_clear(self_: &mut Stack) {
+    stack_node_retain(self_.base_node.as_mut());
+    let heads = &mut self_.heads;
+    let node_pool = &mut self_.node_pool;
+    let subtree_pool = &mut *self_.subtree_pool;
+    for i in 0..heads.size {
         stack_head_delete(
-            stack_head_mut(&mut *self_, i),
-            &mut (*self_).node_pool,
-            &mut *(*self_).subtree_pool,
+            stack_head_array_get_mut(heads, i),
+            node_pool,
+            subtree_pool,
         );
     }
-    array_clear(&mut (*self_).heads);
+    array_clear(heads);
     array_push(
-        &mut (*self_).heads,
+        heads,
         StackHead {
-            node: (*self_).base_node,
+            node: self_.base_node,
             status: StackStatus::Active,
             last_external_token: NULL_SUBTREE,
             lookahead_when_paused: NULL_SUBTREE,

@@ -2833,7 +2833,7 @@ pub unsafe extern "C" fn ts_parser_reset(self_: *mut TSParser) {
 
     reusable_node_clear(&mut (*self_).reusable_node);
     ts_lexer_reset(&mut (*self_).lexer, length_zero());
-    ts_stack_clear((*self_).stack);
+    ts_stack_clear(&mut *(*self_).stack);
     ts_parser__set_cached_token(self_, 0, NULL_SUBTREE, NULL_SUBTREE);
     if !(*self_).finished_tree.ptr.is_null() {
         ts_subtree_release(&mut (*self_).tree_pool, (*self_).finished_tree);
@@ -2990,7 +2990,7 @@ pub unsafe extern "C" fn ts_parser_parse(
         if !(*self_).finished_tree.ptr.is_null()
             && ts_subtree_error_cost((*self_).finished_tree) < min_error_cost
         {
-            ts_stack_clear((*self_).stack);
+            ts_stack_clear(&mut *(*self_).stack);
             break;
         }
 
