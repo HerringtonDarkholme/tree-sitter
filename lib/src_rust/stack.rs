@@ -354,8 +354,13 @@ unsafe fn stack_head_mut(self_: &mut Stack, version: StackVersion) -> &mut Stack
 }
 
 #[inline]
+unsafe fn stack_head_array_get(self_: &Array<StackHead>, version: StackVersion) -> &StackHead {
+    &*array_get(self_, version)
+}
+
+#[inline]
 unsafe fn stack_head_array_read(self_: &Array<StackHead>, version: StackVersion) -> StackHead {
-    ptr::read(array_get(self_, version))
+    stack_head_read_ref(stack_head_array_get(self_, version))
 }
 
 #[inline]
@@ -365,6 +370,11 @@ unsafe fn stack_head_array_write(
     head: StackHead,
 ) {
     ptr::write(array_get(self_, version), head);
+}
+
+#[inline]
+unsafe fn stack_head_read_ref(self_: &StackHead) -> StackHead {
+    ptr::read(self_)
 }
 
 #[inline]
@@ -1272,7 +1282,7 @@ pub unsafe fn ts_stack_renumber_version(
         &mut (*self_).node_pool,
         (*self_).subtree_pool,
     );
-    *target_head = ptr::read(source_head);
+    *target_head = stack_head_read_ref(source_head);
     array_erase(&mut (*self_).heads, v1);
 }
 
