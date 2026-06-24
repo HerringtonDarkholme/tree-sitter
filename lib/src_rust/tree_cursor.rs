@@ -955,16 +955,16 @@ pub unsafe extern "C" fn ts_tree_cursor_current_depth(
 pub unsafe extern "C" fn ts_tree_cursor_parent_node(
     _self: *const TSTreeCursor,
 ) -> TSNode {
-    let self_ = _self as *const TreeCursor;
-    let mut i = (*self_).stack.size as i32 - 2;
+    let cursor = &*(_self as *const TreeCursor);
+    let mut i = cursor.stack.size as i32 - 2;
     while i >= 0 {
-        let entry = tree_cursor_entry_array_get(&(*self_).stack, i as u32);
+        let entry = tree_cursor_entry_array_get(&cursor.stack, i as u32);
         let mut is_visible = true;
         let mut alias_symbol: TSSymbol = 0;
         if i > 0 {
-            let parent_entry = tree_cursor_entry_array_get(&(*self_).stack, i as u32 - 1);
+            let parent_entry = tree_cursor_entry_array_get(&cursor.stack, i as u32 - 1);
             alias_symbol = ts_language_alias_at(
-                (*(*self_).tree).language,
+                (*cursor.tree).language,
                 (*(*parent_entry.subtree).ptr).data.children.production_id as u32,
                 entry.structural_child_index,
             );
@@ -972,7 +972,7 @@ pub unsafe extern "C" fn ts_tree_cursor_parent_node(
         }
         if is_visible {
             return ts_node_new(
-                (*self_).tree,
+                cursor.tree,
                 entry.subtree,
                 entry.position,
                 alias_symbol,
