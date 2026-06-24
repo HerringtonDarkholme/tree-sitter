@@ -492,24 +492,23 @@ pub unsafe fn ts_lexer_reset(self_: &mut Lexer, position: Length) {
 }
 
 /// Prepare the lexer to start scanning a new token.
-pub unsafe fn ts_lexer_start(self_: *mut Lexer) {
-    let s = &mut *self_;
-    s.token_start_position = s.current_position;
-    s.token_end_position = LENGTH_UNDEFINED;
-    s.data.result_symbol = 0;
-    s.did_get_column = false;
-    if !ts_lexer__eof(&s.data) {
-        if s.chunk_size == 0 {
-            ts_lexer__get_chunk(s);
+pub unsafe fn ts_lexer_start(self_: &mut Lexer) {
+    self_.token_start_position = self_.current_position;
+    self_.token_end_position = LENGTH_UNDEFINED;
+    self_.data.result_symbol = 0;
+    self_.did_get_column = false;
+    if !ts_lexer__eof(&self_.data) {
+        if self_.chunk_size == 0 {
+            ts_lexer__get_chunk(self_);
         }
-        if s.lookahead_size == 0 {
-            ts_lexer__get_lookahead(s);
+        if self_.lookahead_size == 0 {
+            ts_lexer__get_lookahead(self_);
         }
-        if s.current_position.bytes == 0 {
-            if s.data.lookahead == BYTE_ORDER_MARK {
-                ts_lexer__advance(&mut s.data, true);
+        if self_.current_position.bytes == 0 {
+            if self_.data.lookahead == BYTE_ORDER_MARK {
+                ts_lexer__advance(&mut self_.data, true);
             }
-            ts_lexer__set_column_data(s, 0);
+            ts_lexer__set_column_data(self_, 0);
         }
     }
 }
