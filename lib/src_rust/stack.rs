@@ -1433,7 +1433,7 @@ pub unsafe fn ts_stack_print_dot_graph(
         let mut all_iterators_done = true;
 
         for i in 0..(*self_).iterators.size {
-            let iterator = ptr::read(array_get(&(*self_).iterators, i));
+            let iterator = stack_iterator_array_read(&(*self_).iterators, i);
             let mut node = iterator.node;
 
             for j in 0..visited_nodes.size {
