@@ -1396,9 +1396,8 @@ pub unsafe fn ts_stack_print_dot_graph(
         array_push(&mut (*self_).iterators, iter);
     }
 
-    let mut all_iterators_done = false;
-    while !all_iterators_done {
-        all_iterators_done = true;
+    loop {
+        let mut all_iterators_done = true;
 
         for i in 0..(*self_).iterators.size {
             let iterator = ptr::read(array_get(&(*self_).iterators, i));
@@ -1500,6 +1499,9 @@ pub unsafe fn ts_stack_print_dot_graph(
             }
 
             array_push(&mut visited_nodes, node);
+        }
+        if all_iterators_done {
+            break;
         }
     }
 
