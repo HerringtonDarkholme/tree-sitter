@@ -1425,7 +1425,7 @@ unsafe fn ts_parser__select_children(
 // ---------------------------------------------------------------------------
 
 unsafe fn ts_parser__shift(
-    self_: *mut TSParser,
+    self_: &mut TSParser,
     version: StackVersion,
     state: TSStateId,
     lookahead: Subtree,
@@ -1434,15 +1434,15 @@ unsafe fn ts_parser__shift(
     let is_leaf = ts_subtree_child_count(lookahead) == 0;
     let mut subtree_to_push = lookahead;
     if extra != ts_subtree_extra(lookahead) && is_leaf {
-        let mut result = ts_subtree_make_mut(&mut (*self_).tree_pool, lookahead);
+        let mut result = ts_subtree_make_mut(&mut self_.tree_pool, lookahead);
         ts_subtree_set_extra(&mut result, extra);
         subtree_to_push = ts_subtree_from_mut(result);
     }
 
-    ts_stack_push((*self_).stack, version, subtree_to_push, !is_leaf, state);
+    ts_stack_push(self_.stack, version, subtree_to_push, !is_leaf, state);
     if ts_subtree_has_external_tokens(subtree_to_push) {
         ts_stack_set_last_external_token(
-            &mut *(*self_).stack,
+            &mut *self_.stack,
             version,
             ts_subtree_last_external_token(subtree_to_push),
         );
@@ -2321,9 +2321,21 @@ unsafe fn ts_parser__advance(
                             state,
                             ts_subtree_symbol(lookahead),
                         );
-                        ts_parser__shift(self_, version, next_state, lookahead, action.shift.extra);
+                        ts_parser__shift(
+                            &mut *self_,
+                            version,
+                            next_state,
+                            lookahead,
+                            action.shift.extra,
+                        );
                     } else {
-                        ts_parser__shift(self_, version, next_state, lookahead, action.shift.extra);
+                        ts_parser__shift(
+                            &mut *self_,
+                            version,
+                            next_state,
+                            lookahead,
+                            action.shift.extra,
+                        );
                     }
                     if did_reuse {
                         reusable_node_advance(&mut (*self_).reusable_node);
