@@ -371,6 +371,11 @@ unsafe fn stack_iterator_array_get_mut(
     &mut *array_get(self_, index)
 }
 
+#[inline]
+unsafe fn stack_iterator_array_read(self_: &Array<StackIterator>, index: u32) -> StackIterator {
+    ptr::read(array_get(self_, index))
+}
+
 // ---------------------------------------------------------------------------
 // Internal (static) functions
 // ---------------------------------------------------------------------------
@@ -734,7 +739,7 @@ unsafe fn stack__iter(
                         continue;
                     }
                     link = (*node).links[j as usize];
-                    let current_iterator = ptr::read(array_get(&(*self_).iterators, i));
+                    let current_iterator = stack_iterator_array_read(&(*self_).iterators, i);
                     array_push(&mut (*self_).iterators, current_iterator);
                     next_iterator = array_back(&(*self_).iterators);
                     ts_subtree_array_copy(
