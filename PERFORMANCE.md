@@ -666,3 +666,68 @@ Source-code analysis:
   pointer dereferences to internal call boundaries and use Rust references
   within the helper bodies.
 - No >5% Rust checkpoint regression was observed and no rollback was performed.
+
+### 2026-06-24 18:31 EDT
+
+- Repo head: `cc8f8619`
+- Batch base: `0c0b47af`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: 10 small Rust-only raw-pointer/reference cleanups through
+  `Use reference for lexer reset`
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+Repeat run used for checkpoint recording:
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 25402.2 | 24268.2 | +4.67% |
+| TypeScript error parses | 32 | 1690.5 | 1641.7 | +2.97% |
+| JavaScript normal parses | 2 | 17379.8 | 16703.1 | +4.05% |
+| JavaScript error parses | 37 | 2021.6 | 2006.3 | +0.76% |
+| Overall parser throughput | 82 | 2313.2 | 2263.9 | +2.18% |
+
+The first run of the same command produced overall Rust throughput of 2260.2
+bytes/ms and C throughput of 2245.3 bytes/ms. Because the repeat run improved
+Rust overall throughput by about 2.35% without source changes, the first run
+was treated as noisy for checkpoint comparison.
+
+Prior checkpoint at `254f42a3` recorded Rust overall throughput of 2323.4
+bytes/ms on the same TypeScript/JavaScript gate. The repeat run measured
+-0.44% Rust throughput versus that checkpoint, which is below the 5% regression
+investigation threshold.
+
+Per-case Rust-vs-C regressions above the 5% threshold on the repeat run:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `javascript error compound-statement-without-trailing-newline.py` | 2516.6 | 3184.4 | 20.97% |
+| `typescript normal refactorProvider.ts` | 21901.3 | 23436.7 | 6.55% |
+| `javascript error crlf-line-endings.py` | 1354.3 | 1445.1 | 6.29% |
+
+Source-code analysis:
+
+- This batch changed only Rust-internal function receivers and call sites in
+  `subtree.rs`, `parser.rs`, and `lexer.rs`. It did not change public
+  `#[no_mangle] extern "C"` APIs, generated parser templates, `#[repr(C)]`
+  layouts, parse tables, allocation sizes, or FFI struct field order.
+- The live generated header inputs `templates/alloc.h`, `templates/array.h`,
+  and `parser.h.inc` were not edited.
+- Parser changes in this batch preserve the same parse-advance control flow:
+  lexing setup, cached token reuse, progress checks, parse action dispatch,
+  reductions, lookahead breakdown, stack halt/pause, keyword fallback, and
+  error detection all call the same operations in the same order. The edits
+  replace raw parser-pointer dereferences with the existing `&mut TSParser`
+  receiver.
+- Lexer changes only convert private Rust receivers for `ts_lexer_mark_end`,
+  `ts_lexer_set_input`, and `ts_lexer_reset` from raw pointers to references.
+  `ts_lexer_reset` required saving `token_start_position` before borrowing the
+  lexer mutably; this preserves the same value and call order.
+- The persistent `javascript error compound-statement-without-trailing-newline.py`
+  Rust-vs-C slowdown is a C comparison in this run, not a >5% Rust checkpoint
+  regression. The changed code does not contain case-specific logic for this
+  fixture, and the aggregate Rust result remained within normal run-to-run
+  variation versus the prior checkpoint. No rollback was performed.
