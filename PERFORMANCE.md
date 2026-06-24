@@ -614,3 +614,55 @@ Source-code analysis:
   overall Rust throughput improved by about 1% versus the previous Rust
   checkpoint, no >5% Rust checkpoint regression was observed and no rollback
   was performed.
+
+### 2026-06-24 18:07 EDT
+
+- Repo head: `254f42a3`
+- Batch base: `5ac7f910`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: 10 small Rust-only parser raw-pointer/reference cleanups
+  through `Use reference for parser recovery`
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 25638.5 | 24619.3 | +4.14% |
+| TypeScript error parses | 32 | 1680.3 | 1664.6 | +0.95% |
+| JavaScript normal parses | 2 | 17558.2 | 16576.5 | +5.92% |
+| JavaScript error parses | 37 | 2064.3 | 1981.8 | +4.16% |
+| Overall parser throughput | 82 | 2323.4 | 2272.4 | +2.24% |
+
+Prior checkpoint at `737fab65` recorded Rust overall throughput of 2291.6
+bytes/ms on the same TypeScript/JavaScript gate, so this batch measured +1.39%
+absolute Rust throughput. That is below the 5% regression investigation
+threshold and in the favorable direction.
+
+Per-case Rust-vs-C regressions above the 5% threshold: none reported by the
+perf gate.
+
+Source-code analysis:
+
+- This batch changed only Rust-internal parser helper receivers and call sites.
+  It did not change public `#[no_mangle] extern "C"` APIs, generated parser
+  templates, `#[repr(C)]` layouts, parse table data, allocation sizes, or FFI
+  struct field order.
+- The generated header templates are live compatibility surface:
+  `ALLOC_HEADER`, `ARRAY_HEADER`, and `PARSER_HEADER` are written by
+  `crates/generate/src/generate.rs` and used by CLI test fixtures. This batch
+  did not edit `templates/alloc.h`, `templates/array.h`, or `parser.h.inc`.
+- The old private C headers still declare internal functions such as stack and
+  subtree helpers, but these Rust helpers are not exported C ABI symbols. The
+  signature cleanups remain private Rust call-graph changes unless a symbol is
+  explicitly exposed through `#[no_mangle] extern "C"`.
+- Parser stack breakdown, lexing, reusable-node lookup, tree selection,
+  progress checks, lookahead breakdown, potential reductions, error handling,
+  reductions, and recovery preserve the same stack operations, subtree
+  retain/release behavior, lexer calls, token-cache behavior, logging events,
+  error-cost checks, and recovery state transitions. The edits move raw parser
+  pointer dereferences to internal call boundaries and use Rust references
+  within the helper bodies.
+- No >5% Rust checkpoint regression was observed and no rollback was performed.
