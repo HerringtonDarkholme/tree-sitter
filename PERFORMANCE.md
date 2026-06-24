@@ -47,3 +47,34 @@ Regressions above the 5% per-case threshold:
 This is a smoke baseline, not a final release benchmark. Use 10+ repetitions
 for optimization decisions and record the gain against this table until a
 broader baseline replaces it.
+
+## Checkpoints
+
+### 2026-06-24 13:33 EDT
+
+- Repo head: `51ab1851`
+- Batch base: `a2956575`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: 10 small Rust-core cleanups through `Use reference for breakdown lookahead`
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 25827.5 | 23528.3 | +9.77% |
+| TypeScript error parses | 32 | 1663.3 | 1567.1 | +6.14% |
+| JavaScript normal parses | 2 | 17037.7 | 15002.8 | +13.56% |
+| JavaScript error parses | 37 | 2036.1 | 1966.3 | +3.55% |
+| Overall parser throughput | 82 | 2296.5 | 2180.1 | +5.34% |
+
+Prior checkpoint at `a2956575` reported overall +4.77% on the same
+TypeScript/JavaScript gate, so this batch is +0.57 percentage points overall.
+
+Regressions above the 5% per-case threshold:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `builderStatePublic.ts` | 18691.6 | 20427.8 | 8.50% |
