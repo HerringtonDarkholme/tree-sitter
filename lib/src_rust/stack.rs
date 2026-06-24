@@ -978,7 +978,7 @@ unsafe extern "C" fn summarize_stack_callback(
 }
 
 // ===========================================================================
-// Exported functions from stack.h (called by parser.c)
+// Internal stack helpers used by the Rust parser.
 // ===========================================================================
 
 /// Create a new parse stack.
