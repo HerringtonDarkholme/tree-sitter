@@ -510,6 +510,10 @@ unsafe fn stack_slice_array_read(self_: &StackSliceArray, index: u32) -> StackSl
     ptr::read(stack_slice_array_get(self_, index))
 }
 
+unsafe fn stack_slice_subtrees_read_ref(self_: &StackSlice) -> SubtreeArray {
+    ptr::read(&self_.subtrees)
+}
+
 unsafe fn ts_reduce_action_set_add(
     self_: &mut ReduceActionSet,
     new_action: ReduceAction,
@@ -1578,8 +1582,7 @@ unsafe fn ts_parser__accept(
 
     let pop = ts_stack_pop_all((*self_).stack, version);
     for i in 0..pop.size {
-        let trees_ptr = &mut (*array_get(&pop as *const StackSliceArray, i)).subtrees;
-        let mut trees = ptr::read(trees_ptr);
+        let mut trees = stack_slice_subtrees_read_ref(stack_slice_array_get(&pop, i));
 
         let mut root = NULL_SUBTREE;
         let mut j = trees.size as i64 - 1;
