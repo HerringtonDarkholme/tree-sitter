@@ -659,23 +659,24 @@ unsafe fn ts_parser__breakdown_top_of_stack(
 }
 
 unsafe fn ts_parser__breakdown_lookahead(
-    self_: *mut TSParser,
+    self_: &mut TSParser,
     lookahead: &mut Subtree,
     state: TSStateId,
-    reusable_node: &mut ReusableNode,
 ) {
+    let parser = self_ as *mut TSParser;
+    let reusable_node = &mut self_.reusable_node;
     let mut did_descend = false;
     let mut tree = reusable_node_tree(reusable_node);
     while ts_subtree_child_count(tree) > 0 && ts_subtree_parse_state(tree) != state {
-        LOG!(self_, b"state_mismatch sym:%s\0".as_ptr() as *const i8,
-            SYM_NAME!(self_, ts_subtree_symbol(tree)));
+        LOG!(parser, b"state_mismatch sym:%s\0".as_ptr() as *const i8,
+            SYM_NAME!(parser, ts_subtree_symbol(tree)));
         reusable_node_descend(reusable_node);
         tree = reusable_node_tree(reusable_node);
         did_descend = true;
     }
 
     if did_descend {
-        ts_subtree_release(&mut (*self_).tree_pool, *lookahead);
+        ts_subtree_release(&mut self_.tree_pool, *lookahead);
         *lookahead = tree;
         ts_subtree_retain(*lookahead);
     }
@@ -2176,7 +2177,7 @@ unsafe fn ts_parser__handle_error(
     // recognize it.
     let mut lookahead = lookahead;
     if ts_subtree_child_count(lookahead) > 0 {
-        ts_parser__breakdown_lookahead(self_, &mut lookahead, ERROR_STATE, &mut (*self_).reusable_node);
+        ts_parser__breakdown_lookahead(&mut *self_, &mut lookahead, ERROR_STATE);
     }
     ts_parser__recover(self_, version, lookahead);
 
@@ -2319,10 +2320,9 @@ unsafe fn ts_parser__advance(
 
                     if ts_subtree_child_count(lookahead) > 0 {
                         ts_parser__breakdown_lookahead(
-                            self_,
+                            &mut *self_,
                             &mut lookahead,
                             state,
-                            &mut (*self_).reusable_node,
                         );
                         let next_state = ts_language_next_state(
                             (*self_).language,
@@ -2385,10 +2385,9 @@ unsafe fn ts_parser__advance(
                 TSPARSE_ACTION_TYPE_RECOVER => {
                     if ts_subtree_child_count(lookahead) > 0 {
                         ts_parser__breakdown_lookahead(
-                            self_,
+                            &mut *self_,
                             &mut lookahead,
                             ERROR_STATE,
-                            &mut (*self_).reusable_node,
                         );
                     }
 
