@@ -147,6 +147,11 @@ unsafe fn stack_pop(arr: &mut TreeCursorEntryArray) -> TreeCursorEntry {
     ptr::read(arr.contents.add(arr.size as usize))
 }
 
+#[inline]
+unsafe fn tree_cursor_read_ref(cursor: &TreeCursor) -> TreeCursor {
+    ptr::read(cursor)
+}
+
 // ---------------------------------------------------------------------------
 // Internal helpers — skeletons
 // ---------------------------------------------------------------------------
@@ -186,7 +191,7 @@ unsafe fn iterator_new(
         descendant_index: 0,
     });
     Iterator {
-        cursor: ptr::read(cursor),
+        cursor: tree_cursor_read_ref(&*cursor),
         language,
         visible_depth: 1,
         in_padding: false,
