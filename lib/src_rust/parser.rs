@@ -1245,20 +1245,21 @@ unsafe fn ts_parser__has_included_range_difference(
 }
 
 unsafe fn ts_parser__reuse_node(
-    self_: *mut TSParser,
+    self_: &mut TSParser,
     version: StackVersion,
     state: &mut TSStateId,
     position: u32,
     last_external_token: Subtree,
     table_entry: &mut TableEntry,
 ) -> Subtree {
+    let parser = self_ as *mut TSParser;
     let mut result;
     loop {
-        result = reusable_node_tree(&mut (*self_).reusable_node);
+        result = reusable_node_tree(&mut self_.reusable_node);
         if result.ptr.is_null() {
             break;
         }
-        let byte_offset = reusable_node_byte_offset(&mut (*self_).reusable_node);
+        let byte_offset = reusable_node_byte_offset(&mut self_.reusable_node);
         let mut end_byte_offset = byte_offset + ts_subtree_total_bytes(result);
 
         // Do not reuse an EOF node if the included ranges array has changes
@@ -1268,27 +1269,27 @@ unsafe fn ts_parser__reuse_node(
         }
 
         if byte_offset > position {
-            LOG!(self_, b"before_reusable_node symbol:%s\0".as_ptr() as *const i8,
-                SYM_NAME!(self_, ts_subtree_symbol(result)));
+            LOG!(parser, b"before_reusable_node symbol:%s\0".as_ptr() as *const i8,
+                SYM_NAME!(parser, ts_subtree_symbol(result)));
             break;
         }
 
         if byte_offset < position {
-            LOG!(self_, b"past_reusable_node symbol:%s\0".as_ptr() as *const i8,
-                SYM_NAME!(self_, ts_subtree_symbol(result)));
-            if end_byte_offset <= position || !reusable_node_descend(&mut (*self_).reusable_node) {
-                reusable_node_advance(&mut (*self_).reusable_node);
+            LOG!(parser, b"past_reusable_node symbol:%s\0".as_ptr() as *const i8,
+                SYM_NAME!(parser, ts_subtree_symbol(result)));
+            if end_byte_offset <= position || !reusable_node_descend(&mut self_.reusable_node) {
+                reusable_node_advance(&mut self_.reusable_node);
             }
             continue;
         }
 
         if !ts_subtree_external_scanner_state_eq(
-            (*self_).reusable_node.last_external_token,
+            self_.reusable_node.last_external_token,
             last_external_token,
         ) {
-            LOG!(self_, b"reusable_node_has_different_external_scanner_state symbol:%s\0".as_ptr() as *const i8,
-                SYM_NAME!(self_, ts_subtree_symbol(result)));
-            reusable_node_advance(&mut (*self_).reusable_node);
+            LOG!(parser, b"reusable_node_has_different_external_scanner_state symbol:%s\0".as_ptr() as *const i8,
+                SYM_NAME!(parser, ts_subtree_symbol(result)));
+            reusable_node_advance(&mut self_.reusable_node);
             continue;
         }
 
@@ -1301,33 +1302,33 @@ unsafe fn ts_parser__reuse_node(
             reason = b"is_missing\0".as_ptr() as *const i8;
         } else if ts_subtree_is_fragile(result) {
             reason = b"is_fragile\0".as_ptr() as *const i8;
-        } else if ts_parser__has_included_range_difference(&*self_, byte_offset, end_byte_offset) {
+        } else if ts_parser__has_included_range_difference(self_, byte_offset, end_byte_offset) {
             reason = b"contains_different_included_range\0".as_ptr() as *const i8;
         }
 
         if !reason.is_null() {
-            LOG!(self_, b"cant_reuse_node_%s tree:%s\0".as_ptr() as *const i8,
-                reason, SYM_NAME!(self_, ts_subtree_symbol(result)));
-            if !reusable_node_descend(&mut (*self_).reusable_node) {
-                reusable_node_advance(&mut (*self_).reusable_node);
-                ts_parser__breakdown_top_of_stack(&mut *self_, version);
-                *state = ts_stack_state(&*(*self_).stack, version);
+            LOG!(parser, b"cant_reuse_node_%s tree:%s\0".as_ptr() as *const i8,
+                reason, SYM_NAME!(parser, ts_subtree_symbol(result)));
+            if !reusable_node_descend(&mut self_.reusable_node) {
+                reusable_node_advance(&mut self_.reusable_node);
+                ts_parser__breakdown_top_of_stack(self_, version);
+                *state = ts_stack_state(&*self_.stack, version);
             }
             continue;
         }
 
         let leaf_symbol = ts_subtree_leaf_symbol(result);
-        ts_language_table_entry((*self_).language, *state, leaf_symbol, table_entry);
-        if !ts_parser__can_reuse_first_leaf(&*self_, *state, result, table_entry) {
-            LOG!(self_, b"cant_reuse_node symbol:%s, first_leaf_symbol:%s\0".as_ptr() as *const i8,
-                SYM_NAME!(self_, ts_subtree_symbol(result)),
-                SYM_NAME!(self_, leaf_symbol));
-            reusable_node_advance_past_leaf(&mut (*self_).reusable_node);
+        ts_language_table_entry(self_.language, *state, leaf_symbol, table_entry);
+        if !ts_parser__can_reuse_first_leaf(self_, *state, result, table_entry) {
+            LOG!(parser, b"cant_reuse_node symbol:%s, first_leaf_symbol:%s\0".as_ptr() as *const i8,
+                SYM_NAME!(parser, ts_subtree_symbol(result)),
+                SYM_NAME!(parser, leaf_symbol));
+            reusable_node_advance_past_leaf(&mut self_.reusable_node);
             break;
         }
 
-        LOG!(self_, b"reuse_node symbol:%s\0".as_ptr() as *const i8,
-            SYM_NAME!(self_, ts_subtree_symbol(result)));
+        LOG!(parser, b"reuse_node symbol:%s\0".as_ptr() as *const i8,
+            SYM_NAME!(parser, ts_subtree_symbol(result)));
         ts_subtree_retain(result);
         return result;
     }
@@ -2229,7 +2230,7 @@ unsafe fn ts_parser__advance(
     // If possible, reuse a node from the previous syntax tree.
     if allow_node_reuse {
         lookahead = ts_parser__reuse_node(
-            self_,
+            &mut *self_,
             version,
             &mut state,
             position,
