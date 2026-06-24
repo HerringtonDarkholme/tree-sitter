@@ -483,8 +483,9 @@ pub unsafe extern "C" fn ts_range_array_intersects(
     start_byte: u32,
     end_byte: u32,
 ) -> bool {
-    for i in start_index..(*self_).size {
-        let range = array_get_range(&*self_, i);
+    let ranges = &*self_;
+    for i in start_index..ranges.size {
+        let range = array_get_range(ranges, i);
         if range.end_byte > start_byte {
             if range.start_byte >= end_byte {
                 break;
