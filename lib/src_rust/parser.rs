@@ -2796,8 +2796,9 @@ pub unsafe extern "C" fn ts_parser_print_dot_graphs(
     self_: *mut TSParser,
     fd: i32,
 ) {
-    if !(*self_).dot_graph_file.is_null() {
-        fclose((*self_).dot_graph_file);
+    let parser = &mut *self_;
+    if !parser.dot_graph_file.is_null() {
+        fclose(parser.dot_graph_file);
     }
 
     if fd >= 0 {
@@ -2806,14 +2807,14 @@ pub unsafe extern "C" fn ts_parser_print_dot_graphs(
             extern "C" {
                 fn _fdopen(fd: i32, mode: *const i8) -> *mut c_void;
             }
-            (*self_).dot_graph_file = _fdopen(fd, b"a\0".as_ptr() as *const i8);
+            parser.dot_graph_file = _fdopen(fd, b"a\0".as_ptr() as *const i8);
         }
         #[cfg(not(target_os = "windows"))]
         {
-            (*self_).dot_graph_file = fdopen(fd, b"a\0".as_ptr() as *const i8);
+            parser.dot_graph_file = fdopen(fd, b"a\0".as_ptr() as *const i8);
         }
     } else {
-        (*self_).dot_graph_file = ptr::null_mut();
+        parser.dot_graph_file = ptr::null_mut();
     }
 }
 
