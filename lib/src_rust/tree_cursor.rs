@@ -468,8 +468,8 @@ unsafe fn ts_tree_cursor_goto_sibling_internal(
 
 #[inline]
 pub unsafe fn ts_tree_cursor_current_subtree(_self: *const TSTreeCursor) -> Subtree {
-    let self_ = _self as *const TreeCursor;
-    let last_entry = tree_cursor_entry_array_back(&(*self_).stack);
+    let cursor = &*(_self as *const TreeCursor);
+    let last_entry = tree_cursor_entry_array_back(&cursor.stack);
     *last_entry.subtree
 }
 
