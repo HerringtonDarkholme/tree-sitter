@@ -1042,17 +1042,17 @@ pub unsafe extern "C" fn ts_tree_cursor_current_field_name(
 pub unsafe extern "C" fn ts_tree_cursor_copy(
     _cursor: *const TSTreeCursor,
 ) -> TSTreeCursor {
-    let cursor = _cursor as *const TreeCursor;
+    let cursor = &*(_cursor as *const TreeCursor);
     let mut res = TSTreeCursor {
         tree: ptr::null(),
         id: ptr::null(),
         context: [0, 0, 0],
     };
-    let copy = &mut res as *mut TSTreeCursor as *mut TreeCursor;
-    (*copy).tree = (*cursor).tree;
-    (*copy).root_alias_symbol = (*cursor).root_alias_symbol;
-    array_init(&mut (*copy).stack);
-    array_push_all(&mut (*copy).stack, &(*cursor).stack);
+    let copy = &mut *(&mut res as *mut TSTreeCursor as *mut TreeCursor);
+    copy.tree = cursor.tree;
+    copy.root_alias_symbol = cursor.root_alias_symbol;
+    array_init(&mut copy.stack);
+    array_push_all(&mut copy.stack, &cursor.stack);
     res
 }
 
@@ -1061,10 +1061,10 @@ pub unsafe extern "C" fn ts_tree_cursor_reset_to(
     _dst: *mut TSTreeCursor,
     _src: *const TSTreeCursor,
 ) {
-    let cursor = _src as *const TreeCursor;
-    let copy = _dst as *mut TreeCursor;
-    (*copy).tree = (*cursor).tree;
-    (*copy).root_alias_symbol = (*cursor).root_alias_symbol;
-    array_clear(&mut (*copy).stack);
-    array_push_all(&mut (*copy).stack, &(*cursor).stack);
+    let cursor = &*(_src as *const TreeCursor);
+    let copy = &mut *(_dst as *mut TreeCursor);
+    copy.tree = cursor.tree;
+    copy.root_alias_symbol = cursor.root_alias_symbol;
+    array_clear(&mut copy.stack);
+    array_push_all(&mut copy.stack, &cursor.stack);
 }
