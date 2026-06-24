@@ -616,7 +616,7 @@ unsafe fn ts_parser__breakdown_top_of_stack(
         let mut pending = false;
         for i in 0..pop.size {
             let mut slice = stack_slice_array_read(&pop, i);
-            let mut state = ts_stack_state((*self_).stack, slice.version);
+            let mut state = ts_stack_state(&*(*self_).stack, slice.version);
             let parent = subtree_array_get(&slice.subtrees, 0);
 
             let n = ts_subtree_child_count(parent);
@@ -741,7 +741,7 @@ unsafe fn ts_parser__version_status(
         cost,
         node_count: ts_stack_node_count_since_error(&mut *(*self_).stack, version),
         dynamic_precedence: ts_stack_dynamic_precedence(&*(*self_).stack, version),
-        is_in_error: is_paused || ts_stack_state((*self_).stack, version) == ERROR_STATE,
+        is_in_error: is_paused || ts_stack_state(&*(*self_).stack, version) == ERROR_STATE,
     }
 }
 
@@ -1308,7 +1308,7 @@ unsafe fn ts_parser__reuse_node(
             if !reusable_node_descend(&mut (*self_).reusable_node) {
                 reusable_node_advance(&mut (*self_).reusable_node);
                 ts_parser__breakdown_top_of_stack(self_, version);
-                *state = ts_stack_state((*self_).stack, version);
+                *state = ts_stack_state(&*(*self_).stack, version);
             }
             continue;
         }
@@ -1546,7 +1546,7 @@ unsafe fn ts_parser__reduce(
             }
         }
 
-        let state = ts_stack_state((*self_).stack, slice_version);
+        let state = ts_stack_state(&*(*self_).stack, slice_version);
         let next_state = ts_language_next_state((*self_).language, state, symbol);
         if end_of_non_terminal_extra && next_state == state {
             (*parent.ptr).set_extra(true);
@@ -1696,7 +1696,7 @@ unsafe fn ts_parser__do_all_potential_reductions(
             continue;
         }
 
-        let state = ts_stack_state((*self_).stack, version);
+        let state = ts_stack_state(&*(*self_).stack, version);
         let mut has_shift_action = false;
         array_clear(&mut (*self_).reduce_actions);
 
@@ -1796,7 +1796,7 @@ unsafe fn ts_parser__recover_to_state(
             continue;
         }
 
-        if ts_stack_state((*self_).stack, slice.version) != goal_state {
+        if ts_stack_state(&*(*self_).stack, slice.version) != goal_state {
             ts_stack_halt(&mut *(*self_).stack, slice.version);
             ts_subtree_array_delete(&mut (*self_).tree_pool, &mut slice.subtrees);
             array_erase(&mut pop, i);
@@ -1882,7 +1882,7 @@ unsafe fn ts_parser__recover(
             // Check for redundant versions
             let would_merge = 'merge: {
                 for j in 0..previous_version_count {
-                    if ts_stack_state((*self_).stack, j) == entry.state
+                    if ts_stack_state(&*(*self_).stack, j) == entry.state
                         && ts_stack_position((*self_).stack, j).bytes == position.bytes
                     {
                         break 'merge true;
@@ -2087,7 +2087,7 @@ unsafe fn ts_parser__handle_error(
     let mut v = version;
     while v < version_count {
         if !did_insert_missing_token {
-            let state = ts_stack_state((*self_).stack, v);
+            let state = ts_stack_state(&*(*self_).stack, v);
             let language = (*self_).language as *const TSLanguageFull;
             let mut missing_symbol: TSSymbol = 1;
             while (missing_symbol as u32) < (*language).token_count {
@@ -2138,7 +2138,7 @@ unsafe fn ts_parser__handle_error(
                             self_,
                             b"recover_with_missing symbol:%s, state:%u\0".as_ptr() as *const i8,
                             SYM_NAME!(self_, missing_symbol),
-                            ts_stack_state((*self_).stack, version_with_missing_tree) as u32
+                            ts_stack_state(&*(*self_).stack, version_with_missing_tree) as u32
                         );
                         did_insert_missing_token = true;
                         break;
@@ -2214,7 +2214,7 @@ unsafe fn ts_parser__advance(
     version: StackVersion,
     allow_node_reuse: bool,
 ) -> bool {
-    let mut state = ts_stack_state((*self_).stack, version);
+    let mut state = ts_stack_state(&*(*self_).stack, version);
     let position = ts_stack_position((*self_).stack, version).bytes;
     let last_external_token = ts_stack_last_external_token(&*(*self_).stack, version);
 
@@ -2391,7 +2391,7 @@ unsafe fn ts_parser__advance(
         if last_reduction_version != STACK_VERSION_NONE {
             ts_stack_renumber_version((*self_).stack, last_reduction_version, version);
             LOG_STACK!(self_);
-            state = ts_stack_state((*self_).stack, version);
+            state = ts_stack_state(&*(*self_).stack, version);
 
             // At the end of a non-terminal extra rule, the lexer will return a
             // null subtree, because the parser needs to perform a fixed reduction
@@ -2465,7 +2465,7 @@ unsafe fn ts_parser__advance(
         // reuse that previous subtree. Remove it from the stack, and in its place,
         // push each of its children. Then try again to process the current lookahead.
         if ts_parser__breakdown_top_of_stack(self_, version) {
-            state = ts_stack_state((*self_).stack, version);
+            state = ts_stack_state(&*(*self_).stack, version);
             ts_subtree_release(&mut (*self_).tree_pool, lookahead);
             needs_lex = true;
             continue;
@@ -2662,7 +2662,7 @@ unsafe fn ts_parser__balance_subtree(self_: &mut TSParser) -> bool {
 unsafe fn ts_parser_has_outstanding_parse(self_: &TSParser) -> bool {
     self_.canceled_balancing
         || !self_.external_scanner_payload.is_null()
-        || ts_stack_state(self_.stack, 0) != 1
+        || ts_stack_state(&*self_.stack, 0) != 1
         || ts_stack_node_count_since_error(&mut *self_.stack, 0) != 0
 }
 
@@ -2954,7 +2954,7 @@ pub unsafe extern "C" fn ts_parser_parse(
                     b"process version:%u, version_count:%u, state:%d, row:%u, col:%u\0".as_ptr() as *const i8,
                     version,
                     ts_stack_version_count(&*(*self_).stack),
-                    ts_stack_state((*self_).stack, version) as i32,
+                    ts_stack_state(&*(*self_).stack, version) as i32,
                     ts_stack_position((*self_).stack, version).extent.row,
                     ts_stack_position((*self_).stack, version).extent.column
                 );

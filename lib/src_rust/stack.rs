@@ -1050,8 +1050,8 @@ pub unsafe fn ts_stack_halted_version_count(self_: &Stack) -> u32 {
 }
 
 /// Get the state at the top of a version.
-pub unsafe fn ts_stack_state(self_: *const Stack, version: StackVersion) -> TSStateId {
-    (*stack_head(&*self_, version).node).state
+pub unsafe fn ts_stack_state(self_: &Stack, version: StackVersion) -> TSStateId {
+    (*stack_head(self_, version).node).state
 }
 
 /// Get the position of a version.
