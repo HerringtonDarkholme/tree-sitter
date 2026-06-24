@@ -519,6 +519,10 @@ unsafe fn stack_summary_array_get(self_: &StackSummary, index: u32) -> &StackSum
     &*array_get(self_ as *const StackSummary, index)
 }
 
+unsafe fn mutable_subtree_array_back(self_: &MutableSubtreeArray) -> MutableSubtree {
+    *array_back(self_ as *const MutableSubtreeArray as *const Array<MutableSubtree>)
+}
+
 unsafe fn ts_reduce_action_set_add(
     self_: &mut ReduceActionSet,
     new_action: ReduceAction,
@@ -2588,10 +2592,7 @@ unsafe fn ts_parser__balance_subtree(self_: *mut TSParser) -> bool {
             return false;
         }
 
-        let tree = *array_get(
-            &(*self_).tree_pool.tree_stack as *const MutableSubtreeArray as *const Array<MutableSubtree>,
-            (*self_).tree_pool.tree_stack.size - 1,
-        );
+        let tree = mutable_subtree_array_back(&(*self_).tree_pool.tree_stack);
 
         if (*tree.ptr).data.children.repeat_depth > 0 {
             let tree_subtree = ts_subtree_from_mut(tree);
