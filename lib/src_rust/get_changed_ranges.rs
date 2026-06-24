@@ -622,12 +622,12 @@ pub unsafe extern "C" fn ts_subtree_get_changed_ranges(
             comparison = IteratorComparison::IteratorMayDiffer;
         }
 
-        let mut is_changed = false;
-        match comparison {
+        let is_changed = match comparison {
             // If the subtrees are definitely identical, move to the end
             // of both subtrees.
             IteratorComparison::IteratorMatches => {
                 next_position = iterator_end_position(&old_iter);
+                false
             }
 
             // If the subtrees might differ internally, descend into both
@@ -635,30 +635,33 @@ pub unsafe extern "C" fn ts_subtree_get_changed_ranges(
             IteratorComparison::IteratorMayDiffer => {
                 if iterator_descend(&mut old_iter, position.bytes) {
                     if !iterator_descend(&mut new_iter, position.bytes) {
-                        is_changed = true;
                         next_position = iterator_end_position(&old_iter);
+                        true
+                    } else {
+                        false
                     }
                 } else if iterator_descend(&mut new_iter, position.bytes) {
-                    is_changed = true;
                     next_position = iterator_end_position(&new_iter);
+                    true
                 } else {
                     next_position = length_min(
                         iterator_end_position(&old_iter),
                         iterator_end_position(&new_iter),
                     );
+                    false
                 }
             }
 
             // If the subtrees are different, record a change and then move
             // to the end of both subtrees.
             IteratorComparison::IteratorDiffers => {
-                is_changed = true;
                 next_position = length_min(
                     iterator_end_position(&old_iter),
                     iterator_end_position(&new_iter),
                 );
+                true
             }
-        }
+        };
 
         // Ensure that both iterators are caught up to the current position.
         while !iterator_done(&old_iter)
