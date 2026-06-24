@@ -682,11 +682,7 @@ unsafe fn ts_parser__breakdown_lookahead(
 // Internal helpers — version comparison
 // ---------------------------------------------------------------------------
 
-unsafe fn ts_parser__compare_versions(
-    _self_: *mut TSParser,
-    a: ErrorStatus,
-    b: ErrorStatus,
-) -> ErrorComparison {
+unsafe fn ts_parser__compare_versions(a: ErrorStatus, b: ErrorStatus) -> ErrorComparison {
     if !a.is_in_error && b.is_in_error {
         if a.cost < b.cost {
             return ErrorComparison::TakeLeft;
@@ -774,7 +770,7 @@ unsafe fn ts_parser__better_version_exists(
             continue;
         }
         let status_i = ts_parser__version_status(self_, i);
-        match ts_parser__compare_versions(self_, status, status_i) {
+        match ts_parser__compare_versions(status, status_i) {
             ErrorComparison::TakeRight => return true,
             ErrorComparison::PreferRight => {
                 if ts_stack_can_merge((*self_).stack, i, version) {
@@ -2508,7 +2504,7 @@ unsafe fn ts_parser__condense_stack(self_: &mut TSParser) -> u32 {
         while j < i {
             let status_j = ts_parser__version_status(self_, j);
 
-            match ts_parser__compare_versions(self_, status_j, status_i) {
+            match ts_parser__compare_versions(status_j, status_i) {
                 ErrorComparison::TakeLeft => {
                     made_changes = true;
                     ts_stack_remove_version(&mut *self_.stack, i);
