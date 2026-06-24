@@ -554,22 +554,22 @@ unsafe fn stack_node_add_link(
 
 /// Delete a stack head, releasing its node and subtrees.
 unsafe fn stack_head_delete(
-    self_: *mut StackHead,
+    self_: &mut StackHead,
     pool: *mut StackNodeArray,
     subtree_pool: *mut SubtreePool,
 ) {
-    if !(*self_).node.is_null() {
-        if !(*self_).last_external_token.ptr.is_null() {
-            ts_subtree_release(subtree_pool, (*self_).last_external_token);
+    if !self_.node.is_null() {
+        if !self_.last_external_token.ptr.is_null() {
+            ts_subtree_release(subtree_pool, self_.last_external_token);
         }
-        if !(*self_).lookahead_when_paused.ptr.is_null() {
-            ts_subtree_release(subtree_pool, (*self_).lookahead_when_paused);
+        if !self_.lookahead_when_paused.ptr.is_null() {
+            ts_subtree_release(subtree_pool, self_.lookahead_when_paused);
         }
-        if !(*self_).summary.is_null() {
-            array_delete((*self_).summary);
-            ts_free((*self_).summary as *mut c_void);
+        if !self_.summary.is_null() {
+            array_delete(self_.summary);
+            ts_free(self_.summary as *mut c_void);
         }
-        stack_node_release((*self_).node, pool, subtree_pool);
+        stack_node_release(self_.node, pool, subtree_pool);
     }
 }
 
@@ -870,7 +870,7 @@ pub unsafe fn ts_stack_delete(self_: *mut Stack) {
     stack_node_release((*self_).base_node, &mut (*self_).node_pool, (*self_).subtree_pool);
     for i in 0..(*self_).heads.size {
         stack_head_delete(
-            array_get(&mut (*self_).heads, i),
+            &mut *array_get(&mut (*self_).heads, i),
             &mut (*self_).node_pool,
             (*self_).subtree_pool,
         );
@@ -1127,7 +1127,7 @@ pub unsafe fn ts_stack_has_advanced_since_error(
 /// Remove a version from the stack.
 pub unsafe fn ts_stack_remove_version(self_: *mut Stack, version: StackVersion) {
     stack_head_delete(
-        array_get(&mut (*self_).heads, version),
+        &mut *array_get(&mut (*self_).heads, version),
         &mut (*self_).node_pool,
         (*self_).subtree_pool,
     );
@@ -1152,7 +1152,7 @@ pub unsafe fn ts_stack_renumber_version(
         target_head.summary = ptr::null_mut();
     }
     stack_head_delete(
-        target_head as *mut StackHead,
+        target_head,
         &mut (*self_).node_pool,
         (*self_).subtree_pool,
     );
@@ -1281,7 +1281,7 @@ pub unsafe fn ts_stack_clear(self_: *mut Stack) {
     stack_node_retain((*self_).base_node);
     for i in 0..(*self_).heads.size {
         stack_head_delete(
-            array_get(&mut (*self_).heads, i),
+            &mut *array_get(&mut (*self_).heads, i),
             &mut (*self_).node_pool,
             (*self_).subtree_pool,
         );
