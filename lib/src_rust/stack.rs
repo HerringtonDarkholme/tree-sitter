@@ -1412,8 +1412,8 @@ pub unsafe fn ts_stack_is_halted(self_: *const Stack, version: StackVersion) -> 
 }
 
 /// Check if a version is paused.
-pub unsafe fn ts_stack_is_paused(self_: *const Stack, version: StackVersion) -> bool {
-    stack_head(&*self_, version).status == StackStatus::Paused
+pub unsafe fn ts_stack_is_paused(self_: &Stack, version: StackVersion) -> bool {
+    stack_head(self_, version).status == StackStatus::Paused
 }
 
 /// Resume a paused version, returning its stored lookahead.

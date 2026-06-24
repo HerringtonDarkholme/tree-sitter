@@ -733,7 +733,7 @@ unsafe fn ts_parser__version_status(
     version: StackVersion,
 ) -> ErrorStatus {
     let mut cost = ts_stack_error_cost(&*(*self_).stack, version);
-    let is_paused = ts_stack_is_paused((*self_).stack, version);
+    let is_paused = ts_stack_is_paused(&*(*self_).stack, version);
     if is_paused {
         cost += ERROR_COST_PER_SKIPPED_TREE;
     }
@@ -2560,7 +2560,7 @@ unsafe fn ts_parser__condense_stack(self_: &mut TSParser) -> u32 {
         let mut i: StackVersion = 0;
         let mut n = ts_stack_version_count(self_.stack);
         while i < n {
-            if ts_stack_is_paused(self_.stack, i) {
+            if ts_stack_is_paused(&*self_.stack, i) {
                 if !has_unpaused_version && self_.accept_count < MAX_VERSION_COUNT {
                     LOG!(self_, b"resume version:%u\0".as_ptr() as *const i8, i);
                     min_error_cost = ts_stack_error_cost(&*self_.stack, i);
