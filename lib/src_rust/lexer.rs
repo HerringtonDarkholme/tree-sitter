@@ -473,8 +473,8 @@ pub unsafe fn ts_lexer_init(self_: *mut Lexer) {
 }
 
 /// Free the lexer's included_ranges allocation.
-pub unsafe fn ts_lexer_delete(self_: *mut Lexer) {
-    ts_free((*self_).included_ranges as *mut c_void);
+pub unsafe fn ts_lexer_delete(self_: &mut Lexer) {
+    ts_free(self_.included_ranges as *mut c_void);
 }
 
 /// Set the input source for the lexer.
