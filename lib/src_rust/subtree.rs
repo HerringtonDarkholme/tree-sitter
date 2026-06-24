@@ -668,16 +668,13 @@ unsafe fn ts_subtree_pool_allocate(self_: &mut SubtreePool) -> *mut SubtreeHeapD
     }
 }
 
-unsafe fn ts_subtree_pool_free(self_: &mut SubtreePool, tree: *mut SubtreeHeapData) {
+unsafe fn ts_subtree_pool_free(self_: &mut SubtreePool, tree: MutableSubtree) {
     if self_.free_trees.capacity > 0
         && self_.free_trees.size + 1 <= TS_MAX_TREE_POOL_SIZE
     {
-        mutable_array_push(
-            &mut self_.free_trees,
-            MutableSubtree { ptr: tree },
-        );
+        mutable_array_push(&mut self_.free_trees, tree);
     } else {
-        ts_free(tree as *mut c_void);
+        ts_free(tree.ptr as *mut c_void);
     }
 }
 
@@ -1328,7 +1325,7 @@ pub unsafe fn ts_subtree_release(pool: *mut SubtreePool, self_: Subtree) {
                         as *mut ExternalScannerState,
                 );
             }
-            ts_subtree_pool_free(&mut *pool, tree.ptr);
+            ts_subtree_pool_free(&mut *pool, tree);
         }
     }
 }
