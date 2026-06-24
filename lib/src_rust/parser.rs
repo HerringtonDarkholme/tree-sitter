@@ -1776,12 +1776,12 @@ unsafe fn ts_parser__do_all_potential_reductions(
 }
 
 unsafe fn ts_parser__recover_to_state(
-    self_: *mut TSParser,
+    self_: &mut TSParser,
     version: StackVersion,
     depth: u32,
     goal_state: TSStateId,
 ) -> bool {
-    let mut pop = ts_stack_pop_count((*self_).stack, version, depth);
+    let mut pop = ts_stack_pop_count(self_.stack, version, depth);
     let mut previous_version = STACK_VERSION_NONE;
 
     let mut i: u32 = 0;
@@ -1789,19 +1789,19 @@ unsafe fn ts_parser__recover_to_state(
         let mut slice = stack_slice_array_read(&pop, i);
 
         if slice.version == previous_version {
-            ts_subtree_array_delete(&mut (*self_).tree_pool, &mut slice.subtrees);
+            ts_subtree_array_delete(&mut self_.tree_pool, &mut slice.subtrees);
             array_erase(&mut pop, i);
             continue;
         }
 
-        if ts_stack_state(&*(*self_).stack, slice.version) != goal_state {
-            ts_stack_halt(&mut *(*self_).stack, slice.version);
-            ts_subtree_array_delete(&mut (*self_).tree_pool, &mut slice.subtrees);
+        if ts_stack_state(&*self_.stack, slice.version) != goal_state {
+            ts_stack_halt(&mut *self_.stack, slice.version);
+            ts_subtree_array_delete(&mut self_.tree_pool, &mut slice.subtrees);
             array_erase(&mut pop, i);
             continue;
         }
 
-        let mut error_trees = ts_stack_pop_error((*self_).stack, slice.version);
+        let mut error_trees = ts_stack_pop_error(self_.stack, slice.version);
         if error_trees.size > 0 {
             debug_assert!(error_trees.size == 1);
             let error_tree = *error_trees.contents;
@@ -1818,28 +1818,28 @@ unsafe fn ts_parser__recover_to_state(
                     ts_subtree_retain(subtree_array_get(&slice.subtrees, j));
                 }
             }
-            ts_subtree_array_delete(&mut (*self_).tree_pool, &mut error_trees);
+            ts_subtree_array_delete(&mut self_.tree_pool, &mut error_trees);
         }
 
         ts_subtree_array_remove_trailing_extras(
             &mut slice.subtrees,
-            &mut (*self_).trailing_extras,
+            &mut self_.trailing_extras,
         );
 
         if slice.subtrees.size > 0 {
             let error = ts_subtree_new_error_node(
                 &mut slice.subtrees,
                 true,
-                (*self_).language,
+                self_.language,
             );
-            ts_stack_push((*self_).stack, slice.version, error, false, goal_state);
+            ts_stack_push(self_.stack, slice.version, error, false, goal_state);
         } else {
             array_delete(&mut slice.subtrees as *mut SubtreeArray as *mut Array<Subtree>);
         }
 
-        for j in 0..(*self_).trailing_extras.size {
-            let tree = subtree_array_get(&(*self_).trailing_extras, j);
-            ts_stack_push((*self_).stack, slice.version, tree, false, goal_state);
+        for j in 0..self_.trailing_extras.size {
+            let tree = subtree_array_get(&self_.trailing_extras, j);
+            ts_stack_push(self_.stack, slice.version, tree, false, goal_state);
         }
 
         previous_version = slice.version;
@@ -1905,7 +1905,7 @@ unsafe fn ts_parser__recover(
                 entry.state,
                 ts_subtree_symbol(lookahead),
             ) {
-                if ts_parser__recover_to_state(self_, version, depth, entry.state) {
+                if ts_parser__recover_to_state(&mut *self_, version, depth, entry.state) {
                     did_recover = true;
                     LOG!(self_, b"recover_to_previous state:%u, depth:%u\0".as_ptr() as *const i8,
                         entry.state as u32, depth);
