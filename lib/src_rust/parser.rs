@@ -2427,26 +2427,26 @@ unsafe fn ts_parser__advance(
         // This version can be discarded.
         if did_reduce {
             if !lookahead.ptr.is_null() {
-                ts_subtree_release(&mut (*self_).tree_pool, lookahead);
+                ts_subtree_release(&mut self_.tree_pool, lookahead);
             }
-            ts_stack_halt(&mut *(*self_).stack, version);
+            ts_stack_halt(&mut *self_.stack, version);
             return true;
         }
 
         // If the current lookahead token is a keyword that is not valid, but the
         // default word token *is* valid, then treat the lookahead token as the word
         // token instead.
-        let language = (*self_).language as *const TSLanguageFull;
+        let language = self_.language as *const TSLanguageFull;
         if ts_subtree_is_keyword(lookahead)
             && ts_subtree_symbol(lookahead) != (*language).keyword_capture_token
             && !ts_language_is_reserved_word(
-                (*self_).language,
+                self_.language,
                 state,
                 ts_subtree_symbol(lookahead),
             )
         {
             ts_language_table_entry(
-                (*self_).language,
+                self_.language,
                 state,
                 (*language).keyword_capture_token,
                 &mut table_entry,
@@ -2460,11 +2460,11 @@ unsafe fn ts_parser__advance(
                 );
 
                 let mut mutable_lookahead =
-                    ts_subtree_make_mut(&mut (*self_).tree_pool, lookahead);
+                    ts_subtree_make_mut(&mut self_.tree_pool, lookahead);
                 ts_subtree_set_symbol(
                     &mut mutable_lookahead,
                     (*language).keyword_capture_token,
-                    (*self_).language,
+                    self_.language,
                 );
                 lookahead = ts_subtree_from_mut(mutable_lookahead);
                 continue;
@@ -2475,9 +2475,9 @@ unsafe fn ts_parser__advance(
         // the stack was reused from an old tree, then it wasn't actually valid to
         // reuse that previous subtree. Remove it from the stack, and in its place,
         // push each of its children. Then try again to process the current lookahead.
-        if ts_parser__breakdown_top_of_stack(&mut *self_, version) {
-            state = ts_stack_state(&*(*self_).stack, version);
-            ts_subtree_release(&mut (*self_).tree_pool, lookahead);
+        if ts_parser__breakdown_top_of_stack(self_, version) {
+            state = ts_stack_state(&*self_.stack, version);
+            ts_subtree_release(&mut self_.tree_pool, lookahead);
             needs_lex = true;
             continue;
         }
@@ -2488,7 +2488,7 @@ unsafe fn ts_parser__advance(
         // this version can simply be removed. But if all versions end up paused,
         // then error recovery is needed.
         LOG!(parser, b"detect_error lookahead:%s\0".as_ptr() as *const i8, TREE_NAME!(parser, lookahead));
-        ts_stack_pause((*self_).stack, version, lookahead);
+        ts_stack_pause(self_.stack, version, lookahead);
         return true;
     }
 }
