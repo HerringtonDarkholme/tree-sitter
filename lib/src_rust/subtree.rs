@@ -578,33 +578,33 @@ pub unsafe fn ts_subtree_array_reverse(self_: *mut SubtreeArray) {
 // MutableSubtreeArray helpers
 // ===========================================================================
 
-unsafe fn mutable_array_grow(arr: *mut MutableSubtreeArray, count: u32) {
-    let new_size = (*arr).size + count;
-    if new_size > (*arr).capacity {
-        let mut new_capacity = (*arr).capacity * 2;
+unsafe fn mutable_array_grow(arr: &mut MutableSubtreeArray, count: u32) {
+    let new_size = arr.size + count;
+    if new_size > arr.capacity {
+        let mut new_capacity = arr.capacity * 2;
         if new_capacity < 8 {
             new_capacity = 8;
         }
         if new_capacity < new_size {
             new_capacity = new_size;
         }
-        (*arr).contents = ts_realloc(
-            (*arr).contents as *mut c_void,
+        arr.contents = ts_realloc(
+            arr.contents as *mut c_void,
             new_capacity as usize * std::mem::size_of::<MutableSubtree>(),
         ) as *mut MutableSubtree;
-        (*arr).capacity = new_capacity;
+        arr.capacity = new_capacity;
     }
 }
 
-pub(crate) unsafe fn mutable_array_push(arr: *mut MutableSubtreeArray, element: MutableSubtree) {
+pub(crate) unsafe fn mutable_array_push(arr: &mut MutableSubtreeArray, element: MutableSubtree) {
     mutable_array_grow(arr, 1);
-    *(*arr).contents.add((*arr).size as usize) = element;
-    (*arr).size += 1;
+    *arr.contents.add(arr.size as usize) = element;
+    arr.size += 1;
 }
 
-unsafe fn mutable_array_pop(arr: *mut MutableSubtreeArray) -> MutableSubtree {
-    (*arr).size -= 1;
-    *(*arr).contents.add((*arr).size as usize)
+unsafe fn mutable_array_pop(arr: &mut MutableSubtreeArray) -> MutableSubtree {
+    arr.size -= 1;
+    *arr.contents.add(arr.size as usize)
 }
 
 unsafe fn mutable_array_delete(arr: *mut MutableSubtreeArray) {
@@ -1343,7 +1343,8 @@ pub unsafe fn ts_subtree_compress(
     language: *const TSLanguage,
     stack: *mut MutableSubtreeArray,
 ) {
-    let initial_stack_size = (*stack).size;
+    let stack = &mut *stack;
+    let initial_stack_size = stack.size;
 
     let mut tree = self_;
     let symbol = (*tree.ptr).symbol;
@@ -1386,7 +1387,7 @@ pub unsafe fn ts_subtree_compress(
         tree = grandchild;
     }
 
-    while (*stack).size > initial_stack_size {
+    while stack.size > initial_stack_size {
         tree = mutable_array_pop(stack);
         let child = ts_subtree_to_mut_unsafe(
             *ts_subtree_children(ts_subtree_from_mut(tree)).add(0),
