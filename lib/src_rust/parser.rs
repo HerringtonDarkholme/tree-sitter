@@ -2823,7 +2823,8 @@ pub unsafe extern "C" fn ts_parser_set_included_ranges(
     ranges: *const TSRange,
     count: u32,
 ) -> bool {
-    ts_lexer_set_included_ranges(&mut (*self_).lexer, ranges, count)
+    let parser = &mut *self_;
+    ts_lexer_set_included_ranges(&mut parser.lexer, ranges, count)
 }
 
 #[no_mangle]
@@ -2831,7 +2832,8 @@ pub unsafe extern "C" fn ts_parser_included_ranges(
     self_: *const TSParser,
     count: *mut u32,
 ) -> *const TSRange {
-    ts_lexer_included_ranges(&(*self_).lexer, count)
+    let parser = &*self_;
+    ts_lexer_included_ranges(&parser.lexer, count)
 }
 
 #[no_mangle]
