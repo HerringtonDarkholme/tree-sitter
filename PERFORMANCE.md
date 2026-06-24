@@ -847,3 +847,58 @@ Source-code analysis:
   this run, not a Rust-vs-previous-checkpoint regression. Overall Rust
   throughput improved versus the previous checkpoint, so no rollback was
   performed.
+
+### 2026-06-24 19:29 EDT
+
+- Repo head: `fb368cb5`
+- Batch base: `c9350f4f`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: 10 small tree-cursor reference cleanups through
+  `Use cursor reference for current field`
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 26307.2 | 25819.4 | +1.89% |
+| TypeScript error parses | 32 | 1756.8 | 1698.6 | +3.43% |
+| JavaScript normal parses | 2 | 18115.9 | 17122.2 | +5.80% |
+| JavaScript error parses | 37 | 2164.3 | 1673.4 | +29.33% |
+| Overall parser throughput | 82 | 2430.6 | 2151.6 | +12.97% |
+
+Prior checkpoint at `b2935073` recorded Rust overall throughput of 2395.5
+bytes/ms on the same TypeScript/JavaScript gate. This run measured +1.47%
+Rust throughput versus that checkpoint, so no >5% Rust checkpoint regression
+was observed.
+
+Per-case Rust-vs-C regressions above the 5% threshold:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `typescript normal corePublic.ts` | 24483.6 | 26706.9 | 8.32% |
+| `typescript normal types.ts` | 18282.1 | 19655.4 | 6.99% |
+| `typescript normal builderStatePublic.ts` | 19598.8 | 20836.7 | 5.94% |
+| `typescript normal packageJsonCache.ts` | 17940.1 | 19020.2 | 5.68% |
+| `typescript normal transform.ts` | 23371.5 | 24672.5 | 5.27% |
+
+Source-code analysis:
+
+- This batch changed Rust-internal receiver/body style only in
+  `tree_cursor.rs`. It did not change any exported function signatures,
+  `#[no_mangle] extern "C"` ABI, `#[repr(C)]` layouts, allocation sizes,
+  parse tables, generated parser templates, or FFI struct field order.
+- The live generated header inputs `templates/alloc.h`, `templates/array.h`,
+  and `parser.h.inc` were not edited.
+- Internal cursor helpers for child and sibling navigation now accept
+  `&mut TreeCursor` after the public wrappers convert from `TSTreeCursor`
+  pointers at the ABI boundary. The same stack push/pop, descendant index,
+  field lookup, alias lookup, and node construction operations happen in the
+  same order.
+- The reported TypeScript normal-case slowdowns are Rust-vs-C comparisons in
+  this run, not Rust-vs-previous-checkpoint regressions. Overall Rust
+  throughput improved versus the previous checkpoint, while C throughput also
+  moved materially between checkpoints, so these are not treated as rollback
+  evidence.
