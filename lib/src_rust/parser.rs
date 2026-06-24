@@ -3061,11 +3061,15 @@ pub unsafe extern "C" fn ts_parser_parse_with_options(
     input: TSInput,
     parse_options: TSParseOptions,
 ) -> *mut TSTree {
-    (*self_).parse_options = parse_options;
-    (*self_).parse_state.payload = parse_options.payload;
+    {
+        let parser = &mut *self_;
+        parser.parse_options = parse_options;
+        parser.parse_state.payload = parse_options.payload;
+    }
     let result = ts_parser_parse(self_, old_tree, input);
     // Reset parser options before further parse calls.
-    (*self_).parse_options = ts_parse_options_none();
+    let parser = &mut *self_;
+    parser.parse_options = ts_parse_options_none();
     result
 }
 
