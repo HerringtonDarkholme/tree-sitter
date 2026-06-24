@@ -211,10 +211,9 @@ unsafe fn ts_node__child(
     include_anonymous: bool,
 ) -> TSNode {
     let mut result = self_;
-    let mut did_descend = true;
 
-    while did_descend {
-        did_descend = false;
+    loop {
+        let mut did_descend = false;
 
         let mut child = ts_node__null();
         let mut index: u32 = 0;
@@ -236,6 +235,9 @@ unsafe fn ts_node__child(
                 }
                 index += grandchild_count;
             }
+        }
+        if !did_descend {
+            break;
         }
     }
 
@@ -393,12 +395,11 @@ unsafe fn ts_node__first_child_for_byte(
     include_anonymous: bool,
 ) -> TSNode {
     let mut node = self_;
-    let mut did_descend = true;
 
     let mut last_iterator: Option<NodeChildIterator> = None;
 
-    while did_descend {
-        did_descend = false;
+    loop {
+        let mut did_descend = false;
 
         let mut child = ts_node__null();
         let mut iterator = ts_node_iterate_children(&node);
@@ -436,6 +437,9 @@ unsafe fn ts_node__first_child_for_byte(
             }
             break;
         }
+        if !did_descend {
+            break;
+        }
     }
 
     ts_node__null()
@@ -453,9 +457,8 @@ unsafe fn ts_node__descendant_for_byte_range(
     let mut node = self_;
     let mut last_visible_node = self_;
 
-    let mut did_descend = true;
-    while did_descend {
-        did_descend = false;
+    loop {
+        let mut did_descend = false;
 
         let mut child = ts_node__null();
         let mut iterator = ts_node_iterate_children(&node);
@@ -478,6 +481,9 @@ unsafe fn ts_node__descendant_for_byte_range(
             did_descend = true;
             break;
         }
+        if !did_descend {
+            break;
+        }
     }
 
     last_visible_node
@@ -495,9 +501,8 @@ unsafe fn ts_node__descendant_for_point_range(
     let mut node = self_;
     let mut last_visible_node = self_;
 
-    let mut did_descend = true;
-    while did_descend {
-        did_descend = false;
+    loop {
+        let mut did_descend = false;
 
         let mut child = ts_node__null();
         let mut iterator = ts_node_iterate_children(&node);
@@ -522,6 +527,9 @@ unsafe fn ts_node__descendant_for_point_range(
                 last_visible_node = node;
             }
             did_descend = true;
+            break;
+        }
+        if !did_descend {
             break;
         }
     }
@@ -980,11 +988,10 @@ pub unsafe extern "C" fn ts_node_field_name_for_child(
     mut child_index: u32,
 ) -> *const i8 {
     let mut result = self_;
-    let mut did_descend = true;
     let mut inherited_field_name: *const i8 = ptr::null();
 
-    while did_descend {
-        did_descend = false;
+    loop {
+        let mut did_descend = false;
 
         let mut child = ts_node__null();
         let mut index: u32 = 0;
@@ -1024,6 +1031,9 @@ pub unsafe extern "C" fn ts_node_field_name_for_child(
                 index += grandchild_count;
             }
         }
+        if !did_descend {
+            break;
+        }
     }
 
     ptr::null()
@@ -1035,11 +1045,10 @@ pub unsafe extern "C" fn ts_node_field_name_for_named_child(
     mut named_child_index: u32,
 ) -> *const i8 {
     let mut result = self_;
-    let mut did_descend = true;
     let mut inherited_field_name: *const i8 = ptr::null();
 
-    while did_descend {
-        did_descend = false;
+    loop {
+        let mut did_descend = false;
 
         let mut child = ts_node__null();
         let mut index: u32 = 0;
@@ -1078,6 +1087,9 @@ pub unsafe extern "C" fn ts_node_field_name_for_named_child(
                 }
                 index += grandchild_count;
             }
+        }
+        if !did_descend {
+            break;
         }
     }
 
