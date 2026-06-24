@@ -411,6 +411,11 @@ unsafe fn stack_slice_array_get_mut(self_: &mut StackSliceArray, index: u32) -> 
 }
 
 #[inline]
+unsafe fn stack_slice_array_read_ref(self_: &StackSliceArray) -> StackSliceArray {
+    ptr::read(self_)
+}
+
+#[inline]
 unsafe fn subtree_array_read_ref(self_: &SubtreeArray) -> SubtreeArray {
     ptr::read(self_)
 }
@@ -867,7 +872,7 @@ unsafe fn stack__iter(
         }
     }
 
-    ptr::read(&(*self_).slices)
+    stack_slice_array_read_ref(&(*self_).slices)
 }
 
 // Callbacks for stack__iter
