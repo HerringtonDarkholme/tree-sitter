@@ -196,3 +196,30 @@ absolute Rust throughput by 3.77%. The Rust-vs-C delta fell from +4.00% to
 +3.85%.
 
 No per-case regressions above the 5% threshold.
+
+### 2026-06-24 15:03 EDT
+
+- Repo head: `58d69eb2`
+- Batch base: `a4dbb358`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: 10 small Rust-core stack accessor/raw-pointer cleanups through `Use stack head getter helpers`
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 25201.5 | 24049.8 | +4.79% |
+| TypeScript error parses | 32 | 1717.0 | 1602.6 | +7.14% |
+| JavaScript normal parses | 2 | 17825.7 | 15768.5 | +13.05% |
+| JavaScript error parses | 37 | 2105.5 | 1977.9 | +6.45% |
+| Overall parser throughput | 82 | 2371.2 | 2217.1 | +6.95% |
+
+Prior checkpoint at `a4dbb358` recorded Rust overall throughput of 2279.8
+bytes/ms on the same TypeScript/JavaScript gate, so this batch improved
+absolute Rust throughput by 4.01%. The Rust-vs-C delta rose from +3.85% to
++6.95%.
+
+No per-case regressions above the 5% threshold.
