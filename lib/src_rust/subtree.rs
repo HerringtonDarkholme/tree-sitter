@@ -561,8 +561,7 @@ pub unsafe fn ts_subtree_array_remove_trailing_extras(
     ts_subtree_array_reverse(destination);
 }
 
-pub unsafe fn ts_subtree_array_reverse(self_: *mut SubtreeArray) {
-    let self_ = &mut *self_;
+pub unsafe fn ts_subtree_array_reverse(self_: &mut SubtreeArray) {
     let limit = self_.size / 2;
     for i in 0..limit {
         let reverse_index = self_.size as usize - 1 - i as usize;
