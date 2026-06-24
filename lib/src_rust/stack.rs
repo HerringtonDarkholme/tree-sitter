@@ -630,7 +630,7 @@ unsafe fn stack__subtree_is_equivalent(left: Subtree, right: Subtree) -> bool {
 unsafe fn stack_node_add_link(
     self_: *mut StackNode,
     link: StackLink,
-    subtree_pool: *mut SubtreePool,
+    subtree_pool: &mut SubtreePool,
 ) {
     if link.node == self_ {
         return;
@@ -644,7 +644,7 @@ unsafe fn stack_node_add_link(
                     > ts_subtree_dynamic_precedence(existing_link.subtree)
                 {
                     ts_subtree_retain(link.subtree);
-                    ts_subtree_release(&mut *subtree_pool, existing_link.subtree);
+                    ts_subtree_release(subtree_pool, existing_link.subtree);
                     existing_link.subtree = link.subtree;
                     (*self_).dynamic_precedence = (*link.node).dynamic_precedence
                         + ts_subtree_dynamic_precedence(link.subtree);
@@ -1351,7 +1351,11 @@ pub unsafe fn ts_stack_merge(
     let head1 = stack_head_mut(&mut *self_, version1);
     let head2 = stack_head(&*self_, version2);
     for i in 0..(*head2.node).link_count as usize {
-        stack_node_add_link(head1.node, (*head2.node).links[i], (*self_).subtree_pool);
+        stack_node_add_link(
+            head1.node,
+            (*head2.node).links[i],
+            &mut *(*self_).subtree_pool,
+        );
     }
     if (*head1.node).state == ERROR_STATE {
         head1.node_count_at_last_error = (*head1.node).node_count;
