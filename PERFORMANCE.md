@@ -371,3 +371,60 @@ Source-code analysis:
   checkpoint, and because the per-case slowdowns are Rust-vs-C comparisons
   rather than regressions against the previous Rust checkpoint, no specific
   culprit was identified and no rollback was performed.
+
+### 2026-06-24 16:29 EDT
+
+- Repo head: `4f8c04bc`
+- Batch base: `6e7d886b`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: 10 small internal raw-pointer/reference cleanups through `Use reference for stack version helper`
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 25167.0 | 24165.9 | +4.14% |
+| TypeScript error parses | 32 | 1650.3 | 1606.4 | +2.73% |
+| JavaScript normal parses | 2 | 16877.8 | 15845.4 | +6.52% |
+| JavaScript error parses | 37 | 2029.6 | 1905.9 | +6.49% |
+| Overall parser throughput | 82 | 2281.9 | 2190.2 | +4.19% |
+
+Prior checkpoint at `954e5f7c` recorded Rust overall throughput of 2306.8
+bytes/ms on the same TypeScript/JavaScript gate, so this batch measured -1.08%
+absolute Rust throughput. That is below the 5% investigation threshold. The
+Rust-vs-C delta fell from +4.76% to +4.19%, with both Rust and C baselines
+moving between runs.
+
+Per-case Rust-vs-C regressions above the 5% threshold:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `typescript normal builderStatePublic.ts` | 16621.0 | 21149.4 | 21.41% |
+| `javascript error performanceCore.ts` | 3941.8 | 4345.0 | 9.28% |
+| `typescript error mixed-spaces-tabs.py` | 289.5 | 313.5 | 7.66% |
+
+Source-code analysis:
+
+- This batch continued replacing internal raw pointer receivers with Rust
+  references. It did not alter FFI-visible signatures, `#[repr(C)]` layouts,
+  allocation sizes, parse table data, or stack/subtree ownership rules.
+- The parser-facing changes were limited to subtree balancing and stack/subtree
+  cleanup helpers. `Use reference for subtree balancing helper` preserves the
+  same tree stack operations, compression calls, progress checks, and child
+  traversal.
+- The subtree cleanup changes (`pool_free`, `make_mut`, array clear/delete, and
+  release) keep the same retain/release decisions and free-list behavior. They
+  remove raw `SubtreePool` parameters where callers already had a mutable pool
+  reference.
+- The stack changes (`stack_node_retain`, `stack_head_delete`,
+  `stack_node_release` pool parameters, `stack_node_add_link` pool parameter,
+  and `ts_stack__add_version`) preserve the same stack node reference counts,
+  link merging, version insertion, and subtree release calls.
+- `typescript normal builderStatePublic.ts` also appeared as a Rust-vs-C
+  slowdown in the previous checkpoint, so it is not new evidence for this
+  batch. The overall Rust checkpoint delta is about -1%, and no >5% Rust
+  checkpoint regression was observed, so no specific source culprit was
+  identified and no rollback was performed.
