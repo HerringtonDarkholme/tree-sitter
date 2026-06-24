@@ -2714,25 +2714,26 @@ pub unsafe extern "C" fn ts_parser_delete(self_: *mut TSParser) {
     }
 
     ts_parser_set_language(self_, ptr::null());
-    ts_stack_delete(&mut *(*self_).stack);
-    if !(*self_).reduce_actions.contents.is_null() {
-        array_delete(&mut (*self_).reduce_actions as *mut ReduceActionSet);
+    let parser = &mut *self_;
+    ts_stack_delete(&mut *parser.stack);
+    if !parser.reduce_actions.contents.is_null() {
+        array_delete(&mut parser.reduce_actions as *mut ReduceActionSet);
     }
-    if !(*self_).included_range_differences.contents.is_null() {
-        array_delete(&mut (*self_).included_range_differences as *mut TSRangeArray as *mut Array<TSRange>);
+    if !parser.included_range_differences.contents.is_null() {
+        array_delete(&mut parser.included_range_differences as *mut TSRangeArray as *mut Array<TSRange>);
     }
-    if !(*self_).old_tree.ptr.is_null() {
-        ts_subtree_release(&mut (*self_).tree_pool, (*self_).old_tree);
-        (*self_).old_tree = NULL_SUBTREE;
+    if !parser.old_tree.ptr.is_null() {
+        ts_subtree_release(&mut parser.tree_pool, parser.old_tree);
+        parser.old_tree = NULL_SUBTREE;
     }
-    ts_wasm_store_delete((*self_).wasm_store);
-    ts_lexer_delete(&mut (*self_).lexer);
-    ts_parser__set_cached_token(&mut *self_, 0, NULL_SUBTREE, NULL_SUBTREE);
-    ts_subtree_pool_delete(&mut (*self_).tree_pool);
-    reusable_node_delete(&mut (*self_).reusable_node);
-    array_delete(&mut (*self_).trailing_extras as *mut SubtreeArray as *mut Array<Subtree>);
-    array_delete(&mut (*self_).trailing_extras2 as *mut SubtreeArray as *mut Array<Subtree>);
-    array_delete(&mut (*self_).scratch_trees as *mut SubtreeArray as *mut Array<Subtree>);
+    ts_wasm_store_delete(parser.wasm_store);
+    ts_lexer_delete(&mut parser.lexer);
+    ts_parser__set_cached_token(parser, 0, NULL_SUBTREE, NULL_SUBTREE);
+    ts_subtree_pool_delete(&mut parser.tree_pool);
+    reusable_node_delete(&mut parser.reusable_node);
+    array_delete(&mut parser.trailing_extras as *mut SubtreeArray as *mut Array<Subtree>);
+    array_delete(&mut parser.trailing_extras2 as *mut SubtreeArray as *mut Array<Subtree>);
+    array_delete(&mut parser.scratch_trees as *mut SubtreeArray as *mut Array<Subtree>);
     ts_free(self_ as *mut c_void);
 }
 
