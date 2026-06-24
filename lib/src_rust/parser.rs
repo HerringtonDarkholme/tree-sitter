@@ -1128,7 +1128,8 @@ unsafe fn ts_parser__lex(
             symbol = *(*lang).external_scanner.symbol_map.add(symbol as usize);
         } else if symbol == (*lang).keyword_capture_token && symbol != 0 {
             let end_byte = self_.lexer.token_end_position.bytes;
-            ts_lexer_reset(&mut self_.lexer, self_.lexer.token_start_position);
+            let token_start_position = self_.lexer.token_start_position;
+            ts_lexer_reset(&mut self_.lexer, token_start_position);
             ts_lexer_start(&mut self_.lexer);
 
             is_keyword = ts_parser__call_keyword_lex_fn(self_);

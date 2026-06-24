@@ -485,10 +485,9 @@ pub unsafe fn ts_lexer_set_input(self_: &mut Lexer, input: TSInput) {
 }
 
 /// Move the lexer to the given position (no-op if already there).
-pub unsafe fn ts_lexer_reset(self_: *mut Lexer, position: Length) {
-    let s = &mut *self_;
-    if position.bytes != s.current_position.bytes {
-        ts_lexer_goto(s, position);
+pub unsafe fn ts_lexer_reset(self_: &mut Lexer, position: Length) {
+    if position.bytes != self_.current_position.bytes {
+        ts_lexer_goto(self_, position);
     }
 }
 
