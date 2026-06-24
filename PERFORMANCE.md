@@ -78,3 +78,34 @@ Regressions above the 5% per-case threshold:
 | Case | Rust bytes/ms | C bytes/ms | Slowdown |
 | --- | ---: | ---: | ---: |
 | `builderStatePublic.ts` | 18691.6 | 20427.8 | 8.50% |
+
+### 2026-06-24 13:50 EDT
+
+- Repo head: `331d0c5d`
+- Batch base: `6cb0e70f`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: 10 small Rust-core reference cleanups through `Use reference for stack node pool`
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 26064.2 | 25146.6 | +3.65% |
+| TypeScript error parses | 32 | 1700.4 | 1655.4 | +2.72% |
+| JavaScript normal parses | 2 | 17355.2 | 16457.1 | +5.46% |
+| JavaScript error parses | 37 | 2093.0 | 2003.1 | +4.49% |
+| Overall parser throughput | 82 | 2352.1 | 2274.2 | +3.42% |
+
+Prior checkpoint at `6cb0e70f` reported Rust overall throughput of 2296.5
+bytes/ms on the same TypeScript/JavaScript gate, so this batch improved
+absolute Rust throughput by 2.42%. The Rust-vs-C delta fell from +5.34% to
++3.42% because this C run was also faster.
+
+Regressions above the 5% per-case threshold:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `compound-statement-without-trailing-newline.py` | 3020.9 | 3223.9 | 6.30% |
