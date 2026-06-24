@@ -400,20 +400,22 @@ unsafe fn reusable_node_clear(self_: &mut ReusableNode) {
     self_.last_external_token = NULL_SUBTREE;
 }
 
-unsafe fn reusable_node_tree(self_: &mut ReusableNode) -> Subtree {
+unsafe fn reusable_node_last_entry(self_: &ReusableNode) -> Option<&StackEntry> {
     if self_.stack.size > 0 {
-        (*array_back(&self_.stack)).tree
+        Some(&*array_back(&self_.stack))
     } else {
-        NULL_SUBTREE
+        None
     }
 }
 
-unsafe fn reusable_node_byte_offset(self_: &mut ReusableNode) -> u32 {
-    if self_.stack.size > 0 {
-        (*array_back(&self_.stack)).byte_offset
-    } else {
-        u32::MAX
-    }
+unsafe fn reusable_node_tree(self_: &ReusableNode) -> Subtree {
+    reusable_node_last_entry(self_)
+        .map_or(NULL_SUBTREE, |entry| entry.tree)
+}
+
+unsafe fn reusable_node_byte_offset(self_: &ReusableNode) -> u32 {
+    reusable_node_last_entry(self_)
+        .map_or(u32::MAX, |entry| entry.byte_offset)
 }
 
 unsafe fn reusable_node_delete(self_: &mut ReusableNode) {
@@ -421,7 +423,9 @@ unsafe fn reusable_node_delete(self_: &mut ReusableNode) {
 }
 
 unsafe fn reusable_node_advance(self_: &mut ReusableNode) {
-    let last_entry = *array_back(&self_.stack);
+    let Some(last_entry) = reusable_node_last_entry(self_).copied() else {
+        return;
+    };
     let byte_offset = last_entry.byte_offset + ts_subtree_total_bytes(last_entry.tree);
     if ts_subtree_has_external_tokens(last_entry.tree) {
         self_.last_external_token = ts_subtree_last_external_token(last_entry.tree);
@@ -435,7 +439,8 @@ unsafe fn reusable_node_advance(self_: &mut ReusableNode) {
         if self_.stack.size == 0 {
             return;
         }
-        tree = (*array_back(&self_.stack)).tree;
+        tree = reusable_node_last_entry(self_)
+            .map_or(NULL_SUBTREE, |entry| entry.tree);
         if ts_subtree_child_count(tree) > next_index {
             break;
         }
@@ -449,7 +454,9 @@ unsafe fn reusable_node_advance(self_: &mut ReusableNode) {
 }
 
 unsafe fn reusable_node_descend(self_: &mut ReusableNode) -> bool {
-    let last_entry = *array_back(&self_.stack);
+    let Some(last_entry) = reusable_node_last_entry(self_).copied() else {
+        return false;
+    };
     if ts_subtree_child_count(last_entry.tree) > 0 {
         array_push(&mut self_.stack, StackEntry {
             tree: *ts_subtree_children(last_entry.tree),
