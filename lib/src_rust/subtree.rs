@@ -1284,20 +1284,20 @@ pub unsafe fn ts_subtree_retain(self_: Subtree) {
 
 // --- #43: release ---
 
-pub unsafe fn ts_subtree_release(pool: *mut SubtreePool, self_: Subtree) {
+pub unsafe fn ts_subtree_release(pool: &mut SubtreePool, self_: Subtree) {
     if self_.data.is_inline() {
         return;
     }
-    (*pool).tree_stack.size = 0;
+    pool.tree_stack.size = 0;
 
     debug_assert!((*self_.ptr).ref_count > 0);
     let ref_count = &(*self_.ptr).ref_count as *const u32 as *const std::sync::atomic::AtomicU32;
     if (*ref_count).fetch_sub(1, std::sync::atomic::Ordering::SeqCst) == 1 {
-        mutable_array_push(&mut (*pool).tree_stack, ts_subtree_to_mut_unsafe(self_));
+        mutable_array_push(&mut pool.tree_stack, ts_subtree_to_mut_unsafe(self_));
     }
 
-    while (*pool).tree_stack.size > 0 {
-        let tree = mutable_array_pop(&mut (*pool).tree_stack);
+    while pool.tree_stack.size > 0 {
+        let tree = mutable_array_pop(&mut pool.tree_stack);
         if (*tree.ptr).child_count > 0 {
             let children = ts_subtree_children(ts_subtree_from_mut(tree));
             for i in 0..(*tree.ptr).child_count {
@@ -1309,10 +1309,7 @@ pub unsafe fn ts_subtree_release(pool: *mut SubtreePool, self_: Subtree) {
                 let child_ref = &(*child.ptr).ref_count as *const u32
                     as *const std::sync::atomic::AtomicU32;
                 if (*child_ref).fetch_sub(1, std::sync::atomic::Ordering::SeqCst) == 1 {
-                    mutable_array_push(
-                        &mut (*pool).tree_stack,
-                        ts_subtree_to_mut_unsafe(child),
-                    );
+                    mutable_array_push(&mut pool.tree_stack, ts_subtree_to_mut_unsafe(child));
                 }
             }
             ts_free(children as *mut c_void);
@@ -1323,7 +1320,7 @@ pub unsafe fn ts_subtree_release(pool: *mut SubtreePool, self_: Subtree) {
                         as *mut ExternalScannerState,
                 );
             }
-            ts_subtree_pool_free(&mut *pool, tree);
+            ts_subtree_pool_free(pool, tree);
         }
     }
 }

@@ -519,14 +519,14 @@ unsafe fn stack_node_release(
             while i > 0 {
                 let link = (*self_).links[i as usize];
                 if !link.subtree.ptr.is_null() {
-                    ts_subtree_release(subtree_pool, link.subtree);
+                    ts_subtree_release(&mut *subtree_pool, link.subtree);
                 }
                 stack_node_release(link.node, pool, subtree_pool);
                 i -= 1;
             }
             let link = (*self_).links[0];
             if !link.subtree.ptr.is_null() {
-                ts_subtree_release(subtree_pool, link.subtree);
+                ts_subtree_release(&mut *subtree_pool, link.subtree);
             }
             first_predecessor = (*self_).links[0].node;
         }
@@ -644,7 +644,7 @@ unsafe fn stack_node_add_link(
                     > ts_subtree_dynamic_precedence(existing_link.subtree)
                 {
                     ts_subtree_retain(link.subtree);
-                    ts_subtree_release(subtree_pool, existing_link.subtree);
+                    ts_subtree_release(&mut *subtree_pool, existing_link.subtree);
                     existing_link.subtree = link.subtree;
                     (*self_).dynamic_precedence = (*link.node).dynamic_precedence
                         + ts_subtree_dynamic_precedence(link.subtree);
@@ -703,10 +703,10 @@ unsafe fn stack_head_delete(
 ) {
     if !self_.node.is_null() {
         if !self_.last_external_token.ptr.is_null() {
-            ts_subtree_release(subtree_pool, self_.last_external_token);
+            ts_subtree_release(&mut *subtree_pool, self_.last_external_token);
         }
         if !self_.lookahead_when_paused.ptr.is_null() {
-            ts_subtree_release(subtree_pool, self_.lookahead_when_paused);
+            ts_subtree_release(&mut *subtree_pool, self_.lookahead_when_paused);
         }
         if !self_.summary.is_null() {
             array_delete(self_.summary);
@@ -1074,7 +1074,7 @@ pub unsafe fn ts_stack_set_last_external_token(
         ts_subtree_retain(token);
     }
     if !head.last_external_token.ptr.is_null() {
-        ts_subtree_release((*self_).subtree_pool, head.last_external_token);
+        ts_subtree_release(&mut *(*self_).subtree_pool, head.last_external_token);
     }
     head.last_external_token = token;
 }
