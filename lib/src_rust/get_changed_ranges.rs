@@ -612,8 +612,10 @@ pub unsafe extern "C" fn ts_subtree_get_changed_ranges(
         capacity: 0,
     };
 
-    let mut old_iter = iterator_new(&mut *cursor1, old_tree, language);
-    let mut new_iter = iterator_new(&mut *cursor2, new_tree, language);
+    let old_cursor = &mut *cursor1;
+    let new_cursor = &mut *cursor2;
+    let mut old_iter = iterator_new(old_cursor, old_tree, language);
+    let mut new_iter = iterator_new(new_cursor, new_tree, language);
     let included_range_differences_array = &*included_range_differences;
 
     let mut included_range_difference_index: u32 = 0;
