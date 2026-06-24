@@ -941,10 +941,10 @@ pub unsafe extern "C" fn ts_tree_cursor_current_status(
 pub unsafe extern "C" fn ts_tree_cursor_current_depth(
     _self: *const TSTreeCursor,
 ) -> u32 {
-    let self_ = _self as *const TreeCursor;
+    let cursor = &*(_self as *const TreeCursor);
     let mut depth: u32 = 0;
-    for i in 1..(*self_).stack.size {
-        if ts_tree_cursor_is_entry_visible(&*self_, i) {
+    for i in 1..cursor.stack.size {
+        if ts_tree_cursor_is_entry_visible(cursor, i) {
             depth += 1;
         }
     }
