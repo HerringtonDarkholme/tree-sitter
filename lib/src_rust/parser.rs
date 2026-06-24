@@ -743,38 +743,38 @@ unsafe fn ts_parser__version_status(
 }
 
 unsafe fn ts_parser__better_version_exists(
-    self_: *mut TSParser,
+    self_: &mut TSParser,
     version: StackVersion,
     is_in_error: bool,
     cost: u32,
 ) -> bool {
-    if !(*self_).finished_tree.ptr.is_null()
-        && ts_subtree_error_cost((*self_).finished_tree) <= cost
+    if !self_.finished_tree.ptr.is_null()
+        && ts_subtree_error_cost(self_.finished_tree) <= cost
     {
         return true;
     }
 
-    let position = ts_stack_position(&*(*self_).stack, version);
+    let position = ts_stack_position(&*self_.stack, version);
     let status = ErrorStatus {
         cost,
         is_in_error,
-        dynamic_precedence: ts_stack_dynamic_precedence(&*(*self_).stack, version),
-        node_count: ts_stack_node_count_since_error(&mut *(*self_).stack, version),
+        dynamic_precedence: ts_stack_dynamic_precedence(&*self_.stack, version),
+        node_count: ts_stack_node_count_since_error(&mut *self_.stack, version),
     };
 
-    let n = ts_stack_version_count(&*(*self_).stack);
+    let n = ts_stack_version_count(&*self_.stack);
     for i in 0..n {
         if i == version
-            || !ts_stack_is_active(&*(*self_).stack, i)
-            || ts_stack_position(&*(*self_).stack, i).bytes < position.bytes
+            || !ts_stack_is_active(&*self_.stack, i)
+            || ts_stack_position(&*self_.stack, i).bytes < position.bytes
         {
             continue;
         }
-        let status_i = ts_parser__version_status(&mut *self_, i);
+        let status_i = ts_parser__version_status(self_, i);
         match ts_parser__compare_versions(status, status_i) {
             ErrorComparison::TakeRight => return true,
             ErrorComparison::PreferRight => {
-                if ts_stack_can_merge((*self_).stack, i, version) {
+                if ts_stack_can_merge(self_.stack, i, version) {
                     return true;
                 }
             }
@@ -1896,7 +1896,7 @@ unsafe fn ts_parser__recover(
                 + entry.depth * ERROR_COST_PER_SKIPPED_TREE
                 + (position.bytes - entry.position.bytes) * ERROR_COST_PER_SKIPPED_CHAR
                 + (position.extent.row - entry.position.extent.row) * ERROR_COST_PER_SKIPPED_LINE;
-            if ts_parser__better_version_exists(self_, version, false, new_cost) {
+            if ts_parser__better_version_exists(&mut *self_, version, false, new_cost) {
                 break;
             }
 
@@ -1959,7 +1959,7 @@ unsafe fn ts_parser__recover(
         + ERROR_COST_PER_SKIPPED_TREE
         + ts_subtree_total_bytes(lookahead) * ERROR_COST_PER_SKIPPED_CHAR
         + ts_subtree_total_size(lookahead).extent.row * ERROR_COST_PER_SKIPPED_LINE;
-    if ts_parser__better_version_exists(self_, version, false, new_cost) {
+    if ts_parser__better_version_exists(&mut *self_, version, false, new_cost) {
         ts_stack_halt(&mut *(*self_).stack, version);
         ts_subtree_release(&mut (*self_).tree_pool, lookahead);
         return;
