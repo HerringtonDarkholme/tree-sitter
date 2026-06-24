@@ -3116,26 +3116,30 @@ pub unsafe extern "C" fn ts_parser_set_wasm_store(
     self_: *mut TSParser,
     store: *mut TSWasmStore,
 ) {
-    if !(*self_).language.is_null() && ts_language_is_wasm((*self_).language) {
+    let parser = &*self_;
+    if !parser.language.is_null() && ts_language_is_wasm(parser.language) {
         // Copy the assigned language into the new store.
-        let copy = ts_language_copy((*self_).language);
+        let copy = ts_language_copy(parser.language);
         ts_parser_set_language(self_, copy);
         ts_language_delete(copy);
     }
 
-    ts_wasm_store_delete((*self_).wasm_store);
-    (*self_).wasm_store = store;
+    let parser = &mut *self_;
+    ts_wasm_store_delete(parser.wasm_store);
+    parser.wasm_store = store;
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_parser_take_wasm_store(
     self_: *mut TSParser,
 ) -> *mut TSWasmStore {
-    if !(*self_).language.is_null() && ts_language_is_wasm((*self_).language) {
+    let parser = &*self_;
+    if !parser.language.is_null() && ts_language_is_wasm(parser.language) {
         ts_parser_set_language(self_, ptr::null());
     }
 
-    let result = (*self_).wasm_store;
-    (*self_).wasm_store = ptr::null_mut();
+    let parser = &mut *self_;
+    let result = parser.wasm_store;
+    parser.wasm_store = ptr::null_mut();
     result
 }
