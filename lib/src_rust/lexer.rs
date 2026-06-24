@@ -308,13 +308,13 @@ unsafe fn ts_lexer__do_advance(self_: &mut Lexer, skip: bool) {
 
 /// Advance to the next character (with logging). TSLexer vtable callback.
 unsafe extern "C" fn ts_lexer__advance(_self: *mut TSLexer, skip: bool) {
-    let self_ = _self as *mut Lexer;
-    if (*self_).chunk.is_null() {
+    let self_ = &mut *(_self as *mut Lexer);
+    if self_.chunk.is_null() {
         return;
     }
 
-    if (*self_).logger.log.is_some() {
-        let character = (*self_).data.lookahead;
+    if self_.logger.log.is_some() {
+        let character = self_.data.lookahead;
         if skip {
             if 32 <= character && character < 127 {
                 ts_lexer__log_shim(
@@ -344,33 +344,33 @@ unsafe extern "C" fn ts_lexer__advance(_self: *mut TSLexer, skip: bool) {
         }
     }
 
-    ts_lexer__do_advance(&mut *self_, skip);
+    ts_lexer__do_advance(self_, skip);
 }
 
 /// Mark that a token match has completed. TSLexer vtable callback.
 unsafe extern "C" fn ts_lexer__mark_end(_self: *mut TSLexer) {
-    let self_ = _self as *mut Lexer;
-    if !ts_lexer__eof(&(*self_).data) {
+    let self_ = &mut *(_self as *mut Lexer);
+    if !ts_lexer__eof(&self_.data) {
         // If the lexer is right at the beginning of included range,
         // then the token should be considered to end at the *end* of the
         // previous included range, rather than here.
-        let current_included_range = &*(*self_)
+        let current_included_range = &*self_
             .included_ranges
-            .add((*self_).current_included_range_index as usize);
-        if (*self_).current_included_range_index > 0
-            && (*self_).current_position.bytes == current_included_range.start_byte
+            .add(self_.current_included_range_index as usize);
+        if self_.current_included_range_index > 0
+            && self_.current_position.bytes == current_included_range.start_byte
         {
-            let previous_included_range = &*(*self_)
+            let previous_included_range = &*self_
                 .included_ranges
-                .add((*self_).current_included_range_index as usize - 1);
-            (*self_).token_end_position = Length {
+                .add(self_.current_included_range_index as usize - 1);
+            self_.token_end_position = Length {
                 bytes: previous_included_range.end_byte,
                 extent: previous_included_range.end_point,
             };
             return;
         }
     }
-    (*self_).token_end_position = (*self_).current_position;
+    self_.token_end_position = self_.current_position;
 }
 
 /// Get the current column number. TSLexer vtable callback.
@@ -417,12 +417,12 @@ unsafe extern "C" fn ts_lexer__get_column(_self: *mut TSLexer) -> u32 {
 /// Is the lexer at a boundary between two disjoint included ranges?
 /// TSLexer vtable callback.
 unsafe extern "C" fn ts_lexer__is_at_included_range_start(_self: *const TSLexer) -> bool {
-    let self_ = _self as *const Lexer;
-    if (*self_).current_included_range_index < (*self_).included_range_count {
-        let current_range = &*(*self_)
+    let self_ = &*(_self as *const Lexer);
+    if self_.current_included_range_index < self_.included_range_count {
+        let current_range = &*self_
             .included_ranges
-            .add((*self_).current_included_range_index as usize);
-        (*self_).current_position.bytes == current_range.start_byte
+            .add(self_.current_included_range_index as usize);
+        self_.current_position.bytes == current_range.start_byte
     } else {
         false
     }
