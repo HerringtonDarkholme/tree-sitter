@@ -648,9 +648,8 @@ unsafe fn stack__iter(
         is_pending: true,
     };
 
-    let mut include_subtrees = false;
-    if goal_subtree_count >= 0 {
-        include_subtrees = true;
+    let include_subtrees = goal_subtree_count >= 0;
+    if include_subtrees {
         let reserve_count =
             ts_subtree_alloc_size(goal_subtree_count as u32) / std::mem::size_of::<Subtree>();
         array_reserve(
