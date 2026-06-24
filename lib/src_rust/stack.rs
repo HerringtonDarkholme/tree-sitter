@@ -492,13 +492,12 @@ unsafe fn stack_iterator_array_back_mut(self_: &Array<StackIterator>) -> &mut St
 // ---------------------------------------------------------------------------
 
 /// Retain (increment ref count) a stack node.
-unsafe fn stack_node_retain(self_: *mut StackNode) {
-    if self_.is_null() {
-        return;
+unsafe fn stack_node_retain(self_: Option<&mut StackNode>) {
+    if let Some(self_) = self_ {
+        debug_assert!(self_.ref_count > 0);
+        self_.ref_count += 1;
+        debug_assert!(self_.ref_count != 0);
     }
-    debug_assert!((*self_).ref_count > 0);
-    (*self_).ref_count += 1;
-    debug_assert!((*self_).ref_count != 0);
 }
 
 /// Release (decrement ref count) a stack node, freeing if zero.
@@ -676,7 +675,7 @@ unsafe fn stack_node_add_link(
         return;
     }
 
-    stack_node_retain(link.node);
+    stack_node_retain(link.node.as_mut());
     let mut node_count = (*link.node).node_count;
     let mut dynamic_precedence = (*link.node).dynamic_precedence;
     (*self_).links[(*self_).link_count as usize] = link;
@@ -733,7 +732,7 @@ unsafe fn ts_stack__add_version(
         summary: ptr::null_mut(),
     };
     array_push(&mut (*self_).heads, head);
-    stack_node_retain(node);
+    stack_node_retain(node.as_mut());
     let head = stack_head_array_back(&(*self_).heads);
     if !head.last_external_token.ptr.is_null() {
         ts_subtree_retain(head.last_external_token);
@@ -1328,7 +1327,7 @@ pub unsafe fn ts_stack_copy_version(
     let version_head = stack_head_array_read(&(*self_).heads, version);
     array_push(&mut (*self_).heads, version_head);
     let head = stack_head_array_back_mut(&(*self_).heads);
-    stack_node_retain(head.node);
+    stack_node_retain(head.node.as_mut());
     if !head.last_external_token.ptr.is_null() {
         ts_subtree_retain(head.last_external_token);
     }
@@ -1423,7 +1422,7 @@ pub unsafe fn ts_stack_resume(
 
 /// Clear all versions, resetting to initial state.
 pub unsafe fn ts_stack_clear(self_: *mut Stack) {
-    stack_node_retain((*self_).base_node);
+    stack_node_retain((*self_).base_node.as_mut());
     for i in 0..(*self_).heads.size {
         stack_head_delete(
             stack_head_mut(&mut *self_, i),
