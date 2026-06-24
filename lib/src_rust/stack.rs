@@ -401,6 +401,11 @@ unsafe fn stack_slice_array_get_mut(self_: &mut StackSliceArray, index: u32) -> 
 }
 
 #[inline]
+unsafe fn subtree_array_read_ref(self_: &SubtreeArray) -> SubtreeArray {
+    ptr::read(self_)
+}
+
+#[inline]
 unsafe fn stack_node_pool_get(self_: &Array<*mut StackNode>, index: u32) -> *mut StackNode {
     *array_get(self_, index)
 }
@@ -720,7 +725,7 @@ unsafe fn ts_stack__add_slice(
         let version = stack_slice_array_get(&(*self_).slices, i as u32).version;
         if stack_head(&*self_, version).node == node {
             let slice = StackSlice {
-                subtrees: ptr::read(subtrees),
+                subtrees: subtree_array_read_ref(&*subtrees),
                 version,
             };
             array_insert(&mut (*self_).slices, (i + 1) as u32, slice);
@@ -731,7 +736,7 @@ unsafe fn ts_stack__add_slice(
 
     let version = ts_stack__add_version(self_, original_version, node);
     let slice = StackSlice {
-        subtrees: ptr::read(subtrees),
+        subtrees: subtree_array_read_ref(&*subtrees),
         version,
     };
     array_push(&mut (*self_).slices, slice);
@@ -786,7 +791,7 @@ unsafe fn stack__iter(
             if should_pop {
                 let mut subtrees = stack_iterator_subtrees_read(&(*self_).iterators, i);
                 if !should_stop {
-                    ts_subtree_array_copy(ptr::read(&subtrees), &mut subtrees);
+                    ts_subtree_array_copy(subtree_array_read_ref(&subtrees), &mut subtrees);
                 }
                 ts_subtree_array_reverse(&mut subtrees);
                 ts_stack__add_slice(self_, version, node, &mut subtrees);
@@ -1125,7 +1130,7 @@ pub unsafe fn ts_stack_pop_error(
                 debug_assert!(pop.size == 1);
                 let first_pop = stack_slice_array_get(&pop, 0);
                 ts_stack_renumber_version(self_, first_pop.version, version);
-                return ptr::read(&first_pop.subtrees);
+                return subtree_array_read_ref(&first_pop.subtrees);
             }
             break;
         }
