@@ -563,13 +563,13 @@ unsafe extern "C" fn ts_string_input_read(
     _point: TSPoint,
     length: *mut u32,
 ) -> *const i8 {
-    let self_ = payload as *const TSStringInput;
-    if byte >= (*self_).length {
+    let input = &*(payload as *const TSStringInput);
+    if byte >= input.length {
         *length = 0;
         b"\0".as_ptr() as *const i8
     } else {
-        *length = (*self_).length - byte;
-        (*self_).string.add(byte as usize)
+        *length = input.length - byte;
+        input.string.add(byte as usize)
     }
 }
 
