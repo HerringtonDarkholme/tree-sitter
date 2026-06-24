@@ -987,17 +987,17 @@ pub unsafe extern "C" fn ts_tree_cursor_parent_node(
 pub unsafe extern "C" fn ts_tree_cursor_current_field_id(
     _self: *const TSTreeCursor,
 ) -> TSFieldId {
-    let self_ = _self as *const TreeCursor;
+    let cursor = &*(_self as *const TreeCursor);
 
     // Walk up the tree, visiting the current node and its invisible ancestors.
-    let mut i = (*self_).stack.size - 1;
+    let mut i = cursor.stack.size - 1;
     while i > 0 {
-        let entry = tree_cursor_entry_array_get(&(*self_).stack, i);
-        let parent_entry = tree_cursor_entry_array_get(&(*self_).stack, i - 1);
+        let entry = tree_cursor_entry_array_get(&cursor.stack, i);
+        let parent_entry = tree_cursor_entry_array_get(&cursor.stack, i - 1);
 
         // Stop walking up when another visible node is found.
-        if i != (*self_).stack.size - 1
-            && ts_tree_cursor_is_entry_visible(&*self_, i)
+        if i != cursor.stack.size - 1
+            && ts_tree_cursor_is_entry_visible(cursor, i)
         {
             break;
         }
@@ -1009,7 +1009,7 @@ pub unsafe extern "C" fn ts_tree_cursor_current_field_id(
         let mut field_map: *const TSFieldMapEntry = ptr::null();
         let mut field_map_end: *const TSFieldMapEntry = ptr::null();
         ts_language_field_map(
-            (*(*self_).tree).language,
+            (*cursor.tree).language,
             (*(*parent_entry.subtree).ptr).data.children.production_id as u32,
             &mut field_map,
             &mut field_map_end,
