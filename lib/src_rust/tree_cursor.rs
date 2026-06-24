@@ -698,11 +698,11 @@ pub unsafe extern "C" fn ts_tree_cursor_goto_previous_sibling(
 pub unsafe extern "C" fn ts_tree_cursor_goto_parent(
     _self: *mut TSTreeCursor,
 ) -> bool {
-    let self_ = _self as *mut TreeCursor;
-    let mut i = (*self_).stack.size as i32 - 2;
+    let cursor = &mut *(_self as *mut TreeCursor);
+    let mut i = cursor.stack.size as i32 - 2;
     while i + 1 > 0 {
-        if ts_tree_cursor_is_entry_visible(&*self_, i as u32) {
-            (*self_).stack.size = i as u32 + 1;
+        if ts_tree_cursor_is_entry_visible(cursor, i as u32) {
+            cursor.stack.size = i as u32 + 1;
             return true;
         }
         i -= 1;
