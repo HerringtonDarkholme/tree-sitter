@@ -827,7 +827,7 @@ unsafe fn stack__iter(
             if should_stop {
                 if !should_pop {
                     let iter = stack_iterator_array_get_mut(&mut (*self_).iterators, i);
-                    ts_subtree_array_delete((*self_).subtree_pool, &mut iter.subtrees);
+                    ts_subtree_array_delete(&mut *(*self_).subtree_pool, &mut iter.subtrees);
                 }
                 array_erase(&mut (*self_).iterators, i);
                 i = i.wrapping_sub(1);

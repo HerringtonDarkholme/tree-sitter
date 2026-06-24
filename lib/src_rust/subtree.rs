@@ -525,23 +525,21 @@ pub unsafe fn ts_subtree_array_copy(self_: SubtreeArray, dest: *mut SubtreeArray
     }
 }
 
-pub unsafe fn ts_subtree_array_clear(pool: *mut SubtreePool, self_: *mut SubtreeArray) {
-    let self_ = &mut *self_;
+pub unsafe fn ts_subtree_array_clear(pool: &mut SubtreePool, self_: &mut SubtreeArray) {
     for i in 0..self_.size {
         ts_subtree_release(pool, *self_.contents.add(i as usize));
     }
     self_.size = 0;
 }
 
-pub unsafe fn ts_subtree_array_delete(pool: *mut SubtreePool, self_: *mut SubtreeArray) {
+pub unsafe fn ts_subtree_array_delete(pool: &mut SubtreePool, self_: &mut SubtreeArray) {
     ts_subtree_array_clear(pool, self_);
-    let self_ref = &mut *self_;
-    if !self_ref.contents.is_null() {
-        ts_free(self_ref.contents as *mut c_void);
+    if !self_.contents.is_null() {
+        ts_free(self_.contents as *mut c_void);
     }
-    self_ref.contents = ptr::null_mut();
-    self_ref.size = 0;
-    self_ref.capacity = 0;
+    self_.contents = ptr::null_mut();
+    self_.size = 0;
+    self_.capacity = 0;
 }
 
 pub unsafe fn ts_subtree_array_remove_trailing_extras(
