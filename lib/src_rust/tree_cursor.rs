@@ -383,18 +383,17 @@ unsafe fn ts_tree_cursor_child_iterator_previous(
 
 #[inline]
 unsafe fn ts_tree_cursor_goto_first_child_for_byte_and_point(
-    _self: *mut TSTreeCursor,
+    cursor: &mut TreeCursor,
     goal_byte: u32,
     goal_point: TSPoint,
 ) -> i64 {
-    let self_ = _self as *mut TreeCursor;
-    let initial_size = (*self_).stack.size;
+    let initial_size = cursor.stack.size;
     let mut visible_child_index: u32 = 0;
 
     loop {
         let mut did_descend = false;
 
-        let mut iterator = ts_tree_cursor_iterate_children(&*self_);
+        let mut iterator = ts_tree_cursor_iterate_children(cursor);
         while let Some(child) = ts_tree_cursor_child_iterator_next(&mut iterator) {
             let entry = child.entry;
             let entry_end = length_add(entry.position, ts_subtree_size(*entry.subtree));
@@ -402,11 +401,11 @@ unsafe fn ts_tree_cursor_goto_first_child_for_byte_and_point(
             let visible_child_count = ts_subtree_visible_child_count(*entry.subtree);
             if at_goal {
                 if child.visible {
-                    array_push(&mut (*self_).stack, entry);
+                    array_push(&mut cursor.stack, entry);
                     return visible_child_index as i64;
                 }
                 if visible_child_count > 0 {
-                    array_push(&mut (*self_).stack, entry);
+                    array_push(&mut cursor.stack, entry);
                     did_descend = true;
                     break;
                 }
@@ -421,7 +420,7 @@ unsafe fn ts_tree_cursor_goto_first_child_for_byte_and_point(
         }
     }
 
-    (*self_).stack.size = initial_size;
+    cursor.stack.size = initial_size;
     -1
 }
 
@@ -604,7 +603,8 @@ pub unsafe extern "C" fn ts_tree_cursor_goto_first_child_for_byte(
     _self: *mut TSTreeCursor,
     goal_byte: u32,
 ) -> i64 {
-    ts_tree_cursor_goto_first_child_for_byte_and_point(_self, goal_byte, POINT_ZERO)
+    let cursor = &mut *(_self as *mut TreeCursor);
+    ts_tree_cursor_goto_first_child_for_byte_and_point(cursor, goal_byte, POINT_ZERO)
 }
 
 #[no_mangle]
@@ -612,7 +612,8 @@ pub unsafe extern "C" fn ts_tree_cursor_goto_first_child_for_point(
     _self: *mut TSTreeCursor,
     goal_point: TSPoint,
 ) -> i64 {
-    ts_tree_cursor_goto_first_child_for_byte_and_point(_self, 0, goal_point)
+    let cursor = &mut *(_self as *mut TreeCursor);
+    ts_tree_cursor_goto_first_child_for_byte_and_point(cursor, 0, goal_point)
 }
 
 // ---------------------------------------------------------------------------
