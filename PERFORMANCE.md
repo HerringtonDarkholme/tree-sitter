@@ -902,3 +902,51 @@ Source-code analysis:
   throughput improved versus the previous checkpoint, while C throughput also
   moved materially between checkpoints, so these are not treated as rollback
   evidence.
+
+### 2026-06-24 19:54 EDT
+
+- Repo head: `4cc7fc9a`
+- Batch base: `c9f64570`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: 10 small cursor/range reference cleanups through
+  `Use references when editing ranges`
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 26984.8 | 25242.6 | +6.90% |
+| TypeScript error parses | 32 | 1772.9 | 1698.6 | +4.37% |
+| JavaScript normal parses | 2 | 18218.0 | 17099.7 | +6.54% |
+| JavaScript error parses | 37 | 2153.3 | 2061.8 | +4.44% |
+| Overall parser throughput | 82 | 2440.3 | 2336.1 | +4.46% |
+
+Prior checkpoint at `fb368cb5` recorded Rust overall throughput of 2430.6
+bytes/ms on the same TypeScript/JavaScript gate. This run measured +0.40%
+Rust throughput versus that checkpoint, so no >5% Rust checkpoint regression
+was observed.
+
+No per-case Rust-vs-C regressions above the 5% threshold were reported.
+
+Source-code analysis:
+
+- This batch changed Rust-internal receiver/body style in `tree_cursor.rs` and
+  `get_changed_ranges.rs`. It did not change any exported function signatures,
+  `#[no_mangle] extern "C"` ABI, `#[repr(C)]` layouts, allocation sizes,
+  parse tables, generated parser templates, or FFI struct field order.
+- The live generated header inputs `templates/alloc.h`, `templates/array.h`,
+  and `parser.h.inc` were not edited.
+- Cursor changes bind `&TreeCursor` or `&mut TreeCursor` after entering the
+  existing raw-pointer ABI boundary. The same stack indexing, descendant
+  navigation, field lookup, field-name lookup, and node/cursor operations occur
+  in the same order.
+- Changed-range changes bind `&TSRangeArray`, `&mut TSRangeArray`, `&TSRange`,
+  `&mut TSRange`, and `&TSInputEdit` after the exported C entrypoints are
+  entered. The same range comparison, included-range scanning, edit arithmetic,
+  and result array appends occur in the same order.
+- Overall Rust throughput improved slightly versus the previous checkpoint and
+  the gate reported no per-case Rust-vs-C slowdowns above 5%, so no regression
+  investigation or rollback was needed for this batch.
