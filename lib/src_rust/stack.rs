@@ -718,11 +718,11 @@ unsafe fn stack_head_delete(
 
 /// Add a new version to the stack, cloning metadata from an existing version.
 unsafe fn ts_stack__add_version(
-    self_: *mut Stack,
+    self_: &mut Stack,
     original_version: StackVersion,
     node: *mut StackNode,
 ) -> StackVersion {
-    let original_head = stack_head(&*self_, original_version);
+    let original_head = stack_head(self_, original_version);
     let head = StackHead {
         node,
         node_count_at_last_error: original_head.node_count_at_last_error,
@@ -731,13 +731,13 @@ unsafe fn ts_stack__add_version(
         lookahead_when_paused: NULL_SUBTREE,
         summary: ptr::null_mut(),
     };
-    array_push(&mut (*self_).heads, head);
+    array_push(&mut self_.heads, head);
     stack_node_retain(node.as_mut());
-    let head = stack_head_array_back(&(*self_).heads);
+    let head = stack_head_array_back(&self_.heads);
     if !head.last_external_token.ptr.is_null() {
         ts_subtree_retain(head.last_external_token);
     }
-    (*self_).heads.size - 1
+    self_.heads.size - 1
 }
 
 /// Add a slice to the stack's slice array, finding or creating a version.
@@ -761,7 +761,7 @@ unsafe fn ts_stack__add_slice(
         i -= 1;
     }
 
-    let version = ts_stack__add_version(self_, original_version, node);
+    let version = ts_stack__add_version(&mut *self_, original_version, node);
     let slice = StackSlice {
         subtrees: subtree_array_read_ref(&*subtrees),
         version,
