@@ -406,6 +406,11 @@ unsafe fn stack_node_pool_get(self_: &Array<*mut StackNode>, index: u32) -> *mut
 }
 
 #[inline]
+unsafe fn stack_node_array_get(self_: &StackNodeArray, index: u32) -> *mut StackNode {
+    *array_get(self_, index)
+}
+
+#[inline]
 unsafe fn stack_summary_array_get(
     self_: &StackSummary,
     index: u32,
@@ -1500,7 +1505,7 @@ pub unsafe fn ts_stack_print_dot_graph(
             let mut node = iterator.node;
 
             for j in 0..visited_nodes.size {
-                if *array_get(&visited_nodes, j) == node {
+                if stack_node_array_get(&visited_nodes, j) == node {
                     node = ptr::null_mut();
                     break;
                 }
