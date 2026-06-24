@@ -1202,12 +1202,12 @@ unsafe fn ts_parser__get_cached_token(
 }
 
 unsafe fn ts_parser__set_cached_token(
-    self_: *mut TSParser,
+    self_: &mut TSParser,
     byte_index: u32,
     last_external_token: Subtree,
     token: Subtree,
 ) {
-    let cache = &mut (*self_).token_cache;
+    let cache = &mut self_.token_cache;
     if !token.ptr.is_null() {
         ts_subtree_retain(token);
     }
@@ -1215,10 +1215,10 @@ unsafe fn ts_parser__set_cached_token(
         ts_subtree_retain(last_external_token);
     }
     if !cache.token.ptr.is_null() {
-        ts_subtree_release(&mut (*self_).tree_pool, cache.token);
+        ts_subtree_release(&mut self_.tree_pool, cache.token);
     }
     if !cache.last_external_token.ptr.is_null() {
-        ts_subtree_release(&mut (*self_).tree_pool, cache.last_external_token);
+        ts_subtree_release(&mut self_.tree_pool, cache.last_external_token);
     }
     cache.token = token;
     cache.byte_index = byte_index;
@@ -2258,7 +2258,7 @@ unsafe fn ts_parser__advance(
             }
 
             if !lookahead.ptr.is_null() {
-                ts_parser__set_cached_token(self_, position, last_external_token, lookahead);
+                ts_parser__set_cached_token(&mut *self_, position, last_external_token, lookahead);
                 ts_language_table_entry(
                     (*self_).language,
                     state,
@@ -2689,7 +2689,7 @@ pub unsafe extern "C" fn ts_parser_new() -> *mut TSParser {
     let new_array: Array<TSRange> = array_new();
     (*self_).included_range_differences = core::mem::transmute(new_array);
     (*self_).included_range_difference_index = 0;
-    ts_parser__set_cached_token(self_, 0, NULL_SUBTREE, NULL_SUBTREE);
+    ts_parser__set_cached_token(&mut *self_, 0, NULL_SUBTREE, NULL_SUBTREE);
     self_
 }
 
@@ -2713,7 +2713,7 @@ pub unsafe extern "C" fn ts_parser_delete(self_: *mut TSParser) {
     }
     ts_wasm_store_delete((*self_).wasm_store);
     ts_lexer_delete(&mut (*self_).lexer);
-    ts_parser__set_cached_token(self_, 0, NULL_SUBTREE, NULL_SUBTREE);
+    ts_parser__set_cached_token(&mut *self_, 0, NULL_SUBTREE, NULL_SUBTREE);
     ts_subtree_pool_delete(&mut (*self_).tree_pool);
     reusable_node_delete(&mut (*self_).reusable_node);
     array_delete(&mut (*self_).trailing_extras as *mut SubtreeArray as *mut Array<Subtree>);
@@ -2832,7 +2832,7 @@ pub unsafe extern "C" fn ts_parser_reset(self_: *mut TSParser) {
     reusable_node_clear(&mut (*self_).reusable_node);
     ts_lexer_reset(&mut (*self_).lexer, length_zero());
     ts_stack_clear(&mut *(*self_).stack);
-    ts_parser__set_cached_token(self_, 0, NULL_SUBTREE, NULL_SUBTREE);
+    ts_parser__set_cached_token(&mut *self_, 0, NULL_SUBTREE, NULL_SUBTREE);
     if !(*self_).finished_tree.ptr.is_null() {
         ts_subtree_release(&mut (*self_).tree_pool, (*self_).finished_tree);
         (*self_).finished_tree = NULL_SUBTREE;
