@@ -2076,18 +2076,19 @@ unsafe fn ts_parser__recover(
 }
 
 unsafe fn ts_parser__handle_error(
-    self_: *mut TSParser,
+    self_: &mut TSParser,
     version: StackVersion,
     lookahead: Subtree,
 ) {
-    let previous_version_count = ts_stack_version_count(&*(*self_).stack);
+    let parser = self_ as *mut TSParser;
+    let previous_version_count = ts_stack_version_count(&*self_.stack);
 
     // Perform any reductions that can happen in this state, regardless of the lookahead. After
     // skipping one or more invalid tokens, the parser might find a token that would have allowed
     // a reduction to take place.
-    ts_parser__do_all_potential_reductions(&mut *self_, version, 0);
-    let version_count = ts_stack_version_count(&*(*self_).stack);
-    let position = ts_stack_position(&*(*self_).stack, version);
+    ts_parser__do_all_potential_reductions(self_, version, 0);
+    let version_count = ts_stack_version_count(&*self_.stack);
+    let position = ts_stack_position(&*self_.stack, version);
 
     // Push a discontinuity onto the stack. Merge all of the stack versions that
     // were created in the previous step.
@@ -2095,42 +2096,41 @@ unsafe fn ts_parser__handle_error(
     let mut v = version;
     while v < version_count {
         if !did_insert_missing_token {
-            let state = ts_stack_state(&*(*self_).stack, v);
-            let language = (*self_).language as *const TSLanguageFull;
+            let state = ts_stack_state(&*self_.stack, v);
+            let language = self_.language as *const TSLanguageFull;
             let mut missing_symbol: TSSymbol = 1;
             while (missing_symbol as u32) < (*language).token_count {
                 let state_after_missing_symbol =
-                    ts_language_next_state((*self_).language, state, missing_symbol);
+                    ts_language_next_state(self_.language, state, missing_symbol);
                 if state_after_missing_symbol == 0 || state_after_missing_symbol == state {
                     missing_symbol += 1;
                     continue;
                 }
 
                 if ts_language_has_reduce_action(
-                    (*self_).language,
+                    self_.language,
                     state_after_missing_symbol,
                     ts_subtree_leaf_symbol(lookahead),
                 ) {
                     // In case the parser is currently outside of any included range, the lexer will
                     // snap to the beginning of the next included range. The missing token's padding
                     // must be assigned to position it within the next included range.
-                    ts_lexer_reset(&mut (*self_).lexer, position);
-                    ts_lexer_mark_end(&mut (*self_).lexer);
-                    let padding = length_sub((*self_).lexer.token_end_position, position);
+                    ts_lexer_reset(&mut self_.lexer, position);
+                    ts_lexer_mark_end(&mut self_.lexer);
+                    let padding = length_sub(self_.lexer.token_end_position, position);
                     let lookahead_bytes =
                         ts_subtree_total_bytes(lookahead) + ts_subtree_lookahead_bytes(lookahead);
 
-                    let version_with_missing_tree =
-                        ts_stack_copy_version((*self_).stack, v);
+                    let version_with_missing_tree = ts_stack_copy_version(self_.stack, v);
                     let missing_tree = ts_subtree_new_missing_leaf(
-                        &mut (*self_).tree_pool,
+                        &mut self_.tree_pool,
                         missing_symbol,
                         padding,
                         lookahead_bytes,
-                        (*self_).language,
+                        self_.language,
                     );
                     ts_stack_push(
-                        (*self_).stack,
+                        self_.stack,
                         version_with_missing_tree,
                         missing_tree,
                         false,
@@ -2138,15 +2138,15 @@ unsafe fn ts_parser__handle_error(
                     );
 
                     if ts_parser__do_all_potential_reductions(
-                        &mut *self_,
+                        self_,
                         version_with_missing_tree,
                         ts_subtree_leaf_symbol(lookahead),
                     ) {
                         LOG!(
-                            self_,
+                            parser,
                             b"recover_with_missing symbol:%s, state:%u\0".as_ptr() as *const i8,
-                            SYM_NAME!(self_, missing_symbol),
-                            ts_stack_state(&*(*self_).stack, version_with_missing_tree) as u32
+                            SYM_NAME!(parser, missing_symbol),
+                            ts_stack_state(&*self_.stack, version_with_missing_tree) as u32
                         );
                         did_insert_missing_token = true;
                         break;
@@ -2156,7 +2156,7 @@ unsafe fn ts_parser__handle_error(
             }
         }
 
-        ts_stack_push((*self_).stack, v, NULL_SUBTREE, false, ERROR_STATE);
+        ts_stack_push(self_.stack, v, NULL_SUBTREE, false, ERROR_STATE);
         v = if v == version {
             previous_version_count
         } else {
@@ -2165,11 +2165,11 @@ unsafe fn ts_parser__handle_error(
     }
 
     for _i in previous_version_count..version_count {
-        let did_merge = ts_stack_merge((*self_).stack, version, previous_version_count);
+        let did_merge = ts_stack_merge(self_.stack, version, previous_version_count);
         debug_assert!(did_merge);
     }
 
-    ts_stack_record_summary((*self_).stack, version, MAX_SUMMARY_DEPTH);
+    ts_stack_record_summary(self_.stack, version, MAX_SUMMARY_DEPTH);
 
     // Begin recovery with the current lookahead node, rather than waiting for the
     // next turn of the parse loop. This ensures that the tree accounts for the
@@ -2178,11 +2178,11 @@ unsafe fn ts_parser__handle_error(
     // recognize it.
     let mut lookahead = lookahead;
     if ts_subtree_child_count(lookahead) > 0 {
-        ts_parser__breakdown_lookahead(&mut *self_, &mut lookahead, ERROR_STATE);
+        ts_parser__breakdown_lookahead(self_, &mut lookahead, ERROR_STATE);
     }
-    ts_parser__recover(self_, version, lookahead);
+    ts_parser__recover(parser, version, lookahead);
 
-    LOG_STACK!(self_);
+    LOG_STACK!(parser);
 }
 
 // ---------------------------------------------------------------------------
@@ -2583,7 +2583,7 @@ unsafe fn ts_parser__condense_stack(self_: &mut TSParser) -> u32 {
                     LOG!(self_, b"resume version:%u\0".as_ptr() as *const i8, i);
                     min_error_cost = ts_stack_error_cost(&*self_.stack, i);
                     let lookahead = ts_stack_resume(self_.stack, i);
-                    ts_parser__handle_error(self_, i, lookahead);
+                    ts_parser__handle_error(&mut *self_, i, lookahead);
                     has_unpaused_version = true;
                 } else {
                     ts_stack_remove_version(&mut *self_.stack, i);
