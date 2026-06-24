@@ -122,8 +122,8 @@ struct CursorChildIterator {
 // ---------------------------------------------------------------------------
 
 #[inline]
-unsafe fn array_get(arr: &TreeCursorEntryArray, index: u32) -> *mut TreeCursorEntry {
-    arr.contents.add(index as usize)
+unsafe fn array_get(arr: &TreeCursorEntryArray, index: u32) -> &TreeCursorEntry {
+    &*arr.contents.add(index as usize)
 }
 
 #[inline]
@@ -211,11 +211,11 @@ unsafe fn ts_tree_cursor_is_entry_visible(
     self_: &TreeCursor,
     index: u32,
 ) -> bool {
-    let entry = &*array_get(&self_.stack, index);
+    let entry = array_get(&self_.stack, index);
     if index == 0 || ts_subtree_visible(*entry.subtree) {
         return true;
     } else if !ts_subtree_extra(*entry.subtree) {
-        let parent_entry = &*array_get(&self_.stack, index - 1);
+        let parent_entry = array_get(&self_.stack, index - 1);
         return ts_language_alias_at(
             (*self_.tree).language,
             (*(*parent_entry.subtree).ptr).data.children.production_id as u32,
@@ -637,7 +637,7 @@ pub unsafe extern "C" fn ts_tree_cursor_goto_previous_sibling_internal(
     }
 
     // restore position from the parent node
-    let parent = &*array_get(&(*self_).stack, (*self_).stack.size - 2);
+    let parent = array_get(&(*self_).stack, (*self_).stack.size - 2);
     let mut position = parent.position;
     let child_index = (*array_back(&(*self_).stack)).child_index;
     let children = ts_subtree_children(*parent.subtree);
@@ -696,7 +696,7 @@ pub unsafe extern "C" fn ts_tree_cursor_goto_descendant(
     // Ascend to the lowest ancestor that contains the goal node.
     loop {
         let i = (*self_).stack.size - 1;
-        let entry = &*array_get(&(*self_).stack, i);
+        let entry = array_get(&(*self_).stack, i);
         let next_descendant_index =
             entry.descendant_index
             + (if ts_tree_cursor_is_entry_visible(&*self_, i) { 1 } else { 0 })
@@ -761,7 +761,7 @@ pub unsafe extern "C" fn ts_tree_cursor_current_node(
     let is_extra = ts_subtree_extra(*last_entry.subtree);
     let mut alias_symbol: TSSymbol = if is_extra { 0 } else { (*self_).root_alias_symbol };
     if (*self_).stack.size > 1 && !is_extra {
-        let parent_entry = &*array_get(&(*self_).stack, (*self_).stack.size - 2);
+        let parent_entry = array_get(&(*self_).stack, (*self_).stack.size - 2);
         alias_symbol = ts_language_alias_at(
             (*(*self_).tree).language,
             (*(*parent_entry.subtree).ptr).data.children.production_id as u32,
@@ -797,8 +797,8 @@ pub unsafe extern "C" fn ts_tree_cursor_current_status(
     // Walk up the tree, visiting the current node and its invisible ancestors
     let mut i = (*self_).stack.size - 1;
     while i > 0 {
-        let entry = &*array_get(&(*self_).stack, i);
-        let parent_entry = &*array_get(&(*self_).stack, i - 1);
+        let entry = array_get(&(*self_).stack, i);
+        let parent_entry = array_get(&(*self_).stack, i - 1);
 
         let alias_sequence = ts_language_alias_sequence(
             (*(*self_).tree).language,
@@ -935,11 +935,11 @@ pub unsafe extern "C" fn ts_tree_cursor_parent_node(
     let self_ = _self as *const TreeCursor;
     let mut i = (*self_).stack.size as i32 - 2;
     while i >= 0 {
-        let entry = &*array_get(&(*self_).stack, i as u32);
+        let entry = array_get(&(*self_).stack, i as u32);
         let mut is_visible = true;
         let mut alias_symbol: TSSymbol = 0;
         if i > 0 {
-            let parent_entry = &*array_get(&(*self_).stack, i as u32 - 1);
+            let parent_entry = array_get(&(*self_).stack, i as u32 - 1);
             alias_symbol = ts_language_alias_at(
                 (*(*self_).tree).language,
                 (*(*parent_entry.subtree).ptr).data.children.production_id as u32,
@@ -969,8 +969,8 @@ pub unsafe extern "C" fn ts_tree_cursor_current_field_id(
     // Walk up the tree, visiting the current node and its invisible ancestors.
     let mut i = (*self_).stack.size - 1;
     while i > 0 {
-        let entry = &*array_get(&(*self_).stack, i);
-        let parent_entry = &*array_get(&(*self_).stack, i - 1);
+        let entry = array_get(&(*self_).stack, i);
+        let parent_entry = array_get(&(*self_).stack, i - 1);
 
         // Stop walking up when another visible node is found.
         if i != (*self_).stack.size - 1
