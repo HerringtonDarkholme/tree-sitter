@@ -792,23 +792,23 @@ unsafe fn ts_parser__better_version_exists(
 // ---------------------------------------------------------------------------
 
 unsafe fn ts_parser__call_main_lex_fn(
-    self_: *mut TSParser,
+    self_: &mut TSParser,
     lex_mode: TSLexerMode,
 ) -> bool {
-    if ts_language_is_wasm((*self_).language) {
-        ts_wasm_store_call_lex_main((*self_).wasm_store, lex_mode.lex_state)
+    if ts_language_is_wasm(self_.language) {
+        ts_wasm_store_call_lex_main(self_.wasm_store, lex_mode.lex_state)
     } else {
-        let lang = (*self_).language as *const TSLanguageFull;
-        ((*lang).lex_fn.unwrap())(&mut (*self_).lexer.data, lex_mode.lex_state)
+        let lang = self_.language as *const TSLanguageFull;
+        ((*lang).lex_fn.unwrap())(&mut self_.lexer.data, lex_mode.lex_state)
     }
 }
 
-unsafe fn ts_parser__call_keyword_lex_fn(self_: *mut TSParser) -> bool {
-    if ts_language_is_wasm((*self_).language) {
-        ts_wasm_store_call_lex_keyword((*self_).wasm_store, 0)
+unsafe fn ts_parser__call_keyword_lex_fn(self_: &mut TSParser) -> bool {
+    if ts_language_is_wasm(self_.language) {
+        ts_wasm_store_call_lex_keyword(self_.wasm_store, 0)
     } else {
-        let lang = (*self_).language as *const TSLanguageFull;
-        ((*lang).keyword_lex_fn.unwrap())(&mut (*self_).lexer.data, 0)
+        let lang = self_.language as *const TSLanguageFull;
+        ((*lang).keyword_lex_fn.unwrap())(&mut self_.lexer.data, 0)
     }
 }
 
@@ -1062,7 +1062,7 @@ unsafe fn ts_parser__lex(
             current_position.extent.row,
             current_position.extent.column);
         ts_lexer_start(&mut (*self_).lexer);
-        found_token = ts_parser__call_main_lex_fn(self_, lex_mode);
+        found_token = ts_parser__call_main_lex_fn(&mut *self_, lex_mode);
         ts_lexer_finish(&mut (*self_).lexer, &mut lookahead_end_byte);
         if found_token {
             break;
@@ -1126,7 +1126,7 @@ unsafe fn ts_parser__lex(
             ts_lexer_reset(&mut (*self_).lexer, (*self_).lexer.token_start_position);
             ts_lexer_start(&mut (*self_).lexer);
 
-            is_keyword = ts_parser__call_keyword_lex_fn(self_);
+            is_keyword = ts_parser__call_keyword_lex_fn(&mut *self_);
 
             if is_keyword
                 && (*self_).lexer.token_end_position.bytes == end_byte
