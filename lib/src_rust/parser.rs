@@ -768,7 +768,7 @@ unsafe fn ts_parser__better_version_exists(
     let n = ts_stack_version_count((*self_).stack);
     for i in 0..n {
         if i == version
-            || !ts_stack_is_active((*self_).stack, i)
+            || !ts_stack_is_active(&*(*self_).stack, i)
             || ts_stack_position((*self_).stack, i).bytes < position.bytes
         {
             continue;
@@ -1921,7 +1921,7 @@ unsafe fn ts_parser__recover(
     // Remove halted versions
     let mut i = previous_version_count;
     while i < ts_stack_version_count((*self_).stack) {
-        if !ts_stack_is_active((*self_).stack, i) {
+        if !ts_stack_is_active(&*(*self_).stack, i) {
             LOG!(self_, b"removed paused version:%u\0".as_ptr() as *const i8, i);
             ts_stack_remove_version((*self_).stack, i);
             LOG_STACK!(self_);
@@ -2948,7 +2948,7 @@ pub unsafe extern "C" fn ts_parser_parse(
             }
 
             let allow_node_reuse = version_count == 1;
-            while ts_stack_is_active((*self_).stack, version) {
+            while ts_stack_is_active(&*(*self_).stack, version) {
                 LOG!(
                     self_,
                     b"process version:%u, version_count:%u, state:%d, row:%u, col:%u\0".as_ptr() as *const i8,

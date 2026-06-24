@@ -1402,8 +1402,8 @@ pub unsafe fn ts_stack_pause(
 }
 
 /// Check if a version is active.
-pub unsafe fn ts_stack_is_active(self_: *const Stack, version: StackVersion) -> bool {
-    stack_head(&*self_, version).status == StackStatus::Active
+pub unsafe fn ts_stack_is_active(self_: &Stack, version: StackVersion) -> bool {
+    stack_head(self_, version).status == StackStatus::Active
 }
 
 /// Check if a version is halted.
