@@ -961,10 +961,10 @@ pub unsafe fn ts_stack_error_cost(self_: *const Stack, version: StackVersion) ->
 
 /// Get the node count since last error for a version.
 pub unsafe fn ts_stack_node_count_since_error(
-    self_: *const Stack,
+    self_: *mut Stack,
     version: StackVersion,
 ) -> u32 {
-    let head = &mut *array_get(&(*self_).heads, version);
+    let head = stack_head_mut(&mut *self_, version);
     if (*head.node).node_count < head.node_count_at_last_error {
         head.node_count_at_last_error = (*head.node).node_count;
     }
