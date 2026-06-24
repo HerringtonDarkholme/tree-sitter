@@ -1466,7 +1466,7 @@ unsafe fn ts_parser__reduce(
 
     let pop = ts_stack_pop_count((*self_).stack, version, count);
     let mut removed_version_count: u32 = 0;
-    let halted_version_count = ts_stack_halted_version_count((*self_).stack);
+    let halted_version_count = ts_stack_halted_version_count(&*(*self_).stack);
     let mut i: u32 = 0;
     while i < pop.size {
         let mut slice = stack_slice_array_read(&pop, i);

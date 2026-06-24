@@ -1039,10 +1039,10 @@ pub unsafe fn ts_stack_version_count(self_: *const Stack) -> u32 {
 }
 
 /// Get the number of halted versions.
-pub unsafe fn ts_stack_halted_version_count(self_: *mut Stack) -> u32 {
+pub unsafe fn ts_stack_halted_version_count(self_: &Stack) -> u32 {
     let mut count = 0u32;
-    for i in 0..(*self_).heads.size {
-        if stack_head(&*self_, i).status == StackStatus::Halted {
+    for i in 0..self_.heads.size {
+        if stack_head(self_, i).status == StackStatus::Halted {
             count += 1;
         }
     }
