@@ -1260,7 +1260,7 @@ pub unsafe fn ts_subtree_set_symbol(
 
 // --- #41: make_mut ---
 
-pub unsafe fn ts_subtree_make_mut(pool: *mut SubtreePool, self_: Subtree) -> MutableSubtree {
+pub unsafe fn ts_subtree_make_mut(pool: &mut SubtreePool, self_: Subtree) -> MutableSubtree {
     if self_.data.is_inline() {
         return MutableSubtree { data: self_.data };
     }
@@ -1672,7 +1672,7 @@ pub unsafe fn ts_subtree_edit(
             );
         }
 
-        let mut result = ts_subtree_make_mut(pool, *entry.tree);
+        let mut result = ts_subtree_make_mut(&mut *pool, *entry.tree);
 
         if result.data.is_inline() {
             if ts_subtree_can_inline(padding, size, lookahead_bytes) {
