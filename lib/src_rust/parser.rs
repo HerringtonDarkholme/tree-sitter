@@ -196,13 +196,14 @@ const TREE_SITTER_MIN_COMPATIBLE_LANGUAGE_VERSION: u32 = 13;
 
 macro_rules! LOG {
     ($self_:expr, $($arg:expr),+) => {
-        if (*$self_).lexer.logger.log.is_some() || !(*$self_).dot_graph_file.is_null() {
+        let parser = &mut *$self_;
+        if parser.lexer.logger.log.is_some() || !parser.dot_graph_file.is_null() {
             snprintf(
-                (*$self_).lexer.debug_buffer.as_mut_ptr() as *mut i8,
+                parser.lexer.debug_buffer.as_mut_ptr() as *mut i8,
                 TREE_SITTER_SERIALIZATION_BUFFER_SIZE,
                 $($arg),+
             );
-            ts_parser__log($self_);
+            ts_parser__log(parser);
         }
     };
 }
@@ -254,7 +255,7 @@ macro_rules! LOG_LOOKAHEAD {
                 b", size:%u\0".as_ptr() as *const i8,
                 $size,
             );
-            ts_parser__log($self_);
+            ts_parser__log(&mut *$self_);
         }
     };
 }
@@ -576,26 +577,26 @@ unsafe extern "C" fn ts_string_input_read(
 // Internal helpers — logging & breakdown
 // ---------------------------------------------------------------------------
 
-unsafe fn ts_parser__log(self_: *mut TSParser) {
-    if let Some(log_fn) = (*self_).lexer.logger.log {
+unsafe fn ts_parser__log(self_: &mut TSParser) {
+    if let Some(log_fn) = self_.lexer.logger.log {
         log_fn(
-            (*self_).lexer.logger.payload,
+            self_.lexer.logger.payload,
             TSLogTypeParse,
-            (*self_).lexer.debug_buffer.as_ptr() as *const i8,
+            self_.lexer.debug_buffer.as_ptr() as *const i8,
         );
     }
 
-    if !(*self_).dot_graph_file.is_null() {
-        fprintf((*self_).dot_graph_file, b"graph {\nlabel=\"\0".as_ptr() as *const i8);
-        let mut chr = (*self_).lexer.debug_buffer.as_ptr();
+    if !self_.dot_graph_file.is_null() {
+        fprintf(self_.dot_graph_file, b"graph {\nlabel=\"\0".as_ptr() as *const i8);
+        let mut chr = self_.lexer.debug_buffer.as_ptr();
         while *chr != 0 {
             if *chr == b'"' || *chr == b'\\' {
-                fputc(b'\\' as i32, (*self_).dot_graph_file);
+                fputc(b'\\' as i32, self_.dot_graph_file);
             }
-            fputc(*chr as i32, (*self_).dot_graph_file);
+            fputc(*chr as i32, self_.dot_graph_file);
             chr = chr.add(1);
         }
-        fprintf((*self_).dot_graph_file, b"\"\n}\n\n\0".as_ptr() as *const i8);
+        fprintf(self_.dot_graph_file, b"\"\n}\n\n\0".as_ptr() as *const i8);
     }
 }
 
