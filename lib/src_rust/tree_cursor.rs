@@ -809,7 +809,8 @@ pub unsafe extern "C" fn ts_tree_cursor_current_status(
     supertypes: *mut TSSymbol,
     supertype_count: *mut u32,
 ) {
-    let self_ = _self as *const TreeCursor;
+    let cursor = &*(_self as *const TreeCursor);
+    let language = (*cursor.tree).language;
     let max_supertypes = *supertype_count;
     *field_id = 0;
     *supertype_count = 0;
@@ -818,13 +819,13 @@ pub unsafe extern "C" fn ts_tree_cursor_current_status(
     *can_have_later_siblings_with_this_field = false;
 
     // Walk up the tree, visiting the current node and its invisible ancestors
-    let mut i = (*self_).stack.size - 1;
+    let mut i = cursor.stack.size - 1;
     while i > 0 {
-        let entry = tree_cursor_entry_array_get(&(*self_).stack, i);
-        let parent_entry = tree_cursor_entry_array_get(&(*self_).stack, i - 1);
+        let entry = tree_cursor_entry_array_get(&cursor.stack, i);
+        let parent_entry = tree_cursor_entry_array_get(&cursor.stack, i - 1);
 
         let alias_sequence = ts_language_alias_sequence(
-            (*(*self_).tree).language,
+            language,
             (*(*parent_entry.subtree).ptr).data.children.production_id as u32,
         );
 
@@ -843,10 +844,10 @@ pub unsafe extern "C" fn ts_tree_cursor_current_status(
         // Stop walking up when a visible ancestor is found.
         let entry_symbol = subtree_symbol_fn(*entry.subtree, entry.structural_child_index);
         let entry_metadata = ts_language_symbol_metadata(
-            (*(*self_).tree).language,
+            language,
             entry_symbol,
         );
-        if i != (*self_).stack.size - 1 && entry_metadata.visible {
+        if i != cursor.stack.size - 1 && entry_metadata.visible {
             break;
         }
 
@@ -867,7 +868,7 @@ pub unsafe extern "C" fn ts_tree_cursor_current_status(
             while j < sibling_count {
                 let sibling = *ts_subtree_children(*parent_entry.subtree).add(j as usize);
                 let sibling_metadata = ts_language_symbol_metadata(
-                    (*(*self_).tree).language,
+                    language,
                     subtree_symbol_fn(sibling, structural_child_index),
                 );
                 if sibling_metadata.visible {
@@ -900,7 +901,7 @@ pub unsafe extern "C" fn ts_tree_cursor_current_status(
             let mut field_map: *const TSFieldMapEntry = ptr::null();
             let mut field_map_end: *const TSFieldMapEntry = ptr::null();
             ts_language_field_map(
-                (*(*self_).tree).language,
+                language,
                 (*(*parent_entry.subtree).ptr).data.children.production_id as u32,
                 &mut field_map,
                 &mut field_map_end,
