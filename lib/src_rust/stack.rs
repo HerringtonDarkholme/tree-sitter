@@ -368,6 +368,19 @@ unsafe fn stack_head_array_write(
 }
 
 #[inline]
+unsafe fn stack_head_array_pair_mut(
+    self_: &mut Array<StackHead>,
+    first: StackVersion,
+    second: StackVersion,
+) -> (&mut StackHead, &mut StackHead) {
+    debug_assert_ne!(first, second);
+    let first_head = array_get(self_, first);
+    let second_head = array_get(self_, second);
+    debug_assert_ne!(first_head, second_head);
+    (&mut *first_head, &mut *second_head)
+}
+
+#[inline]
 unsafe fn stack_slice_array_get(self_: &StackSliceArray, index: u32) -> &StackSlice {
     &*array_get(self_, index)
 }
@@ -1196,8 +1209,7 @@ pub unsafe fn ts_stack_renumber_version(
     }
     debug_assert!(v2 < v1);
     debug_assert!(v1 < (*self_).heads.size);
-    let source_head = &mut *array_get(&mut (*self_).heads, v1);
-    let target_head = &mut *array_get(&mut (*self_).heads, v2);
+    let (source_head, target_head) = stack_head_array_pair_mut(&mut (*self_).heads, v1, v2);
     if !target_head.summary.is_null() && source_head.summary.is_null() {
         source_head.summary = target_head.summary;
         target_head.summary = ptr::null_mut();
