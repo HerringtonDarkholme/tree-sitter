@@ -519,6 +519,10 @@ unsafe fn stack_slice_subtrees_read_ref(self_: &StackSlice) -> SubtreeArray {
     ptr::read(&self_.subtrees)
 }
 
+unsafe fn subtree_array_get(self_: &SubtreeArray, index: u32) -> Subtree {
+    *array_get(self_ as *const SubtreeArray as *const Array<Subtree>, index)
+}
+
 unsafe fn stack_summary_array_get(self_: &StackSummary, index: u32) -> &StackSummaryEntry {
     &*array_get(self_ as *const StackSummary, index)
 }
@@ -612,7 +616,7 @@ unsafe fn ts_parser__breakdown_top_of_stack(
         for i in 0..pop.size {
             let mut slice = stack_slice_array_read(&pop, i);
             let mut state = ts_stack_state((*self_).stack, slice.version);
-            let parent = *slice.subtrees.contents;
+            let parent = subtree_array_get(&slice.subtrees, 0);
 
             let n = ts_subtree_child_count(parent);
             for j in 0..n {
@@ -630,7 +634,7 @@ unsafe fn ts_parser__breakdown_top_of_stack(
             }
 
             for j in 1..slice.subtrees.size {
-                let tree = *slice.subtrees.contents.add(j as usize);
+                let tree = subtree_array_get(&slice.subtrees, j);
                 ts_stack_push((*self_).stack, slice.version, tree, false, state);
             }
 
@@ -1567,7 +1571,7 @@ unsafe fn ts_parser__reduce(
             ts_stack_push(
                 (*self_).stack,
                 slice_version,
-                *(*self_).trailing_extras.contents.add(j as usize),
+                subtree_array_get(&(*self_).trailing_extras, j),
                 false,
                 next_state,
             );
@@ -1608,7 +1612,7 @@ unsafe fn ts_parser__accept(
         let mut root = NULL_SUBTREE;
         let mut j = trees.size as i64 - 1;
         while j >= 0 {
-            let tree = *trees.contents.add(j as usize);
+            let tree = subtree_array_get(&trees, j as u32);
             if !ts_subtree_extra(tree) {
                 debug_assert!(!tree.data.is_inline());
                 let child_count = ts_subtree_child_count(tree);
@@ -1812,7 +1816,7 @@ unsafe fn ts_parser__recover_to_state(
                     ts_subtree_children(error_tree),
                 );
                 for j in 0..error_child_count {
-                    ts_subtree_retain(*slice.subtrees.contents.add(j as usize));
+                    ts_subtree_retain(subtree_array_get(&slice.subtrees, j));
                 }
             }
             ts_subtree_array_delete(&mut (*self_).tree_pool, &mut error_trees);
@@ -1835,7 +1839,7 @@ unsafe fn ts_parser__recover_to_state(
         }
 
         for j in 0..(*self_).trailing_extras.size {
-            let tree = *(*self_).trailing_extras.contents.add(j as usize);
+            let tree = subtree_array_get(&(*self_).trailing_extras, j);
             ts_stack_push((*self_).stack, slice.version, tree, false, goal_state);
         }
 
