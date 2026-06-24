@@ -353,6 +353,11 @@ unsafe fn stack_head_mut(self_: &mut Stack, version: StackVersion) -> &mut Stack
     &mut *array_get(&mut self_.heads, version)
 }
 
+#[inline]
+unsafe fn stack_slice_array_get(self_: &StackSliceArray, index: u32) -> &StackSlice {
+    &*array_get(self_, index)
+}
+
 // ---------------------------------------------------------------------------
 // Internal (static) functions
 // ---------------------------------------------------------------------------
@@ -615,7 +620,7 @@ unsafe fn ts_stack__add_slice(
 ) {
     let mut i = (*self_).slices.size as i32 - 1;
     while i + 1 > 0 {
-        let version = (*array_get(&(*self_).slices, i as u32)).version;
+        let version = stack_slice_array_get(&(*self_).slices, i as u32).version;
         if stack_head(&*self_, version).node == node {
             let slice = StackSlice {
                 subtrees: ptr::read(subtrees),
