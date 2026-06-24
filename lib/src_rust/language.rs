@@ -215,6 +215,17 @@ pub struct TableEntry {
     pub is_reusable: bool,
 }
 
+impl TableEntry {
+    #[inline]
+    pub fn empty() -> Self {
+        Self {
+            actions: ptr::null(),
+            action_count: 0,
+            is_reusable: false,
+        }
+    }
+}
+
 /// Iterator over valid lookahead symbols for a given parse state.
 #[repr(C)]
 pub struct LookaheadIterator {
@@ -319,7 +330,7 @@ pub unsafe fn ts_language_actions(
     symbol: TSSymbol,
     count: *mut u32,
 ) -> *const TSParseAction {
-    let mut entry = std::mem::zeroed::<TableEntry>();
+    let mut entry = TableEntry::empty();
     ts_language_table_entry(self_, state, symbol, &mut entry);
     *count = entry.action_count;
     entry.actions
@@ -332,7 +343,7 @@ pub unsafe fn ts_language_has_reduce_action(
     state: TSStateId,
     symbol: TSSymbol,
 ) -> bool {
-    let mut entry = std::mem::zeroed::<TableEntry>();
+    let mut entry = TableEntry::empty();
     ts_language_table_entry(self_, state, symbol, &mut entry);
     entry.action_count > 0 && (*entry.actions).type_ == TSParseActionTypeReduce
 }

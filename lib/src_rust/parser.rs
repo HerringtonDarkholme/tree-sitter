@@ -1659,7 +1659,7 @@ unsafe fn ts_parser__do_all_potential_reductions(
 
         let mut symbol = first_symbol;
         while symbol < end_symbol {
-            let mut entry = core::mem::zeroed::<TableEntry>();
+            let mut entry = TableEntry::empty();
             ts_language_table_entry((*self_).language, state, symbol, &mut entry);
             for j in 0..entry.action_count {
                 let action = *entry.actions.add(j as usize);
@@ -2164,11 +2164,7 @@ unsafe fn ts_parser__advance(
 
     let mut did_reuse = true;
     let mut lookahead = NULL_SUBTREE;
-    let mut table_entry = TableEntry {
-        actions: ptr::null(),
-        action_count: 0,
-        is_reusable: false,
-    };
+    let mut table_entry = TableEntry::empty();
 
     // If possible, reuse a node from the previous syntax tree.
     if allow_node_reuse {
