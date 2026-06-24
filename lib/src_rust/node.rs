@@ -130,16 +130,11 @@ unsafe fn ts_node_iterate_children(node: &TSNode) -> NodeChildIterator {
     }
 }
 
-#[inline]
-unsafe fn ts_node_child_iterator_done(self_: &NodeChildIterator) -> bool {
-    self_.child_index == (*self_.parent.ptr).child_count
-}
-
 unsafe fn ts_node_child_iterator_next(
     self_: &mut NodeChildIterator,
     result: &mut TSNode,
 ) -> bool {
-    if self_.parent.ptr.is_null() || ts_node_child_iterator_done(self_) {
+    if self_.parent.ptr.is_null() || self_.child_index == (*self_.parent.ptr).child_count {
         return false;
     }
     let child = &*ts_subtree_children(self_.parent).add(self_.child_index as usize);
