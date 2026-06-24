@@ -1828,15 +1828,16 @@ unsafe fn ts_parser__recover(
             }
 
             // Check for redundant versions
-            let mut would_merge = false;
-            for j in 0..previous_version_count {
-                if ts_stack_state((*self_).stack, j) == entry.state
-                    && ts_stack_position((*self_).stack, j).bytes == position.bytes
-                {
-                    would_merge = true;
-                    break;
+            let would_merge = 'merge: {
+                for j in 0..previous_version_count {
+                    if ts_stack_state((*self_).stack, j) == entry.state
+                        && ts_stack_position((*self_).stack, j).bytes == position.bytes
+                    {
+                        break 'merge true;
+                    }
                 }
-            }
+                false
+            };
             if would_merge {
                 continue;
             }
