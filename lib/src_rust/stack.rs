@@ -420,9 +420,9 @@ unsafe fn stack_node_new(
     subtree: Subtree,
     is_pending: bool,
     state: TSStateId,
-    pool: *mut StackNodeArray,
+    pool: &mut StackNodeArray,
 ) -> *mut StackNode {
-    let node: *mut StackNode = if (*pool).size > 0 {
+    let node: *mut StackNode = if pool.size > 0 {
         array_pop(pool)
     } else {
         ts_malloc(std::mem::size_of::<StackNode>()) as *mut StackNode
