@@ -216,7 +216,7 @@ unsafe fn ts_node__child(
     while did_descend {
         did_descend = false;
 
-        let mut child: TSNode = std::mem::zeroed();
+        let mut child = ts_node__null();
         let mut index: u32 = 0;
         let mut iterator = ts_node_iterate_children(&result);
         while ts_node_child_iterator_next(&mut iterator, &mut child) {
@@ -275,7 +275,7 @@ unsafe fn ts_node__prev_sibling(self_: TSNode, include_anonymous: bool) -> TSNod
         let mut earlier_child_is_relevant = false;
         let mut found_child_containing_target = false;
 
-        let mut child: TSNode = std::mem::zeroed();
+        let mut child = ts_node__null();
         let mut iterator = ts_node_iterate_children(&node);
         while ts_node_child_iterator_next(&mut iterator, &mut child) {
             if child.id == self_.id { break; }
@@ -338,7 +338,7 @@ unsafe fn ts_node__next_sibling(self_: TSNode, include_anonymous: bool) -> TSNod
         let mut later_child_is_relevant = false;
         let mut child_containing_target = ts_node__null();
 
-        let mut child: TSNode = std::mem::zeroed();
+        let mut child = ts_node__null();
         let mut iterator = ts_node_iterate_children(&node);
         while ts_node_child_iterator_next(&mut iterator, &mut child) {
             if iterator.position.bytes <= target_end_byte { continue; }
@@ -400,7 +400,7 @@ unsafe fn ts_node__first_child_for_byte(
     while did_descend {
         did_descend = false;
 
-        let mut child: TSNode = std::mem::zeroed();
+        let mut child = ts_node__null();
         let mut iterator = ts_node_iterate_children(&node);
         // labeled loop replaces C's "goto loop"
         'outer: loop {
@@ -457,7 +457,7 @@ unsafe fn ts_node__descendant_for_byte_range(
     while did_descend {
         did_descend = false;
 
-        let mut child: TSNode = std::mem::zeroed();
+        let mut child = ts_node__null();
         let mut iterator = ts_node_iterate_children(&node);
         while ts_node_child_iterator_next(&mut iterator, &mut child) {
             let node_end = iterator.position.bytes;
@@ -499,7 +499,7 @@ unsafe fn ts_node__descendant_for_point_range(
     while did_descend {
         did_descend = false;
 
-        let mut child: TSNode = std::mem::zeroed();
+        let mut child = ts_node__null();
         let mut iterator = ts_node_iterate_children(&node);
         while ts_node_child_iterator_next(&mut iterator, &mut child) {
             let node_end = iterator.position.extent;
@@ -851,7 +851,7 @@ pub unsafe extern "C" fn ts_node_child_by_field_id(
             }
         }
 
-        let mut child: TSNode = std::mem::zeroed();
+        let mut child = ts_node__null();
         let mut iterator = ts_node_iterate_children(&self_);
         while ts_node_child_iterator_next(&mut iterator, &mut child) {
             if !ts_subtree_extra(ts_node__subtree(child)) {
@@ -986,7 +986,7 @@ pub unsafe extern "C" fn ts_node_field_name_for_child(
     while did_descend {
         did_descend = false;
 
-        let mut child: TSNode = std::mem::zeroed();
+        let mut child = ts_node__null();
         let mut index: u32 = 0;
         let mut iterator = ts_node_iterate_children(&result);
         while ts_node_child_iterator_next(&mut iterator, &mut child) {
@@ -1041,7 +1041,7 @@ pub unsafe extern "C" fn ts_node_field_name_for_named_child(
     while did_descend {
         did_descend = false;
 
-        let mut child: TSNode = std::mem::zeroed();
+        let mut child = ts_node__null();
         let mut index: u32 = 0;
         let mut iterator = ts_node_iterate_children(&result);
         while ts_node_child_iterator_next(&mut iterator, &mut child) {
