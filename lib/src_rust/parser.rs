@@ -2321,18 +2321,14 @@ unsafe fn ts_parser__advance(
                     }
 
                     if ts_subtree_child_count(lookahead) > 0 {
-                        ts_parser__breakdown_lookahead(
-                            &mut *self_,
-                            &mut lookahead,
-                            state,
-                        );
+                        ts_parser__breakdown_lookahead(self_, &mut lookahead, state);
                         let next_state = ts_language_next_state(
-                            (*self_).language,
+                            self_.language,
                             state,
                             ts_subtree_symbol(lookahead),
                         );
                         ts_parser__shift(
-                            &mut *self_,
+                            self_,
                             version,
                             next_state,
                             lookahead,
@@ -2340,7 +2336,7 @@ unsafe fn ts_parser__advance(
                         );
                     } else {
                         ts_parser__shift(
-                            &mut *self_,
+                            self_,
                             version,
                             next_state,
                             lookahead,
@@ -2348,7 +2344,7 @@ unsafe fn ts_parser__advance(
                         );
                     }
                     if did_reuse {
-                        reusable_node_advance(&mut (*self_).reusable_node);
+                        reusable_node_advance(&mut self_.reusable_node);
                     }
                     return true;
                 }
@@ -2363,7 +2359,7 @@ unsafe fn ts_parser__advance(
                         action.reduce.child_count as u32
                     );
                     let reduction_version = ts_parser__reduce(
-                        &mut *self_,
+                        self_,
                         version,
                         action.reduce.symbol,
                         action.reduce.child_count as u32,
@@ -2380,22 +2376,18 @@ unsafe fn ts_parser__advance(
 
                 TSPARSE_ACTION_TYPE_ACCEPT => {
                     LOG!(parser, b"accept\0".as_ptr() as *const i8);
-                    ts_parser__accept(&mut *self_, version, lookahead);
+                    ts_parser__accept(self_, version, lookahead);
                     return true;
                 }
 
                 TSPARSE_ACTION_TYPE_RECOVER => {
                     if ts_subtree_child_count(lookahead) > 0 {
-                        ts_parser__breakdown_lookahead(
-                            &mut *self_,
-                            &mut lookahead,
-                            ERROR_STATE,
-                        );
+                        ts_parser__breakdown_lookahead(self_, &mut lookahead, ERROR_STATE);
                     }
 
-                    ts_parser__recover(&mut *self_, version, lookahead);
+                    ts_parser__recover(self_, version, lookahead);
                     if did_reuse {
-                        reusable_node_advance(&mut (*self_).reusable_node);
+                        reusable_node_advance(&mut self_.reusable_node);
                     }
                     return true;
                 }
@@ -2408,9 +2400,9 @@ unsafe fn ts_parser__advance(
         // with one of the stack versions created by a reduction, and continue
         // processing this version of the stack with the same lookahead symbol.
         if last_reduction_version != STACK_VERSION_NONE {
-            ts_stack_renumber_version((*self_).stack, last_reduction_version, version);
+            ts_stack_renumber_version(self_.stack, last_reduction_version, version);
             LOG_STACK!(parser);
-            state = ts_stack_state(&*(*self_).stack, version);
+            state = ts_stack_state(&*self_.stack, version);
 
             // At the end of a non-terminal extra rule, the lexer will return a
             // null subtree, because the parser needs to perform a fixed reduction
@@ -2421,7 +2413,7 @@ unsafe fn ts_parser__advance(
                 needs_lex = true;
             } else {
                 ts_language_table_entry(
-                    (*self_).language,
+                    self_.language,
                     state,
                     ts_subtree_leaf_symbol(lookahead),
                     &mut table_entry,
