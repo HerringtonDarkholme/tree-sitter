@@ -614,6 +614,7 @@ pub unsafe extern "C" fn ts_subtree_get_changed_ranges(
 
     let mut old_iter = iterator_new(&mut *cursor1, old_tree, language);
     let mut new_iter = iterator_new(&mut *cursor2, new_tree, language);
+    let included_range_differences_array = &*included_range_differences;
 
     let mut included_range_difference_index: u32 = 0;
 
@@ -714,9 +715,9 @@ pub unsafe extern "C" fn ts_subtree_get_changed_ranges(
 
         // Keep track of the current position in the included range differences
         // array in order to avoid scanning the entire array on each iteration.
-        while included_range_difference_index < (*included_range_differences).size {
+        while included_range_difference_index < included_range_differences_array.size {
             let range = array_get_range(
-                &*included_range_differences,
+                included_range_differences_array,
                 included_range_difference_index,
             );
             if range.end_byte <= position.bytes {
