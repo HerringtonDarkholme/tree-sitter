@@ -881,7 +881,7 @@ unsafe fn ts_parser__can_reuse_first_leaf(
     self_: *mut TSParser,
     state: TSStateId,
     tree: Subtree,
-    table_entry: *mut TableEntry,
+    table_entry: &TableEntry,
 ) -> bool {
     let lang = (*self_).language as *const TSLanguageFull;
     let leaf_symbol = ts_subtree_leaf_symbol(tree);
@@ -897,7 +897,7 @@ unsafe fn ts_parser__can_reuse_first_leaf(
     }
 
     // If the token was created in a state with the same set of lookaheads, it is reusable.
-    if (*table_entry).action_count > 0
+    if table_entry.action_count > 0
         && memcmp(
             &leaf_lex_mode as *const TSLexerMode as *const c_void,
             &current_lex_mode as *const TSLexerMode as *const c_void,
@@ -916,7 +916,7 @@ unsafe fn ts_parser__can_reuse_first_leaf(
 
     // If the current state allows external tokens or other tokens that conflict with this
     // token, this token is not reusable.
-    current_lex_mode.external_lex_state == 0 && (*table_entry).is_reusable
+    current_lex_mode.external_lex_state == 0 && table_entry.is_reusable
 }
 
 unsafe fn ts_parser__lex(
@@ -1130,7 +1130,7 @@ unsafe fn ts_parser__get_cached_token(
     state: TSStateId,
     position: usize,
     last_external_token: Subtree,
-    table_entry: *mut TableEntry,
+    table_entry: &mut TableEntry,
 ) -> Subtree {
     let cache = &(*self_).token_cache;
     if !cache.token.ptr.is_null()
@@ -1191,10 +1191,10 @@ unsafe fn ts_parser__has_included_range_difference(
 unsafe fn ts_parser__reuse_node(
     self_: *mut TSParser,
     version: StackVersion,
-    state: *mut TSStateId,
+    state: &mut TSStateId,
     position: u32,
     last_external_token: Subtree,
-    table_entry: *mut TableEntry,
+    table_entry: &mut TableEntry,
 ) -> Subtree {
     let mut result;
     loop {
