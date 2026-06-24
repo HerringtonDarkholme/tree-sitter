@@ -715,31 +715,31 @@ pub unsafe extern "C" fn ts_tree_cursor_goto_descendant(
     _self: *mut TSTreeCursor,
     goal_descendant_index: u32,
 ) {
-    let self_ = _self as *mut TreeCursor;
+    let cursor = &mut *(_self as *mut TreeCursor);
 
     // Ascend to the lowest ancestor that contains the goal node.
     loop {
-        let i = (*self_).stack.size - 1;
-        let entry = tree_cursor_entry_array_get(&(*self_).stack, i);
+        let i = cursor.stack.size - 1;
+        let entry = tree_cursor_entry_array_get(&cursor.stack, i);
         let next_descendant_index =
             entry.descendant_index
-            + (if ts_tree_cursor_is_entry_visible(&*self_, i) { 1 } else { 0 })
+            + (if ts_tree_cursor_is_entry_visible(cursor, i) { 1 } else { 0 })
             + ts_subtree_visible_descendant_count(*entry.subtree);
         if entry.descendant_index <= goal_descendant_index
             && next_descendant_index > goal_descendant_index
         {
             break;
-        } else if (*self_).stack.size <= 1 {
+        } else if cursor.stack.size <= 1 {
             return;
         } else {
-            (*self_).stack.size -= 1;
+            cursor.stack.size -= 1;
         }
     }
 
     // Descend to the goal node.
     loop {
         let mut did_descend = false;
-        let mut iterator = ts_tree_cursor_iterate_children(&*self_);
+        let mut iterator = ts_tree_cursor_iterate_children(cursor);
         if iterator.descendant_index > goal_descendant_index {
             return;
         }
@@ -747,7 +747,7 @@ pub unsafe extern "C" fn ts_tree_cursor_goto_descendant(
         while let Some(child) = ts_tree_cursor_child_iterator_next(&mut iterator) {
             let entry = child.entry;
             if iterator.descendant_index > goal_descendant_index {
-                array_push(&mut (*self_).stack, entry);
+                array_push(&mut cursor.stack, entry);
                 if child.visible && entry.descendant_index == goal_descendant_index {
                     return;
                 } else {
