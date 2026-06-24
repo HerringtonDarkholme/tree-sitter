@@ -367,6 +367,23 @@ pub struct TSParser {
     has_error: bool,
 }
 
+#[inline]
+fn ts_parse_options_none() -> TSParseOptions {
+    TSParseOptions {
+        payload: ptr::null_mut(),
+        progress_callback: None,
+    }
+}
+
+#[inline]
+fn ts_parse_state_empty() -> TSParseState {
+    TSParseState {
+        payload: ptr::null_mut(),
+        current_byte_offset: 0,
+        has_error: false,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // ReusableNode inline helpers (from reusable_node.h)
 // ---------------------------------------------------------------------------
@@ -2775,8 +2792,8 @@ pub unsafe extern "C" fn ts_parser_reset(self_: *mut TSParser) {
     (*self_).has_scanner_error = false;
     (*self_).has_error = false;
     (*self_).canceled_balancing = false;
-    (*self_).parse_options = core::mem::zeroed();
-    (*self_).parse_state = core::mem::zeroed();
+    (*self_).parse_options = ts_parse_options_none();
+    (*self_).parse_state = ts_parse_state_empty();
 }
 
 // ---------------------------------------------------------------------------
@@ -2981,7 +2998,7 @@ pub unsafe extern "C" fn ts_parser_parse_with_options(
     (*self_).parse_state.payload = parse_options.payload;
     let result = ts_parser_parse(self_, old_tree, input);
     // Reset parser options before further parse calls.
-    (*self_).parse_options = core::mem::zeroed();
+    (*self_).parse_options = ts_parse_options_none();
     result
 }
 
