@@ -1408,10 +1408,10 @@ unsafe fn ts_parser__select_children(
     left: Subtree,
     children: &SubtreeArray,
 ) -> bool {
-    array_assign(
-        &mut (*self_).scratch_trees as *mut SubtreeArray as *mut Array<Subtree>,
-        children as *const SubtreeArray as *const Array<Subtree>,
-    );
+    let scratch_trees =
+        &mut *(&mut (*self_).scratch_trees as *mut SubtreeArray as *mut Array<Subtree>);
+    let children = &*(children as *const SubtreeArray as *const Array<Subtree>);
+    array_assign(scratch_trees, children);
 
     let scratch_tree = ts_subtree_new_node(
         ts_subtree_symbol(left),
@@ -1527,10 +1527,11 @@ unsafe fn ts_parser__reduce(
             ) {
                 ts_subtree_array_clear(&mut (*self_).tree_pool, &mut (*self_).trailing_extras);
                 ts_subtree_release(&mut (*self_).tree_pool, ts_subtree_from_mut(parent));
-                array_swap(
-                    &mut (*self_).trailing_extras as *mut SubtreeArray as *mut Array<Subtree>,
-                    &mut (*self_).trailing_extras2 as *mut SubtreeArray as *mut Array<Subtree>,
-                );
+                let trailing_extras =
+                    &mut *(&mut (*self_).trailing_extras as *mut SubtreeArray as *mut Array<Subtree>);
+                let trailing_extras2 =
+                    &mut *(&mut (*self_).trailing_extras2 as *mut SubtreeArray as *mut Array<Subtree>);
+                array_swap(trailing_extras, trailing_extras2);
                 parent = ts_subtree_new_node(
                     symbol,
                     &mut next_slice_children,

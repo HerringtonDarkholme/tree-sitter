@@ -318,27 +318,19 @@ pub unsafe fn array_splice<T>(
     (*arr).size = new_size;
 }
 
-pub unsafe fn array_swap<T>(self_: *mut Array<T>, other: *mut Array<T>) {
-    let tmp_contents = (*self_).contents;
-    let tmp_size = (*self_).size;
-    let tmp_capacity = (*self_).capacity;
-    (*self_).contents = (*other).contents;
-    (*self_).size = (*other).size;
-    (*self_).capacity = (*other).capacity;
-    (*other).contents = tmp_contents;
-    (*other).size = tmp_size;
-    (*other).capacity = tmp_capacity;
+pub unsafe fn array_swap<T>(self_: &mut Array<T>, other: &mut Array<T>) {
+    std::mem::swap(self_, other);
 }
 
-pub unsafe fn array_assign<T>(self_: *mut Array<T>, other: *const Array<T>) {
+pub unsafe fn array_assign<T>(self_: &mut Array<T>, other: &Array<T>) {
     let elem_size = std::mem::size_of::<T>();
-    array_reserve(self_, (*other).size);
-    (*self_).size = (*other).size;
-    if (*other).size > 0 {
+    array_reserve(self_ as *mut Array<T>, other.size);
+    self_.size = other.size;
+    if other.size > 0 {
         memcpy(
-            (*self_).contents as *mut c_void,
-            (*other).contents as *const c_void,
-            (*other).size as usize * elem_size,
+            self_.contents as *mut c_void,
+            other.contents as *const c_void,
+            other.size as usize * elem_size,
         );
     }
 }
