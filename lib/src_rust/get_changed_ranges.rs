@@ -193,12 +193,12 @@ unsafe fn ts_range_array_add(self_: &mut TSRangeArray, start: Length, end: Lengt
 }
 
 unsafe fn iterator_new(
-    cursor: *mut TreeCursor,
+    cursor: &mut TreeCursor,
     tree: *const Subtree,
     language: *const TSLanguage,
 ) -> Iterator {
-    stack_clear(&mut (*cursor).stack);
-    stack_push(&mut (*cursor).stack, TreeCursorEntry {
+    stack_clear(&mut cursor.stack);
+    stack_push(&mut cursor.stack, TreeCursorEntry {
         subtree: tree,
         position: length_zero(),
         child_index: 0,
@@ -206,7 +206,7 @@ unsafe fn iterator_new(
         descendant_index: 0,
     });
     Iterator {
-        cursor: tree_cursor_read_ref(&*cursor),
+        cursor: tree_cursor_read_ref(cursor),
         language,
         visible_depth: 1,
         in_padding: false,
@@ -610,8 +610,8 @@ pub unsafe extern "C" fn ts_subtree_get_changed_ranges(
         capacity: 0,
     };
 
-    let mut old_iter = iterator_new(cursor1, old_tree, language);
-    let mut new_iter = iterator_new(cursor2, new_tree, language);
+    let mut old_iter = iterator_new(&mut *cursor1, old_tree, language);
+    let mut new_iter = iterator_new(&mut *cursor2, new_tree, language);
 
     let mut included_range_difference_index: u32 = 0;
 
