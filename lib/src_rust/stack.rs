@@ -381,6 +381,11 @@ unsafe fn stack_head_array_pair_mut(
 }
 
 #[inline]
+unsafe fn stack_head_array_back(self_: &Array<StackHead>) -> &StackHead {
+    &*array_back(self_)
+}
+
+#[inline]
 unsafe fn stack_head_array_back_mut(self_: &Array<StackHead>) -> &mut StackHead {
     &mut *array_back(self_)
 }
@@ -665,8 +670,9 @@ unsafe fn ts_stack__add_version(
     };
     array_push(&mut (*self_).heads, head);
     stack_node_retain(node);
-    if !(*array_back(&(*self_).heads)).last_external_token.ptr.is_null() {
-        ts_subtree_retain((*array_back(&(*self_).heads)).last_external_token);
+    let head = stack_head_array_back(&(*self_).heads);
+    if !head.last_external_token.ptr.is_null() {
+        ts_subtree_retain(head.last_external_token);
     }
     (*self_).heads.size - 1
 }
