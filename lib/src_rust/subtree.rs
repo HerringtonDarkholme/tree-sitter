@@ -526,31 +526,34 @@ pub unsafe fn ts_subtree_array_copy(self_: SubtreeArray, dest: *mut SubtreeArray
 }
 
 pub unsafe fn ts_subtree_array_clear(pool: *mut SubtreePool, self_: *mut SubtreeArray) {
-    for i in 0..(*self_).size {
-        ts_subtree_release(pool, *(*self_).contents.add(i as usize));
+    let self_ = &mut *self_;
+    for i in 0..self_.size {
+        ts_subtree_release(pool, *self_.contents.add(i as usize));
     }
-    (*self_).size = 0;
+    self_.size = 0;
 }
 
 pub unsafe fn ts_subtree_array_delete(pool: *mut SubtreePool, self_: *mut SubtreeArray) {
     ts_subtree_array_clear(pool, self_);
-    if !(*self_).contents.is_null() {
-        ts_free((*self_).contents as *mut c_void);
+    let self_ref = &mut *self_;
+    if !self_ref.contents.is_null() {
+        ts_free(self_ref.contents as *mut c_void);
     }
-    (*self_).contents = ptr::null_mut();
-    (*self_).size = 0;
-    (*self_).capacity = 0;
+    self_ref.contents = ptr::null_mut();
+    self_ref.size = 0;
+    self_ref.capacity = 0;
 }
 
 pub unsafe fn ts_subtree_array_remove_trailing_extras(
     self_: *mut SubtreeArray,
     destination: *mut SubtreeArray,
 ) {
+    let self_ = &mut *self_;
     (*destination).size = 0;
-    while (*self_).size > 0 {
-        let last = *(*self_).contents.add((*self_).size as usize - 1);
+    while self_.size > 0 {
+        let last = *self_.contents.add(self_.size as usize - 1);
         if ts_subtree_extra(last) {
-            (*self_).size -= 1;
+            self_.size -= 1;
             array_push_subtree(destination, last);
         } else {
             break;
@@ -560,11 +563,12 @@ pub unsafe fn ts_subtree_array_remove_trailing_extras(
 }
 
 pub unsafe fn ts_subtree_array_reverse(self_: *mut SubtreeArray) {
-    let limit = (*self_).size / 2;
+    let self_ = &mut *self_;
+    let limit = self_.size / 2;
     for i in 0..limit {
-        let reverse_index = (*self_).size as usize - 1 - i as usize;
-        let a = (*self_).contents.add(i as usize);
-        let b = (*self_).contents.add(reverse_index);
+        let reverse_index = self_.size as usize - 1 - i as usize;
+        let a = self_.contents.add(i as usize);
+        let b = self_.contents.add(reverse_index);
         ptr::swap(a, b);
     }
 }
