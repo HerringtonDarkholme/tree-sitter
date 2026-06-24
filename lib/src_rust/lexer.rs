@@ -469,7 +469,7 @@ pub unsafe fn ts_lexer_init(self_: *mut Lexer) {
         valid: false,
         value: 0,
     };
-    ts_lexer_set_included_ranges(self_, ptr::null(), 0);
+    ts_lexer_set_included_ranges(s, ptr::null(), 0);
 }
 
 /// Free the lexer's included_ranges allocation.
@@ -546,11 +546,10 @@ pub unsafe fn ts_lexer_mark_end(self_: &mut Lexer) {
 
 /// Set the included ranges for the lexer. Returns false if ranges are invalid.
 pub unsafe fn ts_lexer_set_included_ranges(
-    self_: *mut Lexer,
+    self_: &mut Lexer,
     mut ranges: *const TSRange,
     mut count: u32,
 ) -> bool {
-    let s = &mut *self_;
     if count == 0 || ranges.is_null() {
         ranges = &DEFAULT_RANGE;
         count = 1;
@@ -566,14 +565,15 @@ pub unsafe fn ts_lexer_set_included_ranges(
     }
 
     let size = count as usize * std::mem::size_of::<TSRange>();
-    s.included_ranges = ts_realloc(s.included_ranges as *mut c_void, size) as *mut TSRange;
+    self_.included_ranges =
+        ts_realloc(self_.included_ranges as *mut c_void, size) as *mut TSRange;
     memcpy(
-        s.included_ranges as *mut c_void,
+        self_.included_ranges as *mut c_void,
         ranges as *const c_void,
         size,
     );
-    s.included_range_count = count;
-    ts_lexer_goto(s, s.current_position);
+    self_.included_range_count = count;
+    ts_lexer_goto(self_, self_.current_position);
     true
 }
 
