@@ -547,8 +547,8 @@ pub unsafe fn ts_lexer_finish(
 }
 
 /// Mark the end of the current token.
-pub unsafe fn ts_lexer_mark_end(self_: *mut Lexer) {
-    ts_lexer__mark_end(&mut (*self_).data);
+pub unsafe fn ts_lexer_mark_end(self_: &mut Lexer) {
+    ts_lexer__mark_end(&mut self_.data);
 }
 
 /// Set the included ranges for the lexer. Returns false if ranges are invalid.
