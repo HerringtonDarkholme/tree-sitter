@@ -1055,8 +1055,8 @@ pub unsafe fn ts_stack_state(self_: &Stack, version: StackVersion) -> TSStateId 
 }
 
 /// Get the position of a version.
-pub unsafe fn ts_stack_position(self_: *const Stack, version: StackVersion) -> Length {
-    (*stack_head(&*self_, version).node).position
+pub unsafe fn ts_stack_position(self_: &Stack, version: StackVersion) -> Length {
+    (*stack_head(self_, version).node).position
 }
 
 /// Get the last external token for a version.

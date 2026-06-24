@@ -757,7 +757,7 @@ unsafe fn ts_parser__better_version_exists(
         return true;
     }
 
-    let position = ts_stack_position((*self_).stack, version);
+    let position = ts_stack_position(&*(*self_).stack, version);
     let status = ErrorStatus {
         cost,
         is_in_error,
@@ -769,7 +769,7 @@ unsafe fn ts_parser__better_version_exists(
     for i in 0..n {
         if i == version
             || !ts_stack_is_active(&*(*self_).stack, i)
-            || ts_stack_position((*self_).stack, i).bytes < position.bytes
+            || ts_stack_position(&*(*self_).stack, i).bytes < position.bytes
         {
             continue;
         }
@@ -984,7 +984,7 @@ unsafe fn ts_parser__lex(
         return NULL_SUBTREE;
     }
 
-    let start_position = ts_stack_position((*self_).stack, version);
+    let start_position = ts_stack_position(&*(*self_).stack, version);
     let external_token = ts_stack_last_external_token(&*(*self_).stack, version);
 
     let mut found_external_token = false;
@@ -1858,7 +1858,7 @@ unsafe fn ts_parser__recover(
 ) {
     let mut did_recover = false;
     let previous_version_count = ts_stack_version_count(&*(*self_).stack);
-    let position = ts_stack_position((*self_).stack, version);
+    let position = ts_stack_position(&*(*self_).stack, version);
     let summary = ts_stack_get_summary((*self_).stack, version);
     let node_count_since_error = ts_stack_node_count_since_error(&mut *(*self_).stack, version);
     let current_error_cost = ts_stack_error_cost(&*(*self_).stack, version);
@@ -1883,7 +1883,7 @@ unsafe fn ts_parser__recover(
             let would_merge = 'merge: {
                 for j in 0..previous_version_count {
                     if ts_stack_state(&*(*self_).stack, j) == entry.state
-                        && ts_stack_position((*self_).stack, j).bytes == position.bytes
+                        && ts_stack_position(&*(*self_).stack, j).bytes == position.bytes
                     {
                         break 'merge true;
                     }
@@ -2079,7 +2079,7 @@ unsafe fn ts_parser__handle_error(
     // a reduction to take place.
     ts_parser__do_all_potential_reductions(self_, version, 0);
     let version_count = ts_stack_version_count(&*(*self_).stack);
-    let position = ts_stack_position((*self_).stack, version);
+    let position = ts_stack_position(&*(*self_).stack, version);
 
     // Push a discontinuity onto the stack. Merge all of the stack versions that
     // were created in the previous step.
@@ -2215,7 +2215,7 @@ unsafe fn ts_parser__advance(
     allow_node_reuse: bool,
 ) -> bool {
     let mut state = ts_stack_state(&*(*self_).stack, version);
-    let position = ts_stack_position((*self_).stack, version).bytes;
+    let position = ts_stack_position(&*(*self_).stack, version).bytes;
     let last_external_token = ts_stack_last_external_token(&*(*self_).stack, version);
 
     let mut did_reuse = true;
@@ -2955,8 +2955,8 @@ pub unsafe extern "C" fn ts_parser_parse(
                     version,
                     ts_stack_version_count(&*(*self_).stack),
                     ts_stack_state(&*(*self_).stack, version) as i32,
-                    ts_stack_position((*self_).stack, version).extent.row,
-                    ts_stack_position((*self_).stack, version).extent.column
+                    ts_stack_position(&*(*self_).stack, version).extent.row,
+                    ts_stack_position(&*(*self_).stack, version).extent.column
                 );
 
                 if !ts_parser__advance(self_, version, allow_node_reuse) {
@@ -2970,7 +2970,7 @@ pub unsafe extern "C" fn ts_parser_parse(
 
                 LOG_STACK!(self_);
 
-                position = ts_stack_position((*self_).stack, version).bytes;
+                position = ts_stack_position(&*(*self_).stack, version).bytes;
                 if position > last_position || (version > 0 && position == last_position) {
                     last_position = position;
                     break;
