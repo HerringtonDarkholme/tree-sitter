@@ -2714,7 +2714,7 @@ pub unsafe extern "C" fn ts_parser_delete(self_: *mut TSParser) {
     }
 
     ts_parser_set_language(self_, ptr::null());
-    ts_stack_delete((*self_).stack);
+    ts_stack_delete(&mut *(*self_).stack);
     if !(*self_).reduce_actions.contents.is_null() {
         array_delete(&mut (*self_).reduce_actions as *mut ReduceActionSet);
     }

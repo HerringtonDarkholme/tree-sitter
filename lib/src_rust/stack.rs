@@ -995,34 +995,37 @@ pub unsafe fn ts_stack_new(subtree_pool: *mut SubtreePool) -> *mut Stack {
 }
 
 /// Free the parse stack.
-pub unsafe fn ts_stack_delete(self_: *mut Stack) {
-    if !(*self_).slices.contents.is_null() {
-        array_delete(&mut (*self_).slices);
+pub unsafe fn ts_stack_delete(self_: &mut Stack) {
+    if !self_.slices.contents.is_null() {
+        array_delete(&mut self_.slices);
     }
-    if !(*self_).iterators.contents.is_null() {
-        array_delete(&mut (*self_).iterators);
+    if !self_.iterators.contents.is_null() {
+        array_delete(&mut self_.iterators);
     }
     stack_node_release(
-        (*self_).base_node,
-        &mut (*self_).node_pool,
-        &mut *(*self_).subtree_pool,
+        self_.base_node,
+        &mut self_.node_pool,
+        &mut *self_.subtree_pool,
     );
-    for i in 0..(*self_).heads.size {
+    let heads = &mut self_.heads;
+    let node_pool = &mut self_.node_pool;
+    let subtree_pool = &mut *self_.subtree_pool;
+    for i in 0..heads.size {
         stack_head_delete(
-            stack_head_mut(&mut *self_, i),
-            &mut (*self_).node_pool,
-            &mut *(*self_).subtree_pool,
+            stack_head_array_get_mut(heads, i),
+            node_pool,
+            subtree_pool,
         );
     }
-    array_clear(&mut (*self_).heads);
-    if !(*self_).node_pool.contents.is_null() {
-        for i in 0..(*self_).node_pool.size {
-            ts_free(stack_node_pool_get(&(*self_).node_pool, i) as *mut c_void);
+    array_clear(heads);
+    if !node_pool.contents.is_null() {
+        for i in 0..node_pool.size {
+            ts_free(stack_node_pool_get(node_pool, i) as *mut c_void);
         }
-        array_delete(&mut (*self_).node_pool);
+        array_delete(node_pool);
     }
-    array_delete(&mut (*self_).heads);
-    ts_free(self_ as *mut c_void);
+    array_delete(heads);
+    ts_free(self_ as *mut Stack as *mut c_void);
 }
 
 /// Get the number of versions in the stack.
