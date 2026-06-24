@@ -123,8 +123,8 @@ fn ts_lexer__invalidate_column_data(self_: &mut Lexer) {
 
 /// Check if the lexer has reached EOF.
 unsafe extern "C" fn ts_lexer__eof(_self: *const TSLexer) -> bool {
-    let self_ = _self as *const Lexer;
-    (*self_).current_included_range_index == (*self_).included_range_count
+    let self_ = &*(_self as *const Lexer);
+    self_.current_included_range_index == self_.included_range_count
 }
 
 /// Clear the currently stored chunk of source code.
