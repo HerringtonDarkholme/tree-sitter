@@ -345,17 +345,25 @@ pub unsafe fn array_assign<T>(self_: *mut Array<T>, other: *const Array<T>) {
 
 #[inline]
 unsafe fn stack_head(self_: &Stack, version: StackVersion) -> &StackHead {
-    &*array_get(&self_.heads, version)
+    stack_head_array_get(&self_.heads, version)
 }
 
 #[inline]
 unsafe fn stack_head_mut(self_: &mut Stack, version: StackVersion) -> &mut StackHead {
-    &mut *array_get(&mut self_.heads, version)
+    stack_head_array_get_mut(&mut self_.heads, version)
 }
 
 #[inline]
 unsafe fn stack_head_array_get(self_: &Array<StackHead>, version: StackVersion) -> &StackHead {
     &*array_get(self_, version)
+}
+
+#[inline]
+unsafe fn stack_head_array_get_mut(
+    self_: &mut Array<StackHead>,
+    version: StackVersion,
+) -> &mut StackHead {
+    &mut *array_get(self_, version)
 }
 
 #[inline]
