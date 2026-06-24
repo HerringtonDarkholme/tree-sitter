@@ -55,8 +55,8 @@ enum IteratorComparison {
 // ---------------------------------------------------------------------------
 
 #[inline]
-unsafe fn array_back_range(arr: &TSRangeArray) -> *mut TSRange {
-    arr.contents.add(arr.size as usize - 1)
+unsafe fn array_back_range(arr: &mut TSRangeArray) -> &mut TSRange {
+    &mut *arr.contents.add(arr.size as usize - 1)
 }
 
 #[inline]
@@ -148,9 +148,9 @@ unsafe fn stack_pop(arr: &mut TreeCursorEntryArray) -> TreeCursorEntry {
 unsafe fn ts_range_array_add(self_: &mut TSRangeArray, start: Length, end: Length) {
     if self_.size > 0 {
         let last_range = array_back_range(self_);
-        if start.bytes <= (*last_range).end_byte {
-            (*last_range).end_byte = end.bytes;
-            (*last_range).end_point = end.extent;
+        if start.bytes <= last_range.end_byte {
+            last_range.end_byte = end.bytes;
+            last_range.end_point = end.extent;
             return;
         }
     }
