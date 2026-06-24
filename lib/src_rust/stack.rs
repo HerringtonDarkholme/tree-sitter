@@ -453,12 +453,17 @@ unsafe fn stack_iterator_array_get_mut(
 
 #[inline]
 unsafe fn stack_iterator_array_read(self_: &Array<StackIterator>, index: u32) -> StackIterator {
-    ptr::read(array_get(self_, index))
+    stack_iterator_read_ref(stack_iterator_array_get(self_, index))
 }
 
 #[inline]
 unsafe fn stack_iterator_subtrees_read_ref(self_: &StackIterator) -> SubtreeArray {
     ptr::read(&self_.subtrees)
+}
+
+#[inline]
+unsafe fn stack_iterator_read_ref(self_: &StackIterator) -> StackIterator {
+    ptr::read(self_)
 }
 
 #[inline]
@@ -1625,7 +1630,7 @@ pub unsafe fn ts_stack_print_dot_graph(
                 if j == 0 {
                     next_iterator = stack_iterator_array_get_mut(&mut (*self_).iterators, i);
                 } else {
-                    array_push(&mut (*self_).iterators, ptr::read(&iterator));
+                    array_push(&mut (*self_).iterators, stack_iterator_read_ref(&iterator));
                     next_iterator = stack_iterator_array_back_mut(&(*self_).iterators);
                 }
                 next_iterator.node = link.node;
