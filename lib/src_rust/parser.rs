@@ -502,6 +502,10 @@ unsafe fn stack_slice_array_get(self_: &StackSliceArray, index: u32) -> &StackSl
     &*array_get(self_ as *const StackSliceArray, index)
 }
 
+unsafe fn stack_slice_array_get_mut(self_: &mut StackSliceArray, index: u32) -> &mut StackSlice {
+    &mut *array_get(self_ as *mut StackSliceArray, index)
+}
+
 unsafe fn ts_reduce_action_set_add(
     self_: &mut ReduceActionSet,
     new_action: ReduceAction,
@@ -1966,7 +1970,7 @@ unsafe fn ts_parser__recover(
 
     // Merge with existing error on top of stack
     if node_count_since_error > 0 {
-        let pop = ts_stack_pop_count((*self_).stack, version, 1);
+        let mut pop = ts_stack_pop_count((*self_).stack, version, 1);
 
         if pop.size > 1 {
             for pi in 1..pop.size {
@@ -1990,7 +1994,7 @@ unsafe fn ts_parser__recover(
             stack_slice_array_get(&pop, 0).version,
             version,
         );
-        let slot = &mut (*array_get(&pop as *const StackSliceArray, 0)).subtrees;
+        let slot = &mut stack_slice_array_get_mut(&mut pop, 0).subtrees;
         array_push(
             slot as *mut SubtreeArray as *mut Array<Subtree>,
             ts_subtree_from_mut(error_repeat),
