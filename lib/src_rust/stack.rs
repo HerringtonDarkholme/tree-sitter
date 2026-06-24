@@ -1385,8 +1385,8 @@ pub unsafe fn ts_stack_can_merge(
 }
 
 /// Halt a version.
-pub unsafe fn ts_stack_halt(self_: *mut Stack, version: StackVersion) {
-    stack_head_mut(&mut *self_, version).status = StackStatus::Halted;
+pub unsafe fn ts_stack_halt(self_: &mut Stack, version: StackVersion) {
+    stack_head_mut(self_, version).status = StackStatus::Halted;
 }
 
 /// Pause a version with a lookahead token.

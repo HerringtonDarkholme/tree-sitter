@@ -1659,7 +1659,7 @@ unsafe fn ts_parser__accept(
         (*self_).stack,
         stack_slice_array_get(&pop, 0).version,
     );
-    ts_stack_halt((*self_).stack, version);
+    ts_stack_halt(&mut *(*self_).stack, version);
 }
 
 // ---------------------------------------------------------------------------
@@ -1797,7 +1797,7 @@ unsafe fn ts_parser__recover_to_state(
         }
 
         if ts_stack_state((*self_).stack, slice.version) != goal_state {
-            ts_stack_halt((*self_).stack, slice.version);
+            ts_stack_halt(&mut *(*self_).stack, slice.version);
             ts_subtree_array_delete(&mut (*self_).tree_pool, &mut slice.subtrees);
             array_erase(&mut pop, i);
             continue;
@@ -1946,13 +1946,13 @@ unsafe fn ts_parser__recover(
 
     // Strategy 2: skip the current token
     if did_recover && ts_stack_version_count((*self_).stack) > MAX_VERSION_COUNT {
-        ts_stack_halt((*self_).stack, version);
+        ts_stack_halt(&mut *(*self_).stack, version);
         ts_subtree_release(&mut (*self_).tree_pool, lookahead);
         return;
     }
 
     if did_recover && ts_subtree_has_external_scanner_state_change(lookahead) {
-        ts_stack_halt((*self_).stack, version);
+        ts_stack_halt(&mut *(*self_).stack, version);
         ts_subtree_release(&mut (*self_).tree_pool, lookahead);
         return;
     }
@@ -1962,7 +1962,7 @@ unsafe fn ts_parser__recover(
         + ts_subtree_total_bytes(lookahead) * ERROR_COST_PER_SKIPPED_CHAR
         + ts_subtree_total_size(lookahead).extent.row * ERROR_COST_PER_SKIPPED_LINE;
     if ts_parser__better_version_exists(self_, version, false, new_cost) {
-        ts_stack_halt((*self_).stack, version);
+        ts_stack_halt(&mut *(*self_).stack, version);
         ts_subtree_release(&mut (*self_).tree_pool, lookahead);
         return;
     }
@@ -2418,7 +2418,7 @@ unsafe fn ts_parser__advance(
             if !lookahead.ptr.is_null() {
                 ts_subtree_release(&mut (*self_).tree_pool, lookahead);
             }
-            ts_stack_halt((*self_).stack, version);
+            ts_stack_halt(&mut *(*self_).stack, version);
             return true;
         }
 
