@@ -776,11 +776,11 @@ pub unsafe fn ts_subtree_children(self_: Subtree) -> *mut Subtree {
 }
 
 #[inline]
-pub unsafe fn ts_subtree_set_extra(self_: *mut MutableSubtree, is_extra: bool) {
-    if (*self_).data.is_inline() {
-        (*self_).data.set_extra(is_extra);
+pub unsafe fn ts_subtree_set_extra(self_: &mut MutableSubtree, is_extra: bool) {
+    if self_.data.is_inline() {
+        self_.data.set_extra(is_extra);
     } else {
-        (*(*self_).ptr).set_extra(is_extra);
+        (*self_.ptr).set_extra(is_extra);
     }
 }
 
