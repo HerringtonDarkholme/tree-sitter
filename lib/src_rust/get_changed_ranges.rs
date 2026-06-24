@@ -94,13 +94,13 @@ unsafe fn array_push_range(arr: &mut TSRangeArray, range: TSRange) {
 // ---------------------------------------------------------------------------
 
 #[inline]
-unsafe fn stack_back(arr: &TreeCursorEntryArray) -> *mut TreeCursorEntry {
-    arr.contents.add(arr.size as usize - 1)
+unsafe fn stack_back(arr: &TreeCursorEntryArray) -> &TreeCursorEntry {
+    &*arr.contents.add(arr.size as usize - 1)
 }
 
 #[inline]
-unsafe fn stack_get(arr: &TreeCursorEntryArray, index: u32) -> *mut TreeCursorEntry {
-    arr.contents.add(index as usize)
+unsafe fn stack_get(arr: &TreeCursorEntryArray, index: u32) -> &TreeCursorEntry {
+    &*arr.contents.add(index as usize)
 }
 
 #[inline]
@@ -194,7 +194,7 @@ unsafe fn iterator_done(self_: &Iterator) -> bool {
 }
 
 unsafe fn iterator_start_position(self_: &Iterator) -> Length {
-    let entry = *stack_back(&self_.cursor.stack);
+    let entry = stack_back(&self_.cursor.stack);
     if self_.in_padding {
         entry.position
     } else {
@@ -203,7 +203,7 @@ unsafe fn iterator_start_position(self_: &Iterator) -> Length {
 }
 
 unsafe fn iterator_end_position(self_: &Iterator) -> Length {
-    let entry = *stack_back(&self_.cursor.stack);
+    let entry = stack_back(&self_.cursor.stack);
     let result = length_add(entry.position, ts_subtree_padding(*entry.subtree));
     if self_.in_padding {
         result
@@ -213,15 +213,13 @@ unsafe fn iterator_end_position(self_: &Iterator) -> Length {
 }
 
 unsafe fn iterator_tree_is_visible(self_: &Iterator) -> bool {
-    let entry = *stack_back(&self_.cursor.stack);
+    let entry = stack_back(&self_.cursor.stack);
     if ts_subtree_visible(*entry.subtree) {
         return true;
     }
     if self_.cursor.stack.size > 1 {
-        let parent = *(*stack_get(
-            &self_.cursor.stack,
-            self_.cursor.stack.size - 2,
-        )).subtree;
+        let parent_entry = stack_get(&self_.cursor.stack, self_.cursor.stack.size - 2);
+        let parent = *parent_entry.subtree;
         return ts_language_alias_at(
             self_.language,
             (*parent.ptr).data.children.production_id as u32,
@@ -247,10 +245,10 @@ unsafe fn iterator_get_visible_state(
     }
 
     loop {
-        let entry = *stack_get(&self_.cursor.stack, i);
+        let entry = stack_get(&self_.cursor.stack, i);
 
         if i > 0 {
-            let parent = (*stack_get(&self_.cursor.stack, i - 1)).subtree;
+            let parent = stack_get(&self_.cursor.stack, i - 1).subtree;
             *alias_symbol = ts_language_alias_at(
                 self_.language,
                 (*(*parent).ptr).data.children.production_id as u32,
@@ -278,7 +276,7 @@ unsafe fn iterator_ascend(self_: &mut Iterator) {
     if iterator_tree_is_visible(self_) && !self_.in_padding {
         self_.visible_depth -= 1;
     }
-    if (*stack_back(&self_.cursor.stack)).child_index > 0 {
+    if stack_back(&self_.cursor.stack).child_index > 0 {
         self_.in_padding = false;
     }
     self_.cursor.stack.size -= 1;
@@ -360,7 +358,7 @@ unsafe fn iterator_advance(self_: &mut Iterator) {
             return;
         }
 
-        let parent = (*stack_back(&self_.cursor.stack)).subtree;
+        let parent = stack_back(&self_.cursor.stack).subtree;
         let child_index = entry.child_index + 1;
         let last_external_token = ts_subtree_last_external_token(*entry.subtree);
         if !last_external_token.ptr.is_null() {
