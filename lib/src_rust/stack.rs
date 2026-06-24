@@ -589,7 +589,7 @@ unsafe fn ts_stack__add_version(
     original_version: StackVersion,
     node: *mut StackNode,
 ) -> StackVersion {
-    let original_head = &*array_get(&(*self_).heads, original_version);
+    let original_head = stack_head(&*self_, original_version);
     let head = StackHead {
         node,
         node_count_at_last_error: original_head.node_count_at_last_error,
@@ -616,7 +616,7 @@ unsafe fn ts_stack__add_slice(
     let mut i = (*self_).slices.size as i32 - 1;
     while i + 1 > 0 {
         let version = (*array_get(&(*self_).slices, i as u32)).version;
-        if (*array_get(&(*self_).heads, version)).node == node {
+        if stack_head(&*self_, version).node == node {
             let slice = StackSlice {
                 subtrees: ptr::read(subtrees),
                 version,
@@ -646,7 +646,7 @@ unsafe fn stack__iter(
     array_clear(&mut (*self_).slices);
     array_clear(&mut (*self_).iterators);
 
-    let head = &*array_get(&(*self_).heads, version);
+    let head = stack_head(&*self_, version);
     let mut new_iterator = StackIterator {
         node: head.node,
         subtrees: SubtreeArray {
@@ -1335,7 +1335,7 @@ pub unsafe fn ts_stack_print_dot_graph(
 
     array_clear(&mut (*self_).iterators);
     for i in 0..(*self_).heads.size {
-        let head = &*array_get(&(*self_).heads, i);
+        let head = stack_head(&*self_, i);
         if head.status == StackStatus::Halted {
             continue;
         }
