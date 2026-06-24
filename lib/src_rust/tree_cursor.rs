@@ -766,8 +766,8 @@ pub unsafe extern "C" fn ts_tree_cursor_goto_descendant(
 pub unsafe extern "C" fn ts_tree_cursor_current_descendant_index(
     _self: *const TSTreeCursor,
 ) -> u32 {
-    let self_ = _self as *const TreeCursor;
-    let last_entry = tree_cursor_entry_array_back(&(*self_).stack);
+    let cursor = &*(_self as *const TreeCursor);
+    let last_entry = tree_cursor_entry_array_back(&cursor.stack);
     last_entry.descendant_index
 }
 
