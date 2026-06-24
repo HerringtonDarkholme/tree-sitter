@@ -73,9 +73,9 @@ pub unsafe extern "C" fn ts_point_edit(
     byte: *mut u32,
     edit: *const TSInputEdit,
 ) {
-    let point = unsafe { &mut *point };
-    let byte = unsafe { &mut *byte };
-    let edit = unsafe { &*edit };
+    let point = &mut *point;
+    let byte = &mut *byte;
+    let edit = &*edit;
 
     let start_byte = *byte;
     let start_point = *point;
