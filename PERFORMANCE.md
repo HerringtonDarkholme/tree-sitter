@@ -267,3 +267,51 @@ Source-code analysis:
 - `Use parser logger move helper`, `Use reusable node stack helper`, and `Use parser range array accessor` affect logger access, reusable-node bookkeeping, or included-range bookkeeping. These are outside the repeated parse/reduce hot path for the reported error case and are also unlikely primary causes.
 - The plausible hot-path commits are `Use parser stack slice move helper`, `Use parser slice subtree move helper`, `Use parser stack summary accessor`, and `Use parser mutable subtree stack helper`. They wrap raw `array_get`/`ptr::read` operations in private helper functions used by `ts_parser__reduce`, `ts_parser__recover_to_state`, `ts_parser__accept`, and subtree balancing. If a regression later proves reproducible, these parser helpers should be checked first for missed inlining or optimizer differences.
 - The source changes are semantic no-ops: they preserve the same pointer arithmetic, struct moves, and field reads, with no FFI signature or `#[repr(C)]` layout changes. Given private helper functions in optimized builds and the noisy per-case behavior above, no specific source culprit was identified in this batch.
+
+### 2026-06-24 15:52 EDT
+
+- Repo head: `5a0a2fcf`
+- Batch base: `e97f7b3b`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: 10 small raw-pointer/reference cleanups through `Use references for mutable array cleanup`
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 24747.2 | 23999.3 | +3.12% |
+| TypeScript error parses | 32 | 1698.0 | 1597.5 | +6.29% |
+| JavaScript normal parses | 2 | 16869.9 | 15408.5 | +9.48% |
+| JavaScript error parses | 37 | 2041.2 | 1963.1 | +3.98% |
+| Overall parser throughput | 82 | 2325.9 | 2205.9 | +5.44% |
+
+Prior checkpoint at `e97f7b3b` recorded Rust overall throughput of 2327.8
+bytes/ms on the same TypeScript/JavaScript gate, so this batch was effectively
+flat at -0.08% absolute Rust throughput. The Rust-vs-C delta rose from +4.03%
+to +5.44%, mostly because the measured C baseline was lower in this run.
+
+No per-case regressions above the 5% threshold.
+
+Source-code analysis:
+
+- The batch contains several changes outside parser throughput hot loops:
+  tree cursor entry slot helpers, changed-range stack helpers, lexer callback
+  reference binding, and tree C API reference binding. These should not affect
+  the steady-state TypeScript/JavaScript parse loop except through measurement
+  noise or code layout.
+- `Use parser subtree array accessor` is the main parser hot-path-adjacent
+  change. It routes existing `SubtreeArray` element reads in reduce, accept,
+  breakdown, and recovery paths through a private helper while preserving the
+  same `array_get` pointer arithmetic and value loads.
+- The subtree changes reduce raw-pointer signatures or repeated dereferences in
+  `ExternalScannerState`, `SubtreeArray`, and `MutableSubtreeArray` helpers.
+  They preserve the same allocations, `#[repr(C)]` data layout, stack element
+  moves, and release/retain behavior. The mutable subtree stack helpers are
+  used during subtree compression/balancing, but the measured overall Rust
+  throughput is flat versus the prior checkpoint.
+- Because the perf gate reported no per-case regressions above threshold and
+  overall Rust throughput changed by less than 0.1%, there is no reproducible
+  performance culprit to investigate in this batch. No rollback was performed.
