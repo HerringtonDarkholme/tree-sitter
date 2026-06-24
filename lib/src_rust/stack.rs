@@ -503,8 +503,8 @@ unsafe fn stack_node_retain(self_: Option<&mut StackNode>) {
 /// Release (decrement ref count) a stack node, freeing if zero.
 unsafe fn stack_node_release(
     mut self_: *mut StackNode,
-    pool: *mut StackNodeArray,
-    subtree_pool: *mut SubtreePool,
+    pool: &mut StackNodeArray,
+    subtree_pool: &mut SubtreePool,
 ) {
     loop {
         debug_assert!((*self_).ref_count != 0);
@@ -519,19 +519,19 @@ unsafe fn stack_node_release(
             while i > 0 {
                 let link = (*self_).links[i as usize];
                 if !link.subtree.ptr.is_null() {
-                    ts_subtree_release(&mut *subtree_pool, link.subtree);
+                    ts_subtree_release(subtree_pool, link.subtree);
                 }
                 stack_node_release(link.node, pool, subtree_pool);
                 i -= 1;
             }
             let link = (*self_).links[0];
             if !link.subtree.ptr.is_null() {
-                ts_subtree_release(&mut *subtree_pool, link.subtree);
+                ts_subtree_release(subtree_pool, link.subtree);
             }
             first_predecessor = (*self_).links[0].node;
         }
 
-        if (*pool).size < MAX_NODE_POOL_SIZE as u32 {
+        if pool.size < MAX_NODE_POOL_SIZE as u32 {
             array_push(pool, self_);
         } else {
             ts_free(self_ as *mut c_void);
@@ -1010,7 +1010,11 @@ pub unsafe fn ts_stack_delete(self_: *mut Stack) {
     if !(*self_).iterators.contents.is_null() {
         array_delete(&mut (*self_).iterators);
     }
-    stack_node_release((*self_).base_node, &mut (*self_).node_pool, (*self_).subtree_pool);
+    stack_node_release(
+        (*self_).base_node,
+        &mut (*self_).node_pool,
+        &mut *(*self_).subtree_pool,
+    );
     for i in 0..(*self_).heads.size {
         stack_head_delete(
             stack_head_mut(&mut *self_, i),
