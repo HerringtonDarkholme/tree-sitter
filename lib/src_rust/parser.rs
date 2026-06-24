@@ -2188,26 +2188,26 @@ unsafe fn ts_parser__handle_error(
 // ---------------------------------------------------------------------------
 
 unsafe fn ts_parser__check_progress(
-    self_: *mut TSParser,
+    self_: &mut TSParser,
     lookahead: Option<&mut Subtree>,
     position: Option<u32>,
     operations: u32,
 ) -> bool {
-    (*self_).operation_count += operations;
-    if (*self_).operation_count >= OP_COUNT_PER_PARSER_CALLBACK_CHECK {
-        (*self_).operation_count = 0;
+    self_.operation_count += operations;
+    if self_.operation_count >= OP_COUNT_PER_PARSER_CALLBACK_CHECK {
+        self_.operation_count = 0;
     }
     if let Some(position) = position {
-        (*self_).parse_state.current_byte_offset = position;
-        (*self_).parse_state.has_error = (*self_).has_error;
+        self_.parse_state.current_byte_offset = position;
+        self_.parse_state.has_error = self_.has_error;
     }
-    if (*self_).operation_count == 0
-        && (*self_).parse_options.progress_callback.is_some()
-        && (*self_).parse_options.progress_callback.unwrap()(&mut (*self_).parse_state)
+    if self_.operation_count == 0
+        && self_.parse_options.progress_callback.is_some()
+        && self_.parse_options.progress_callback.unwrap()(&mut self_.parse_state)
     {
         if let Some(lookahead) = lookahead {
             if !lookahead.ptr.is_null() {
-                ts_subtree_release(&mut (*self_).tree_pool, *lookahead);
+                ts_subtree_release(&mut self_.tree_pool, *lookahead);
             }
         }
         return false;
@@ -2289,7 +2289,7 @@ unsafe fn ts_parser__advance(
 
         // If a progress callback was provided, then check every
         // time a fixed number of parse actions has been processed.
-        if !ts_parser__check_progress(self_, Some(&mut lookahead), Some(position), 1) {
+        if !ts_parser__check_progress(&mut *self_, Some(&mut lookahead), Some(position), 1) {
             return false;
         }
 
@@ -2623,7 +2623,7 @@ unsafe fn ts_parser__balance_subtree(self_: &mut TSParser) -> bool {
     }
 
     while self_.tree_pool.tree_stack.size > 0 {
-        if !ts_parser__check_progress(self_, None, None, 1) {
+        if !ts_parser__check_progress(&mut *self_, None, None, 1) {
             return false;
         }
 
@@ -2652,7 +2652,7 @@ unsafe fn ts_parser__balance_subtree(self_: &mut TSParser) -> bool {
                     // size since larger values of i take longer to process. Shifting by 4 empirically provides good check
                     // intervals (e.g. 193 operations when i=3100) to prevent blocking during large compressions.
                     let operations = if i >> 4 > 0 { i >> 4 } else { 1 };
-                    if !ts_parser__check_progress(self_, None, None, operations) {
+                    if !ts_parser__check_progress(&mut *self_, None, None, operations) {
                         return false;
                     }
                     i /= 2;
