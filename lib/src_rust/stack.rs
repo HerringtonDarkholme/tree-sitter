@@ -1136,7 +1136,7 @@ pub unsafe fn ts_stack_has_advanced_since_error(
 /// Remove a version from the stack.
 pub unsafe fn ts_stack_remove_version(self_: *mut Stack, version: StackVersion) {
     stack_head_delete(
-        &mut *array_get(&mut (*self_).heads, version),
+        stack_head_mut(&mut *self_, version),
         &mut (*self_).node_pool,
         (*self_).subtree_pool,
     );
