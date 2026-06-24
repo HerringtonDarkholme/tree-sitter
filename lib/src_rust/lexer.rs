@@ -514,27 +514,23 @@ pub unsafe fn ts_lexer_start(self_: &mut Lexer) {
 }
 
 /// Finalize the current token scan.
-pub unsafe fn ts_lexer_finish(
-    self_: *mut Lexer,
-    lookahead_end_byte: *mut u32,
-) {
-    let s = &mut *self_;
-    if length_is_undefined(s.token_end_position) {
-        ts_lexer__mark_end(&mut s.data);
+pub unsafe fn ts_lexer_finish(self_: &mut Lexer, lookahead_end_byte: &mut u32) {
+    if length_is_undefined(self_.token_end_position) {
+        ts_lexer__mark_end(&mut self_.data);
     }
 
     // If the token ended at an included range boundary, then its end position
     // will have been reset to the end of the preceding range. Reset the start
     // position to match.
-    if s.token_end_position.bytes < s.token_start_position.bytes {
-        s.token_start_position = s.token_end_position;
+    if self_.token_end_position.bytes < self_.token_start_position.bytes {
+        self_.token_start_position = self_.token_end_position;
     }
 
-    let mut current_lookahead_end_byte = s.current_position.bytes + 1;
+    let mut current_lookahead_end_byte = self_.current_position.bytes + 1;
 
     // In order to determine that a byte sequence is invalid UTF8 or UTF16,
     // the character decoding algorithm may have looked at the following byte.
-    if s.data.lookahead == TS_DECODE_ERROR {
+    if self_.data.lookahead == TS_DECODE_ERROR {
         current_lookahead_end_byte += 4;
     }
 
