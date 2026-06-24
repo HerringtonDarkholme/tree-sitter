@@ -533,7 +533,6 @@ unsafe fn ts_parser__breakdown_top_of_stack(
     version: StackVersion,
 ) -> bool {
     let mut did_break_down = false;
-    let mut pending = false;
 
     loop {
         let pop = ts_stack_pop_pending((*self_).stack, version);
@@ -542,7 +541,7 @@ unsafe fn ts_parser__breakdown_top_of_stack(
         }
 
         did_break_down = true;
-        pending = false;
+        let mut pending = false;
         for i in 0..pop.size {
             let mut slice = ptr::read(array_get(&pop as *const StackSliceArray, i));
             let mut state = ts_stack_state((*self_).stack, slice.version);
