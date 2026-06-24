@@ -376,6 +376,11 @@ unsafe fn stack_iterator_array_read(self_: &Array<StackIterator>, index: u32) ->
     ptr::read(array_get(self_, index))
 }
 
+#[inline]
+unsafe fn stack_iterator_array_back_mut(self_: &Array<StackIterator>) -> &mut StackIterator {
+    &mut *array_back(self_)
+}
+
 // ---------------------------------------------------------------------------
 // Internal (static) functions
 // ---------------------------------------------------------------------------
@@ -728,11 +733,11 @@ unsafe fn stack__iter(
 
             let mut j: u32 = 1;
             while j <= (*node).link_count as u32 {
-                let next_iterator: *mut StackIterator;
+                let next_iterator: &mut StackIterator;
                 let link: StackLink;
                 if j == (*node).link_count as u32 {
                     link = (*node).links[0];
-                    next_iterator = array_get(&mut (*self_).iterators, i);
+                    next_iterator = stack_iterator_array_get_mut(&mut (*self_).iterators, i);
                 } else {
                     if (*self_).iterators.size >= MAX_ITERATOR_COUNT as u32 {
                         j += 1;
@@ -741,33 +746,32 @@ unsafe fn stack__iter(
                     link = (*node).links[j as usize];
                     let current_iterator = stack_iterator_array_read(&(*self_).iterators, i);
                     array_push(&mut (*self_).iterators, current_iterator);
-                    next_iterator = array_back(&(*self_).iterators);
+                    next_iterator = stack_iterator_array_back_mut(&(*self_).iterators);
                     ts_subtree_array_copy(
-                        ptr::read(&(*next_iterator).subtrees),
-                        &mut (*next_iterator).subtrees,
+                        ptr::read(&next_iterator.subtrees),
+                        &mut next_iterator.subtrees,
                     );
                 }
 
-                (*next_iterator).node = link.node;
+                next_iterator.node = link.node;
                 if !link.subtree.ptr.is_null() {
                     if include_subtrees {
                         array_push(
-                            &mut (*next_iterator).subtrees as *mut SubtreeArray
-                                as *mut Array<Subtree>,
+                            &mut next_iterator.subtrees as *mut SubtreeArray as *mut Array<Subtree>,
                             link.subtree,
                         );
                         ts_subtree_retain(link.subtree);
                     }
 
                     if !ts_subtree_extra(link.subtree) {
-                        (*next_iterator).subtree_count += 1;
+                        next_iterator.subtree_count += 1;
                         if !link.is_pending {
-                            (*next_iterator).is_pending = false;
+                            next_iterator.is_pending = false;
                         }
                     }
                 } else {
-                    (*next_iterator).subtree_count += 1;
-                    (*next_iterator).is_pending = false;
+                    next_iterator.subtree_count += 1;
+                    next_iterator.is_pending = false;
                 }
                 j += 1;
             }
