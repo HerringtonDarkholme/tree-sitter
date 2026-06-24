@@ -497,10 +497,11 @@ pub unsafe extern "C" fn ts_tree_cursor_reset(_self: *mut TSTreeCursor, node: TS
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_tree_cursor_init(self_: *mut TreeCursor, node: TSNode) {
-    (*self_).tree = node.tree as *const TSTree;
-    (*self_).root_alias_symbol = node.context[3] as TSSymbol;
-    array_clear(&mut (*self_).stack);
-    array_push(&mut (*self_).stack, TreeCursorEntry {
+    let cursor = &mut *self_;
+    cursor.tree = node.tree as *const TSTree;
+    cursor.root_alias_symbol = node.context[3] as TSSymbol;
+    array_clear(&mut cursor.stack);
+    array_push(&mut cursor.stack, TreeCursorEntry {
         subtree: node.id as *const Subtree,
         position: Length {
             bytes: ts_node_start_byte(node),
@@ -514,8 +515,8 @@ pub unsafe extern "C" fn ts_tree_cursor_init(self_: *mut TreeCursor, node: TSNod
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_tree_cursor_delete(_self: *mut TSTreeCursor) {
-    let self_ = _self as *mut TreeCursor;
-    array_delete(&mut (*self_).stack);
+    let cursor = &mut *(_self as *mut TreeCursor);
+    array_delete(&mut cursor.stack);
 }
 
 // ---------------------------------------------------------------------------
