@@ -643,16 +643,16 @@ pub unsafe fn ts_subtree_pool_new(capacity: u32) -> SubtreePool {
     pool
 }
 
-pub unsafe fn ts_subtree_pool_delete(self_: *mut SubtreePool) {
-    if !(*self_).free_trees.contents.is_null() {
-        for i in 0..(*self_).free_trees.size {
-            let tree = *(*self_).free_trees.contents.add(i as usize);
+pub unsafe fn ts_subtree_pool_delete(self_: &mut SubtreePool) {
+    if !self_.free_trees.contents.is_null() {
+        for i in 0..self_.free_trees.size {
+            let tree = *self_.free_trees.contents.add(i as usize);
             ts_free(tree.ptr as *mut c_void);
         }
-        mutable_array_delete(&mut (*self_).free_trees);
+        mutable_array_delete(&mut self_.free_trees);
     }
-    if !(*self_).tree_stack.contents.is_null() {
-        mutable_array_delete(&mut (*self_).tree_stack);
+    if !self_.tree_stack.contents.is_null() {
+        mutable_array_delete(&mut self_.tree_stack);
     }
 }
 
