@@ -386,7 +386,7 @@ struct TSLanguageData {
     alias_sequences: *const TSSymbol,
 }
 
-/// Rust re-implementation of the static inline ts_language_alias_sequence from language.h.
+/// Rust re-implementation of the static inline `ts_language_alias_sequence` from `language.h`.
 #[inline]
 unsafe fn language_alias_sequence(
     language: *const TSLanguage,
