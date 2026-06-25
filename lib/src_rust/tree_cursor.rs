@@ -28,14 +28,6 @@ use crate::ffi::TSPoint as POINT_ZERO_TYPE;
 const POINT_ZERO: POINT_ZERO_TYPE = POINT_ZERO_TYPE { row: 0, column: 0 };
 
 // ---------------------------------------------------------------------------
-// Extern C functions (still in C)
-// ---------------------------------------------------------------------------
-
-extern "C" {
-    fn memcpy(dest: *mut c_void, src: *const c_void, n: usize) -> *mut c_void;
-}
-
-// ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
@@ -213,10 +205,10 @@ unsafe fn array_init(arr: &mut TreeCursorEntryArray) {
 unsafe fn array_push_all(dst: &mut TreeCursorEntryArray, src: &TreeCursorEntryArray) {
     if src.size > 0 {
         array_grow(dst, src.size);
-        memcpy(
-            dst.contents.add(dst.size as usize).cast::<c_void>(),
-            src.contents as *const c_void,
-            src.size as usize * std::mem::size_of::<TreeCursorEntry>(),
+        ptr::copy_nonoverlapping(
+            src.contents,
+            dst.contents.add(dst.size as usize),
+            src.size as usize,
         );
         dst.size += src.size;
     }
