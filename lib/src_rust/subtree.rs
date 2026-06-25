@@ -1171,10 +1171,13 @@ pub unsafe fn ts_subtree_new_node(
     let new_byte_size = ts_subtree_alloc_size((*children).size);
     if ((*children).capacity as usize) * std::mem::size_of::<Subtree>() < new_byte_size {
         (*children).contents =
-            ts_realloc((*children).contents as *mut c_void, new_byte_size) as *mut Subtree;
+            ts_realloc((*children).contents.cast::<c_void>(), new_byte_size).cast::<Subtree>();
         (*children).capacity = (new_byte_size / std::mem::size_of::<Subtree>()) as u32;
     }
-    let data = (*children).contents.add((*children).size as usize) as *mut SubtreeHeapData;
+    let data = (*children)
+        .contents
+        .add((*children).size as usize)
+        .cast::<SubtreeHeapData>();
 
     *data = SubtreeHeapData {
         ref_count: 1,
@@ -1237,7 +1240,7 @@ pub unsafe fn ts_subtree_new_missing_leaf(
     if result.data.is_inline() {
         result.data.set_is_missing(true);
     } else {
-        (*(result.ptr as *mut SubtreeHeapData)).set_is_missing(true);
+        (*result.ptr.cast_mut()).set_is_missing(true);
     }
     result
 }
@@ -1323,7 +1326,7 @@ pub unsafe fn ts_subtree_release(pool: &mut SubtreePool, self_: Subtree) {
                     mutable_array_push(&mut pool.tree_stack, ts_subtree_to_mut_unsafe(child));
                 }
             }
-            ts_free(children as *mut c_void);
+            ts_free(children.cast::<c_void>());
         } else {
             if (*tree.ptr).has_external_tokens() {
                 let external_scanner_state =
