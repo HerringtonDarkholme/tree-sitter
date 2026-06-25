@@ -1395,108 +1395,103 @@ pub unsafe fn ts_subtree_summarize_children(
 ) {
     debug_assert!(!self_.data.is_inline());
 
-    (*self_.ptr).data.children.named_child_count = 0;
-    (*self_.ptr).data.children.visible_child_count = 0;
-    (*self_.ptr).error_cost = 0;
-    (*self_.ptr).data.children.repeat_depth = 0;
-    (*self_.ptr).data.children.visible_descendant_count = 0;
-    (*self_.ptr).set_has_external_tokens(false);
-    (*self_.ptr).set_depends_on_column(false);
-    (*self_.ptr).set_has_external_scanner_state_change(false);
-    (*self_.ptr).data.children.dynamic_precedence = 0;
+    let data = &mut *self_.ptr;
+    data.data.children.named_child_count = 0;
+    data.data.children.visible_child_count = 0;
+    data.error_cost = 0;
+    data.data.children.repeat_depth = 0;
+    data.data.children.visible_descendant_count = 0;
+    data.set_has_external_tokens(false);
+    data.set_depends_on_column(false);
+    data.set_has_external_scanner_state_change(false);
+    data.data.children.dynamic_precedence = 0;
 
     let mut structural_index: u32 = 0;
-    let alias_sequence =
-        language_alias_sequence(language, (*self_.ptr).data.children.production_id as u32);
+    let alias_sequence = language_alias_sequence(language, data.data.children.production_id as u32);
     let mut lookahead_end_byte: u32 = 0;
 
     let children = ts_subtree_children(ts_subtree_from_mut(self_));
-    for i in 0..(*self_.ptr).child_count {
+    for i in 0..data.child_count {
         let child = *children.add(i as usize);
 
-        if (*self_.ptr).size.extent.row == 0 && ts_subtree_depends_on_column(child) {
-            (*self_.ptr).set_depends_on_column(true);
+        if data.size.extent.row == 0 && ts_subtree_depends_on_column(child) {
+            data.set_depends_on_column(true);
         }
 
         if ts_subtree_has_external_scanner_state_change(child) {
-            (*self_.ptr).set_has_external_scanner_state_change(true);
+            data.set_has_external_scanner_state_change(true);
         }
 
         if i == 0 {
-            (*self_.ptr).padding = ts_subtree_padding(child);
-            (*self_.ptr).size = ts_subtree_size(child);
+            data.padding = ts_subtree_padding(child);
+            data.size = ts_subtree_size(child);
         } else {
-            (*self_.ptr).size = length_add((*self_.ptr).size, ts_subtree_total_size(child));
+            data.size = length_add(data.size, ts_subtree_total_size(child));
         }
 
-        let child_lookahead_end_byte = (*self_.ptr).padding.bytes
-            + (*self_.ptr).size.bytes
-            + ts_subtree_lookahead_bytes(child);
+        let child_lookahead_end_byte =
+            data.padding.bytes + data.size.bytes + ts_subtree_lookahead_bytes(child);
         if child_lookahead_end_byte > lookahead_end_byte {
             lookahead_end_byte = child_lookahead_end_byte;
         }
 
         if ts_subtree_symbol(child) != ts_builtin_sym_error_repeat {
-            (*self_.ptr).error_cost += ts_subtree_error_cost(child);
+            data.error_cost += ts_subtree_error_cost(child);
         }
 
         let grandchild_count = ts_subtree_child_count(child);
-        if (*self_.ptr).symbol == ts_builtin_sym_error
-            || (*self_.ptr).symbol == ts_builtin_sym_error_repeat
+        if data.symbol == ts_builtin_sym_error || data.symbol == ts_builtin_sym_error_repeat
         {
             if !ts_subtree_extra(child)
                 && !(ts_subtree_is_error(child) && grandchild_count == 0)
             {
                 if ts_subtree_visible(child) {
-                    (*self_.ptr).error_cost += ERROR_COST_PER_SKIPPED_TREE;
+                    data.error_cost += ERROR_COST_PER_SKIPPED_TREE;
                 } else if grandchild_count > 0 {
-                    (*self_.ptr).error_cost += ERROR_COST_PER_SKIPPED_TREE
+                    data.error_cost += ERROR_COST_PER_SKIPPED_TREE
                         * (*child.ptr).data.children.visible_child_count;
                 }
             }
         }
 
-        (*self_.ptr).data.children.dynamic_precedence +=
-            ts_subtree_dynamic_precedence(child);
-        (*self_.ptr).data.children.visible_descendant_count +=
-            ts_subtree_visible_descendant_count(child);
+        data.data.children.dynamic_precedence += ts_subtree_dynamic_precedence(child);
+        data.data.children.visible_descendant_count += ts_subtree_visible_descendant_count(child);
 
         if !ts_subtree_extra(child)
             && ts_subtree_symbol(child) != 0
             && !alias_sequence.is_null()
             && *alias_sequence.add(structural_index as usize) != 0
         {
-            (*self_.ptr).data.children.visible_descendant_count += 1;
-            (*self_.ptr).data.children.visible_child_count += 1;
+            data.data.children.visible_descendant_count += 1;
+            data.data.children.visible_child_count += 1;
             if ts_language_symbol_metadata(
                 language,
                 *alias_sequence.add(structural_index as usize),
             )
             .named
             {
-                (*self_.ptr).data.children.named_child_count += 1;
+                data.data.children.named_child_count += 1;
             }
         } else if ts_subtree_visible(child) {
-            (*self_.ptr).data.children.visible_descendant_count += 1;
-            (*self_.ptr).data.children.visible_child_count += 1;
+            data.data.children.visible_descendant_count += 1;
+            data.data.children.visible_child_count += 1;
             if ts_subtree_named(child) {
-                (*self_.ptr).data.children.named_child_count += 1;
+                data.data.children.named_child_count += 1;
             }
         } else if grandchild_count > 0 {
-            (*self_.ptr).data.children.visible_child_count +=
+            data.data.children.visible_child_count +=
                 (*child.ptr).data.children.visible_child_count;
-            (*self_.ptr).data.children.named_child_count +=
-                (*child.ptr).data.children.named_child_count;
+            data.data.children.named_child_count += (*child.ptr).data.children.named_child_count;
         }
 
         if ts_subtree_has_external_tokens(child) {
-            (*self_.ptr).set_has_external_tokens(true);
+            data.set_has_external_tokens(true);
         }
 
         if ts_subtree_is_error(child) {
-            (*self_.ptr).set_fragile_left(true);
-            (*self_.ptr).set_fragile_right(true);
-            (*self_.ptr).parse_state = TS_TREE_STATE_NONE;
+            data.set_fragile_left(true);
+            data.set_fragile_right(true);
+            data.parse_state = TS_TREE_STATE_NONE;
         }
 
         if !ts_subtree_extra(child) {
@@ -1504,43 +1499,38 @@ pub unsafe fn ts_subtree_summarize_children(
         }
     }
 
-    (*self_.ptr).lookahead_bytes =
-        lookahead_end_byte - (*self_.ptr).size.bytes - (*self_.ptr).padding.bytes;
+    data.lookahead_bytes = lookahead_end_byte - data.size.bytes - data.padding.bytes;
 
-    if (*self_.ptr).symbol == ts_builtin_sym_error
-        || (*self_.ptr).symbol == ts_builtin_sym_error_repeat
+    if data.symbol == ts_builtin_sym_error || data.symbol == ts_builtin_sym_error_repeat
     {
-        (*self_.ptr).error_cost += ERROR_COST_PER_RECOVERY
-            + ERROR_COST_PER_SKIPPED_CHAR * (*self_.ptr).size.bytes
-            + ERROR_COST_PER_SKIPPED_LINE * (*self_.ptr).size.extent.row;
+        data.error_cost += ERROR_COST_PER_RECOVERY
+            + ERROR_COST_PER_SKIPPED_CHAR * data.size.bytes
+            + ERROR_COST_PER_SKIPPED_LINE * data.size.extent.row;
     }
 
-    if (*self_.ptr).child_count > 0 {
+    if data.child_count > 0 {
         let first_child = *children.add(0);
-        let last_child = *children.add((*self_.ptr).child_count as usize - 1);
+        let last_child = *children.add(data.child_count as usize - 1);
 
-        (*self_.ptr).data.children.first_leaf.symbol = ts_subtree_leaf_symbol(first_child);
-        (*self_.ptr).data.children.first_leaf.parse_state =
-            ts_subtree_leaf_parse_state(first_child);
+        data.data.children.first_leaf.symbol = ts_subtree_leaf_symbol(first_child);
+        data.data.children.first_leaf.parse_state = ts_subtree_leaf_parse_state(first_child);
 
         if ts_subtree_fragile_left(first_child) {
-            (*self_.ptr).set_fragile_left(true);
+            data.set_fragile_left(true);
         }
         if ts_subtree_fragile_right(last_child) {
-            (*self_.ptr).set_fragile_right(true);
+            data.set_fragile_right(true);
         }
 
-        if (*self_.ptr).child_count >= 2
-            && !(*self_.ptr).visible()
-            && !(*self_.ptr).named()
-            && ts_subtree_symbol(first_child) == (*self_.ptr).symbol
+        if data.child_count >= 2
+            && !data.visible()
+            && !data.named()
+            && ts_subtree_symbol(first_child) == data.symbol
         {
             if ts_subtree_repeat_depth(first_child) > ts_subtree_repeat_depth(last_child) {
-                (*self_.ptr).data.children.repeat_depth =
-                    (ts_subtree_repeat_depth(first_child) + 1) as u16;
+                data.data.children.repeat_depth = (ts_subtree_repeat_depth(first_child) + 1) as u16;
             } else {
-                (*self_.ptr).data.children.repeat_depth =
-                    (ts_subtree_repeat_depth(last_child) + 1) as u16;
+                data.data.children.repeat_depth = (ts_subtree_repeat_depth(last_child) + 1) as u16;
             }
         }
     }
