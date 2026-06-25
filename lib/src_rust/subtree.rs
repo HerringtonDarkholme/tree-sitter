@@ -1059,11 +1059,6 @@ unsafe fn subtree_pool_mut<'a>(pool: *mut SubtreePool) -> &'a mut SubtreePool {
     pool.as_mut().unwrap_unchecked()
 }
 
-#[inline]
-unsafe fn input_edit_ref<'a>(input_edit: *const TSInputEdit) -> &'a TSInputEdit {
-    input_edit.as_ref().unwrap_unchecked()
-}
-
 unsafe fn ts_subtree_set_has_changes(self_: &mut MutableSubtree) {
     if self_.data.is_inline() {
         self_.data.set_has_changes(true);
@@ -1650,16 +1645,14 @@ pub unsafe fn ts_subtree_compare(
 
 pub unsafe fn ts_subtree_edit(
     mut self_: Subtree,
-    input_edit: *const TSInputEdit,
-    pool: *mut SubtreePool,
+    input_edit: &TSInputEdit,
+    pool: &mut SubtreePool,
 ) -> Subtree {
     struct EditEntry {
         tree: *mut Subtree,
         edit: Edit,
     }
 
-    let input_edit = input_edit_ref(input_edit);
-    let pool = subtree_pool_mut(pool);
     let mut stack: Vec<EditEntry> = Vec::new();
     stack.push(EditEntry {
         tree: std::ptr::addr_of_mut!(self_),
