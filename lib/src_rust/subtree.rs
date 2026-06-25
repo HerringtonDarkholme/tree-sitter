@@ -1806,7 +1806,7 @@ extern "C" {
 
 static ROOT_FIELD: &[u8; 9] = b"__ROOT__\0";
 
-/// Rust re-implementation of the static inline ts_language_field_map from language.h.
+/// Rust re-implementation of the static inline `ts_language_field_map` from `language.h`.
 unsafe fn language_field_map(
     language: *const TSLanguage,
     production_id: u32,
