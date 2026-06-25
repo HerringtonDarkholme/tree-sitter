@@ -688,7 +688,7 @@ pub unsafe fn ts_subtree_symbol(self_: Subtree) -> TSSymbol {
 }
 
 #[inline]
-pub unsafe fn ts_subtree_visible(self_: Subtree) -> bool {
+pub const unsafe fn ts_subtree_visible(self_: Subtree) -> bool {
     if self_.data.is_inline() {
         self_.data.visible()
     } else {
@@ -697,7 +697,7 @@ pub unsafe fn ts_subtree_visible(self_: Subtree) -> bool {
 }
 
 #[inline]
-pub unsafe fn ts_subtree_named(self_: Subtree) -> bool {
+pub const unsafe fn ts_subtree_named(self_: Subtree) -> bool {
     if self_.data.is_inline() {
         self_.data.named()
     } else {
@@ -706,7 +706,7 @@ pub unsafe fn ts_subtree_named(self_: Subtree) -> bool {
 }
 
 #[inline]
-pub unsafe fn ts_subtree_extra(self_: Subtree) -> bool {
+pub const unsafe fn ts_subtree_extra(self_: Subtree) -> bool {
     if self_.data.is_inline() {
         self_.data.extra()
     } else {
@@ -715,7 +715,7 @@ pub unsafe fn ts_subtree_extra(self_: Subtree) -> bool {
 }
 
 #[inline]
-pub unsafe fn ts_subtree_has_changes(self_: Subtree) -> bool {
+pub const unsafe fn ts_subtree_has_changes(self_: Subtree) -> bool {
     if self_.data.is_inline() {
         self_.data.has_changes()
     } else {
@@ -724,7 +724,7 @@ pub unsafe fn ts_subtree_has_changes(self_: Subtree) -> bool {
 }
 
 #[inline]
-pub unsafe fn ts_subtree_missing(self_: Subtree) -> bool {
+pub const unsafe fn ts_subtree_missing(self_: Subtree) -> bool {
     if self_.data.is_inline() {
         self_.data.is_missing()
     } else {
@@ -733,7 +733,7 @@ pub unsafe fn ts_subtree_missing(self_: Subtree) -> bool {
 }
 
 #[inline]
-pub unsafe fn ts_subtree_is_keyword(self_: Subtree) -> bool {
+pub const unsafe fn ts_subtree_is_keyword(self_: Subtree) -> bool {
     if self_.data.is_inline() {
         self_.data.is_keyword()
     } else {
@@ -742,7 +742,7 @@ pub unsafe fn ts_subtree_is_keyword(self_: Subtree) -> bool {
 }
 
 #[inline]
-pub unsafe fn ts_subtree_parse_state(self_: Subtree) -> TSStateId {
+pub const unsafe fn ts_subtree_parse_state(self_: Subtree) -> TSStateId {
     if self_.data.is_inline() {
         self_.data.parse_state
     } else {
