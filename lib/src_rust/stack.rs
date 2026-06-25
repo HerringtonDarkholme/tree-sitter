@@ -486,12 +486,10 @@ unsafe fn stack_iterator_array_back_mut(self_: &mut Array<StackIterator>) -> &mu
 // ---------------------------------------------------------------------------
 
 /// Retain (increment ref count) a stack node.
-unsafe fn stack_node_retain(self_: Option<&mut StackNode>) {
-    if let Some(self_) = self_ {
-        debug_assert!(self_.ref_count > 0);
-        self_.ref_count += 1;
-        debug_assert!(self_.ref_count != 0);
-    }
+unsafe fn stack_node_retain(self_: &mut StackNode) {
+    debug_assert!(self_.ref_count > 0);
+    self_.ref_count += 1;
+    debug_assert!(self_.ref_count != 0);
 }
 
 /// Release (decrement ref count) a stack node, freeing if zero.
@@ -670,7 +668,7 @@ unsafe fn stack_node_add_link(
         return;
     }
 
-    stack_node_retain(link.node.as_mut());
+    stack_node_retain(&mut *link.node);
     let mut node_count = (*link.node).node_count;
     let mut dynamic_precedence = (*link.node).dynamic_precedence;
     self_.links[self_.link_count as usize] = link;
@@ -727,7 +725,7 @@ unsafe fn ts_stack__add_version(
         summary: ptr::null_mut(),
     };
     array_push(&mut self_.heads, head);
-    stack_node_retain(node.as_mut());
+    stack_node_retain(&mut *node);
     let head = stack_head_array_back(&self_.heads);
     if !head.last_external_token.ptr.is_null() {
         ts_subtree_retain(head.last_external_token);
@@ -1334,7 +1332,7 @@ pub unsafe fn ts_stack_copy_version(
     let version_head = stack_head_array_read(&stack.heads, version);
     array_push(&mut stack.heads, version_head);
     let head = stack_head_array_back_mut(&mut stack.heads);
-    stack_node_retain(head.node.as_mut());
+    stack_node_retain(&mut *head.node);
     if !head.last_external_token.ptr.is_null() {
         ts_subtree_retain(head.last_external_token);
     }
@@ -1432,7 +1430,7 @@ pub unsafe fn ts_stack_resume(
 
 /// Clear all versions, resetting to initial state.
 pub unsafe fn ts_stack_clear(self_: &mut Stack) {
-    stack_node_retain(self_.base_node.as_mut());
+    stack_node_retain(&mut *self_.base_node);
     let heads = &mut self_.heads;
     let node_pool = &mut self_.node_pool;
     let subtree_pool = &mut *self_.subtree_pool;
