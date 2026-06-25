@@ -747,19 +747,34 @@ pub unsafe extern "C" fn ts_subtree_get_changed_ranges(
     included_range_differences: *const TSRangeArray,
     ranges: *mut *mut TSRange,
 ) -> u32 {
+    ts_subtree_get_changed_ranges_ref(
+        &*old_tree,
+        &*new_tree,
+        &mut *cursor1,
+        &mut *cursor2,
+        language,
+        &*included_range_differences,
+        ranges,
+    )
+}
+
+pub(crate) unsafe fn ts_subtree_get_changed_ranges_ref(
+    old_tree: &Subtree,
+    new_tree: &Subtree,
+    old_cursor: &mut TreeCursor,
+    new_cursor: &mut TreeCursor,
+    language: *const TSLanguage,
+    included_range_differences_array: &TSRangeArray,
+    ranges: *mut *mut TSRange,
+) -> u32 {
     let mut results = TSRangeArray {
         contents: ptr::null_mut(),
         size: 0,
         capacity: 0,
     };
 
-    let old_cursor = &mut *cursor1;
-    let new_cursor = &mut *cursor2;
-    let old_tree = &*old_tree;
-    let new_tree = &*new_tree;
     let mut old_iter = iterator_new(old_cursor, old_tree, language);
     let mut new_iter = iterator_new(new_cursor, new_tree, language);
-    let included_range_differences_array = &*included_range_differences;
 
     let mut included_range_difference_index: u32 = 0;
 
@@ -885,8 +900,8 @@ pub unsafe extern "C" fn ts_subtree_get_changed_ranges(
         ts_range_array_add(&mut results, new_size, old_size);
     }
 
-    *cursor1 = old_iter.cursor;
-    *cursor2 = new_iter.cursor;
+    *old_cursor = old_iter.cursor;
+    *new_cursor = new_iter.cursor;
     *ranges = results.contents;
     results.size
 }

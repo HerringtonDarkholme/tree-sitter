@@ -7,7 +7,7 @@ use crate::ffi::{TSLanguage, TSNode, TSPoint, TSRange, TSSymbol};
 
 use super::alloc::{ts_calloc, ts_free, ts_malloc};
 use super::get_changed_ranges::{
-    ts_range_array_get_changed_ranges_ref, ts_range_edit_ref, ts_subtree_get_changed_ranges,
+    ts_range_array_get_changed_ranges_ref, ts_range_edit_ref, ts_subtree_get_changed_ranges_ref,
     TSRangeArray,
 };
 use super::language::{ts_language_copy, ts_language_delete};
@@ -276,7 +276,7 @@ pub unsafe extern "C" fn ts_tree_get_changed_ranges(
     );
 
     let mut result: *mut TSRange = std::ptr::null_mut();
-    *length = ts_subtree_get_changed_ranges(
+    *length = ts_subtree_get_changed_ranges_ref(
         &old_tree_ref.root,
         &new_tree_ref.root,
         &mut cursor1,
