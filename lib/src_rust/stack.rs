@@ -925,7 +925,7 @@ unsafe extern "C" fn pop_count_callback(
     iterator: *const StackIterator,
 ) -> StackAction {
     let iterator = stack_iterator_ref(iterator);
-    let goal_subtree_count = *payload.cast::<u32>();
+    let goal_subtree_count = *u32_payload_ref(payload);
     if iterator.subtree_count == goal_subtree_count {
         StackActionPop | StackActionStop
     } else {
@@ -977,6 +977,11 @@ unsafe fn stack_iterator_ref<'a>(iterator: *const StackIterator) -> &'a StackIte
 #[inline]
 unsafe fn bool_payload_mut<'a>(payload: *mut c_void) -> &'a mut bool {
     payload.cast::<bool>().as_mut().unwrap_unchecked()
+}
+
+#[inline]
+unsafe fn u32_payload_ref<'a>(payload: *const c_void) -> &'a u32 {
+    payload.cast::<u32>().as_ref().unwrap_unchecked()
 }
 
 #[inline]
