@@ -261,11 +261,13 @@ pub unsafe fn array_erase<T>(arr: *mut Array<T>, index: u32) {
 pub unsafe fn array_insert<T>(arr: *mut Array<T>, index: u32, element: T) {
     let elem_size = std::mem::size_of::<T>();
     array_grow(arr, 1);
-    let contents = (*arr).contents as *mut u8;
+    let contents = (*arr).contents.cast::<u8>();
     if ((*arr).size as usize) > index as usize {
         memmove(
-            contents.add((index as usize + 1) * elem_size) as *mut c_void,
-            contents.add(index as usize * elem_size) as *const c_void,
+            contents
+                .add((index as usize + 1) * elem_size)
+                .cast::<c_void>(),
+            contents.add(index as usize * elem_size).cast::<c_void>(),
             ((*arr).size as usize - index as usize) * elem_size,
         );
     }
