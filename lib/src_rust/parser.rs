@@ -348,6 +348,11 @@ unsafe fn parser_stack_ref<'a>(stack: *const Stack) -> &'a Stack {
     stack.as_ref().unwrap_unchecked()
 }
 
+#[inline]
+unsafe fn parser_language_full<'a>(language: *const TSLanguage) -> &'a TSLanguageFull {
+    language.cast::<TSLanguageFull>().as_ref().unwrap_unchecked()
+}
+
 // ---------------------------------------------------------------------------
 // ReusableNode inline helpers (from reusable_node.h)
 // ---------------------------------------------------------------------------
@@ -800,8 +805,10 @@ unsafe fn ts_parser__call_main_lex_fn(
     if ts_language_is_wasm(self_.language) {
         ts_wasm_store_call_lex_main(self_.wasm_store, lex_mode.lex_state)
     } else {
-        let lang = self_.language.cast::<TSLanguageFull>();
-        ((*lang).lex_fn.unwrap())(&mut self_.lexer.data, lex_mode.lex_state)
+        (parser_language_full(self_.language).lex_fn.unwrap())(
+            &mut self_.lexer.data,
+            lex_mode.lex_state,
+        )
     }
 }
 
@@ -809,8 +816,9 @@ unsafe fn ts_parser__call_keyword_lex_fn(self_: &mut TSParser) -> bool {
     if ts_language_is_wasm(self_.language) {
         ts_wasm_store_call_lex_keyword(self_.wasm_store, 0)
     } else {
-        let lang = self_.language.cast::<TSLanguageFull>();
-        ((*lang).keyword_lex_fn.unwrap())(&mut self_.lexer.data, 0)
+        (parser_language_full(self_.language)
+            .keyword_lex_fn
+            .unwrap())(&mut self_.lexer.data, 0)
     }
 }
 
