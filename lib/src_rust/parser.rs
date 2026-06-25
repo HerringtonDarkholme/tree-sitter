@@ -728,7 +728,7 @@ unsafe fn ts_parser__better_version_exists(
         match ts_parser__compare_versions(status, status_i) {
             ErrorComparison::TakeRight => return true,
             ErrorComparison::PreferRight
-                if ts_stack_can_merge(self_.stack, i, version) => {
+                if ts_stack_can_merge(&*self_.stack, i, version) => {
                     return true;
                 }
             _ => {}
@@ -1547,7 +1547,7 @@ unsafe fn ts_parser__reduce(
             if j == version {
                 continue;
             }
-            if ts_stack_merge(self_.stack, j, slice_version) {
+            if ts_stack_merge(&mut *self_.stack, j, slice_version) {
                 removed_version_count += 1;
                 break;
             }
@@ -1650,7 +1650,7 @@ unsafe fn ts_parser__do_all_potential_reductions(
 
         let merged = 'merge: {
             for j in initial_version_count..version {
-                if ts_stack_merge(self_.stack, j, version) {
+                if ts_stack_merge(&mut *self_.stack, j, version) {
                     break 'merge true;
                 }
             }
@@ -2118,7 +2118,7 @@ unsafe fn ts_parser__handle_error(
     }
 
     for _i in previous_version_count..version_count {
-        let did_merge = ts_stack_merge(self_.stack, version, previous_version_count);
+        let did_merge = ts_stack_merge(&mut *self_.stack, version, previous_version_count);
         debug_assert!(did_merge);
     }
 
@@ -2481,7 +2481,7 @@ unsafe fn ts_parser__condense_stack(self_: &mut TSParser) -> u32 {
                 }
 
                 ErrorComparison::PreferLeft | ErrorComparison::None => {
-                    if ts_stack_merge(self_.stack, j, i) {
+                    if ts_stack_merge(&mut *self_.stack, j, i) {
                         made_changes = true;
                         i -= 1;
                         break;
@@ -2490,7 +2490,7 @@ unsafe fn ts_parser__condense_stack(self_: &mut TSParser) -> u32 {
 
                 ErrorComparison::PreferRight => {
                     made_changes = true;
-                    if ts_stack_merge(self_.stack, j, i) {
+                    if ts_stack_merge(&mut *self_.stack, j, i) {
                         i -= 1;
                         break;
                     }

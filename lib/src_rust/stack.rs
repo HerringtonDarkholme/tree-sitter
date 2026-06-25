@@ -1346,14 +1346,13 @@ pub unsafe fn ts_stack_copy_version(
 
 /// Merge two versions if possible.
 pub unsafe fn ts_stack_merge(
-    self_: *mut Stack,
+    stack: &mut Stack,
     version1: StackVersion,
     version2: StackVersion,
 ) -> bool {
-    if !ts_stack_can_merge(self_, version1, version2) {
+    if !ts_stack_can_merge(stack, version1, version2) {
         return false;
     }
-    let stack = &mut *self_;
     {
         let stack_heads = &mut stack.heads;
         let subtree_pool = &mut *stack.subtree_pool;
@@ -1371,11 +1370,10 @@ pub unsafe fn ts_stack_merge(
 
 /// Check if two versions can be merged.
 pub unsafe fn ts_stack_can_merge(
-    self_: *mut Stack,
+    stack: &Stack,
     version1: StackVersion,
     version2: StackVersion,
 ) -> bool {
-    let stack = &*self_;
     let head1 = stack_head(stack, version1);
     let head2 = stack_head(stack, version2);
     head1.status == StackStatus::Active
