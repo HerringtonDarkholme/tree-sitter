@@ -1832,7 +1832,7 @@ unsafe fn language_field_map(
     *end = (*lang).field_map_entries.add(slice.index as usize + slice.length as usize);
 }
 
-/// Rust re-implementation of the static inline ts_language_write_symbol_as_dot_string.
+/// Rust re-implementation of the static inline `ts_language_write_symbol_as_dot_string`.
 unsafe fn language_write_symbol_as_dot_string(
     language: *const TSLanguage,
     f: *mut c_void,
