@@ -5,8 +5,6 @@
 extern "C" {
 #endif
 
-#include <stdbool.h>
-#include <stdio.h>
 #include <stdlib.h>
 
 #if defined(TREE_SITTER_HIDDEN_SYMBOLS) || defined(_WIN32)
