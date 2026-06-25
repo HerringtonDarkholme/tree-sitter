@@ -990,8 +990,9 @@ unsafe fn ts_parser__lex(
         return NULL_SUBTREE;
     }
 
-    let start_position = ts_stack_position(&*self_.stack, version);
-    let external_token = ts_stack_last_external_token(&*self_.stack, version);
+    let stack = &*self_.stack;
+    let start_position = ts_stack_position(stack, version);
+    let external_token = ts_stack_last_external_token(stack, version);
 
     let mut found_external_token = false;
     let mut error_mode = parse_state == ERROR_STATE;
