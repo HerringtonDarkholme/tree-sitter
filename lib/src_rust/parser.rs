@@ -722,7 +722,7 @@ unsafe fn ts_parser__version_status(
     self_: &mut TSParser,
     version: StackVersion,
 ) -> ErrorStatus {
-    let stack = &mut *self_.stack;
+    let stack = parser_stack_mut(self_.stack);
     let mut cost = ts_stack_error_cost(stack, version);
     let is_paused = ts_stack_is_paused(stack, version);
     if is_paused {
@@ -748,7 +748,7 @@ unsafe fn ts_parser__better_version_exists(
         return true;
     }
 
-    let stack = &mut *self_.stack;
+    let stack = parser_stack_mut(self_.stack);
     let position = ts_stack_position(stack, version);
     let status = ErrorStatus {
         cost,
@@ -769,7 +769,7 @@ unsafe fn ts_parser__better_version_exists(
         match ts_parser__compare_versions(status, status_i) {
             ErrorComparison::TakeRight => return true,
             ErrorComparison::PreferRight
-                if ts_stack_can_merge(&*self_.stack, i, version) => {
+                if ts_stack_can_merge(parser_stack_ref(self_.stack), i, version) => {
                     return true;
                 }
             _ => {}
