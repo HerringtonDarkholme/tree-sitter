@@ -742,18 +742,16 @@ unsafe fn ts_stack__add_slice(
     node: *mut StackNode,
     subtrees: &SubtreeArray,
 ) {
-    let mut i = self_.slices.size as i32 - 1;
-    while i + 1 > 0 {
-        let version = stack_slice_array_get(&self_.slices, i as u32).version;
+    for i in (0..self_.slices.size).rev() {
+        let version = stack_slice_array_get(&self_.slices, i).version;
         if stack_head(self_, version).node == node {
             let slice = StackSlice {
                 subtrees: subtree_array_read_ref(subtrees),
                 version,
             };
-            array_insert(&mut self_.slices, (i + 1) as u32, slice);
+            array_insert(&mut self_.slices, i + 1, slice);
             return;
         }
-        i -= 1;
     }
 
     let version = ts_stack__add_version(self_, original_version, node);
