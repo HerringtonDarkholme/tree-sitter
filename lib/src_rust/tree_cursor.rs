@@ -551,7 +551,7 @@ pub unsafe extern "C" fn ts_tree_cursor_goto_first_child(
     let cursor = &mut *_self.cast::<TreeCursor>();
     loop {
         match tree_cursor_goto_first_child_internal(cursor) {
-            TreeCursorStep::TreeCursorStepHidden => continue,
+            TreeCursorStep::TreeCursorStepHidden => {}
             TreeCursorStep::TreeCursorStepVisible => return true,
             _ => return false,
         }
@@ -598,7 +598,7 @@ pub unsafe extern "C" fn ts_tree_cursor_goto_last_child(
     let cursor = &mut *_self.cast::<TreeCursor>();
     loop {
         match tree_cursor_goto_last_child_internal(cursor) {
-            TreeCursorStep::TreeCursorStepHidden => continue,
+            TreeCursorStep::TreeCursorStepHidden => {}
             TreeCursorStep::TreeCursorStepVisible => return true,
             _ => return false,
         }
