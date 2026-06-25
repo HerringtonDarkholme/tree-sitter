@@ -73,12 +73,17 @@ pub struct TreeCursor {
 
 #[inline]
 unsafe fn tree_cursor_ref<'a>(cursor: *const TSTreeCursor) -> &'a TreeCursor {
-    &*cursor.cast::<TreeCursor>()
+    cursor.cast::<TreeCursor>().as_ref().unwrap_unchecked()
 }
 
 #[inline]
 unsafe fn tree_cursor_mut<'a>(cursor: *mut TSTreeCursor) -> &'a mut TreeCursor {
-    &mut *cursor.cast::<TreeCursor>()
+    cursor.cast::<TreeCursor>().as_mut().unwrap_unchecked()
+}
+
+#[inline]
+unsafe fn internal_tree_cursor_mut<'a>(cursor: *mut TreeCursor) -> &'a mut TreeCursor {
+    cursor.as_mut().unwrap_unchecked()
 }
 
 /// `TreeCursorStep` — result of internal navigation
@@ -505,7 +510,7 @@ pub unsafe extern "C" fn ts_tree_cursor_reset(self_: *mut TSTreeCursor, node: TS
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_tree_cursor_init(self_: *mut TreeCursor, node: TSNode) {
-    ts_tree_cursor_init_ref(&mut *self_, node);
+    ts_tree_cursor_init_ref(internal_tree_cursor_mut(self_), node);
 }
 
 pub(crate) unsafe fn ts_tree_cursor_init_ref(cursor: &mut TreeCursor, node: TSNode) {
