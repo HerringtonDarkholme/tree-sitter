@@ -543,9 +543,9 @@ unsafe fn ts_parser__log(self_: &mut TSParser) {
         let mut chr = self_.lexer.debug_buffer.as_ptr();
         while *chr != 0 {
             if *chr == b'"' || *chr == b'\\' {
-                fputc(b'\\' as i32, self_.dot_graph_file);
+                fputc(i32::from(b'\\'), self_.dot_graph_file);
             }
-            fputc(*chr as i32, self_.dot_graph_file);
+            fputc(i32::from(*chr), self_.dot_graph_file);
             chr = chr.add(1);
         }
         fprintf(self_.dot_graph_file, b"\"\n}\n\n\0".as_ptr() as *const i8);
