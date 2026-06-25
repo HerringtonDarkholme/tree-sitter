@@ -63,7 +63,17 @@ pub(crate) const unsafe fn tree_ref<'a>(tree: *const TSTree) -> &'a TSTree {
 
 #[inline]
 unsafe fn tree_mut<'a>(tree: *mut TSTree) -> &'a mut TSTree {
-    &mut *tree
+    tree.as_mut().unwrap_unchecked()
+}
+
+#[inline]
+unsafe fn input_edit_ref<'a>(edit: *const TSInputEdit) -> &'a TSInputEdit {
+    edit.as_ref().unwrap_unchecked()
+}
+
+#[inline]
+unsafe fn output_length_mut<'a>(length: *mut u32) -> &'a mut u32 {
+    length.as_mut().unwrap_unchecked()
 }
 
 unsafe fn ts_tree_init_ref(
@@ -249,7 +259,7 @@ pub unsafe extern "C" fn ts_tree_included_ranges(
     length: *mut u32,
 ) -> *mut TSRange {
     let tree = tree_ref(self_);
-    let length = &mut *length;
+    let length = output_length_mut(length);
     ts_tree_included_ranges_ref(tree, length)
 }
 
@@ -261,7 +271,7 @@ pub unsafe extern "C" fn ts_tree_included_ranges(
 #[no_mangle]
 pub unsafe extern "C" fn ts_tree_edit(self_: *mut TSTree, edit: *const TSInputEdit) {
     let tree = tree_mut(self_);
-    let edit = &*edit;
+    let edit = input_edit_ref(edit);
     ts_tree_edit_ref(tree, edit);
 }
 
