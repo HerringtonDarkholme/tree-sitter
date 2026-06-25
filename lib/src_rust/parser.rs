@@ -405,7 +405,7 @@ unsafe fn reusable_node_advance(self_: &mut ReusableNode) {
     }
 
     array_push(&mut self_.stack, StackEntry {
-        tree: *ts_subtree_children(tree).add(next_index as usize),
+        tree: *parser_subtree_child(tree, next_index),
         child_index: next_index,
         byte_offset,
     });
@@ -417,7 +417,7 @@ unsafe fn reusable_node_descend(self_: &mut ReusableNode) -> bool {
     };
     if ts_subtree_child_count(last_entry.tree) > 0 {
         array_push(&mut self_.stack, StackEntry {
-            tree: *ts_subtree_children(last_entry.tree),
+            tree: *parser_subtree_child(last_entry.tree, 0),
             child_index: 0,
             byte_offset: last_entry.byte_offset,
         });
@@ -466,6 +466,19 @@ unsafe fn stack_slice_array_get_mut(self_: &mut StackSliceArray, index: u32) -> 
 
 unsafe fn stack_slice_array_read(self_: &StackSliceArray, index: u32) -> StackSlice {
     ptr::read(stack_slice_array_get(self_, index))
+}
+
+#[inline]
+unsafe fn parser_subtree_child<'a>(parent: Subtree, index: u32) -> &'a Subtree {
+    parser_subtree_children(parent).get_unchecked(index as usize)
+}
+
+#[inline]
+unsafe fn parser_subtree_children<'a>(parent: Subtree) -> &'a [Subtree] {
+    std::slice::from_raw_parts(
+        ts_subtree_children(parent),
+        ts_subtree_child_count(parent) as usize,
+    )
 }
 
 const unsafe fn stack_slice_subtrees_read_ref(self_: &StackSlice) -> SubtreeArray {
@@ -591,7 +604,7 @@ unsafe fn ts_parser__breakdown_top_of_stack(
 
             let n = ts_subtree_child_count(parent);
             for j in 0..n {
-                let child = *ts_subtree_children(parent).add(j as usize);
+                let child = *parser_subtree_child(parent, j);
                 pending = ts_subtree_child_count(child) > 0;
 
                 if ts_subtree_is_error(child) {
@@ -1599,16 +1612,16 @@ unsafe fn ts_parser__accept(
             if !ts_subtree_extra(tree) {
                 debug_assert!(!tree.data.is_inline());
                 let child_count = ts_subtree_child_count(tree);
-                let children = ts_subtree_children(tree);
-                for k in 0..child_count {
-                    ts_subtree_retain(*children.add(k as usize));
+                let children = parser_subtree_children(tree);
+                for child in children {
+                    ts_subtree_retain(*child);
                 }
                 array_splice(
                     std::ptr::addr_of_mut!(trees).cast::<Array<Subtree>>(),
                     j as u32,
                     1,
                     child_count,
-                    children,
+                    children.as_ptr(),
                 );
                 root = ts_subtree_from_mut(ts_subtree_new_node(
                     ts_subtree_symbol(tree),
@@ -1787,15 +1800,16 @@ unsafe fn ts_parser__recover_to_state(
             let error_tree = *error_trees.contents;
             let error_child_count = ts_subtree_child_count(error_tree);
             if error_child_count > 0 {
+                let error_children = parser_subtree_children(error_tree);
                 array_splice(
                     std::ptr::addr_of_mut!(slice.subtrees).cast::<Array<Subtree>>(),
                     0,
                     0,
                     error_child_count,
-                    ts_subtree_children(error_tree),
+                    error_children.as_ptr(),
                 );
-                for j in 0..error_child_count {
-                    ts_subtree_retain(subtree_array_get(&slice.subtrees, j));
+                for child in error_children {
+                    ts_subtree_retain(*child);
                 }
             }
             ts_subtree_array_delete(&mut self_.tree_pool, &mut error_trees);
@@ -2594,9 +2608,9 @@ unsafe fn ts_parser__balance_subtree(self_: &mut TSParser) -> bool {
 
         if (*tree.ptr).data.children.repeat_depth > 0 {
             let tree_subtree = ts_subtree_from_mut(tree);
-            let child1 = *ts_subtree_children(tree_subtree).add(0);
-            let child2 =
-                *ts_subtree_children(tree_subtree).add((*tree.ptr).child_count as usize - 1);
+            let children = parser_subtree_children(tree_subtree);
+            let child1 = *children.get_unchecked(0);
+            let child2 = *children.get_unchecked((*tree.ptr).child_count as usize - 1);
             let repeat_delta = i64::from(ts_subtree_repeat_depth(child1))
                 - i64::from(ts_subtree_repeat_depth(child2));
             if repeat_delta > 0 {
@@ -2627,7 +2641,7 @@ unsafe fn ts_parser__balance_subtree(self_: &mut TSParser) -> bool {
 
         for i in 0..(*tree.ptr).child_count {
             let tree_subtree = ts_subtree_from_mut(tree);
-            let child = *ts_subtree_children(tree_subtree).add(i as usize);
+            let child = *parser_subtree_child(tree_subtree, i);
             if ts_subtree_child_count(child) > 0 && (*child.ptr).ref_count == 1 {
                 array_push(
                     std::ptr::addr_of_mut!(self_.tree_pool.tree_stack).cast::<Array<MutableSubtree>>(),
