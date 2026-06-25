@@ -802,6 +802,16 @@ unsafe fn mutable_subtree_children<'a>(self_: MutableSubtree) -> &'a mut [Subtre
 }
 
 #[inline]
+unsafe fn mutable_subtree_mut<'a>(self_: *mut MutableSubtree) -> &'a mut MutableSubtree {
+    self_.as_mut().unwrap_unchecked()
+}
+
+#[inline]
+unsafe fn mutable_subtree_data_mut<'a>(self_: MutableSubtree) -> &'a mut SubtreeHeapData {
+    self_.ptr.as_mut().unwrap_unchecked()
+}
+
+#[inline]
 unsafe fn mutable_subtree_child(self_: MutableSubtree, index: usize) -> Subtree {
     *mutable_subtree_children(self_).get_unchecked(index)
 }
@@ -1304,14 +1314,14 @@ pub unsafe fn ts_subtree_set_symbol(
     language: *const TSLanguage,
 ) {
     let metadata = ts_language_symbol_metadata(language, symbol);
-    let self_ = &mut *self_;
+    let self_ = mutable_subtree_mut(self_);
     if self_.data.is_inline() {
         debug_assert!(symbol < TSSymbol::from(u8::MAX));
         self_.data.symbol = symbol as u8;
         self_.data.set_named(metadata.named);
         self_.data.set_visible(metadata.visible);
     } else {
-        let data = &mut *self_.ptr;
+        let data = mutable_subtree_data_mut(*self_);
         data.symbol = symbol;
         data.set_named(metadata.named);
         data.set_visible(metadata.visible);
@@ -1452,7 +1462,7 @@ pub unsafe fn ts_subtree_summarize_children(
 ) {
     debug_assert!(!self_.data.is_inline());
 
-    let data = &mut *self_.ptr;
+    let data = mutable_subtree_data_mut(self_);
     data.data.children.named_child_count = 0;
     data.data.children.visible_child_count = 0;
     data.error_cost = 0;
