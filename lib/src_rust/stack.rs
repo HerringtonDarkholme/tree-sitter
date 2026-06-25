@@ -671,7 +671,7 @@ unsafe fn stack_node_add_link(
                     ts_subtree_retain(link.subtree);
                     ts_subtree_release(subtree_pool, existing_link.subtree);
                     existing_link.subtree = link.subtree;
-                    self_.dynamic_precedence = (*link.node).dynamic_precedence
+                    self_.dynamic_precedence = stack_node_ref(link.node).dynamic_precedence
                         + ts_subtree_dynamic_precedence(link.subtree);
                 }
                 return;
