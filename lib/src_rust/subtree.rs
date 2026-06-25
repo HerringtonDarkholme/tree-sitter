@@ -392,7 +392,7 @@ const unsafe fn language_alias_sequence(
     language: *const TSLanguage,
     production_id: u32,
 ) -> *const TSSymbol {
-    let lang = language as *const TSLanguageData;
+    let lang = language.cast::<TSLanguageData>();
     if production_id != 0 {
         (*lang)
             .alias_sequences
@@ -424,7 +424,7 @@ pub unsafe fn ts_external_scanner_state_init(
 ) {
     self_.length = length;
     if length > EXTERNAL_SCANNER_STATE_INLINE_SIZE as u32 {
-        self_.data.long_data = ts_malloc(length as usize) as *mut u8;
+        self_.data.long_data = ts_malloc(length as usize).cast::<u8>();
         ptr::copy_nonoverlapping(data, self_.data.long_data, length as usize);
     } else {
         ptr::copy_nonoverlapping(data, self_.data.short_data.as_mut_ptr(), length as usize);
@@ -439,7 +439,7 @@ pub unsafe fn ts_external_scanner_state_copy(self_: &ExternalScannerState) -> Ex
         length: self_.length,
     };
     if self_.length > EXTERNAL_SCANNER_STATE_INLINE_SIZE as u32 {
-        result.data.long_data = ts_malloc(self_.length as usize) as *mut u8;
+        result.data.long_data = ts_malloc(self_.length as usize).cast::<u8>();
         ptr::copy_nonoverlapping(
             self_.data.long_data,
             result.data.long_data,
@@ -451,7 +451,7 @@ pub unsafe fn ts_external_scanner_state_copy(self_: &ExternalScannerState) -> Ex
 
 pub unsafe fn ts_external_scanner_state_delete(self_: &mut ExternalScannerState) {
     if self_.length > EXTERNAL_SCANNER_STATE_INLINE_SIZE as u32 {
-        ts_free(self_.data.long_data as *mut c_void);
+        ts_free(self_.data.long_data.cast::<c_void>());
     }
 }
 
@@ -470,8 +470,8 @@ pub unsafe fn ts_external_scanner_state_eq(
 ) -> bool {
     self_.length == length
         && libc_memcmp(
-            ts_external_scanner_state_data(self_) as *const c_void,
-            buffer as *const c_void,
+            ts_external_scanner_state_data(self_).cast::<c_void>(),
+            buffer.cast::<c_void>(),
             length as usize,
         ) == 0
 }
