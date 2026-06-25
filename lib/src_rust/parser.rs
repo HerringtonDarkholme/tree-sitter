@@ -2082,14 +2082,14 @@ unsafe fn ts_parser__handle_error(
     lookahead: Subtree,
 ) {
     let parser = ptr::from_mut(self_);
-    let previous_version_count = ts_stack_version_count(&*self_.stack);
+    let previous_version_count = ts_stack_version_count(parser_stack_ref(self_.stack));
 
     // Perform any reductions that can happen in this state, regardless of the lookahead. After
     // skipping one or more invalid tokens, the parser might find a token that would have allowed
     // a reduction to take place.
     ts_parser__do_all_potential_reductions(self_, version, 0);
-    let version_count = ts_stack_version_count(&*self_.stack);
-    let position = ts_stack_position(&*self_.stack, version);
+    let version_count = ts_stack_version_count(parser_stack_ref(self_.stack));
+    let position = ts_stack_position(parser_stack_ref(self_.stack), version);
 
     // Push a discontinuity onto the stack. Merge all of the stack versions that
     // were created in the previous step.
@@ -2097,7 +2097,7 @@ unsafe fn ts_parser__handle_error(
     let mut v = version;
     while v < version_count {
         if !did_insert_missing_token {
-            let state = ts_stack_state(&*self_.stack, v);
+            let state = ts_stack_state(parser_stack_ref(self_.stack), v);
             let language = self_.language.cast::<TSLanguageFull>();
             let mut missing_symbol: TSSymbol = 1;
             while u32::from(missing_symbol) < (*language).token_count {
@@ -2122,7 +2122,8 @@ unsafe fn ts_parser__handle_error(
                     let lookahead_bytes =
                         ts_subtree_total_bytes(lookahead) + ts_subtree_lookahead_bytes(lookahead);
 
-                    let version_with_missing_tree = ts_stack_copy_version(&mut *self_.stack, v);
+                    let version_with_missing_tree =
+                        ts_stack_copy_version(parser_stack_mut(self_.stack), v);
                     let missing_tree = ts_subtree_new_missing_leaf(
                         &mut self_.tree_pool,
                         missing_symbol,
@@ -2131,7 +2132,7 @@ unsafe fn ts_parser__handle_error(
                         self_.language,
                     );
                     ts_stack_push(
-                        &mut *self_.stack,
+                        parser_stack_mut(self_.stack),
                         version_with_missing_tree,
                         missing_tree,
                         false,
@@ -2147,7 +2148,10 @@ unsafe fn ts_parser__handle_error(
                             parser,
                             c"recover_with_missing symbol:%s, state:%u".as_ptr().cast::<i8>(),
                             SYM_NAME!(parser, missing_symbol),
-                            u32::from(ts_stack_state(&*self_.stack, version_with_missing_tree))
+                            u32::from(ts_stack_state(
+                                parser_stack_ref(self_.stack),
+                                version_with_missing_tree,
+                            ))
                         );
                         did_insert_missing_token = true;
                         break;
@@ -2157,7 +2161,13 @@ unsafe fn ts_parser__handle_error(
             }
         }
 
-        ts_stack_push(&mut *self_.stack, v, NULL_SUBTREE, false, ERROR_STATE);
+        ts_stack_push(
+            parser_stack_mut(self_.stack),
+            v,
+            NULL_SUBTREE,
+            false,
+            ERROR_STATE,
+        );
         v = if v == version {
             previous_version_count
         } else {
@@ -2166,11 +2176,19 @@ unsafe fn ts_parser__handle_error(
     }
 
     for _i in previous_version_count..version_count {
-        let did_merge = ts_stack_merge(&mut *self_.stack, version, previous_version_count);
+        let did_merge = ts_stack_merge(
+            parser_stack_mut(self_.stack),
+            version,
+            previous_version_count,
+        );
         debug_assert!(did_merge);
     }
 
-    ts_stack_record_summary(&mut *self_.stack, version, MAX_SUMMARY_DEPTH);
+    ts_stack_record_summary(
+        parser_stack_mut(self_.stack),
+        version,
+        MAX_SUMMARY_DEPTH,
+    );
 
     // Begin recovery with the current lookahead node, rather than waiting for the
     // next turn of the parse loop. This ensures that the tree accounts for the
