@@ -934,27 +934,27 @@ pub const unsafe fn ts_subtree_production_id(self_: Subtree) -> u16 {
 // --- #31: fragile/external/depends_on_column accessors ---
 
 #[inline]
-pub unsafe fn ts_subtree_fragile_left(self_: Subtree) -> bool {
+pub const unsafe fn ts_subtree_fragile_left(self_: Subtree) -> bool {
     if self_.data.is_inline() { false } else { (*self_.ptr).fragile_left() }
 }
 
 #[inline]
-pub unsafe fn ts_subtree_fragile_right(self_: Subtree) -> bool {
+pub const unsafe fn ts_subtree_fragile_right(self_: Subtree) -> bool {
     if self_.data.is_inline() { false } else { (*self_.ptr).fragile_right() }
 }
 
 #[inline]
-pub unsafe fn ts_subtree_has_external_tokens(self_: Subtree) -> bool {
+pub const unsafe fn ts_subtree_has_external_tokens(self_: Subtree) -> bool {
     if self_.data.is_inline() { false } else { (*self_.ptr).has_external_tokens() }
 }
 
 #[inline]
-pub unsafe fn ts_subtree_has_external_scanner_state_change(self_: Subtree) -> bool {
+pub const unsafe fn ts_subtree_has_external_scanner_state_change(self_: Subtree) -> bool {
     if self_.data.is_inline() { false } else { (*self_.ptr).has_external_scanner_state_change() }
 }
 
 #[inline]
-pub unsafe fn ts_subtree_depends_on_column(self_: Subtree) -> bool {
+pub const unsafe fn ts_subtree_depends_on_column(self_: Subtree) -> bool {
     if self_.data.is_inline() { false } else { (*self_.ptr).depends_on_column() }
 }
 
