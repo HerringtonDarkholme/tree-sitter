@@ -1447,10 +1447,16 @@ unsafe fn ts_parser__shift(
         lookahead
     };
 
-    ts_stack_push(&mut *self_.stack, version, subtree_to_push, !is_leaf, state);
+    ts_stack_push(
+        parser_stack_mut(self_.stack),
+        version,
+        subtree_to_push,
+        !is_leaf,
+        state,
+    );
     if ts_subtree_has_external_tokens(subtree_to_push) {
         ts_stack_set_last_external_token(
-            &mut *self_.stack,
+            parser_stack_mut(self_.stack),
             version,
             ts_subtree_last_external_token(subtree_to_push),
         );
