@@ -33,6 +33,16 @@ pub struct TSRangeArray {
     pub capacity: u32,
 }
 
+#[inline]
+unsafe fn range_array_ref<'a>(ranges: *const TSRangeArray) -> &'a TSRangeArray {
+    &*ranges
+}
+
+#[inline]
+unsafe fn range_array_mut<'a>(ranges: *mut TSRangeArray) -> &'a mut TSRangeArray {
+    &mut *ranges
+}
+
 /// Iterator — internal state for tree diffing
 struct Iterator {
     cursor: TreeCursor,
@@ -535,7 +545,7 @@ pub unsafe extern "C" fn ts_range_array_intersects(
     start_byte: u32,
     end_byte: u32,
 ) -> bool {
-    let ranges = &*self_;
+    let ranges = range_array_ref(self_);
     ts_range_array_intersects_ref(ranges, start_index, start_byte, end_byte)
 }
 
@@ -616,7 +626,7 @@ pub unsafe extern "C" fn ts_range_array_get_changed_ranges(
         old_range_count,
         new_ranges,
         new_range_count,
-        &mut *differences,
+        range_array_mut(differences),
     );
 }
 
