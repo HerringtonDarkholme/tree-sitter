@@ -1153,7 +1153,7 @@ pub unsafe fn ts_subtree_clone(self_: Subtree) -> MutableSubtree {
         }
     } else if data.has_external_tokens() {
         (*result).data.external_scanner_state = std::mem::ManuallyDrop::new(
-            ts_external_scanner_state_copy(&*data.data.external_scanner_state),
+            ts_external_scanner_state_copy(&data.data.external_scanner_state),
         );
     }
     (*result).ref_count = 1;
