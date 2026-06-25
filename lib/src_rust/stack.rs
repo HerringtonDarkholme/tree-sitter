@@ -530,7 +530,7 @@ unsafe fn stack_node_release(
         if pool.size < MAX_NODE_POOL_SIZE as u32 {
             array_push(pool, self_);
         } else {
-            ts_free(self_ as *mut c_void);
+            ts_free(self_.cast::<c_void>());
         }
 
         if !first_predecessor.is_null() {
@@ -564,7 +564,7 @@ unsafe fn stack_node_new(
     let node: *mut StackNode = if pool.size > 0 {
         array_pop(pool)
     } else {
-        ts_malloc(std::mem::size_of::<StackNode>()) as *mut StackNode
+        ts_malloc(std::mem::size_of::<StackNode>()).cast::<StackNode>()
     };
 
     (*node).ref_count = 1;
