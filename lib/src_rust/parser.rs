@@ -1873,7 +1873,7 @@ unsafe fn ts_parser__recover(
                 if ts_parser__recover_to_state(self_, version, depth, entry.state) {
                     did_recover = true;
                     LOG!(parser, b"recover_to_previous state:%u, depth:%u\0".as_ptr() as *const i8,
-                        entry.state as u32, depth);
+                        u32::from(entry.state), depth);
                     LOG_STACK!(parser);
                     break;
                 }
@@ -2053,7 +2053,7 @@ unsafe fn ts_parser__handle_error(
             let state = ts_stack_state(&*self_.stack, v);
             let language = self_.language as *const TSLanguageFull;
             let mut missing_symbol: TSSymbol = 1;
-            while (missing_symbol as u32) < (*language).token_count {
+            while u32::from(missing_symbol) < (*language).token_count {
                 let state_after_missing_symbol =
                     ts_language_next_state(self_.language, state, missing_symbol);
                 if state_after_missing_symbol == 0 || state_after_missing_symbol == state {
@@ -2100,7 +2100,7 @@ unsafe fn ts_parser__handle_error(
                             parser,
                             b"recover_with_missing symbol:%s, state:%u\0".as_ptr() as *const i8,
                             SYM_NAME!(parser, missing_symbol),
-                            ts_stack_state(&*self_.stack, version_with_missing_tree) as u32
+                            u32::from(ts_stack_state(&*self_.stack, version_with_missing_tree))
                         );
                         did_insert_missing_token = true;
                         break;
@@ -2272,7 +2272,7 @@ unsafe fn ts_parser__advance(
                         LOG!(parser, b"shift_extra\0".as_ptr() as *const i8);
                     } else {
                         next_state = action.shift.state;
-                        LOG!(parser, b"shift state:%u\0".as_ptr() as *const i8, next_state as u32);
+                        LOG!(parser, b"shift state:%u\0".as_ptr() as *const i8, u32::from(next_state));
                     }
 
                     if ts_subtree_child_count(lookahead) > 0 {
