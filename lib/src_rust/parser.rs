@@ -821,13 +821,12 @@ unsafe fn ts_parser__external_scanner_deserialize(
     external_token: Subtree,
 ) {
     let lang = self_.language as *const TSLanguageFull;
-    let mut data: *const u8 = ptr::null();
-    let mut length: u32 = 0;
-    if !external_token.ptr.is_null() {
+    let (data, length) = if !external_token.ptr.is_null() {
         let state = ts_subtree_external_scanner_state(&external_token);
-        data = ts_external_scanner_state_data(state);
-        length = state.length;
-    }
+        (ts_external_scanner_state_data(state), state.length)
+    } else {
+        (ptr::null(), 0)
+    };
 
     if ts_language_is_wasm(self_.language) {
         ts_wasm_store_call_scanner_deserialize(
