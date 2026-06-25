@@ -1030,3 +1030,61 @@ Source-code analysis:
   for an aggregate parser regression.
 - No reproducible >5% Rust checkpoint regression was observed after rerunning
   the prior checkpoint in the same environment. No rollback was performed.
+
+### 2026-06-24 22:46 EDT
+
+- Repo head: `98118c0e`
+- Batch base: `5bda68da`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: 10 small Rust-core reference cleanups from
+  `Use reference helper for point edits` through
+  `Use refs for scanner state comparison`
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 24727.0 | 25274.5 | -2.17% |
+| TypeScript error parses | 32 | 1685.8 | 1678.1 | +0.46% |
+| JavaScript normal parses | 2 | 17745.1 | 14152.7 | +25.38% |
+| JavaScript error parses | 37 | 2085.4 | 1998.5 | +4.35% |
+| Overall parser throughput | 82 | 2336.1 | 2285.0 | +2.24% |
+
+The previous logged checkpoint at `52b81b76` recorded repeat-run Rust overall
+throughput of 2304.8 bytes/ms on the same TypeScript/JavaScript gate. This
+checkpoint is +1.36% versus that Rust throughput, so no aggregate parser
+regression was observed.
+
+Per-case Rust-vs-C regressions above the 5% threshold:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `typescript normal builderStatePublic.ts` | 13335.7 | 19192.1 | 30.51% |
+| `typescript normal corePublic.ts` | 23566.5 | 27499.0 | 14.30% |
+| `typescript error letter_test.go` | 1563.5 | 1780.3 | 12.18% |
+| `javascript error crlf-line-endings.py` | 1313.3 | 1446.0 | 9.18% |
+| `typescript normal performance.ts` | 18935.3 | 20649.9 | 8.30% |
+| `javascript error builderStatePublic.ts` | 2430.2 | 2593.1 | 6.28% |
+| `javascript error compound-statement-without-trailing-newline.py` | 3080.2 | 3284.4 | 6.22% |
+| `typescript error crlf-line-endings.py` | 1267.7 | 1335.5 | 5.08% |
+
+Source-code analysis:
+
+- This batch changed only Rust-internal code in `point.rs`, `tree.rs`,
+  `get_changed_ranges.rs`, `subtree.rs`, `parser.rs`, and `stack.rs`, replacing
+  some by-value `#[repr(C)]` copies and raw-pointer-adjacent access with
+  reference-based helper signatures and call sites.
+- No exported `#[no_mangle] extern "C"` signatures, public FFI struct layouts,
+  allocation headers, generated parser templates, or included C header text were
+  edited.
+- The latest cleanup changes `ts_subtree_external_scanner_state_eq` from taking
+  two `Subtree` values to borrowing them internally. All call sites pass
+  references to existing values, preserving the same scanner-state lookup and
+  byte comparison logic without changing tree ownership or allocation behavior.
+- The per-case Rust-vs-C outliers are not treated as a source-change regression
+  because the aggregate Rust throughput improved versus the previous checkpoint,
+  and prior checkpoint investigation showed the named outlier cases move between
+  runs. No rollback was performed.
