@@ -1766,24 +1766,22 @@ pub unsafe fn ts_subtree_last_external_token(mut tree: Subtree) -> Subtree {
 }
 
 pub unsafe fn ts_subtree_external_scanner_state(
-    self_: Subtree,
-) -> *const ExternalScannerState {
+    self_: &Subtree,
+) -> &ExternalScannerState {
     if !self_.ptr.is_null()
         && !self_.data.is_inline()
         && (*self_.ptr).has_external_tokens()
         && (*self_.ptr).child_count == 0
     {
-        &*(*self_.ptr).data.external_scanner_state as *const ExternalScannerState
+        &*(*self_.ptr).data.external_scanner_state
     } else {
         &EMPTY_EXTERNAL_SCANNER_STATE
     }
 }
 
 pub unsafe fn ts_subtree_external_scanner_state_eq(self_: Subtree, other: Subtree) -> bool {
-    let state_self = ts_subtree_external_scanner_state(self_);
-    let state_other = ts_subtree_external_scanner_state(other);
-    let state_self = &*state_self;
-    let state_other = &*state_other;
+    let state_self = ts_subtree_external_scanner_state(&self_);
+    let state_other = ts_subtree_external_scanner_state(&other);
     ts_external_scanner_state_eq(
         state_self,
         ts_external_scanner_state_data(state_other),
