@@ -664,7 +664,7 @@ unsafe fn ts_subtree_pool_allocate(self_: &mut SubtreePool) -> *mut SubtreeHeapD
 
 unsafe fn ts_subtree_pool_free(self_: &mut SubtreePool, tree: MutableSubtree) {
     if self_.free_trees.capacity > 0
-        && self_.free_trees.size + 1 <= TS_MAX_TREE_POOL_SIZE
+        && self_.free_trees.size < TS_MAX_TREE_POOL_SIZE
     {
         mutable_array_push(&mut self_.free_trees, tree);
     } else {
