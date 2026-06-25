@@ -738,12 +738,13 @@ unsafe fn ts_stack__add_version(
 unsafe fn ts_stack__add_slice(
     self_: &mut Stack,
     original_version: StackVersion,
-    node: *mut StackNode,
+    node: &mut StackNode,
     subtrees: &SubtreeArray,
 ) {
+    let node_ptr = ptr::from_mut(node);
     for i in (0..self_.slices.size).rev() {
         let version = stack_slice_array_get(&self_.slices, i).version;
-        if stack_head(self_, version).node == node {
+        if stack_head(self_, version).node == node_ptr {
             let slice = StackSlice {
                 subtrees: subtree_array_read_ref(subtrees),
                 version,
@@ -753,7 +754,7 @@ unsafe fn ts_stack__add_slice(
         }
     }
 
-    let version = ts_stack__add_version(self_, original_version, &mut *node);
+    let version = ts_stack__add_version(self_, original_version, node);
     let slice = StackSlice {
         subtrees: subtree_array_read_ref(subtrees),
         version,
@@ -813,7 +814,7 @@ unsafe fn stack__iter(
                     ts_subtree_array_copy(subtree_array_read_ref(&subtrees), &mut subtrees);
                 }
                 ts_subtree_array_reverse(&mut subtrees);
-                ts_stack__add_slice(stack, version, node, &subtrees);
+                ts_stack__add_slice(stack, version, &mut *node, &subtrees);
             }
 
             if should_stop {
