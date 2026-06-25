@@ -50,6 +50,16 @@ unsafe fn ts_node__null() -> TSNode {
 }
 
 #[inline]
+unsafe fn node_mut<'a>(self_: *mut TSNode) -> &'a mut TSNode {
+    self_.as_mut().unwrap_unchecked()
+}
+
+#[inline]
+unsafe fn input_edit_ref<'a>(edit: *const TSInputEdit) -> &'a TSInputEdit {
+    edit.as_ref().unwrap_unchecked()
+}
+
+#[inline]
 const unsafe fn ts_node__alias(self_: &TSNode) -> u32 {
     self_.context[3]
 }
@@ -1150,12 +1160,14 @@ pub unsafe extern "C" fn ts_node_edit(
     self_: *mut TSNode,
     edit: *const TSInputEdit,
 ) {
+    let self_ = node_mut(self_);
+    let edit = input_edit_ref(edit);
     let mut start_byte = node_start_byte(*self_);
     let mut start_point = node_start_point(*self_);
 
-    point_edit(&mut start_point, &mut start_byte, &*edit);
+    point_edit(&mut start_point, &mut start_byte, edit);
 
-    (*self_).context[0] = start_byte;
-    (*self_).context[1] = start_point.row;
-    (*self_).context[2] = start_point.column;
+    self_.context[0] = start_byte;
+    self_.context[1] = start_point.row;
+    self_.context[2] = start_point.column;
 }
