@@ -115,6 +115,17 @@ extern "C" {
     (const void *)(other)->contents, (other)->size, array_elem_size(self) \
   )
 
+/// Swap one array with another
+#define array_swap(self, other)                                     \
+  do {                                                              \
+    struct Swap swapped_contents = _array__swap(                    \
+      (void *)(self)->contents, &(self)->size, &(self)->capacity,   \
+      (void *)(other)->contents, &(other)->size, &(other)->capacity \
+    );                                                              \
+    (self)->contents = swapped_contents.self_contents;              \
+    (other)->contents = swapped_contents.other_contents;            \
+  } while (0)
+
 /// Get the size of the array contents
 #define array_elem_size(self) (sizeof *(self)->contents)
 
@@ -194,6 +205,33 @@ static inline void *_array__assign(void* self_contents, uint32_t *self_size, uin
   *self_size = other_size;
   memcpy(new_contents, other_contents, *self_size * element_size);
   return new_contents;
+}
+
+struct Swap {
+  void *self_contents;
+  void *other_contents;
+};
+
+/// This is not what you're looking for, see `array_swap`.
+// static inline void _array__swap(Array *self, Array *other) {
+static inline struct Swap _array__swap(void *self_contents, uint32_t *self_size, uint32_t *self_capacity,
+                               void *other_contents, uint32_t *other_size, uint32_t *other_capacity) {
+  void *new_self_contents = other_contents;
+  uint32_t new_self_size = *other_size;
+  uint32_t new_self_capacity = *other_capacity;
+
+  void *new_other_contents = self_contents;
+  *other_size = *self_size;
+  *other_capacity = *self_capacity;
+
+  *self_size = new_self_size;
+  *self_capacity = new_self_capacity;
+
+  struct Swap out = {
+    .self_contents = new_self_contents,
+    .other_contents = new_other_contents,
+  };
+  return out;
 }
 
 /// This is not what you're looking for, see `array_push` or `array_grow_by`.
