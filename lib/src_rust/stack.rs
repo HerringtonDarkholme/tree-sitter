@@ -509,14 +509,12 @@ unsafe fn stack_node_release(
         }
 
         let first_predecessor = if node.link_count > 0 {
-            let mut i = i32::from(node.link_count) - 1;
-            while i > 0 {
-                let link = node.links[i as usize];
+            for i in (1..usize::from(node.link_count)).rev() {
+                let link = node.links[i];
                 if !link.subtree.ptr.is_null() {
                     ts_subtree_release(subtree_pool, link.subtree);
                 }
                 stack_node_release(link.node, pool, subtree_pool);
-                i -= 1;
             }
             let link = node.links[0];
             if !link.subtree.ptr.is_null() {
