@@ -949,16 +949,14 @@ unsafe extern "C" fn summarize_stack_callback(
     if depth > session.max_depth {
         return StackActionStop;
     }
-    let mut i = (*session.summary).size as i32 - 1;
-    while i + 1 > 0 {
-        let entry = stack_summary_array_get(&*session.summary, i as u32);
+    for i in (0..(*session.summary).size).rev() {
+        let entry = stack_summary_array_get(&*session.summary, i);
         if entry.depth < depth {
             break;
         }
         if entry.depth == depth && entry.state == state {
             return StackActionNone;
         }
-        i -= 1;
     }
     array_push(
         session.summary,
