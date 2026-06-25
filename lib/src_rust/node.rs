@@ -83,7 +83,7 @@ unsafe fn ts_node_iterate_children(node: &TSNode) -> NodeChildIterator {
     );
     NodeChildIterator {
         parent: subtree,
-        tree: tree,
+        tree,
         position: Length {
             bytes: ts_node_start_byte(*node),
             extent: ts_node_start_point(*node),
@@ -833,25 +833,23 @@ pub unsafe extern "C" fn ts_node_child_by_field_id(
                     if field_map.add(1) == field_map_end {
                         self_ = child;
                         continue 'recur;
-                    } else {
-                        let result = ts_node_child_by_field_id(child, field_id);
-                        if !result.id.is_null() {
-                            return result;
-                        }
-                        field_map = field_map.add(1);
-                        if field_map == field_map_end {
-                            return ts_node__null();
-                        }
+                    }
+                    let result = ts_node_child_by_field_id(child, field_id);
+                    if !result.id.is_null() {
+                        return result;
+                    }
+                    field_map = field_map.add(1);
+                    if field_map == field_map_end {
+                        return ts_node__null();
                     }
                 } else if ts_node__is_relevant(child, true) {
                     return child;
                 } else if ts_node_child_count(child) > 0 {
                     return ts_node_child(child, 0);
-                } else {
-                    field_map = field_map.add(1);
-                    if field_map == field_map_end {
-                        return ts_node__null();
-                    }
+                }
+                field_map = field_map.add(1);
+                if field_map == field_map_end {
+                    return ts_node__null();
                 }
             }
         }
