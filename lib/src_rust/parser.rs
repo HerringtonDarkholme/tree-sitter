@@ -801,7 +801,7 @@ unsafe fn ts_parser__external_scanner_serialize(self_: &mut TSParser) -> u32 {
         length = ts_wasm_store_call_scanner_serialize(
             self_.wasm_store,
             self_.external_scanner_payload as usize as u32,
-            self_.lexer.debug_buffer.as_mut_ptr() as *mut i8,
+            self_.lexer.debug_buffer.as_mut_ptr().cast::<i8>(),
         );
         if ts_wasm_store_has_error(self_.wasm_store) {
             self_.has_scanner_error = true;
@@ -809,7 +809,7 @@ unsafe fn ts_parser__external_scanner_serialize(self_: &mut TSParser) -> u32 {
     } else {
         length = ((*lang).external_scanner.serialize.unwrap())(
             self_.external_scanner_payload,
-            self_.lexer.debug_buffer.as_mut_ptr() as *mut i8,
+            self_.lexer.debug_buffer.as_mut_ptr().cast::<i8>(),
         );
     }
     debug_assert!(length as usize <= TREE_SITTER_SERIALIZATION_BUFFER_SIZE);
@@ -832,7 +832,7 @@ unsafe fn ts_parser__external_scanner_deserialize(
         ts_wasm_store_call_scanner_deserialize(
             self_.wasm_store,
             self_.external_scanner_payload as usize as u32,
-            data as *const i8,
+            data.cast::<i8>(),
             length,
         );
         if ts_wasm_store_has_error(self_.wasm_store) {
@@ -841,7 +841,7 @@ unsafe fn ts_parser__external_scanner_deserialize(
     } else {
         ((*lang).external_scanner.deserialize.unwrap())(
             self_.external_scanner_payload,
-            data as *const i8,
+            data.cast::<i8>(),
             length,
         );
     }
