@@ -1480,12 +1480,9 @@ pub unsafe fn ts_stack_print_dot_graph(
         f = stderr;
     }
 
-    fprintf(f, b"digraph stack {\n\0".as_ptr().cast::<i8>());
-    fprintf(f, b"rankdir=\"RL\";\n\0".as_ptr().cast::<i8>());
-    fprintf(
-        f,
-        b"edge [arrowhead=none]\n\0".as_ptr().cast::<i8>(),
-    );
+    fprintf(f, c"digraph stack {\n".as_ptr().cast::<i8>());
+    fprintf(f, c"rankdir=\"RL\";\n".as_ptr().cast::<i8>());
+    fprintf(f, c"edge [arrowhead=none]\n".as_ptr().cast::<i8>());
 
     let mut visited_nodes: Array<*mut StackNode> = Array {
         contents: ptr::null_mut(),
@@ -1504,34 +1501,34 @@ pub unsafe fn ts_stack_print_dot_graph(
 
         fprintf(
             f,
-            b"node_head_%u [shape=none, label=\"\"]\n\0".as_ptr().cast::<i8>(),
+            c"node_head_%u [shape=none, label=\"\"]\n".as_ptr().cast::<i8>(),
             i,
         );
         fprintf(
             f,
-            b"node_head_%u -> node_%p [\0".as_ptr().cast::<i8>(),
+            c"node_head_%u -> node_%p [".as_ptr().cast::<i8>(),
             i,
             head.node as *const c_void,
         );
 
         if head.status == StackStatus::Paused {
-            fprintf(f, b"color=red \0".as_ptr().cast::<i8>());
+            fprintf(f, c"color=red ".as_ptr().cast::<i8>());
         }
         fprintf(
             f,
-            b"label=%u, fontcolor=blue, weight=10000, labeltooltip=\"node_count: %u\nerror_cost: %u\0".as_ptr().cast::<i8>(),
+            c"label=%u, fontcolor=blue, weight=10000, labeltooltip=\"node_count: %u\nerror_cost: %u".as_ptr().cast::<i8>(),
             i,
             node_count_since_error,
             error_cost,
         );
 
         if !head.summary.is_null() {
-            fprintf(f, b"\nsummary:\0".as_ptr().cast::<i8>());
+            fprintf(f, c"\nsummary:".as_ptr().cast::<i8>());
             for j in 0..(*head.summary).size {
                 let entry = stack_summary_array_get(&*head.summary, j);
                 fprintf(
                     f,
-                    b" %u\0".as_ptr().cast::<i8>(),
+                    c" %u".as_ptr().cast::<i8>(),
                     u32::from(entry.state),
                 );
             }
@@ -1540,20 +1537,17 @@ pub unsafe fn ts_stack_print_dot_graph(
         if !head.last_external_token.ptr.is_null() {
             let state = &*(*head.last_external_token.ptr).data.external_scanner_state;
             let data = ts_external_scanner_state_data(state);
-            fprintf(
-                f,
-                b"\nexternal_scanner_state:\0".as_ptr().cast::<i8>(),
-            );
+            fprintf(f, c"\nexternal_scanner_state:".as_ptr().cast::<i8>());
             for j in 0..state.length {
                 fprintf(
                     f,
-                    b" %2X\0".as_ptr().cast::<i8>(),
+                    c" %2X".as_ptr().cast::<i8>(),
                     u32::from(*data.add(j as usize)),
                 );
             }
         }
 
-        fprintf(f, b"\"]\n\0".as_ptr().cast::<i8>());
+        fprintf(f, c"\"]\n".as_ptr().cast::<i8>());
 
         let iter = StackIterator {
             node: head.node,
@@ -1588,28 +1582,28 @@ pub unsafe fn ts_stack_print_dot_graph(
             all_iterators_done = false;
             let node_ref = &*node;
 
-            fprintf(f, b"node_%p [\0".as_ptr().cast::<i8>(), node as *const c_void);
+            fprintf(f, c"node_%p [".as_ptr().cast::<i8>(), node as *const c_void);
             if node_ref.state == ERROR_STATE {
-                fprintf(f, b"label=\"?\"\0".as_ptr().cast::<i8>());
+                fprintf(f, c"label=\"?\"".as_ptr().cast::<i8>());
             } else if node_ref.link_count == 1
                 && !node_ref.links[0].subtree.ptr.is_null()
                 && ts_subtree_extra(node_ref.links[0].subtree)
             {
                 fprintf(
                     f,
-                    b"shape=point margin=0 label=\"\"\0".as_ptr().cast::<i8>(),
+                    c"shape=point margin=0 label=\"\"".as_ptr().cast::<i8>(),
                 );
             } else {
                 fprintf(
                     f,
-                    b"label=\"%d\"\0".as_ptr().cast::<i8>(),
+                    c"label=\"%d\"".as_ptr().cast::<i8>(),
                     i32::from(node_ref.state),
                 );
             }
 
             fprintf(
                 f,
-                b" tooltip=\"position: %u,%u\nnode_count:%u\nerror_cost: %u\ndynamic_precedence: %d\"];\n\0".as_ptr().cast::<i8>(),
+                c" tooltip=\"position: %u,%u\nnode_count:%u\nerror_cost: %u\ndynamic_precedence: %d\"];\n".as_ptr().cast::<i8>(),
                 node_ref.position.extent.row + 1,
                 node_ref.position.extent.column,
                 node_ref.node_count,
@@ -1621,25 +1615,25 @@ pub unsafe fn ts_stack_print_dot_graph(
                 let link = node_ref.links[j];
                 fprintf(
                     f,
-                    b"node_%p -> node_%p [\0".as_ptr().cast::<i8>(),
+                    c"node_%p -> node_%p [".as_ptr().cast::<i8>(),
                     node as *const c_void,
                     link.node as *const c_void,
                 );
                 if link.is_pending {
-                    fprintf(f, b"style=dashed \0".as_ptr().cast::<i8>());
+                    fprintf(f, c"style=dashed ".as_ptr().cast::<i8>());
                 }
                 if !link.subtree.ptr.is_null() && ts_subtree_extra(link.subtree) {
-                    fprintf(f, b"fontcolor=gray \0".as_ptr().cast::<i8>());
+                    fprintf(f, c"fontcolor=gray ".as_ptr().cast::<i8>());
                 }
 
                 if link.subtree.ptr.is_null() {
-                    fprintf(f, b"color=red\0".as_ptr().cast::<i8>());
+                    fprintf(f, c"color=red".as_ptr().cast::<i8>());
                 } else {
-                    fprintf(f, b"label=\"\0".as_ptr().cast::<i8>());
+                    fprintf(f, c"label=\"".as_ptr().cast::<i8>());
                     let quoted =
                         ts_subtree_visible(link.subtree) && !ts_subtree_named(link.subtree);
                     if quoted {
-                        fprintf(f, b"'\0".as_ptr().cast::<i8>());
+                        fprintf(f, c"'".as_ptr().cast::<i8>());
                     }
                     ts_language_write_symbol_as_dot_string(
                         language,
@@ -1647,18 +1641,18 @@ pub unsafe fn ts_stack_print_dot_graph(
                         ts_subtree_symbol(link.subtree),
                     );
                     if quoted {
-                        fprintf(f, b"'\0".as_ptr().cast::<i8>());
+                        fprintf(f, c"'".as_ptr().cast::<i8>());
                     }
-                    fprintf(f, b"\"\0".as_ptr().cast::<i8>());
+                    fprintf(f, c"\"".as_ptr().cast::<i8>());
                     fprintf(
                         f,
-                        b"labeltooltip=\"error_cost: %u\ndynamic_precedence: %d\"\0".as_ptr().cast::<i8>(),
+                        c"labeltooltip=\"error_cost: %u\ndynamic_precedence: %d\"".as_ptr().cast::<i8>(),
                         ts_subtree_error_cost(link.subtree),
                         ts_subtree_dynamic_precedence(link.subtree),
                     );
                 }
 
-                fprintf(f, b"];\n\0".as_ptr().cast::<i8>());
+                fprintf(f, c"];\n".as_ptr().cast::<i8>());
 
                 let next_iterator = if j == 0 {
                     stack_iterator_array_get_mut(&mut stack.iterators, i)
@@ -1676,7 +1670,7 @@ pub unsafe fn ts_stack_print_dot_graph(
         }
     }
 
-    fprintf(f, b"}\n\0".as_ptr().cast::<i8>());
+    fprintf(f, c"}\n".as_ptr().cast::<i8>());
 
     array_delete(&mut visited_nodes);
     true
