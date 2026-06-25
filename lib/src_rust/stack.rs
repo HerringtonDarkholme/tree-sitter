@@ -1032,7 +1032,7 @@ unsafe extern "C" fn summarize_stack_callback(
 // ===========================================================================
 
 /// Create a new parse stack.
-pub unsafe fn ts_stack_new(subtree_pool: *mut SubtreePool) -> *mut Stack {
+pub(crate) unsafe fn ts_stack_new(subtree_pool: *mut SubtreePool) -> *mut Stack {
     let self_ = ts_calloc(1, std::mem::size_of::<Stack>()).cast::<Stack>();
     let stack = stack_mut(self_);
 
@@ -1059,7 +1059,7 @@ pub unsafe fn ts_stack_new(subtree_pool: *mut SubtreePool) -> *mut Stack {
 }
 
 /// Free the parse stack.
-pub unsafe fn ts_stack_delete(self_: &mut Stack) {
+pub(crate) unsafe fn ts_stack_delete(self_: &mut Stack) {
     if !self_.slices.contents.is_null() {
         array_delete(&mut self_.slices);
     }
@@ -1093,12 +1093,12 @@ pub unsafe fn ts_stack_delete(self_: &mut Stack) {
 }
 
 /// Get the number of versions in the stack.
-pub const unsafe fn ts_stack_version_count(self_: &Stack) -> u32 {
+pub(crate) const unsafe fn ts_stack_version_count(self_: &Stack) -> u32 {
     self_.heads.size
 }
 
 /// Get the number of halted versions.
-pub unsafe fn ts_stack_halted_version_count(self_: &Stack) -> u32 {
+pub(crate) unsafe fn ts_stack_halted_version_count(self_: &Stack) -> u32 {
     let mut count = 0u32;
     for i in 0..self_.heads.size {
         if stack_head(self_, i).status == StackStatus::Halted {
@@ -1109,17 +1109,17 @@ pub unsafe fn ts_stack_halted_version_count(self_: &Stack) -> u32 {
 }
 
 /// Get the state at the top of a version.
-pub unsafe fn ts_stack_state(self_: &Stack, version: StackVersion) -> TSStateId {
+pub(crate) unsafe fn ts_stack_state(self_: &Stack, version: StackVersion) -> TSStateId {
     (*stack_head(self_, version).node).state
 }
 
 /// Get the position of a version.
-pub unsafe fn ts_stack_position(self_: &Stack, version: StackVersion) -> Length {
+pub(crate) unsafe fn ts_stack_position(self_: &Stack, version: StackVersion) -> Length {
     (*stack_head(self_, version).node).position
 }
 
 /// Get the last external token for a version.
-pub unsafe fn ts_stack_last_external_token(
+pub(crate) unsafe fn ts_stack_last_external_token(
     self_: &Stack,
     version: StackVersion,
 ) -> Subtree {
@@ -1127,7 +1127,7 @@ pub unsafe fn ts_stack_last_external_token(
 }
 
 /// Set the last external token for a version.
-pub unsafe fn ts_stack_set_last_external_token(
+pub(crate) unsafe fn ts_stack_set_last_external_token(
     self_: &mut Stack,
     version: StackVersion,
     token: Subtree,
@@ -1144,7 +1144,7 @@ pub unsafe fn ts_stack_set_last_external_token(
 }
 
 /// Get the error cost for a version.
-pub unsafe fn ts_stack_error_cost(self_: &Stack, version: StackVersion) -> u32 {
+pub(crate) unsafe fn ts_stack_error_cost(self_: &Stack, version: StackVersion) -> u32 {
     let head = stack_head(self_, version);
     let mut result = (*head.node).error_cost;
     if head.status == StackStatus::Paused
@@ -1157,7 +1157,7 @@ pub unsafe fn ts_stack_error_cost(self_: &Stack, version: StackVersion) -> u32 {
 }
 
 /// Get the node count since last error for a version.
-pub unsafe fn ts_stack_node_count_since_error(
+pub(crate) unsafe fn ts_stack_node_count_since_error(
     self_: &mut Stack,
     version: StackVersion,
 ) -> u32 {
@@ -1169,7 +1169,7 @@ pub unsafe fn ts_stack_node_count_since_error(
 }
 
 /// Push a subtree onto a version.
-pub unsafe fn ts_stack_push(
+pub(crate) unsafe fn ts_stack_push(
     stack: &mut Stack,
     version: StackVersion,
     subtree: Subtree,
@@ -1187,7 +1187,7 @@ pub unsafe fn ts_stack_push(
 }
 
 /// Pop a given number of entries from a version.
-pub unsafe fn ts_stack_pop_count(
+pub(crate) unsafe fn ts_stack_pop_count(
     self_: &mut Stack,
     version: StackVersion,
     count: u32,
@@ -1202,7 +1202,7 @@ pub unsafe fn ts_stack_pop_count(
 }
 
 /// Pop an error from the top of a version.
-pub unsafe fn ts_stack_pop_error(
+pub(crate) unsafe fn ts_stack_pop_error(
     self_: &mut Stack,
     version: StackVersion,
 ) -> SubtreeArray {
@@ -1236,7 +1236,7 @@ pub unsafe fn ts_stack_pop_error(
 }
 
 /// Pop pending entries from a version.
-pub unsafe fn ts_stack_pop_pending(
+pub(crate) unsafe fn ts_stack_pop_pending(
     self_: &mut Stack,
     version: StackVersion,
 ) -> StackSliceArray {
@@ -1256,7 +1256,7 @@ pub unsafe fn ts_stack_pop_pending(
 }
 
 /// Pop all entries from a version.
-pub unsafe fn ts_stack_pop_all(
+pub(crate) unsafe fn ts_stack_pop_all(
     self_: &mut Stack,
     version: StackVersion,
 ) -> StackSliceArray {
@@ -1264,7 +1264,7 @@ pub unsafe fn ts_stack_pop_all(
 }
 
 /// Record a summary of parse states near the top of a version.
-pub unsafe fn ts_stack_record_summary(
+pub(crate) unsafe fn ts_stack_record_summary(
     self_: &mut Stack,
     version: StackVersion,
     max_depth: u32,
@@ -1290,7 +1290,7 @@ pub unsafe fn ts_stack_record_summary(
 }
 
 /// Get the recorded summary for a version.
-pub unsafe fn ts_stack_get_summary(
+pub(crate) unsafe fn ts_stack_get_summary(
     stack: &Stack,
     version: StackVersion,
 ) -> *mut StackSummary {
@@ -1298,7 +1298,7 @@ pub unsafe fn ts_stack_get_summary(
 }
 
 /// Get the dynamic precedence of a version.
-pub unsafe fn ts_stack_dynamic_precedence(
+pub(crate) unsafe fn ts_stack_dynamic_precedence(
     self_: &Stack,
     version: StackVersion,
 ) -> i32 {
@@ -1306,7 +1306,7 @@ pub unsafe fn ts_stack_dynamic_precedence(
 }
 
 /// Check if a version has advanced since the last error.
-pub unsafe fn ts_stack_has_advanced_since_error(
+pub(crate) unsafe fn ts_stack_has_advanced_since_error(
     self_: &Stack,
     version: StackVersion,
 ) -> bool {
@@ -1335,7 +1335,7 @@ pub unsafe fn ts_stack_has_advanced_since_error(
 }
 
 /// Remove a version from the stack.
-pub unsafe fn ts_stack_remove_version(self_: &mut Stack, version: StackVersion) {
+pub(crate) unsafe fn ts_stack_remove_version(self_: &mut Stack, version: StackVersion) {
     let heads = &mut self_.heads;
     let node_pool = &mut self_.node_pool;
     let subtree_pool = subtree_pool_mut(self_.subtree_pool);
@@ -1348,7 +1348,7 @@ pub unsafe fn ts_stack_remove_version(self_: &mut Stack, version: StackVersion) 
 }
 
 /// Renumber version v1 to v2 (move v1 into v2's slot, removing v2).
-pub unsafe fn ts_stack_renumber_version(
+pub(crate) unsafe fn ts_stack_renumber_version(
     stack: &mut Stack,
     v1: StackVersion,
     v2: StackVersion,
@@ -1373,7 +1373,7 @@ pub unsafe fn ts_stack_renumber_version(
 }
 
 /// Swap two versions.
-pub unsafe fn ts_stack_swap_versions(
+pub(crate) unsafe fn ts_stack_swap_versions(
     stack: &mut Stack,
     v1: StackVersion,
     v2: StackVersion,
@@ -1385,7 +1385,7 @@ pub unsafe fn ts_stack_swap_versions(
 }
 
 /// Copy a version, creating a new one.
-pub unsafe fn ts_stack_copy_version(
+pub(crate) unsafe fn ts_stack_copy_version(
     stack: &mut Stack,
     version: StackVersion,
 ) -> StackVersion {
@@ -1402,7 +1402,7 @@ pub unsafe fn ts_stack_copy_version(
 }
 
 /// Merge two versions if possible.
-pub unsafe fn ts_stack_merge(
+pub(crate) unsafe fn ts_stack_merge(
     stack: &mut Stack,
     version1: StackVersion,
     version2: StackVersion,
@@ -1426,7 +1426,7 @@ pub unsafe fn ts_stack_merge(
 }
 
 /// Check if two versions can be merged.
-pub unsafe fn ts_stack_can_merge(
+pub(crate) unsafe fn ts_stack_can_merge(
     stack: &Stack,
     version1: StackVersion,
     version2: StackVersion,
@@ -1445,12 +1445,12 @@ pub unsafe fn ts_stack_can_merge(
 }
 
 /// Halt a version.
-pub unsafe fn ts_stack_halt(self_: &mut Stack, version: StackVersion) {
+pub(crate) unsafe fn ts_stack_halt(self_: &mut Stack, version: StackVersion) {
     stack_head_mut(self_, version).status = StackStatus::Halted;
 }
 
 /// Pause a version with a lookahead token.
-pub unsafe fn ts_stack_pause(
+pub(crate) unsafe fn ts_stack_pause(
     stack: &mut Stack,
     version: StackVersion,
     lookahead: Subtree,
@@ -1462,22 +1462,22 @@ pub unsafe fn ts_stack_pause(
 }
 
 /// Check if a version is active.
-pub unsafe fn ts_stack_is_active(self_: &Stack, version: StackVersion) -> bool {
+pub(crate) unsafe fn ts_stack_is_active(self_: &Stack, version: StackVersion) -> bool {
     stack_head(self_, version).status == StackStatus::Active
 }
 
 /// Check if a version is halted.
-pub unsafe fn ts_stack_is_halted(self_: &Stack, version: StackVersion) -> bool {
+pub(crate) unsafe fn ts_stack_is_halted(self_: &Stack, version: StackVersion) -> bool {
     stack_head(self_, version).status == StackStatus::Halted
 }
 
 /// Check if a version is paused.
-pub unsafe fn ts_stack_is_paused(self_: &Stack, version: StackVersion) -> bool {
+pub(crate) unsafe fn ts_stack_is_paused(self_: &Stack, version: StackVersion) -> bool {
     stack_head(self_, version).status == StackStatus::Paused
 }
 
 /// Resume a paused version, returning its stored lookahead.
-pub unsafe fn ts_stack_resume(
+pub(crate) unsafe fn ts_stack_resume(
     stack: &mut Stack,
     version: StackVersion,
 ) -> Subtree {
@@ -1490,7 +1490,7 @@ pub unsafe fn ts_stack_resume(
 }
 
 /// Clear all versions, resetting to initial state.
-pub unsafe fn ts_stack_clear(self_: &mut Stack) {
+pub(crate) unsafe fn ts_stack_clear(self_: &mut Stack) {
     stack_node_retain(stack_node_mut(self_.base_node));
     let heads = &mut self_.heads;
     let node_pool = &mut self_.node_pool;
@@ -1517,7 +1517,7 @@ pub unsafe fn ts_stack_clear(self_: &mut Stack) {
 }
 
 /// Print the stack as a DOT graph for debugging.
-pub unsafe fn ts_stack_print_dot_graph(
+pub(crate) unsafe fn ts_stack_print_dot_graph(
     stack: &mut Stack,
     language: *const TSLanguage,
     mut f: *mut c_void,
