@@ -583,12 +583,12 @@ unsafe fn ts_parser__breakdown_top_of_stack(
                 }
 
                 ts_subtree_retain(child);
-                ts_stack_push(self_.stack, slice.version, child, pending, state);
+                ts_stack_push(&mut *self_.stack, slice.version, child, pending, state);
             }
 
             for j in 1..slice.subtrees.size {
                 let tree = subtree_array_get(&slice.subtrees, j);
-                ts_stack_push(self_.stack, slice.version, tree, false, state);
+                ts_stack_push(&mut *self_.stack, slice.version, tree, false, state);
             }
 
             ts_subtree_release(&mut self_.tree_pool, parent);
@@ -1404,7 +1404,7 @@ unsafe fn ts_parser__shift(
         lookahead
     };
 
-    ts_stack_push(self_.stack, version, subtree_to_push, !is_leaf, state);
+    ts_stack_push(&mut *self_.stack, version, subtree_to_push, !is_leaf, state);
     if ts_subtree_has_external_tokens(subtree_to_push) {
         ts_stack_set_last_external_token(
             &mut *self_.stack,
@@ -1527,7 +1527,7 @@ unsafe fn ts_parser__reduce(
 
         // Push the parent node and trailing extras
         ts_stack_push(
-            self_.stack,
+            &mut *self_.stack,
             slice_version,
             ts_subtree_from_mut(parent),
             false,
@@ -1535,7 +1535,7 @@ unsafe fn ts_parser__reduce(
         );
         for j in 0..self_.trailing_extras.size {
             ts_stack_push(
-                self_.stack,
+                &mut *self_.stack,
                 slice_version,
                 subtree_array_get(&self_.trailing_extras, j),
                 false,
@@ -1569,7 +1569,7 @@ unsafe fn ts_parser__accept(
     lookahead: Subtree,
 ) {
     debug_assert!(ts_subtree_is_eof(lookahead));
-    ts_stack_push(self_.stack, version, lookahead, false, 1);
+    ts_stack_push(&mut *self_.stack, version, lookahead, false, 1);
 
     let pop = ts_stack_pop_all(&mut *self_.stack, version);
     for i in 0..pop.size {
@@ -1795,14 +1795,14 @@ unsafe fn ts_parser__recover_to_state(
                 true,
                 self_.language,
             );
-            ts_stack_push(self_.stack, slice.version, error, false, goal_state);
+            ts_stack_push(&mut *self_.stack, slice.version, error, false, goal_state);
         } else {
             array_delete(std::ptr::addr_of_mut!(slice.subtrees).cast::<Array<Subtree>>());
         }
 
         for j in 0..self_.trailing_extras.size {
             let tree = subtree_array_get(&self_.trailing_extras, j);
-            ts_stack_push(self_.stack, slice.version, tree, false, goal_state);
+            ts_stack_push(&mut *self_.stack, slice.version, tree, false, goal_state);
         }
 
         previous_version = slice.version;
@@ -1901,7 +1901,7 @@ unsafe fn ts_parser__recover(
             capacity: 0,
         };
         let parent = ts_subtree_new_error_node(&mut children, false, self_.language);
-        ts_stack_push(self_.stack, version, parent, false, 1);
+        ts_stack_push(&mut *self_.stack, version, parent, false, 1);
         ts_parser__accept(self_, version, lookahead);
         return;
     }
@@ -2003,7 +2003,7 @@ unsafe fn ts_parser__recover(
 
     // Push the ERROR
     ts_stack_push(
-        self_.stack,
+        &mut *self_.stack,
         version,
         ts_subtree_from_mut(error_repeat),
         false,
@@ -2083,7 +2083,7 @@ unsafe fn ts_parser__handle_error(
                         self_.language,
                     );
                     ts_stack_push(
-                        self_.stack,
+                        &mut *self_.stack,
                         version_with_missing_tree,
                         missing_tree,
                         false,
@@ -2109,7 +2109,7 @@ unsafe fn ts_parser__handle_error(
             }
         }
 
-        ts_stack_push(self_.stack, v, NULL_SUBTREE, false, ERROR_STATE);
+        ts_stack_push(&mut *self_.stack, v, NULL_SUBTREE, false, ERROR_STATE);
         v = if v == version {
             previous_version_count
         } else {

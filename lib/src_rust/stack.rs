@@ -1111,13 +1111,12 @@ pub unsafe fn ts_stack_node_count_since_error(
 
 /// Push a subtree onto a version.
 pub unsafe fn ts_stack_push(
-    self_: *mut Stack,
+    stack: &mut Stack,
     version: StackVersion,
     subtree: Subtree,
     pending: bool,
     state: TSStateId,
 ) {
-    let stack = &mut *self_;
     let heads = &mut stack.heads;
     let node_pool = &mut stack.node_pool;
     let head = stack_head_array_get_mut(heads, version);
