@@ -238,12 +238,16 @@ pub unsafe fn array_get<T>(arr: *const Array<T>, index: u32) -> *mut T {
 
 #[inline]
 pub unsafe fn array_get_ref<T>(arr: &Array<T>, index: u32) -> &T {
-    &*array_get(ptr::from_ref(arr), index)
+    array_get(ptr::from_ref(arr), index)
+        .as_ref()
+        .unwrap_unchecked()
 }
 
 #[inline]
 pub unsafe fn array_get_mut<T>(arr: &mut Array<T>, index: u32) -> &mut T {
-    &mut *array_get(ptr::from_mut(arr), index)
+    array_get(ptr::from_mut(arr), index)
+        .as_mut()
+        .unwrap_unchecked()
 }
 
 pub unsafe fn array_back<T>(arr: *const Array<T>) -> *mut T {
@@ -253,12 +257,12 @@ pub unsafe fn array_back<T>(arr: *const Array<T>) -> *mut T {
 
 #[inline]
 pub unsafe fn array_back_ref<T>(arr: &Array<T>) -> &T {
-    &*array_back(ptr::from_ref(arr))
+    array_back(ptr::from_ref(arr)).as_ref().unwrap_unchecked()
 }
 
 #[inline]
 pub unsafe fn array_back_mut<T>(arr: &mut Array<T>) -> &mut T {
-    &mut *array_back(ptr::from_mut(arr))
+    array_back(ptr::from_mut(arr)).as_mut().unwrap_unchecked()
 }
 
 pub unsafe fn array_erase<T>(arr: *mut Array<T>, index: u32) {
@@ -393,7 +397,10 @@ unsafe fn stack_head_array_pair_mut(
     let first_head = array_get(self_, first);
     let second_head = array_get(self_, second);
     debug_assert_ne!(first_head, second_head);
-    (&mut *first_head, &mut *second_head)
+    (
+        first_head.as_mut().unwrap_unchecked(),
+        second_head.as_mut().unwrap_unchecked(),
+    )
 }
 
 #[inline]
