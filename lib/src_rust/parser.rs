@@ -2127,9 +2127,9 @@ unsafe fn ts_parser__handle_error(
     while v < version_count {
         if !did_insert_missing_token {
             let state = ts_stack_state(parser_stack_ref(self_.stack), v);
-            let language = self_.language.cast::<TSLanguageFull>();
+            let language = parser_language_full(self_.language);
             let mut missing_symbol: TSSymbol = 1;
-            while u32::from(missing_symbol) < (*language).token_count {
+            while u32::from(missing_symbol) < language.token_count {
                 let state_after_missing_symbol =
                     ts_language_next_state(self_.language, state, missing_symbol);
                 if state_after_missing_symbol == 0 || state_after_missing_symbol == state {
