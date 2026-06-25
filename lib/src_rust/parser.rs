@@ -1215,13 +1215,14 @@ unsafe fn ts_parser__reuse_node(
             break;
         }
         let byte_offset = reusable_node_byte_offset(&mut self_.reusable_node);
-        let mut end_byte_offset = byte_offset + ts_subtree_total_bytes(result);
 
         // Do not reuse an EOF node if the included ranges array has changes
         // later on in the file.
-        if ts_subtree_is_eof(result) {
-            end_byte_offset = u32::MAX;
-        }
+        let end_byte_offset = if ts_subtree_is_eof(result) {
+            u32::MAX
+        } else {
+            byte_offset + ts_subtree_total_bytes(result)
+        };
 
         if byte_offset > position {
             LOG!(parser, b"before_reusable_node symbol:%s\0".as_ptr() as *const i8,
