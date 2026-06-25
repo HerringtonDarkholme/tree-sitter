@@ -164,7 +164,7 @@ unsafe fn ts_lexer__get_lookahead(self_: &mut Lexer) {
         return;
     }
 
-    let mut chunk = (self_.chunk as *const u8).add(position_in_chunk as usize);
+    let mut chunk = self_.chunk.cast::<u8>().add(position_in_chunk as usize);
     let decode: unsafe extern "C" fn(*const u8, u32, *mut i32) -> u32 =
         if self_.input.encoding == TSInputEncodingUTF8 {
             ts_decode_utf8
@@ -182,7 +182,7 @@ unsafe fn ts_lexer__get_lookahead(self_: &mut Lexer) {
     // try again with a fresh chunk.
     if self_.data.lookahead == TS_DECODE_ERROR && size < 4 {
         ts_lexer__get_chunk(self_);
-        chunk = self_.chunk as *const u8;
+        chunk = self_.chunk.cast::<u8>();
         size = self_.chunk_size;
         self_.lookahead_size = decode(chunk, size, &mut self_.data.lookahead);
     }
@@ -474,7 +474,7 @@ pub unsafe fn ts_lexer_init(self_: &mut Lexer) {
 
 /// Free the lexer's `included_ranges` allocation.
 pub unsafe fn ts_lexer_delete(self_: &mut Lexer) {
-    ts_free(self_.included_ranges as *mut c_void);
+    ts_free(self_.included_ranges.cast::<c_void>());
 }
 
 /// Set the input source for the lexer.
@@ -565,10 +565,10 @@ pub unsafe fn ts_lexer_set_included_ranges(
 
     let size = count as usize * std::mem::size_of::<TSRange>();
     self_.included_ranges =
-        ts_realloc(self_.included_ranges as *mut c_void, size) as *mut TSRange;
+        ts_realloc(self_.included_ranges.cast::<c_void>(), size).cast::<TSRange>();
     memcpy(
-        self_.included_ranges as *mut c_void,
-        ranges as *const c_void,
+        self_.included_ranges.cast::<c_void>(),
+        ranges.cast::<c_void>(),
         size,
     );
     self_.included_range_count = count;
