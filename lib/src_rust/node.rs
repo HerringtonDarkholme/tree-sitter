@@ -208,7 +208,15 @@ unsafe fn ts_node_iterate_children(node: &TSNode) -> NodeChildIterator {
 
 #[inline]
 unsafe fn node_child<'a>(parent: Subtree, index: u32) -> &'a Subtree {
-    &*ts_subtree_children(parent).add(index as usize)
+    node_children(parent).get_unchecked(index as usize)
+}
+
+#[inline]
+unsafe fn node_children<'a>(parent: Subtree) -> &'a [Subtree] {
+    std::slice::from_raw_parts(
+        ts_subtree_children(parent),
+        ts_subtree_child_count(parent) as usize,
+    )
 }
 
 unsafe fn ts_node_child_iterator_next(
@@ -327,7 +335,7 @@ unsafe fn ts_subtree_has_trailing_empty_descendant(
     if count == 0 { return false; }
     let mut i = count - 1;
     loop {
-        let child = *ts_subtree_children(self_).add(i as usize);
+        let child = *node_child(self_, i);
         if ts_subtree_total_bytes(child) > 0 { break; }
         if child.ptr == other.ptr || ts_subtree_has_trailing_empty_descendant(child, other) {
             return true;
