@@ -770,6 +770,16 @@ pub const unsafe fn ts_subtree_children(self_: Subtree) -> *mut Subtree {
 }
 
 #[inline]
+unsafe fn subtree_children<'a>(self_: Subtree) -> &'a [Subtree] {
+    let count = ts_subtree_child_count(self_) as usize;
+    if count == 0 {
+        &[]
+    } else {
+        std::slice::from_raw_parts(ts_subtree_children(self_), count)
+    }
+}
+
+#[inline]
 pub unsafe fn ts_subtree_set_extra(self_: &mut MutableSubtree, is_extra: bool) {
     if self_.data.is_inline() {
         self_.data.set_extra(is_extra);
@@ -1578,11 +1588,13 @@ pub unsafe fn ts_subtree_compare(
         }
 
         let count = ts_subtree_child_count(left);
+        let left_children = subtree_children(left);
+        let right_children = subtree_children(right);
         let mut i = count;
         while i > 0 {
             i -= 1;
-            let left_child = *ts_subtree_children(left).add(i as usize);
-            let right_child = *ts_subtree_children(right).add(i as usize);
+            let left_child = *left_children.get_unchecked(i as usize);
+            let right_child = *right_children.get_unchecked(i as usize);
             mutable_array_push(&mut pool.tree_stack, ts_subtree_to_mut_unsafe(left_child));
             mutable_array_push(
                 &mut pool.tree_stack,
