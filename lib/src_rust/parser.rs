@@ -1618,9 +1618,10 @@ unsafe fn ts_parser__accept(
     lookahead: Subtree,
 ) {
     debug_assert!(ts_subtree_is_eof(lookahead));
-    ts_stack_push(&mut *self_.stack, version, lookahead, false, 1);
+    let stack = parser_stack_mut(self_.stack);
+    ts_stack_push(stack, version, lookahead, false, 1);
 
-    let pop = ts_stack_pop_all(&mut *self_.stack, version);
+    let pop = ts_stack_pop_all(stack, version);
     for i in 0..pop.size {
         let mut trees = stack_slice_subtrees_read_ref(stack_slice_array_get(&pop, i));
 
@@ -1669,11 +1670,8 @@ unsafe fn ts_parser__accept(
         }
     }
 
-    ts_stack_remove_version(
-        &mut *self_.stack,
-        stack_slice_array_get(&pop, 0).version,
-    );
-    ts_stack_halt(&mut *self_.stack, version);
+    ts_stack_remove_version(stack, stack_slice_array_get(&pop, 0).version);
+    ts_stack_halt(stack, version);
 }
 
 // ---------------------------------------------------------------------------
