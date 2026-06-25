@@ -33,7 +33,7 @@ use super::language::ts_language_write_symbol_as_dot_string;
 
 const MAX_LINK_COUNT: usize = 8;
 const MAX_NODE_POOL_SIZE: u32 = 50;
-const MAX_ITERATOR_COUNT: usize = 64;
+const MAX_ITERATOR_COUNT: u32 = 64;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -838,7 +838,7 @@ unsafe fn stack__iter(
                     link = (*node).links[0];
                     next_iterator = stack_iterator_array_get_mut(&mut stack.iterators, i);
                 } else {
-                    if stack.iterators.size >= MAX_ITERATOR_COUNT as u32 {
+                    if stack.iterators.size >= MAX_ITERATOR_COUNT {
                         j += 1;
                         continue;
                     }
