@@ -568,10 +568,10 @@ pub unsafe fn ts_language_write_symbol_as_dot_string(
                 fputc(i32::from(*chr), f);
             }
             b'\n' => {
-                fputs(b"\\n\0".as_ptr().cast::<i8>(), f);
+                fputs(c"\\n".as_ptr().cast::<i8>(), f);
             }
             b'\t' => {
-                fputs(b"\\t\0".as_ptr().cast::<i8>(), f);
+                fputs(c"\\t".as_ptr().cast::<i8>(), f);
             }
             _ => {
                 fputc(i32::from(*chr), f);
@@ -809,9 +809,9 @@ pub unsafe extern "C" fn ts_language_symbol_name(
     symbol: TSSymbol,
 ) -> *const i8 {
     if symbol == ts_builtin_sym_error {
-        b"ERROR\0".as_ptr().cast::<i8>()
+        c"ERROR".as_ptr().cast::<i8>()
     } else if symbol == ts_builtin_sym_error_repeat {
-        b"_ERROR\0".as_ptr().cast::<i8>()
+        c"_ERROR".as_ptr().cast::<i8>()
     } else if u32::from(symbol) < ts_language_symbol_count(self_) {
         *(*lang(self_)).symbol_names.add(symbol as usize)
     } else {
@@ -826,7 +826,7 @@ pub unsafe extern "C" fn ts_language_symbol_for_name(
     length: u32,
     is_named: bool,
 ) -> TSSymbol {
-    if is_named && strncmp(string, b"ERROR\0".as_ptr().cast::<i8>(), length as usize) == 0 {
+    if is_named && strncmp(string, c"ERROR".as_ptr().cast::<i8>(), length as usize) == 0 {
         return ts_builtin_sym_error;
     }
     let count = ts_language_symbol_count(self_) as u16;
