@@ -805,7 +805,7 @@ unsafe fn stack__iter(
             let iterator = stack_iterator_array_get(&stack.iterators, i);
             let node = iterator.node;
 
-            let action = callback(payload, iterator as *const StackIterator);
+            let action = callback(payload, ptr::from_ref(iterator));
             let should_pop = (action & StackActionPop) != 0;
             let should_stop = (action & StackActionStop) != 0 || (*node).link_count == 0;
 
