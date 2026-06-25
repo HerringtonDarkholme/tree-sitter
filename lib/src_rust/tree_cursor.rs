@@ -521,11 +521,7 @@ pub unsafe extern "C" fn ts_tree_cursor_delete(_self: *mut TSTreeCursor) {
 // Navigation: children
 // ---------------------------------------------------------------------------
 
-#[no_mangle]
-pub unsafe extern "C" fn ts_tree_cursor_goto_first_child_internal(
-    _self: *mut TSTreeCursor,
-) -> TreeCursorStep {
-    let cursor = &mut *(_self as *mut TreeCursor);
+unsafe fn tree_cursor_goto_first_child_internal(cursor: &mut TreeCursor) -> TreeCursorStep {
     let mut iterator = ts_tree_cursor_iterate_children(cursor);
     while let Some(child) = ts_tree_cursor_child_iterator_next(&mut iterator) {
         let entry = child.entry;
@@ -542,11 +538,19 @@ pub unsafe extern "C" fn ts_tree_cursor_goto_first_child_internal(
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn ts_tree_cursor_goto_first_child_internal(
+    _self: *mut TSTreeCursor,
+) -> TreeCursorStep {
+    tree_cursor_goto_first_child_internal(&mut *(_self as *mut TreeCursor))
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn ts_tree_cursor_goto_first_child(
     _self: *mut TSTreeCursor,
 ) -> bool {
+    let cursor = &mut *(_self as *mut TreeCursor);
     loop {
-        match ts_tree_cursor_goto_first_child_internal(_self) {
+        match tree_cursor_goto_first_child_internal(cursor) {
             TreeCursorStep::TreeCursorStepHidden => continue,
             TreeCursorStep::TreeCursorStepVisible => return true,
             _ => return false,
@@ -554,11 +558,7 @@ pub unsafe extern "C" fn ts_tree_cursor_goto_first_child(
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn ts_tree_cursor_goto_last_child_internal(
-    _self: *mut TSTreeCursor,
-) -> TreeCursorStep {
-    let cursor = &mut *(_self as *mut TreeCursor);
+unsafe fn tree_cursor_goto_last_child_internal(cursor: &mut TreeCursor) -> TreeCursorStep {
     let mut iterator = ts_tree_cursor_iterate_children(cursor);
     if iterator.parent.ptr.is_null() || (*iterator.parent.ptr).child_count == 0 {
         return TreeCursorStep::TreeCursorStepNone;
@@ -585,11 +585,19 @@ pub unsafe extern "C" fn ts_tree_cursor_goto_last_child_internal(
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn ts_tree_cursor_goto_last_child_internal(
+    _self: *mut TSTreeCursor,
+) -> TreeCursorStep {
+    tree_cursor_goto_last_child_internal(&mut *(_self as *mut TreeCursor))
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn ts_tree_cursor_goto_last_child(
     _self: *mut TSTreeCursor,
 ) -> bool {
+    let cursor = &mut *(_self as *mut TreeCursor);
     loop {
-        match ts_tree_cursor_goto_last_child_internal(_self) {
+        match tree_cursor_goto_last_child_internal(cursor) {
             TreeCursorStep::TreeCursorStepHidden => continue,
             TreeCursorStep::TreeCursorStepVisible => return true,
             _ => return false,
