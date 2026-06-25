@@ -50,12 +50,12 @@ unsafe fn ts_node__null() -> TSNode {
 }
 
 #[inline]
-unsafe fn ts_node__alias(self_: &TSNode) -> u32 {
+const unsafe fn ts_node__alias(self_: &TSNode) -> u32 {
     self_.context[3]
 }
 
 #[inline]
-unsafe fn ts_node__subtree(self_: TSNode) -> Subtree {
+const unsafe fn ts_node__subtree(self_: TSNode) -> Subtree {
     *(self_.id as *const Subtree)
 }
 
