@@ -999,7 +999,8 @@ unsafe extern "C" fn pop_all_callback(
     iterator: *const StackIterator,
 ) -> StackAction {
     let iterator = stack_iterator_ref(iterator);
-    if (*iterator.node).link_count == 0 {
+    let node = stack_node_ref(iterator.node);
+    if node.link_count == 0 {
         StackActionPop
     } else {
         StackActionNone
@@ -1011,8 +1012,9 @@ unsafe extern "C" fn summarize_stack_callback(
     iterator: *const StackIterator,
 ) -> StackAction {
     let iterator = stack_iterator_ref(iterator);
+    let node = stack_node_ref(iterator.node);
     let session = summarize_stack_session_mut(payload);
-    let state = (*iterator.node).state;
+    let state = node.state;
     let depth = iterator.subtree_count;
     if depth > session.max_depth {
         return StackActionStop;
@@ -1029,7 +1031,7 @@ unsafe extern "C" fn summarize_stack_callback(
     array_push(
         session.summary,
         StackSummaryEntry {
-            position: (*iterator.node).position,
+            position: node.position,
             depth,
             state,
         },
