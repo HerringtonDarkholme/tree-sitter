@@ -561,13 +561,6 @@ pub(crate) unsafe fn ts_subtree_array_reverse(self_: &mut SubtreeArray) {
 // MutableSubtreeArray helpers
 // ===========================================================================
 
-#[inline]
-unsafe fn mutable_subtree_array_mut<'a>(
-    array: *mut MutableSubtreeArray,
-) -> &'a mut MutableSubtreeArray {
-    array.as_mut().unwrap_unchecked()
-}
-
 unsafe fn mutable_array_grow(arr: &mut MutableSubtreeArray, count: u32) {
     let new_size = arr.size + count;
     if new_size > arr.capacity {
@@ -1409,9 +1402,8 @@ pub unsafe fn ts_subtree_compress(
     self_: MutableSubtree,
     count: u32,
     language: *const TSLanguage,
-    stack: *mut MutableSubtreeArray,
+    stack: &mut MutableSubtreeArray,
 ) {
-    let stack = mutable_subtree_array_mut(stack);
     let initial_stack_size = stack.size;
 
     let mut tree = self_;

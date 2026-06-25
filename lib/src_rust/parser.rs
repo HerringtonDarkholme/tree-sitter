@@ -2700,7 +2700,7 @@ unsafe fn ts_parser__balance_subtree(self_: &mut TSParser) -> bool {
                         tree,
                         i,
                         self_.language,
-                        std::ptr::addr_of_mut!(self_.tree_pool.tree_stack),
+                        &mut self_.tree_pool.tree_stack,
                     );
 
                     // We scale the operation count increment in `ts_parser__check_progress` proportionately to the compression
