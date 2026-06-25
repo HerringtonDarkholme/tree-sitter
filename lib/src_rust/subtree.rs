@@ -959,7 +959,7 @@ pub const unsafe fn ts_subtree_depends_on_column(self_: Subtree) -> bool {
 }
 
 #[inline]
-pub unsafe fn ts_subtree_is_fragile(self_: Subtree) -> bool {
+pub const unsafe fn ts_subtree_is_fragile(self_: Subtree) -> bool {
     if self_.data.is_inline() {
         false
     } else {
