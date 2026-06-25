@@ -149,8 +149,7 @@ unsafe fn ts_node__is_relevant(self_: TSNode, include_anonymous: bool) -> bool {
     } else {
         let alias = ts_node__alias(&self_) as TSSymbol;
         if alias != 0 {
-            let t = self_.tree.cast::<TSTree>();
-            ts_language_symbol_metadata((*t).language, alias).named
+            ts_language_symbol_metadata(node_language(self_), alias).named
         } else {
             ts_subtree_visible(tree) && ts_subtree_named(tree)
         }
@@ -634,8 +633,7 @@ pub const unsafe extern "C" fn ts_node_is_extra(self_: TSNode) -> bool {
 pub unsafe extern "C" fn ts_node_is_named(self_: TSNode) -> bool {
     let alias = ts_node__alias(&self_) as TSSymbol;
     if alias != 0 {
-        let tree = self_.tree.cast::<TSTree>();
-        ts_language_symbol_metadata((*tree).language, alias).named
+        ts_language_symbol_metadata(node_language(self_), alias).named
     } else {
         ts_subtree_named(ts_node__subtree(self_))
     }
@@ -673,14 +671,12 @@ pub const unsafe extern "C" fn ts_node_parse_state(self_: TSNode) -> TSStateId {
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_node_next_parse_state(self_: TSNode) -> TSStateId {
-    let tree = self_.tree.cast::<TSTree>();
-    let language = (*tree).language;
     let state = ts_node_parse_state(self_);
     if state == TS_TREE_STATE_NONE {
         return TS_TREE_STATE_NONE;
     }
     let symbol = ts_node_grammar_symbol(self_);
-    ts_language_next_state(language, state, symbol)
+    ts_language_next_state(node_language(self_), state, symbol)
 }
 
 // ---------------------------------------------------------------------------
@@ -793,11 +789,10 @@ pub unsafe extern "C" fn ts_node_child_by_field_id(
             return ts_node__null();
         }
 
-        let tree = self_.tree.cast::<TSTree>();
         let mut field_map: *const TSFieldMapEntry = ptr::null();
         let mut field_map_end: *const TSFieldMapEntry = ptr::null();
         ts_language_field_map(
-            (*tree).language,
+            node_language(self_),
             u32::from((*ts_node__subtree(self_).ptr).data.children.production_id),
             &mut field_map,
             &mut field_map_end,
@@ -866,8 +861,7 @@ pub unsafe extern "C" fn ts_node_child_by_field_name(
     name: *const i8,
     name_length: u32,
 ) -> TSNode {
-    let tree = self_.tree.cast::<TSTree>();
-    let field_id = ts_language_field_id_for_name((*tree).language, name, name_length);
+    let field_id = ts_language_field_id_for_name(node_language(self_), name, name_length);
     ts_node_child_by_field_id(self_, field_id)
 }
 
