@@ -468,7 +468,7 @@ unsafe fn stack_slice_array_read(self_: &StackSliceArray, index: u32) -> StackSl
     ptr::read(stack_slice_array_get(self_, index))
 }
 
-unsafe fn stack_slice_subtrees_read_ref(self_: &StackSlice) -> SubtreeArray {
+const unsafe fn stack_slice_subtrees_read_ref(self_: &StackSlice) -> SubtreeArray {
     ptr::read(&self_.subtrees)
 }
 
@@ -488,7 +488,7 @@ unsafe fn ts_range_array_get(self_: &TSRangeArray, index: u32) -> &TSRange {
     &*array_get(self_ as *const TSRangeArray as *const Array<TSRange>, index)
 }
 
-unsafe fn ts_logger_read_ref(self_: &TSLogger) -> TSLogger {
+const unsafe fn ts_logger_read_ref(self_: &TSLogger) -> TSLogger {
     ptr::read(self_)
 }
 
