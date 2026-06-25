@@ -5,7 +5,6 @@
 extern "C" {
 #endif
 
-#include "./subtree.h"
 #include "./parser.h"
 
 #define LANGUAGE_VERSION_WITH_RESERVED_WORDS 15
