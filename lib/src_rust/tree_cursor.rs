@@ -21,6 +21,7 @@ use super::language::{
     ts_language_alias_at, ts_language_alias_sequence, ts_language_field_map,
     ts_language_symbol_metadata, TSLanguageFull,
 };
+use super::node::{ts_node_new, ts_node_start_byte, ts_node_start_point};
 use super::tree::TSTree;
 
 use crate::ffi::TSPoint as POINT_ZERO_TYPE;
@@ -31,15 +32,6 @@ const POINT_ZERO: POINT_ZERO_TYPE = POINT_ZERO_TYPE { row: 0, column: 0 };
 // ---------------------------------------------------------------------------
 
 extern "C" {
-    // node.c (still in C)
-    fn ts_node_new(
-        tree: *const TSTree,
-        subtree: *const Subtree,
-        position: Length,
-        alias: TSSymbol,
-    ) -> TSNode;
-    fn ts_node_start_byte(self_: TSNode) -> u32;
-    fn ts_node_start_point(self_: TSNode) -> TSPoint;
     fn memcpy(dest: *mut c_void, src: *const c_void, n: usize) -> *mut c_void;
 }
 
