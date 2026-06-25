@@ -40,9 +40,6 @@ extern "C" {
 #define array_get(self, _index) \
   (ts_assert((uint32_t)(_index) < (self)->size), &(self)->contents[_index])
 
-/// Get a pointer to the first element in the array.
-#define array_front(self) array_get(self, 0)
-
 /// Get a pointer to the last element in the array.
 #define array_back(self) array_get(self, (self)->size - 1)
 
@@ -97,15 +94,6 @@ extern "C" {
     array_elem_size(self), (self)->size, 0, count, other_contents \
   )
 
-/// Remove `old_count` elements from the array starting at the given `index`. At
-/// the same index, insert `new_count` new elements, reading their values from the
-/// `new_contents` pointer.
-#define array_splice(self, _index, old_count, new_count, new_contents) \
-  (self)->contents = _array__splice(                                   \
-    (void *)(self)->contents, &(self)->size, &(self)->capacity,        \
-    array_elem_size(self), _index, old_count, new_count, new_contents  \
-  )
-
 /// Insert one `element` into the array at the given `index`.
 #define array_insert(self, _index, element)                     \
   (self)->contents = _array__splice(                            \
@@ -127,17 +115,6 @@ extern "C" {
     (const void *)(other)->contents, (other)->size, array_elem_size(self) \
   )
 
-/// Swap one array with another
-#define array_swap(self, other)                                     \
-  do {                                                              \
-    struct Swap swapped_contents = _array__swap(                    \
-      (void *)(self)->contents, &(self)->size, &(self)->capacity,   \
-      (void *)(other)->contents, &(other)->size, &(other)->capacity \
-    );                                                              \
-    (self)->contents = swapped_contents.self_contents;              \
-    (other)->contents = swapped_contents.other_contents;            \
-  } while (0)
-
 /// Get the size of the array contents
 #define array_elem_size(self) (sizeof *(self)->contents)
 
@@ -158,15 +135,6 @@ extern "C" {
 /// See also `array_search_sorted_with`.
 #define array_search_sorted_by(self, field, needle, _index, _exists) \
   _array__search_sorted(self, 0, _compare_int, field, needle, _index, _exists)
-
-/// Insert a given `value` into a sorted array, using the given `compare`
-/// callback to determine the order.
-#define array_insert_sorted_with(self, compare, value) \
-  do { \
-    unsigned _index, _exists; \
-    array_search_sorted_with(self, compare, &(value), &_index, &_exists); \
-    if (!_exists) array_insert(self, _index, value); \
-  } while (0)
 
 /// Insert a given `value` into a sorted array, using integer comparisons of
 /// a given struct field (specified with a leading dot) to determine the order.
@@ -226,33 +194,6 @@ static inline void *_array__assign(void* self_contents, uint32_t *self_size, uin
   *self_size = other_size;
   memcpy(new_contents, other_contents, *self_size * element_size);
   return new_contents;
-}
-
-struct Swap {
-  void *self_contents;
-  void *other_contents;
-};
-
-/// This is not what you're looking for, see `array_swap`.
-// static inline void _array__swap(Array *self, Array *other) {
-static inline struct Swap _array__swap(void *self_contents, uint32_t *self_size, uint32_t *self_capacity,
-                               void *other_contents, uint32_t *other_size, uint32_t *other_capacity) {
-  void *new_self_contents = other_contents;
-  uint32_t new_self_size = *other_size;
-  uint32_t new_self_capacity = *other_capacity;
-
-  void *new_other_contents = self_contents;
-  *other_size = *self_size;
-  *other_capacity = *self_capacity;
-
-  *self_size = new_self_size;
-  *self_capacity = new_self_capacity;
-
-  struct Swap out = {
-    .self_contents = new_self_contents,
-    .other_contents = new_other_contents,
-  };
-  return out;
 }
 
 /// This is not what you're looking for, see `array_push` or `array_grow_by`.
