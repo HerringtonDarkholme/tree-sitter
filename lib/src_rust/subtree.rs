@@ -812,6 +812,18 @@ unsafe fn mutable_subtree_data_mut<'a>(self_: MutableSubtree) -> &'a mut Subtree
 }
 
 #[inline]
+unsafe fn subtree_data_ref<'a>(self_: Subtree) -> &'a SubtreeHeapData {
+    self_.ptr.as_ref().unwrap_unchecked()
+}
+
+#[inline]
+unsafe fn external_scanner_state_mut<'a>(
+    state: *mut ExternalScannerState,
+) -> &'a mut ExternalScannerState {
+    state.as_mut().unwrap_unchecked()
+}
+
+#[inline]
 unsafe fn mutable_subtree_child(self_: MutableSubtree, index: usize) -> Subtree {
     *mutable_subtree_children(self_).get_unchecked(index)
 }
@@ -1192,7 +1204,7 @@ pub unsafe fn ts_subtree_new_error(
 // --- #36: clone ---
 
 pub unsafe fn ts_subtree_clone(self_: Subtree) -> MutableSubtree {
-    let data = &*self_.ptr;
+    let data = subtree_data_ref(self_);
     let alloc_size = ts_subtree_alloc_size(data.child_count);
     let new_children = ts_malloc(alloc_size).cast::<Subtree>();
     let old_children = ts_subtree_children(self_);
@@ -1389,7 +1401,7 @@ pub unsafe fn ts_subtree_release(pool: &mut SubtreePool, self_: Subtree) {
                 let external_scanner_state =
                     ptr::addr_of_mut!((*tree.ptr).data.external_scanner_state)
                         .cast::<ExternalScannerState>();
-                ts_external_scanner_state_delete(&mut *external_scanner_state);
+                ts_external_scanner_state_delete(external_scanner_state_mut(external_scanner_state));
             }
             ts_subtree_pool_free(pool, tree);
         }
@@ -1813,7 +1825,7 @@ pub unsafe fn ts_subtree_last_external_token(mut tree: Subtree) -> Subtree {
         return NULL_SUBTREE;
     }
     loop {
-        let data = &*tree.ptr;
+        let data = subtree_data_ref(tree);
         if data.child_count == 0 {
             break;
         }
@@ -1838,7 +1850,7 @@ pub unsafe fn ts_subtree_external_scanner_state(
         return &EMPTY_EXTERNAL_SCANNER_STATE;
     }
 
-    let data = &*self_.ptr;
+    let data = subtree_data_ref(*self_);
     if data.has_external_tokens() && data.child_count == 0 {
         &data.data.external_scanner_state
     } else {
