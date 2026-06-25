@@ -1641,3 +1641,57 @@ Source-code analysis:
   ownership, allocation, subtree layout, and raw pointer operations are
   unchanged.
 - No rollback was performed.
+
+### 2026-06-25 06:22 EDT
+
+- Repo head: `b255b076`
+- Batch base: `b393fc6d`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: 10 small raw-pointer cast cleanup commits from
+  `Use pointer casts in scanner state helpers` through
+  `Use pointer casts in subtree string allocation`
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language tsx --repetitions 10 --error-limit 4 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 26932.4 | 25883.9 | +4.05% |
+| TypeScript error parses | 24 | 1752.3 | 1724.7 | +1.60% |
+| TSX normal parses | 1 | 5867.1 | 5716.1 | +2.64% |
+| TSX error parses | 27 | 1749.1 | 1728.9 | +1.17% |
+| Overall parser throughput | 63 | 2140.5 | 2109.8 | +1.46% |
+
+Prior checkpoint at `07716c87` recorded Rust overall throughput of 2140.8
+bytes/ms on the same TypeScript/TSX gate, so this batch was effectively flat
+at -0.01% absolute Rust throughput. The Rust-vs-C delta fell from +1.69% to +1.46%,
+mainly because this C run was slightly faster.
+
+Per-case regression investigation:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `tsx error crlf-line-endings.py` | 1228.9 | 1316.0 | 6.62% |
+| `typescript error compound-statement-without-trailing-newline.py` | 902.3 | 963.0 | 6.30% |
+
+Source-code analysis:
+
+- This batch did not change exported FFI signatures, `#[repr(C)]` layouts,
+  allocation sizes, parse-table data, generated parser templates, C headers,
+  parser control flow, stack ownership, or subtree ownership.
+- The runtime edits are pointer-cast spelling cleanups in `subtree.rs`:
+  replacing equivalent raw pointer `as *const/*mut T` casts with `.cast()`
+  or `.cast_mut()`, including scanner-state, subtree-array, pool,
+  construction, cloning, child access, and string-formatting paths.
+- The only cast cleanup touching an internal allocation path keeps the same
+  allocation size and offset, but computes the clone footer pointer by
+  advancing a `*mut Subtree` before casting to `*mut SubtreeHeapData`, avoiding
+  the previous intermediate `*mut u8` alignment warning.
+- The two reported >5% per-case slowdowns are error-case fixtures that have
+  shown sensitivity in earlier checkpoints. Given the flat absolute Rust
+  throughput against the prior checkpoint and the lack of semantic parser
+  changes, this is most likely benchmark/C-run variance rather than a source
+  regression from this batch.
+- No rollback was performed.
