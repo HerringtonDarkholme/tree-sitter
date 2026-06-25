@@ -997,12 +997,12 @@ pub fn ts_subtree_to_mut_unsafe(self_: Subtree) -> MutableSubtree {
 
 #[inline]
 fn ts_subtree_can_inline(padding: Length, size: Length, lookahead_bytes: u32) -> bool {
-    padding.bytes < TS_MAX_INLINE_TREE_LENGTH as u32
+    padding.bytes < u32::from(TS_MAX_INLINE_TREE_LENGTH)
         && padding.extent.row < 16
-        && padding.extent.column < TS_MAX_INLINE_TREE_LENGTH as u32
-        && size.bytes < TS_MAX_INLINE_TREE_LENGTH as u32
+        && padding.extent.column < u32::from(TS_MAX_INLINE_TREE_LENGTH)
+        && size.bytes < u32::from(TS_MAX_INLINE_TREE_LENGTH)
         && size.extent.row == 0
-        && size.extent.column < TS_MAX_INLINE_TREE_LENGTH as u32
+        && size.extent.column < u32::from(TS_MAX_INLINE_TREE_LENGTH)
         && lookahead_bytes < 16
 }
 
