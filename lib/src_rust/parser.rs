@@ -37,9 +37,9 @@ use super::lexer::{
 };
 use super::stack::{
     array_assign, array_back_ref, array_clear, array_delete, array_erase,
-    array_get, array_get_mut, array_get_ref, array_init, array_new, array_pop, array_push,
-    array_reserve, array_splice, array_swap, Array, Stack, StackSlice, StackSliceArray,
-    StackSummary, StackSummaryEntry,
+    array_get_mut, array_get_ref, array_init, array_new, array_pop, array_push, array_reserve,
+    array_splice, array_swap, Array, Stack, StackSlice, StackSliceArray, StackSummary,
+    StackSummaryEntry,
     StackVersion, STACK_VERSION_NONE,
     // Stack functions (now Rust-only)
     ts_stack_can_merge, ts_stack_clear, ts_stack_copy_version, ts_stack_delete,
@@ -486,6 +486,10 @@ unsafe fn mutable_subtree_array_as_array(
     &*ptr::from_ref(self_).cast::<Array<MutableSubtree>>()
 }
 
+unsafe fn ts_range_array_as_array(self_: &TSRangeArray) -> &Array<TSRange> {
+    &*ptr::from_ref(self_).cast::<Array<TSRange>>()
+}
+
 unsafe fn subtree_array_get(self_: &SubtreeArray, index: u32) -> Subtree {
     *array_get_ref(subtree_array_as_array(self_), index)
 }
@@ -499,7 +503,7 @@ unsafe fn mutable_subtree_array_back(self_: &MutableSubtreeArray) -> MutableSubt
 }
 
 unsafe fn ts_range_array_get(self_: &TSRangeArray, index: u32) -> &TSRange {
-    &*array_get(std::ptr::from_ref::<TSRangeArray>(self_).cast::<Array<TSRange>>(), index)
+    array_get_ref(ts_range_array_as_array(self_), index)
 }
 
 const unsafe fn ts_logger_read_ref(self_: &TSLogger) -> TSLogger {
