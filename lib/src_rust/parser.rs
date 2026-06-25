@@ -2722,12 +2722,11 @@ pub unsafe extern "C" fn ts_parser_set_language(
             return false;
         }
 
-        if ts_language_is_wasm(language) {
-            if parser.wasm_store.is_null()
-                || !ts_wasm_store_start(parser.wasm_store, &mut parser.lexer.data, language)
-            {
-                return false;
-            }
+        if ts_language_is_wasm(language)
+            && (parser.wasm_store.is_null()
+                || !ts_wasm_store_start(parser.wasm_store, &mut parser.lexer.data, language))
+        {
+            return false;
         }
     }
 
