@@ -43,6 +43,16 @@ unsafe fn range_array_mut<'a>(ranges: *mut TSRangeArray) -> &'a mut TSRangeArray
     &mut *ranges
 }
 
+#[inline]
+unsafe fn range_mut<'a>(range: *mut TSRange) -> &'a mut TSRange {
+    &mut *range
+}
+
+#[inline]
+unsafe fn input_edit_ref<'a>(edit: *const TSInputEdit) -> &'a TSInputEdit {
+    &*edit
+}
+
 /// Iterator — internal state for tree diffing
 struct Iterator {
     cursor: TreeCursor,
@@ -635,8 +645,8 @@ pub unsafe extern "C" fn ts_range_edit(
     range: *mut TSRange,
     edit: *const TSInputEdit,
 ) {
-    let range = &mut *range;
-    let edit = &*edit;
+    let range = range_mut(range);
+    let edit = input_edit_ref(edit);
 
     ts_range_edit_ref(range, edit);
 }
