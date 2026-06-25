@@ -200,6 +200,19 @@ execution for this milestone. Query behavior remains protected by leaving
 8. Run the perf gate in report-only mode during profiling, then make
    `cargo xtask perf-gate` part of the release checklist once parity is stable.
 
+## Current Idiomatic Rust Cleanup Order
+
+1. Fix Clippy warnings first in the active Rust core, prioritizing warnings that
+   improve readability or remove C-port artifacts without changing exported
+   FFI signatures, generated parser ABI, `#[repr(C)]` layouts, allocation
+   behavior, or parser semantics.
+2. Then clean up raw pointer and type-cast usage, starting with internal helper
+   bodies and internal Rust-only function signatures. Keep public C ABI
+   signatures and layout-sensitive structures unchanged.
+3. Keep each cleanup single-goal and small. Run `cargo test --all` after every
+   code change, use focused Clippy checks for touched warnings, and run the
+   TypeScript/TSX perf gate after each ten code commits before pushing.
+
 ## Task Breakdown
 
 1. `core-parity`: keep `cargo xtask core-parity` green. This compares the old C
