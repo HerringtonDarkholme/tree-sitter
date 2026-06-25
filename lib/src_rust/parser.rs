@@ -927,7 +927,7 @@ unsafe fn ts_parser__lex(
     version: StackVersion,
     parse_state: TSStateId,
 ) -> Subtree {
-    let parser = self_ as *mut TSParser;
+    let parser = ptr::from_mut(self_);
     let lang = self_.language.cast::<TSLanguageFull>();
     let mut lex_mode = ts_language_lex_mode_for_state(self_.language, parse_state);
     if lex_mode.lex_state == u16::MAX {
@@ -1208,7 +1208,7 @@ unsafe fn ts_parser__reuse_node(
     last_external_token: Subtree,
     table_entry: &mut TableEntry,
 ) -> Subtree {
-    let parser = self_ as *mut TSParser;
+    let parser = ptr::from_mut(self_);
     let mut result;
     loop {
         result = reusable_node_tree(&mut self_.reusable_node);
@@ -1302,7 +1302,7 @@ unsafe fn ts_parser__select_tree(
     left: Subtree,
     right: Subtree,
 ) -> bool {
-    let parser = self_ as *mut TSParser;
+    let parser = ptr::from_mut(self_);
     if left.ptr.is_null() {
         return true;
     }
