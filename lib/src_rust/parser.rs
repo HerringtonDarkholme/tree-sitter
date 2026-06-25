@@ -1479,7 +1479,8 @@ unsafe fn ts_parser__reduce(
 
     let pop = ts_stack_pop_count(self_.stack, version, count);
     let mut removed_version_count: u32 = 0;
-    let halted_version_count = ts_stack_halted_version_count(&*self_.stack);
+    let stack = &mut *self_.stack;
+    let halted_version_count = ts_stack_halted_version_count(stack);
     let mut i: u32 = 0;
     while i < pop.size {
         let mut slice = stack_slice_array_read(&pop, i);
@@ -1487,7 +1488,7 @@ unsafe fn ts_parser__reduce(
 
         // Limit max versions
         if slice_version > MAX_VERSION_COUNT + MAX_VERSION_COUNT_OVERFLOW + halted_version_count {
-            ts_stack_remove_version(&mut *self_.stack, slice_version);
+            ts_stack_remove_version(stack, slice_version);
             ts_subtree_array_delete(&mut self_.tree_pool, &mut slice.subtrees);
             removed_version_count += 1;
             while i + 1 < pop.size {
