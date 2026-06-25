@@ -290,7 +290,15 @@ unsafe fn ts_tree_cursor_iterate_children(
 
 #[inline]
 unsafe fn cursor_child<'a>(parent: Subtree, index: u32) -> &'a Subtree {
-    &*ts_subtree_children(parent).add(index as usize)
+    cursor_children(parent).get_unchecked(index as usize)
+}
+
+#[inline]
+unsafe fn cursor_children<'a>(parent: Subtree) -> &'a [Subtree] {
+    std::slice::from_raw_parts(
+        ts_subtree_children(parent),
+        ts_subtree_child_count(parent) as usize,
+    )
 }
 
 unsafe fn ts_tree_cursor_child_iterator_next(
@@ -682,15 +690,21 @@ unsafe fn tree_cursor_goto_previous_sibling_internal(cursor: &mut TreeCursor) ->
     let parent = tree_cursor_entry_array_get(&cursor.stack, cursor.stack.size - 2);
     let mut position = parent.position;
     let child_index = tree_cursor_entry_array_back(&cursor.stack).child_index;
-    let children = ts_subtree_children(*parent.subtree);
+    let children = cursor_children(*parent.subtree);
 
     if child_index > 0 {
         // skip first child padding since its position should match the position of the parent
-        position = length_add(position, ts_subtree_size(*children.add(0)));
+        position = length_add(position, ts_subtree_size(*children.get_unchecked(0)));
         for i in 1..child_index {
-            position = length_add(position, ts_subtree_total_size(*children.add(i as usize)));
+            position = length_add(
+                position,
+                ts_subtree_total_size(*children.get_unchecked(i as usize)),
+            );
         }
-        position = length_add(position, ts_subtree_padding(*children.add(child_index as usize)));
+        position = length_add(
+            position,
+            ts_subtree_padding(*children.get_unchecked(child_index as usize)),
+        );
     }
 
     tree_cursor_entry_array_back_mut(&mut cursor.stack).position = position;
@@ -894,7 +908,7 @@ pub unsafe extern "C" fn ts_tree_cursor_current_status(
             }
             let mut j = entry.child_index + 1;
             while j < sibling_count {
-                let sibling = *ts_subtree_children(*parent_entry.subtree).add(j as usize);
+                let sibling = *cursor_child(*parent_entry.subtree, j);
                 let sibling_metadata = ts_language_symbol_metadata(
                     language,
                     subtree_symbol_fn(sibling, structural_child_index),
