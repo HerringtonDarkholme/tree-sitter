@@ -14,6 +14,7 @@ use super::subtree::{
     ts_subtree_edit, ts_subtree_padding, ts_subtree_pool_delete, ts_subtree_pool_new,
     ts_subtree_print_dot_graph, ts_subtree_release, ts_subtree_retain, Subtree,
 };
+use super::tree_cursor::{ts_tree_cursor_init, TreeCursor, TreeCursorEntryArray};
 
 // ---------------------------------------------------------------------------
 // Extern C functions (still in C or other Rust modules)
@@ -29,9 +30,6 @@ extern "C" {
         included_range_differences: *const TSRangeArray,
         ranges: *mut *mut TSRange,
     ) -> u32;
-
-    fn ts_tree_cursor_init(self_: *mut TreeCursor, node: TSNode);
-
     fn memcpy(dest: *mut c_void, src: *const c_void, n: usize) -> *mut c_void;
 
     #[cfg(not(target_os = "windows"))]
@@ -43,36 +41,6 @@ extern "C" {
 }
 
 use crate::ffi::TSInputEdit;
-
-// ---------------------------------------------------------------------------
-// Forward-declared types from other modules (not yet rewritten)
-// ---------------------------------------------------------------------------
-
-/// `TreeCursorEntry` — mirrors `tree_cursor.h`
-#[repr(C)]
-pub struct TreeCursorEntry {
-    pub subtree: *const Subtree,
-    pub position: Length,
-    pub child_index: u32,
-    pub structural_child_index: u32,
-    pub descendant_index: u32,
-}
-
-/// Array(TreeCursorEntry) — mirrors array.h generic
-#[repr(C)]
-pub struct TreeCursorEntryArray {
-    pub contents: *mut TreeCursorEntry,
-    pub size: u32,
-    pub capacity: u32,
-}
-
-/// `TreeCursor` — mirrors `tree_cursor.h`
-#[repr(C)]
-pub struct TreeCursor {
-    pub tree: *const TSTree,
-    pub stack: TreeCursorEntryArray,
-    pub root_alias_symbol: TSSymbol,
-}
 
 // ---------------------------------------------------------------------------
 // Types from tree.h
