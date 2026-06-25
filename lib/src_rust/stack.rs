@@ -518,6 +518,11 @@ unsafe fn stack_node_mut<'a>(node: *mut StackNode) -> &'a mut StackNode {
     node.as_mut().unwrap_unchecked()
 }
 
+#[inline]
+unsafe fn stack_node_ref<'a>(node: *const StackNode) -> &'a StackNode {
+    node.as_ref().unwrap_unchecked()
+}
+
 /// Release (decrement ref count) a stack node, freeing if zero.
 unsafe fn stack_node_release(
     self_: &mut StackNode,
@@ -845,7 +850,7 @@ unsafe fn stack__iter(
                     ts_subtree_array_copy(subtree_array_read_ref(&subtrees), &mut subtrees);
                 }
                 ts_subtree_array_reverse(&mut subtrees);
-                ts_stack__add_slice(stack, version, &mut *node, &subtrees);
+                ts_stack__add_slice(stack, version, stack_node_mut(node), &subtrees);
             }
 
             if should_stop {
@@ -1622,7 +1627,7 @@ pub unsafe fn ts_stack_print_dot_graph(
                 continue;
             }
             all_iterators_done = false;
-            let node_ref = &*node;
+            let node_ref = stack_node_ref(node);
 
             fprintf(f, c"node_%p [".as_ptr().cast::<i8>(), node as *const c_void);
             if node_ref.state == ERROR_STATE {
