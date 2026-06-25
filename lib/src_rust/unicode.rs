@@ -10,7 +10,7 @@
 pub const TS_DECODE_ERROR: i32 = -1;
 
 /// Decode one UTF-8 code point from `string[..length]`.
-/// Returns (bytes_consumed, code_point). On error, code_point is -1.
+/// Returns (`bytes_consumed`, `code_point`). On error, `code_point` is -1.
 #[inline]
 pub fn utf8_next(string: &[u8], offset: usize) -> (u32, i32) {
     if offset >= string.len() {
@@ -55,7 +55,7 @@ pub fn utf8_next(string: &[u8], offset: usize) -> (u32, i32) {
     let valid = match expected_len {
         2 => code_point >= 0x80,
         3 => code_point >= 0x800 && !(0xD800..=0xDFFF).contains(&code_point),
-        4 => (0x10000..=0x10FFFF).contains(&code_point),
+        4 => (0x1_0000..=0x0010_FFFF).contains(&code_point),
         _ => false,
     };
 
@@ -67,7 +67,7 @@ pub fn utf8_next(string: &[u8], offset: usize) -> (u32, i32) {
 }
 
 /// Decode one UTF-16LE code point from `string[..length]`.
-/// Returns (bytes_consumed, code_point). On error, code_point is -1.
+/// Returns (`bytes_consumed`, `code_point`). On error, `code_point` is -1.
 #[inline]
 pub fn utf16le_next(string: &[u8], offset: usize) -> (u32, i32) {
     if offset + 1 >= string.len() {
@@ -98,7 +98,7 @@ pub fn utf16le_next(string: &[u8], offset: usize) -> (u32, i32) {
 }
 
 /// Decode one UTF-16BE code point from `string[..length]`.
-/// Returns (bytes_consumed, code_point). On error, code_point is -1.
+/// Returns (`bytes_consumed`, `code_point`). On error, `code_point` is -1.
 #[inline]
 pub fn utf16be_next(string: &[u8], offset: usize) -> (u32, i32) {
     if offset + 1 >= string.len() {
