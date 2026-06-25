@@ -2489,9 +2489,9 @@ unsafe fn ts_parser__advance(
         // If the current lookahead token is a keyword that is not valid, but the
         // default word token *is* valid, then treat the lookahead token as the word
         // token instead.
-        let language = self_.language.cast::<TSLanguageFull>();
+        let keyword_capture_token = parser_language_full(self_.language).keyword_capture_token;
         if ts_subtree_is_keyword(lookahead)
-            && ts_subtree_symbol(lookahead) != (*language).keyword_capture_token
+            && ts_subtree_symbol(lookahead) != keyword_capture_token
             && !ts_language_is_reserved_word(
                 self_.language,
                 state,
@@ -2501,7 +2501,7 @@ unsafe fn ts_parser__advance(
             ts_language_table_entry(
                 self_.language,
                 state,
-                (*language).keyword_capture_token,
+                keyword_capture_token,
                 &mut table_entry,
             );
             if table_entry.action_count > 0 {
@@ -2509,14 +2509,14 @@ unsafe fn ts_parser__advance(
                     parser,
                     c"switch from_keyword:%s, to_word_token:%s".as_ptr().cast::<i8>(),
                     TREE_NAME!(parser, lookahead),
-                    SYM_NAME!(parser, (*language).keyword_capture_token)
+                    SYM_NAME!(parser, keyword_capture_token)
                 );
 
                 let mut mutable_lookahead =
                     ts_subtree_make_mut(&mut self_.tree_pool, lookahead);
                 ts_subtree_set_symbol(
                     &mut mutable_lookahead,
-                    (*language).keyword_capture_token,
+                    keyword_capture_token,
                     self_.language,
                 );
                 lookahead = ts_subtree_from_mut(mutable_lookahead);
