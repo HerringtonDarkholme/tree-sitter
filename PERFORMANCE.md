@@ -126,6 +126,85 @@ Source-code analysis:
 - Full `cargo test --all` passed before every committed code change in this
   checkpoint.
 
+### 2026-06-25 16:40 EDT
+
+- Repo head: `4811d155`
+- Batch base: `f3fda4ab`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: 10 small Rust-core aliasing cleanups:
+  `Use slice for subtree string children` through
+  `Use pointer accessors in language helpers`.
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+Primary run:
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 24580.3 | 22164.6 | +10.90% |
+| TypeScript error parses | 32 | 1652.1 | 1571.0 | +5.16% |
+| JavaScript normal parses | 2 | 16731.8 | 15806.5 | +5.85% |
+| JavaScript error parses | 37 | 2029.5 | 1921.3 | +5.63% |
+| Overall parser throughput | 82 | 2282.5 | 2165.4 | +5.41% |
+
+Per-case regressions over 5% in the primary run:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `javascript error malloc.c` | 1111.3 | 1249.2 | 11.04% |
+| `javascript error corePublic.ts` | 2385.7 | 2556.6 | 6.68% |
+
+JavaScript-only rerun to check whether those per-case regressions were stable:
+
+```sh
+cargo xtask perf-gate --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| JavaScript normal parses | 2 | 16991.9 | 15378.8 | +10.49% |
+| JavaScript error parses | 37 | 1957.2 | 1922.7 | +1.79% |
+| JavaScript overall | 39 | 2549.7 | 2496.5 | +2.13% |
+
+Per-case regressions over 5% in the JavaScript rerun:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `javascript error letter_test.go` | 1590.1 | 1715.2 | 7.29% |
+| `javascript error marker-index.h` | 1155.4 | 1230.0 | 6.06% |
+| `javascript error cluster.c` | 2158.5 | 2288.2 | 5.67% |
+
+Prior checkpoint at `3d976f95` measured Rust overall throughput of 2283.3
+bytes/ms in the primary run and 2302.4 bytes/ms in its rerun. This checkpoint
+measured 2282.5 bytes/ms in the primary run, so absolute Rust throughput is
+effectively flat against the prior primary run (-0.04%) and down about 0.86%
+against the prior rerun. The Rust-vs-C delta remains positive at +5.41%.
+
+Source-code analysis:
+
+- The batch contains no exported `#[no_mangle] extern "C"` signature changes,
+  no struct layout changes, no C header field changes, and no parsing table or
+  parser action semantic changes.
+- The subtree commits move repeated child-pointer arithmetic behind local
+  slice helpers and one mutable child accessor. They preserve existing loop
+  bounds and explicitly keep the zero-child null-pointer case out of slice
+  construction.
+- The point, changed-ranges, tree, tree-cursor, and language commits replace
+  direct `&*ptr` / `&mut *ptr` conversions with localized pointer accessors at
+  existing unsafe boundaries. These changes alter how references are formed,
+  but not the underlying control flow, allocation behavior, or parser state
+  transitions.
+- The primary JavaScript per-case regressions did not reproduce as the same
+  files in the JavaScript-only rerun; the rerun reported different outliers
+  while JavaScript normal throughput improved to +10.49% vs C. Given the
+  changing outlier set, flat absolute Rust throughput against the prior primary
+  checkpoint, and positive overall Rust-vs-C result, no rollback was performed.
+- Full `cargo test --all` passed before every committed code change in this
+  checkpoint.
+
 ### 2026-06-24 13:33 EDT
 
 - Repo head: `51ab1851`
