@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 #![allow(non_snake_case)]
 
-use core::ffi::c_void;
+use core::{cmp::Ordering, ffi::c_void};
 use std::ptr;
 
 use crate::ffi::{TSInputEdit, TSLanguage, TSRange, TSSymbol};
@@ -574,29 +574,33 @@ pub unsafe extern "C" fn ts_range_array_get_changed_ranges(
             LENGTH_MAX
         };
 
-        if next_old_position.bytes < next_new_position.bytes {
-            if in_old_range != in_new_range {
-                ts_range_array_add(differences, current_position, next_old_position);
+        match next_old_position.bytes.cmp(&next_new_position.bytes) {
+            Ordering::Less => {
+                if in_old_range != in_new_range {
+                    ts_range_array_add(differences, current_position, next_old_position);
+                }
+                if in_old_range { old_index += 1; }
+                current_position = next_old_position;
+                in_old_range = !in_old_range;
             }
-            if in_old_range { old_index += 1; }
-            current_position = next_old_position;
-            in_old_range = !in_old_range;
-        } else if next_new_position.bytes < next_old_position.bytes {
-            if in_old_range != in_new_range {
-                ts_range_array_add(differences, current_position, next_new_position);
+            Ordering::Greater => {
+                if in_old_range != in_new_range {
+                    ts_range_array_add(differences, current_position, next_new_position);
+                }
+                if in_new_range { new_index += 1; }
+                current_position = next_new_position;
+                in_new_range = !in_new_range;
             }
-            if in_new_range { new_index += 1; }
-            current_position = next_new_position;
-            in_new_range = !in_new_range;
-        } else {
-            if in_old_range != in_new_range {
-                ts_range_array_add(differences, current_position, next_new_position);
+            Ordering::Equal => {
+                if in_old_range != in_new_range {
+                    ts_range_array_add(differences, current_position, next_new_position);
+                }
+                if in_old_range { old_index += 1; }
+                if in_new_range { new_index += 1; }
+                in_old_range = !in_old_range;
+                in_new_range = !in_new_range;
+                current_position = next_new_position;
             }
-            if in_old_range { old_index += 1; }
-            if in_new_range { new_index += 1; }
-            in_old_range = !in_old_range;
-            in_new_range = !in_new_range;
-            current_position = next_new_position;
         }
     }
 }
