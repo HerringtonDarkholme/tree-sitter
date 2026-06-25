@@ -299,7 +299,7 @@ pub unsafe fn ts_language_lookup(
     symbol: TSSymbol,
 ) -> u16 {
     let l = lang(self_);
-    if (state as u32) >= (*l).large_state_count {
+    if u32::from(state) >= (*l).large_state_count {
         let index = *(*l).small_parse_table_map.add(state as usize - (*l).large_state_count as usize);
         let mut data = (*l).small_parse_table.add(index as usize);
         let group_count = *data;
@@ -365,7 +365,7 @@ pub unsafe fn ts_language_lookaheads(
     state: TSStateId,
 ) -> LookaheadIterator {
     let l = lang(self_);
-    let is_small_state = (state as u32) >= (*l).large_state_count;
+    let is_small_state = u32::from(state) >= (*l).large_state_count;
     let (data, group_end, group_count): (*const u16, *const u16, u16) = if is_small_state {
         let index = *(*l).small_parse_table_map.add(state as usize - (*l).large_state_count as usize);
         let data = (*l).small_parse_table.add(index as usize);
@@ -431,7 +431,7 @@ pub unsafe fn ts_lookahead_iterator__next(self_: *mut LookaheadIterator) -> bool
 
     // Depending on if the symbol is terminal or non-terminal, the table value
     // either represents a list of actions or a successor state.
-    if ((*self_).symbol as u32) < (*l).token_count {
+    if u32::from((*self_).symbol) < (*l).token_count {
         let entry = &*(*l).parse_actions.add((*self_).table_value as usize);
         (*self_).action_count = entry.entry.count as u16;
         (*self_).actions = (*l).parse_actions.add((*self_).table_value as usize + 1) as *const TSParseAction;
@@ -643,7 +643,7 @@ pub unsafe extern "C" fn ts_language_subtypes(
         return ptr::null();
     }
     let slice = *(*l).supertype_map_slices.add(supertype as usize);
-    *length = slice.length as u32;
+    *length = u32::from(slice.length);
     (*l).supertype_map_entries.add(slice.index as usize)
 }
 
@@ -698,10 +698,10 @@ pub unsafe extern "C" fn ts_language_table_entry(
         (*result).is_reusable = false;
         (*result).actions = ptr::null();
     } else {
-        debug_assert!((symbol as u32) < (*l).token_count);
+        debug_assert!(u32::from(symbol) < (*l).token_count);
         let action_index = ts_language_lookup(self_, state, symbol) as usize;
         let entry = &*(*l).parse_actions.add(action_index);
-        (*result).action_count = entry.entry.count as u32;
+        (*result).action_count = u32::from(entry.entry.count);
         (*result).is_reusable = entry.entry.reusable;
         (*result).actions = (*l).parse_actions.add(action_index + 1) as *const TSParseAction;
     }
@@ -734,8 +734,9 @@ pub unsafe extern "C" fn ts_language_is_reserved_word(
     let l = lang(self_);
     let lex_mode = ts_language_lex_mode_for_state(self_, state);
     if lex_mode.reserved_word_set_id > 0 {
-        let start = lex_mode.reserved_word_set_id as u32 * (*l).max_reserved_word_set_size as u32;
-        let end = start + (*l).max_reserved_word_set_size as u32;
+        let start =
+            u32::from(lex_mode.reserved_word_set_id) * u32::from((*l).max_reserved_word_set_size);
+        let end = start + u32::from((*l).max_reserved_word_set_size);
         for i in start..end {
             let w = *(*l).reserved_words.add(i as usize);
             if w == symbol {
@@ -784,7 +785,7 @@ pub unsafe extern "C" fn ts_language_next_state(
     let l = lang(self_);
     if symbol == ts_builtin_sym_error || symbol == ts_builtin_sym_error_repeat {
         0
-    } else if (symbol as u32) < (*l).token_count {
+    } else if u32::from(symbol) < (*l).token_count {
         let mut count: u32 = 0;
         let actions = ts_language_actions(self_, state, symbol, &mut count);
         if count > 0 {
@@ -808,7 +809,7 @@ pub unsafe extern "C" fn ts_language_symbol_name(
         b"ERROR\0".as_ptr() as *const i8
     } else if symbol == ts_builtin_sym_error_repeat {
         b"_ERROR\0".as_ptr() as *const i8
-    } else if (symbol as u32) < ts_language_symbol_count(self_) {
+    } else if u32::from(symbol) < ts_language_symbol_count(self_) {
         *(*lang(self_)).symbol_names.add(symbol as usize)
     } else {
         ptr::null()
@@ -865,7 +866,7 @@ pub unsafe extern "C" fn ts_language_field_name_for_id(
     id: TSFieldId,
 ) -> *const i8 {
     let count = ts_language_field_count(self_);
-    if count > 0 && (id as u32) <= count {
+    if count > 0 && u32::from(id) <= count {
         *(*lang(self_)).field_names.add(id as usize)
     } else {
         ptr::null()
@@ -904,7 +905,7 @@ pub unsafe extern "C" fn ts_lookahead_iterator_new(
     self_: *const TSLanguage,
     state: TSStateId,
 ) -> *mut LookaheadIterator {
-    if (state as u32) >= (*lang(self_)).state_count {
+    if u32::from(state) >= (*lang(self_)).state_count {
         return ptr::null_mut();
     }
     let iterator = ts_malloc(std::mem::size_of::<LookaheadIterator>()) as *mut LookaheadIterator;
@@ -924,7 +925,7 @@ pub unsafe extern "C" fn ts_lookahead_iterator_reset_state(
     self_: *mut LookaheadIterator,
     state: TSStateId,
 ) -> bool {
-    if (state as u32) >= (*lang((*self_).language)).state_count {
+    if u32::from(state) >= (*lang((*self_).language)).state_count {
         return false;
     }
     *self_ = ts_language_lookaheads((*self_).language, state);
@@ -944,7 +945,7 @@ pub unsafe extern "C" fn ts_lookahead_iterator_reset(
     language: *const TSLanguage,
     state: TSStateId,
 ) -> bool {
-    if (state as u32) >= (*lang(language)).state_count {
+    if u32::from(state) >= (*lang(language)).state_count {
         return false;
     }
     *self_ = ts_language_lookaheads(language, state);
