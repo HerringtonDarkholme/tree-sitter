@@ -901,8 +901,8 @@ unsafe fn ts_parser__can_reuse_first_leaf(
     // If the token was created in a state with the same set of lookaheads, it is reusable.
     if table_entry.action_count > 0
         && memcmp(
-            &leaf_lex_mode as *const TSLexerMode as *const c_void,
-            &current_lex_mode as *const TSLexerMode as *const c_void,
+            ptr::from_ref(&leaf_lex_mode).cast::<c_void>(),
+            ptr::from_ref(&current_lex_mode).cast::<c_void>(),
             core::mem::size_of::<TSLexerMode>(),
         ) == 0
         && (leaf_symbol != (*lang).keyword_capture_token
