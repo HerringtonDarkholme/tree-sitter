@@ -270,8 +270,8 @@ pub unsafe extern "C" fn ts_tree_get_changed_ranges(
     let new_tree_ref = tree_ref(new_tree);
     let mut cursor1 = tree_cursor_empty();
     let mut cursor2 = tree_cursor_empty();
-    ts_tree_cursor_init_ref(&mut cursor1, ts_tree_root_node(old_tree));
-    ts_tree_cursor_init_ref(&mut cursor2, ts_tree_root_node(new_tree));
+    ts_tree_cursor_init_ref(&mut cursor1, ts_tree_root_node_ref(old_tree, old_tree_ref));
+    ts_tree_cursor_init_ref(&mut cursor2, ts_tree_root_node_ref(new_tree, new_tree_ref));
 
     let mut included_range_differences = TSRangeArray {
         contents: std::ptr::null_mut(),
