@@ -172,7 +172,7 @@ unsafe fn ts_tree_root_node_with_offset_ref(
     )
 }
 
-fn ts_tree_language_ref(tree: &TSTree) -> *const TSLanguage {
+const fn ts_tree_language_ref(tree: &TSTree) -> *const TSLanguage {
     tree.language
 }
 
