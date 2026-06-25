@@ -1712,8 +1712,9 @@ pub unsafe fn ts_subtree_edit(
 
         let mut child_right = length_zero();
         let n = ts_subtree_child_count(*entry.tree);
+        let children = subtree_children(*entry.tree);
         for i in 0..n {
-            let child = ts_subtree_children(*entry.tree).add(i as usize);
+            let child = children.get_unchecked(i as usize);
             let child_size = ts_subtree_total_size(*child);
             let child_left = child_right;
             child_right = length_add(child_left, child_size);
@@ -1752,7 +1753,7 @@ pub unsafe fn ts_subtree_edit(
             }
 
             stack.push(EditEntry {
-                tree: child,
+                tree: ptr::from_ref(child).cast_mut(),
                 edit: child_edit,
             });
         }
