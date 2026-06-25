@@ -35,32 +35,32 @@ pub struct TSRangeArray {
 
 #[inline]
 unsafe fn range_array_ref<'a>(ranges: *const TSRangeArray) -> &'a TSRangeArray {
-    &*ranges
+    ranges.as_ref().unwrap_unchecked()
 }
 
 #[inline]
 unsafe fn range_array_mut<'a>(ranges: *mut TSRangeArray) -> &'a mut TSRangeArray {
-    &mut *ranges
+    ranges.as_mut().unwrap_unchecked()
 }
 
 #[inline]
 unsafe fn range_mut<'a>(range: *mut TSRange) -> &'a mut TSRange {
-    &mut *range
+    range.as_mut().unwrap_unchecked()
 }
 
 #[inline]
 unsafe fn input_edit_ref<'a>(edit: *const TSInputEdit) -> &'a TSInputEdit {
-    &*edit
+    edit.as_ref().unwrap_unchecked()
 }
 
 #[inline]
 unsafe fn subtree_ref<'a>(subtree: *const Subtree) -> &'a Subtree {
-    &*subtree
+    subtree.as_ref().unwrap_unchecked()
 }
 
 #[inline]
 unsafe fn tree_cursor_mut<'a>(cursor: *mut TreeCursor) -> &'a mut TreeCursor {
-    &mut *cursor
+    cursor.as_mut().unwrap_unchecked()
 }
 
 /// Iterator — internal state for tree diffing
