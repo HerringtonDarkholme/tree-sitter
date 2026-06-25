@@ -35,12 +35,12 @@ pub const LENGTH_MAX: Length = Length {
 };
 
 #[inline]
-pub fn length_is_undefined(length: Length) -> bool {
+pub const fn length_is_undefined(length: Length) -> bool {
     length.bytes == 0 && length.extent.column != 0
 }
 
 #[inline]
-pub fn length_min(len1: Length, len2: Length) -> Length {
+pub const fn length_min(len1: Length, len2: Length) -> Length {
     if len1.bytes < len2.bytes {
         len1
     } else {
@@ -49,7 +49,7 @@ pub fn length_min(len1: Length, len2: Length) -> Length {
 }
 
 #[inline]
-pub fn length_add(len1: Length, len2: Length) -> Length {
+pub const fn length_add(len1: Length, len2: Length) -> Length {
     Length {
         bytes: len1.bytes + len2.bytes,
         extent: point_add(len1.extent, len2.extent),
@@ -57,19 +57,15 @@ pub fn length_add(len1: Length, len2: Length) -> Length {
 }
 
 #[inline]
-pub fn length_sub(len1: Length, len2: Length) -> Length {
+pub const fn length_sub(len1: Length, len2: Length) -> Length {
     Length {
-        bytes: if len1.bytes >= len2.bytes {
-            len1.bytes - len2.bytes
-        } else {
-            0
-        },
+        bytes: len1.bytes.saturating_sub(len2.bytes),
         extent: point_sub(len1.extent, len2.extent),
     }
 }
 
 #[inline]
-pub fn length_zero() -> Length {
+pub const fn length_zero() -> Length {
     Length {
         bytes: 0,
         extent: TSPoint { row: 0, column: 0 },
@@ -77,7 +73,7 @@ pub fn length_zero() -> Length {
 }
 
 #[inline]
-pub fn length_saturating_sub(len1: Length, len2: Length) -> Length {
+pub const fn length_saturating_sub(len1: Length, len2: Length) -> Length {
     if len1.bytes > len2.bytes {
         length_sub(len1, len2)
     } else {
