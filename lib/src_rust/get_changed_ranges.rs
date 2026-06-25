@@ -300,7 +300,7 @@ unsafe fn iterator_tree_is_visible(self_: &Iterator) -> bool {
         let parent = *parent_entry.subtree;
         return ts_language_alias_at(
             self_.language,
-            (*parent.ptr).data.children.production_id as u32,
+            u32::from((*parent.ptr).data.children.production_id),
             entry.structural_child_index,
         ) != 0;
     }
@@ -329,7 +329,7 @@ unsafe fn iterator_get_visible_state(self_: &Iterator) -> VisibleState {
             let parent = stack_get(&self_.cursor.stack, i - 1).subtree;
             result.alias_symbol = ts_language_alias_at(
                 self_.language,
-                (*(*parent).ptr).data.children.production_id as u32,
+                u32::from((*(*parent).ptr).data.children.production_id),
                 entry.structural_child_index,
             );
         }
