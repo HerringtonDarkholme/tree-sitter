@@ -1433,11 +1433,13 @@ pub(crate) unsafe fn ts_stack_merge(
         let stack_heads = &mut stack.heads;
         let subtree_pool = subtree_pool_mut(stack.subtree_pool);
         let (head1, head2) = stack_head_array_pair_mut(stack_heads, version1, version2);
-        for i in 0..(*head2.node).link_count as usize {
-            stack_node_add_link(stack_node_mut(head1.node), (*head2.node).links[i], subtree_pool);
+        let head2_node = stack_node_ref(head2.node);
+        for i in 0..head2_node.link_count as usize {
+            stack_node_add_link(stack_node_mut(head1.node), head2_node.links[i], subtree_pool);
         }
-        if (*head1.node).state == ERROR_STATE {
-            head1.node_count_at_last_error = (*head1.node).node_count;
+        let head1_node = stack_node_ref(head1.node);
+        if head1_node.state == ERROR_STATE {
+            head1.node_count_at_last_error = head1_node.node_count;
         }
     }
     ts_stack_remove_version(stack, version2);
@@ -1452,11 +1454,13 @@ pub(crate) unsafe fn ts_stack_can_merge(
 ) -> bool {
     let head1 = stack_head(stack, version1);
     let head2 = stack_head(stack, version2);
+    let node1 = stack_node_ref(head1.node);
+    let node2 = stack_node_ref(head2.node);
     head1.status == StackStatus::Active
         && head2.status == StackStatus::Active
-        && (*head1.node).state == (*head2.node).state
-        && (*head1.node).position.bytes == (*head2.node).position.bytes
-        && (*head1.node).error_cost == (*head2.node).error_cost
+        && node1.state == node2.state
+        && node1.position.bytes == node2.position.bytes
+        && node1.error_cost == node2.error_cost
         && ts_subtree_external_scanner_state_eq(
             &head1.last_external_token,
             &head2.last_external_token,
@@ -1477,7 +1481,7 @@ pub(crate) unsafe fn ts_stack_pause(
     let head = stack_head_mut(stack, version);
     head.status = StackStatus::Paused;
     head.lookahead_when_paused = lookahead;
-    head.node_count_at_last_error = (*head.node).node_count;
+    head.node_count_at_last_error = stack_node_ref(head.node).node_count;
 }
 
 /// Check if a version is active.
