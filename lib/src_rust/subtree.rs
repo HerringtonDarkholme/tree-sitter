@@ -402,7 +402,7 @@ static EMPTY_EXTERNAL_SCANNER_STATE: ExternalScannerState = ExternalScannerState
 // ExternalScannerState functions
 // ===========================================================================
 
-pub unsafe fn ts_external_scanner_state_init(
+pub(crate) unsafe fn ts_external_scanner_state_init(
     self_: &mut ExternalScannerState,
     data: *const u8,
     length: u32,
@@ -416,7 +416,7 @@ pub unsafe fn ts_external_scanner_state_init(
     }
 }
 
-pub unsafe fn ts_external_scanner_state_copy(self_: &ExternalScannerState) -> ExternalScannerState {
+pub(crate) unsafe fn ts_external_scanner_state_copy(self_: &ExternalScannerState) -> ExternalScannerState {
     let mut result = ExternalScannerState {
         data: ExternalScannerStateData {
             short_data: self_.data.short_data,
@@ -434,13 +434,13 @@ pub unsafe fn ts_external_scanner_state_copy(self_: &ExternalScannerState) -> Ex
     result
 }
 
-pub unsafe fn ts_external_scanner_state_delete(self_: &mut ExternalScannerState) {
+pub(crate) unsafe fn ts_external_scanner_state_delete(self_: &mut ExternalScannerState) {
     if self_.length > EXTERNAL_SCANNER_STATE_INLINE_SIZE as u32 {
         ts_free(self_.data.long_data.cast::<c_void>());
     }
 }
 
-pub const unsafe fn ts_external_scanner_state_data(self_: &ExternalScannerState) -> *const u8 {
+pub(crate) const unsafe fn ts_external_scanner_state_data(self_: &ExternalScannerState) -> *const u8 {
     if self_.length > EXTERNAL_SCANNER_STATE_INLINE_SIZE as u32 {
         self_.data.long_data
     } else {
@@ -448,7 +448,7 @@ pub const unsafe fn ts_external_scanner_state_data(self_: &ExternalScannerState)
     }
 }
 
-pub unsafe fn ts_external_scanner_state_eq(
+pub(crate) unsafe fn ts_external_scanner_state_eq(
     self_: &ExternalScannerState,
     buffer: *const u8,
     length: u32,
@@ -504,7 +504,7 @@ unsafe fn subtree_array_mut<'a>(array: *mut SubtreeArray) -> &'a mut SubtreeArra
 // SubtreeArray functions
 // ===========================================================================
 
-pub unsafe fn ts_subtree_array_copy(self_: SubtreeArray, dest: &mut SubtreeArray) {
+pub(crate) unsafe fn ts_subtree_array_copy(self_: SubtreeArray, dest: &mut SubtreeArray) {
     dest.size = self_.size;
     dest.capacity = self_.capacity;
     dest.contents = self_.contents;
@@ -518,14 +518,14 @@ pub unsafe fn ts_subtree_array_copy(self_: SubtreeArray, dest: &mut SubtreeArray
     }
 }
 
-pub unsafe fn ts_subtree_array_clear(pool: &mut SubtreePool, self_: &mut SubtreeArray) {
+pub(crate) unsafe fn ts_subtree_array_clear(pool: &mut SubtreePool, self_: &mut SubtreeArray) {
     for i in 0..self_.size {
         ts_subtree_release(pool, *self_.contents.add(i as usize));
     }
     self_.size = 0;
 }
 
-pub unsafe fn ts_subtree_array_delete(pool: &mut SubtreePool, self_: &mut SubtreeArray) {
+pub(crate) unsafe fn ts_subtree_array_delete(pool: &mut SubtreePool, self_: &mut SubtreeArray) {
     ts_subtree_array_clear(pool, self_);
     if !self_.contents.is_null() {
         ts_free(self_.contents.cast::<c_void>());
@@ -535,7 +535,7 @@ pub unsafe fn ts_subtree_array_delete(pool: &mut SubtreePool, self_: &mut Subtre
     self_.capacity = 0;
 }
 
-pub unsafe fn ts_subtree_array_remove_trailing_extras(
+pub(crate) unsafe fn ts_subtree_array_remove_trailing_extras(
     self_: *mut SubtreeArray,
     destination: *mut SubtreeArray,
 ) {
@@ -554,7 +554,7 @@ pub unsafe fn ts_subtree_array_remove_trailing_extras(
     ts_subtree_array_reverse(destination);
 }
 
-pub unsafe fn ts_subtree_array_reverse(self_: &mut SubtreeArray) {
+pub(crate) unsafe fn ts_subtree_array_reverse(self_: &mut SubtreeArray) {
     let limit = self_.size / 2;
     for i in 0..limit {
         let reverse_index = self_.size as usize - 1 - i as usize;
