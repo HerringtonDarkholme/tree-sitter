@@ -163,7 +163,7 @@ macro_rules! LOG {
 macro_rules! LOG_STACK {
     ($self_:expr) => {
         if !(*$self_).dot_graph_file.is_null() {
-            ts_stack_print_dot_graph(&mut *(*$self_).stack, (*$self_).language, (*$self_).dot_graph_file);
+            ts_stack_print_dot_graph(parser_stack_mut((*$self_).stack), (*$self_).language, (*$self_).dot_graph_file);
             fputs(c"\n\n".as_ptr().cast::<i8>(), (*$self_).dot_graph_file);
         }
     };
@@ -2742,7 +2742,7 @@ pub unsafe extern "C" fn ts_parser_delete(self_: *mut TSParser) {
 
     ts_parser_set_language(self_, ptr::null());
     let parser = &mut *self_;
-    ts_stack_delete(&mut *parser.stack);
+    ts_stack_delete(parser_stack_mut(parser.stack));
     if !parser.reduce_actions.contents.is_null() {
         array_delete(std::ptr::addr_of_mut!(parser.reduce_actions));
     }
@@ -2880,7 +2880,7 @@ pub unsafe extern "C" fn ts_parser_reset(self_: *mut TSParser) {
 
     reusable_node_clear(&mut parser.reusable_node);
     ts_lexer_reset(&mut parser.lexer, length_zero());
-    ts_stack_clear(&mut *parser.stack);
+    ts_stack_clear(parser_stack_mut(parser.stack));
     ts_parser__set_cached_token(parser, 0, NULL_SUBTREE, NULL_SUBTREE);
     if !parser.finished_tree.ptr.is_null() {
         ts_subtree_release(&mut parser.tree_pool, parser.finished_tree);
@@ -2991,21 +2991,21 @@ pub unsafe extern "C" fn ts_parser_parse(
     loop {
         let mut version: StackVersion = 0;
         loop {
-            version_count = ts_stack_version_count(&*parser.stack);
+            version_count = ts_stack_version_count(parser_stack_ref(parser.stack));
             if version >= version_count {
                 break;
             }
 
             let allow_node_reuse = version_count == 1;
-            while ts_stack_is_active(&*parser.stack, version) {
+            while ts_stack_is_active(parser_stack_ref(parser.stack), version) {
                 LOG!(
                     self_,
                     c"process version:%u, version_count:%u, state:%d, row:%u, col:%u".as_ptr().cast::<i8>(),
                     version,
-                    ts_stack_version_count(&*parser.stack),
-                    i32::from(ts_stack_state(&*parser.stack, version)),
-                    ts_stack_position(&*parser.stack, version).extent.row,
-                    ts_stack_position(&*parser.stack, version).extent.column
+                    ts_stack_version_count(parser_stack_ref(parser.stack)),
+                    i32::from(ts_stack_state(parser_stack_ref(parser.stack), version)),
+                    ts_stack_position(parser_stack_ref(parser.stack), version).extent.row,
+                    ts_stack_position(parser_stack_ref(parser.stack), version).extent.column
                 );
 
                 if !ts_parser__advance(parser, version, allow_node_reuse) {
@@ -3019,7 +3019,7 @@ pub unsafe extern "C" fn ts_parser_parse(
 
                 LOG_STACK!(self_);
 
-                position = ts_stack_position(&*parser.stack, version).bytes;
+                position = ts_stack_position(parser_stack_ref(parser.stack), version).bytes;
                 if position > last_position || (version > 0 && position == last_position) {
                     last_position = position;
                     break;
@@ -3039,7 +3039,7 @@ pub unsafe extern "C" fn ts_parser_parse(
         if !parser.finished_tree.ptr.is_null()
             && ts_subtree_error_cost(parser.finished_tree) < min_error_cost
         {
-            ts_stack_clear(&mut *parser.stack);
+            ts_stack_clear(parser_stack_mut(parser.stack));
             break;
         }
 
