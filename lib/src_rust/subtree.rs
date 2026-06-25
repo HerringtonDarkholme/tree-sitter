@@ -1420,7 +1420,7 @@ pub unsafe fn ts_subtree_summarize_children(
     data.data.children.dynamic_precedence = 0;
 
     let mut structural_index: u32 = 0;
-    let alias_sequence = language_alias_sequence(language, data.data.children.production_id as u32);
+    let alias_sequence = language_alias_sequence(language, u32::from(data.data.children.production_id));
     let mut lookahead_end_byte: u32 = 0;
 
     let children = ts_subtree_children(ts_subtree_from_mut(self_));
@@ -1997,13 +1997,13 @@ unsafe fn ts_subtree__write_to_string(
     if ts_subtree_child_count(self_) > 0 {
         let alias_sequence = language_alias_sequence(
             language,
-            (*self_.ptr).data.children.production_id as u32,
+            u32::from((*self_.ptr).data.children.production_id),
         );
         let mut field_map: *const TSFieldMapEntry = ptr::null();
         let mut field_map_end: *const TSFieldMapEntry = ptr::null();
         language_field_map(
             language,
-            (*self_.ptr).data.children.production_id as u32,
+            u32::from((*self_.ptr).data.children.production_id),
             &mut field_map,
             &mut field_map_end,
         );
