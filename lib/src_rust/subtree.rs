@@ -1552,12 +1552,13 @@ pub unsafe fn ts_subtree_compare(
     right: Subtree,
     pool: *mut SubtreePool,
 ) -> i32 {
-    mutable_array_push(&mut (*pool).tree_stack, ts_subtree_to_mut_unsafe(left));
-    mutable_array_push(&mut (*pool).tree_stack, ts_subtree_to_mut_unsafe(right));
+    let pool = &mut *pool;
+    mutable_array_push(&mut pool.tree_stack, ts_subtree_to_mut_unsafe(left));
+    mutable_array_push(&mut pool.tree_stack, ts_subtree_to_mut_unsafe(right));
 
-    while (*pool).tree_stack.size > 0 {
-        let right = ts_subtree_from_mut(mutable_array_pop(&mut (*pool).tree_stack));
-        let left = ts_subtree_from_mut(mutable_array_pop(&mut (*pool).tree_stack));
+    while pool.tree_stack.size > 0 {
+        let right = ts_subtree_from_mut(mutable_array_pop(&mut pool.tree_stack));
+        let left = ts_subtree_from_mut(mutable_array_pop(&mut pool.tree_stack));
 
         let mut result = 0i32;
         if ts_subtree_symbol(left) < ts_subtree_symbol(right) {
@@ -1570,7 +1571,7 @@ pub unsafe fn ts_subtree_compare(
             result = 1;
         }
         if result != 0 {
-            (*pool).tree_stack.size = 0;
+            pool.tree_stack.size = 0;
             return result;
         }
 
@@ -1580,12 +1581,9 @@ pub unsafe fn ts_subtree_compare(
             i -= 1;
             let left_child = *ts_subtree_children(left).add(i as usize);
             let right_child = *ts_subtree_children(right).add(i as usize);
+            mutable_array_push(&mut pool.tree_stack, ts_subtree_to_mut_unsafe(left_child));
             mutable_array_push(
-                &mut (*pool).tree_stack,
-                ts_subtree_to_mut_unsafe(left_child),
-            );
-            mutable_array_push(
-                &mut (*pool).tree_stack,
+                &mut pool.tree_stack,
                 ts_subtree_to_mut_unsafe(right_child),
             );
         }
