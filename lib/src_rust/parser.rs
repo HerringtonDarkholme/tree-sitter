@@ -2883,72 +2883,74 @@ pub unsafe extern "C" fn ts_parser_parse(
     old_tree: *const TSTree,
     input: TSInput,
 ) -> *mut TSTree {
+    let parser = &mut *self_;
     let mut result: *mut TSTree = ptr::null_mut();
-    if (*self_).language.is_null() || input.read.is_none() {
+    if parser.language.is_null() || input.read.is_none() {
         return ptr::null_mut();
     }
 
-    if ts_language_is_wasm((*self_).language) {
-        if (*self_).wasm_store.is_null() {
+    if ts_language_is_wasm(parser.language) {
+        if parser.wasm_store.is_null() {
             return ptr::null_mut();
         }
-        ts_wasm_store_start((*self_).wasm_store, &mut (*self_).lexer.data, (*self_).language);
+        ts_wasm_store_start(parser.wasm_store, &mut parser.lexer.data, parser.language);
     }
 
-    ts_lexer_set_input(&mut (*self_).lexer, input);
-    array_clear(&mut (*self_).included_range_differences as *mut TSRangeArray as *mut Array<TSRange>);
-    (*self_).included_range_difference_index = 0;
+    ts_lexer_set_input(&mut parser.lexer, input);
+    array_clear(&mut parser.included_range_differences as *mut TSRangeArray as *mut Array<TSRange>);
+    parser.included_range_difference_index = 0;
 
-    (*self_).operation_count = 0;
+    parser.operation_count = 0;
 
-    if ts_parser_has_outstanding_parse(&*self_) {
+    if ts_parser_has_outstanding_parse(parser) {
         LOG!(self_, b"resume_parsing\0".as_ptr() as *const i8);
-        if (*self_).canceled_balancing {
+        if parser.canceled_balancing {
             // goto balance
-            debug_assert!(!(*self_).finished_tree.ptr.is_null());
-            if !ts_parser__balance_subtree(&mut *self_) {
-                (*self_).canceled_balancing = true;
+            debug_assert!(!parser.finished_tree.ptr.is_null());
+            if !ts_parser__balance_subtree(parser) {
+                parser.canceled_balancing = true;
                 return ptr::null_mut();
             }
-            (*self_).canceled_balancing = false;
+            parser.canceled_balancing = false;
             LOG!(self_, b"done\0".as_ptr() as *const i8);
-            LOG_TREE!(self_, (*self_).finished_tree);
+            LOG_TREE!(self_, parser.finished_tree);
 
             result = ts_tree_new(
-                (*self_).finished_tree,
-                (*self_).language,
-                (*self_).lexer.included_ranges,
-                (*self_).lexer.included_range_count,
+                parser.finished_tree,
+                parser.language,
+                parser.lexer.included_ranges,
+                parser.lexer.included_range_count,
             );
-            (*self_).finished_tree = NULL_SUBTREE;
+            parser.finished_tree = NULL_SUBTREE;
 
             // goto exit
             ts_parser_reset(self_);
             return result;
         }
     } else {
-        ts_parser__external_scanner_create(&mut *self_);
-        if (*self_).has_scanner_error {
+        ts_parser__external_scanner_create(parser);
+        if parser.has_scanner_error {
             // goto exit
             ts_parser_reset(self_);
             return result;
         }
 
         if !old_tree.is_null() {
-            ts_subtree_retain((*old_tree).root);
-            (*self_).old_tree = (*old_tree).root;
+            let old_tree = &*old_tree;
+            ts_subtree_retain(old_tree.root);
+            parser.old_tree = old_tree.root;
             ts_range_array_get_changed_ranges(
-                (*old_tree).included_ranges,
-                (*old_tree).included_range_count,
-                (*self_).lexer.included_ranges,
-                (*self_).lexer.included_range_count,
-                &mut (*self_).included_range_differences,
+                old_tree.included_ranges,
+                old_tree.included_range_count,
+                parser.lexer.included_ranges,
+                parser.lexer.included_range_count,
+                &mut parser.included_range_differences,
             );
-            reusable_node_reset(&mut (*self_).reusable_node, (*old_tree).root);
+            reusable_node_reset(&mut parser.reusable_node, old_tree.root);
             LOG!(self_, b"parse_after_edit\0".as_ptr() as *const i8);
-            LOG_TREE!(self_, (*self_).old_tree);
-            for i in 0..(*self_).included_range_differences.size {
-                let range = ts_range_array_get(&(*self_).included_range_differences, i);
+            LOG_TREE!(self_, parser.old_tree);
+            for i in 0..parser.included_range_differences.size {
+                let range = ts_range_array_get(&parser.included_range_differences, i);
                 LOG!(
                     self_,
                     b"different_included_range %u - %u\0".as_ptr() as *const i8,
@@ -2957,7 +2959,7 @@ pub unsafe extern "C" fn ts_parser_parse(
                 );
             }
         } else {
-            reusable_node_clear(&mut (*self_).reusable_node);
+            reusable_node_clear(&mut parser.reusable_node);
             LOG!(self_, b"new_parse\0".as_ptr() as *const i8);
         }
     }
@@ -2968,25 +2970,25 @@ pub unsafe extern "C" fn ts_parser_parse(
     loop {
         let mut version: StackVersion = 0;
         loop {
-            version_count = ts_stack_version_count(&*(*self_).stack);
+            version_count = ts_stack_version_count(&*parser.stack);
             if version >= version_count {
                 break;
             }
 
             let allow_node_reuse = version_count == 1;
-            while ts_stack_is_active(&*(*self_).stack, version) {
+            while ts_stack_is_active(&*parser.stack, version) {
                 LOG!(
                     self_,
                     b"process version:%u, version_count:%u, state:%d, row:%u, col:%u\0".as_ptr() as *const i8,
                     version,
-                    ts_stack_version_count(&*(*self_).stack),
-                    ts_stack_state(&*(*self_).stack, version) as i32,
-                    ts_stack_position(&*(*self_).stack, version).extent.row,
-                    ts_stack_position(&*(*self_).stack, version).extent.column
+                    ts_stack_version_count(&*parser.stack),
+                    ts_stack_state(&*parser.stack, version) as i32,
+                    ts_stack_position(&*parser.stack, version).extent.row,
+                    ts_stack_position(&*parser.stack, version).extent.column
                 );
 
-                if !ts_parser__advance(&mut *self_, version, allow_node_reuse) {
-                    if (*self_).has_scanner_error {
+                if !ts_parser__advance(parser, version, allow_node_reuse) {
+                    if parser.has_scanner_error {
                         // goto exit
                         ts_parser_reset(self_);
                         return result;
@@ -2996,7 +2998,7 @@ pub unsafe extern "C" fn ts_parser_parse(
 
                 LOG_STACK!(self_);
 
-                position = ts_stack_position(&*(*self_).stack, version).bytes;
+                position = ts_stack_position(&*parser.stack, version).bytes;
                 if position > last_position || (version > 0 && position == last_position) {
                     last_position = position;
                     break;
@@ -3007,27 +3009,27 @@ pub unsafe extern "C" fn ts_parser_parse(
 
         // After advancing each version of the stack, re-sort the versions by their cost,
         // removing any versions that are no longer worth pursuing.
-        let min_error_cost = ts_parser__condense_stack(&mut *self_);
+        let min_error_cost = ts_parser__condense_stack(parser);
 
         // If there's already a finished parse tree that's better than any in-progress version,
         // then terminate parsing. Clear the parse stack to remove any extra references to subtrees
         // within the finished tree, ensuring that these subtrees can be safely mutated in-place
         // for rebalancing.
-        if !(*self_).finished_tree.ptr.is_null()
-            && ts_subtree_error_cost((*self_).finished_tree) < min_error_cost
+        if !parser.finished_tree.ptr.is_null()
+            && ts_subtree_error_cost(parser.finished_tree) < min_error_cost
         {
-            ts_stack_clear(&mut *(*self_).stack);
+            ts_stack_clear(&mut *parser.stack);
             break;
         }
 
-        while (*self_).included_range_difference_index < (*self_).included_range_differences.size
+        while parser.included_range_difference_index < parser.included_range_differences.size
         {
             let range = ts_range_array_get(
-                &(*self_).included_range_differences,
-                (*self_).included_range_difference_index,
+                &parser.included_range_differences,
+                parser.included_range_difference_index,
             );
             if (*range).end_byte <= position {
-                (*self_).included_range_difference_index += 1;
+                parser.included_range_difference_index += 1;
             } else {
                 break;
             }
@@ -3039,22 +3041,22 @@ pub unsafe extern "C" fn ts_parser_parse(
     }
 
     // balance:
-    debug_assert!(!(*self_).finished_tree.ptr.is_null());
-    if !ts_parser__balance_subtree(&mut *self_) {
-        (*self_).canceled_balancing = true;
+    debug_assert!(!parser.finished_tree.ptr.is_null());
+    if !ts_parser__balance_subtree(parser) {
+        parser.canceled_balancing = true;
         return ptr::null_mut();
     }
-    (*self_).canceled_balancing = false;
+    parser.canceled_balancing = false;
     LOG!(self_, b"done\0".as_ptr() as *const i8);
-    LOG_TREE!(self_, (*self_).finished_tree);
+    LOG_TREE!(self_, parser.finished_tree);
 
     result = ts_tree_new(
-        (*self_).finished_tree,
-        (*self_).language,
-        (*self_).lexer.included_ranges,
-        (*self_).lexer.included_range_count,
+        parser.finished_tree,
+        parser.language,
+        parser.lexer.included_ranges,
+        parser.lexer.included_range_count,
     );
-    (*self_).finished_tree = NULL_SUBTREE;
+    parser.finished_tree = NULL_SUBTREE;
 
     // exit:
     ts_parser_reset(self_);
