@@ -2101,9 +2101,10 @@ unsafe fn ts_subtree__print_dot_graph(
     alias_symbol: TSSymbol,
     f: *mut c_void,
 ) {
-    let subtree_symbol = ts_subtree_symbol(*self_);
+    let tree = *self_;
+    let subtree_symbol = ts_subtree_symbol(tree);
     let symbol = if alias_symbol != 0 { alias_symbol } else { subtree_symbol };
-    let end_offset = start_offset + ts_subtree_total_bytes(*self_);
+    let end_offset = start_offset + ts_subtree_total_bytes(tree);
     fprintf(
         f,
         b"tree_%p [label=\"\0".as_ptr() as *const i8,
@@ -2112,13 +2113,13 @@ unsafe fn ts_subtree__print_dot_graph(
     language_write_symbol_as_dot_string(language, f, symbol);
     fprintf(f, b"\"\0".as_ptr() as *const i8);
 
-    if ts_subtree_child_count(*self_) == 0 {
+    if ts_subtree_child_count(tree) == 0 {
         fprintf(f, b", shape=plaintext\0".as_ptr() as *const i8);
     }
-    if ts_subtree_extra(*self_) {
+    if ts_subtree_extra(tree) {
         fprintf(f, b", fontcolor=gray\0".as_ptr() as *const i8);
     }
-    if ts_subtree_has_changes(*self_) {
+    if ts_subtree_has_changes(tree) {
         fprintf(f, b", color=green, penwidth=2\0".as_ptr() as *const i8);
     }
 
@@ -2127,23 +2128,23 @@ unsafe fn ts_subtree__print_dot_graph(
         b", tooltip=\"range: %u - %u\nstate: %d\nerror-cost: %u\nhas-changes: %u\ndepends-on-column: %u\ndescendant-count: %u\nrepeat-depth: %u\nlookahead-bytes: %u\0".as_ptr() as *const i8,
         start_offset,
         end_offset,
-        ts_subtree_parse_state(*self_) as i32,
-        ts_subtree_error_cost(*self_),
-        ts_subtree_has_changes(*self_) as u32,
-        ts_subtree_depends_on_column(*self_) as u32,
-        ts_subtree_visible_descendant_count(*self_),
-        ts_subtree_repeat_depth(*self_),
-        ts_subtree_lookahead_bytes(*self_),
+        ts_subtree_parse_state(tree) as i32,
+        ts_subtree_error_cost(tree),
+        ts_subtree_has_changes(tree) as u32,
+        ts_subtree_depends_on_column(tree) as u32,
+        ts_subtree_visible_descendant_count(tree),
+        ts_subtree_repeat_depth(tree),
+        ts_subtree_lookahead_bytes(tree),
     );
 
-    if ts_subtree_is_error(*self_)
-        && ts_subtree_child_count(*self_) == 0
-        && (*(*self_).ptr).data.lookahead_char != 0
+    if ts_subtree_is_error(tree)
+        && ts_subtree_child_count(tree) == 0
+        && (*tree.ptr).data.lookahead_char != 0
     {
         fprintf(
             f,
             b"\ncharacter: '%c'\0".as_ptr() as *const i8,
-            (*(*self_).ptr).data.lookahead_char,
+            (*tree.ptr).data.lookahead_char,
         );
     }
 
@@ -2152,10 +2153,10 @@ unsafe fn ts_subtree__print_dot_graph(
     let mut child_start_offset = start_offset;
     let lang = language as *const TSLanguageData;
     let mut child_info_offset =
-        (*lang).max_alias_sequence_length as u32 * ts_subtree_production_id(*self_) as u32;
-    let n = ts_subtree_child_count(*self_);
+        (*lang).max_alias_sequence_length as u32 * ts_subtree_production_id(tree) as u32;
+    let n = ts_subtree_child_count(tree);
     for i in 0..n {
-        let child = ts_subtree_children(*self_).add(i as usize) as *const Subtree;
+        let child = ts_subtree_children(tree).add(i as usize) as *const Subtree;
         let mut subtree_alias_symbol: TSSymbol = 0;
         if !ts_subtree_extra(*child) && child_info_offset != 0 {
             subtree_alias_symbol = *(*lang).alias_sequences.add(child_info_offset as usize);
