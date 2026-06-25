@@ -2018,8 +2018,8 @@ unsafe fn ts_subtree__write_to_string(
         );
 
         let mut structural_child_index: u32 = 0;
-        for i in 0..(*self_.ptr).child_count {
-            let child = *ts_subtree_children(self_).add(i as usize);
+        for child in subtree_children(self_) {
+            let child = *child;
             if ts_subtree_extra(child) {
                 cursor = cursor.add(ts_subtree__write_to_string(
                     child,
