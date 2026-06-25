@@ -1665,15 +1665,11 @@ unsafe fn ts_parser__do_all_potential_reductions(
         let mut has_shift_action = false;
         array_clear(&mut self_.reduce_actions);
 
-        let first_symbol: TSSymbol;
-        let end_symbol: TSSymbol;
-        if lookahead_symbol != 0 {
-            first_symbol = lookahead_symbol;
-            end_symbol = lookahead_symbol + 1;
+        let (first_symbol, end_symbol): (TSSymbol, TSSymbol) = if lookahead_symbol != 0 {
+            (lookahead_symbol, lookahead_symbol + 1)
         } else {
-            first_symbol = 1;
-            end_symbol = (*lang).token_count as TSSymbol;
-        }
+            (1, (*lang).token_count as TSSymbol)
+        };
 
         let mut symbol = first_symbol;
         while symbol < end_symbol {
