@@ -1548,7 +1548,7 @@ pub unsafe fn ts_stack_print_dot_graph(
                 f,
                 b"\nexternal_scanner_state:\0".as_ptr() as *const i8,
             );
-            for j in 0..(*state).length {
+            for j in 0..state.length {
                 fprintf(
                     f,
                     b" %2X\0".as_ptr() as *const i8,
