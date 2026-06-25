@@ -122,8 +122,8 @@ fn ts_lexer__invalidate_column_data(self_: &mut Lexer) {
 }
 
 /// Check if the lexer has reached EOF.
-const unsafe extern "C" fn ts_lexer__eof(_self: *const TSLexer) -> bool {
-    let self_ = &*(_self as *const Lexer);
+const unsafe extern "C" fn ts_lexer__eof(lexer: *const TSLexer) -> bool {
+    let self_ = &*lexer.cast::<Lexer>();
     self_.current_included_range_index == self_.included_range_count
 }
 
@@ -311,8 +311,8 @@ unsafe fn ts_lexer__do_advance(self_: &mut Lexer, skip: bool) {
 }
 
 /// Advance to the next character (with logging). TSLexer vtable callback.
-unsafe extern "C" fn ts_lexer__advance(_self: *mut TSLexer, skip: bool) {
-    let self_ = &mut *(_self as *mut Lexer);
+unsafe extern "C" fn ts_lexer__advance(lexer: *mut TSLexer, skip: bool) {
+    let self_ = &mut *lexer.cast::<Lexer>();
     if self_.chunk.is_null() {
         return;
     }
@@ -322,26 +322,26 @@ unsafe extern "C" fn ts_lexer__advance(_self: *mut TSLexer, skip: bool) {
         if skip {
             if 32 <= character && character < 127 {
                 ts_lexer__log_shim(
-                    _self,
+                    lexer,
                     b"skip character:'%c'\0".as_ptr() as *const i8,
                     character,
                 );
             } else {
                 ts_lexer__log_shim(
-                    _self,
+                    lexer,
                     b"skip character:%d\0".as_ptr() as *const i8,
                     character,
                 );
             }
         } else if 32 <= character && character < 127 {
             ts_lexer__log_shim(
-                _self,
+                lexer,
                 b"consume character:'%c'\0".as_ptr() as *const i8,
                 character,
             );
         } else {
             ts_lexer__log_shim(
-                _self,
+                lexer,
                 b"consume character:%d\0".as_ptr() as *const i8,
                 character,
             );
@@ -352,8 +352,8 @@ unsafe extern "C" fn ts_lexer__advance(_self: *mut TSLexer, skip: bool) {
 }
 
 /// Mark that a token match has completed. TSLexer vtable callback.
-unsafe extern "C" fn ts_lexer__mark_end(_self: *mut TSLexer) {
-    let self_ = &mut *(_self as *mut Lexer);
+unsafe extern "C" fn ts_lexer__mark_end(lexer: *mut TSLexer) {
+    let self_ = &mut *lexer.cast::<Lexer>();
     if !ts_lexer__eof(&self_.data) {
         // If the lexer is right at the beginning of included range,
         // then the token should be considered to end at the *end* of the
@@ -375,8 +375,8 @@ unsafe extern "C" fn ts_lexer__mark_end(_self: *mut TSLexer) {
 }
 
 /// Get the current column number. TSLexer vtable callback.
-unsafe extern "C" fn ts_lexer__get_column(_self: *mut TSLexer) -> u32 {
-    let self_ = &mut *(_self as *mut Lexer);
+unsafe extern "C" fn ts_lexer__get_column(lexer: *mut TSLexer) -> u32 {
+    let self_ = &mut *lexer.cast::<Lexer>();
 
     self_.did_get_column = true;
 
@@ -396,16 +396,16 @@ unsafe extern "C" fn ts_lexer__get_column(_self: *mut TSLexer) -> u32 {
         ts_lexer__set_column_data(self_, 0);
         ts_lexer__get_chunk(self_);
 
-        if !ts_lexer__eof(_self) {
+        if !ts_lexer__eof(lexer) {
             ts_lexer__get_lookahead(self_);
 
             // Advance to the recorded position
             while self_.current_position.bytes < goal_byte
-                && !ts_lexer__eof(_self)
+                && !ts_lexer__eof(lexer)
                 && !self_.chunk.is_null()
             {
                 ts_lexer__do_advance(self_, false);
-                if ts_lexer__eof(_self) {
+                if ts_lexer__eof(lexer) {
                     break;
                 }
             }
@@ -417,8 +417,8 @@ unsafe extern "C" fn ts_lexer__get_column(_self: *mut TSLexer) -> u32 {
 
 /// Is the lexer at a boundary between two disjoint included ranges?
 /// TSLexer vtable callback.
-unsafe extern "C" fn ts_lexer__is_at_included_range_start(_self: *const TSLexer) -> bool {
-    let self_ = &*(_self as *const Lexer);
+unsafe extern "C" fn ts_lexer__is_at_included_range_start(lexer: *const TSLexer) -> bool {
+    let self_ = &*lexer.cast::<Lexer>();
     if self_.current_included_range_index < self_.included_range_count {
         let range_index = self_.current_included_range_index as usize;
         let current_range = ts_lexer__included_range(self_, range_index);
