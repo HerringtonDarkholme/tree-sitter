@@ -264,7 +264,15 @@ unsafe fn stack_pop(arr: &mut TreeCursorEntryArray) -> TreeCursorEntry {
 
 #[inline]
 unsafe fn subtree_child<'a>(parent: Subtree, index: u32) -> &'a Subtree {
-    &*ts_subtree_children(parent).add(index as usize)
+    subtree_children(parent).get_unchecked(index as usize)
+}
+
+#[inline]
+unsafe fn subtree_children<'a>(parent: Subtree) -> &'a [Subtree] {
+    std::slice::from_raw_parts(
+        ts_subtree_children(parent),
+        ts_subtree_child_count(parent) as usize,
+    )
 }
 
 #[inline]
