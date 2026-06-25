@@ -2126,3 +2126,45 @@ Source-code analysis:
 - The JavaScript error outliers are not tied to a plausible source-code change
   in this batch, and the aggregate result still shows Rust slightly ahead of C.
   No rollback was performed.
+
+### 2026-06-25 12:34 EDT
+
+- Repo head: `32de820d`
+- Batch base: `3e27ae96`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: 10 small cleanup commits from
+  `Rename tree cursor FFI parameter bindings` through
+  `Use stack references for version helpers`
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 25802.0 | 24133.8 | +6.91% |
+| TypeScript error parses | 32 | 1671.5 | 1625.6 | +2.82% |
+| JavaScript normal parses | 2 | 17075.5 | 16169.0 | +5.61% |
+| JavaScript error parses | 37 | 2055.2 | 1942.5 | +5.80% |
+| Overall parser throughput | 82 | 2311.3 | 2222.3 | +4.01% |
+
+Prior checkpoint at `4d6c2113` recorded Rust overall throughput of 2245.3
+bytes/ms on the same TypeScript/JavaScript gate, so this batch measured +2.94%
+absolute Rust throughput. The Rust-vs-C delta moved from +0.96% to +4.01%, and
+the gate reported no per-case regressions above 5%.
+
+Source-code analysis:
+
+- The first seven commits are low-risk Clippy/readability cleanups: FFI parameter
+  binding renames, raw-string hash/doc visibility cleanup in `xtask`, a
+  highlight match simplification, an ordering-based comparison, and by-value
+  receivers for 8-byte inline subtree metadata accessors.
+- The three stack commits reduce internal Rust raw-pointer signatures for stack
+  pop, renumber, and version helper paths. They keep exported symbols, C
+  headers, `#[repr(C)]` layouts, allocation sizes, generated parser templates,
+  parse-table data, stack ownership, and subtree ownership unchanged.
+- The stack changes move raw-pointer-to-reference conversion to the parser/stack
+  boundary only; parser control flow and stack mutation order remain the same.
+- Full `cargo test --all` passed after each code commit in this checkpoint.
+  No rollback was performed.
