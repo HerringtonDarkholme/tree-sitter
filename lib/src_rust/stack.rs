@@ -1496,12 +1496,14 @@ pub unsafe fn ts_stack_print_dot_graph(
         capacity: 0,
     };
 
-    array_clear(&mut (*self_).iterators);
-    for i in 0..(*self_).heads.size {
-        let head = stack_head(&*self_, i);
-        if head.status == StackStatus::Halted {
+    array_clear(&mut stack.iterators);
+    for i in 0..stack.heads.size {
+        if stack_head(stack, i).status == StackStatus::Halted {
             continue;
         }
+        let node_count_since_error = ts_stack_node_count_since_error(stack, i);
+        let error_cost = ts_stack_error_cost(stack, i);
+        let head = stack_head(stack, i);
 
         fprintf(
             f,
@@ -1522,8 +1524,8 @@ pub unsafe fn ts_stack_print_dot_graph(
             f,
             b"label=%u, fontcolor=blue, weight=10000, labeltooltip=\"node_count: %u\nerror_cost: %u\0".as_ptr() as *const i8,
             i,
-            ts_stack_node_count_since_error(&mut *self_, i),
-            ts_stack_error_cost(&*self_, i),
+            node_count_since_error,
+            error_cost,
         );
 
         if !head.summary.is_null() {
