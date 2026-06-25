@@ -734,31 +734,31 @@ unsafe fn ts_stack__add_version(
 
 /// Add a slice to the stack's slice array, finding or creating a version.
 unsafe fn ts_stack__add_slice(
-    self_: *mut Stack,
+    self_: &mut Stack,
     original_version: StackVersion,
     node: *mut StackNode,
-    subtrees: *mut SubtreeArray,
+    subtrees: &SubtreeArray,
 ) {
-    let mut i = (*self_).slices.size as i32 - 1;
+    let mut i = self_.slices.size as i32 - 1;
     while i + 1 > 0 {
-        let version = stack_slice_array_get(&(*self_).slices, i as u32).version;
-        if stack_head(&*self_, version).node == node {
+        let version = stack_slice_array_get(&self_.slices, i as u32).version;
+        if stack_head(self_, version).node == node {
             let slice = StackSlice {
-                subtrees: subtree_array_read_ref(&*subtrees),
+                subtrees: subtree_array_read_ref(subtrees),
                 version,
             };
-            array_insert(&mut (*self_).slices, (i + 1) as u32, slice);
+            array_insert(&mut self_.slices, (i + 1) as u32, slice);
             return;
         }
         i -= 1;
     }
 
-    let version = ts_stack__add_version(&mut *self_, original_version, node);
+    let version = ts_stack__add_version(self_, original_version, node);
     let slice = StackSlice {
-        subtrees: subtree_array_read_ref(&*subtrees),
+        subtrees: subtree_array_read_ref(subtrees),
         version,
     };
-    array_push(&mut (*self_).slices, slice);
+    array_push(&mut self_.slices, slice);
 }
 
 /// Core iteration function for walking the stack graph.
@@ -813,7 +813,7 @@ unsafe fn stack__iter(
                     ts_subtree_array_copy(subtree_array_read_ref(&subtrees), &mut subtrees);
                 }
                 ts_subtree_array_reverse(&mut subtrees);
-                ts_stack__add_slice(self_, version, node, &mut subtrees);
+                ts_stack__add_slice(&mut *self_, version, node, &subtrees);
             }
 
             if should_stop {
