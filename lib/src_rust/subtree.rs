@@ -1604,21 +1604,22 @@ pub unsafe fn ts_subtree_edit(
         edit: Edit,
     }
 
+    let input_edit = &*input_edit;
     let mut stack: Vec<EditEntry> = Vec::new();
     stack.push(EditEntry {
         tree: &mut self_ as *mut Subtree,
         edit: Edit {
             start: Length {
-                bytes: (*input_edit).start_byte,
-                extent: (*input_edit).start_point,
+                bytes: input_edit.start_byte,
+                extent: input_edit.start_point,
             },
             old_end: Length {
-                bytes: (*input_edit).old_end_byte,
-                extent: (*input_edit).old_end_point,
+                bytes: input_edit.old_end_byte,
+                extent: input_edit.old_end_point,
             },
             new_end: Length {
-                bytes: (*input_edit).new_end_byte,
-                extent: (*input_edit).new_end_point,
+                bytes: input_edit.new_end_byte,
+                extent: input_edit.new_end_point,
             },
         },
     });
@@ -1659,7 +1660,8 @@ pub unsafe fn ts_subtree_edit(
             );
         }
 
-        let mut result = ts_subtree_make_mut(&mut *pool, *entry.tree);
+        let pool = &mut *pool;
+        let mut result = ts_subtree_make_mut(pool, *entry.tree);
 
         if result.data.is_inline() {
             if ts_subtree_can_inline(padding, size, lookahead_bytes) {
@@ -1669,7 +1671,7 @@ pub unsafe fn ts_subtree_edit(
                 result.data.size_bytes = size.bytes as u8;
             } else {
                 // Promote inline node to heap
-                let data = ts_subtree_pool_allocate(&mut *pool);
+                let data = ts_subtree_pool_allocate(pool);
                 *data = SubtreeHeapData {
                     ref_count: 1,
                     padding,
