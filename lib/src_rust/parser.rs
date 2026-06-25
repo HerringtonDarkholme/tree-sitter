@@ -2231,9 +2231,10 @@ unsafe fn ts_parser__advance(
     allow_node_reuse: bool,
 ) -> bool {
     let parser = self_ as *mut TSParser;
-    let mut state = ts_stack_state(&*self_.stack, version);
-    let position = ts_stack_position(&*self_.stack, version).bytes;
-    let last_external_token = ts_stack_last_external_token(&*self_.stack, version);
+    let stack = &*self_.stack;
+    let mut state = ts_stack_state(stack, version);
+    let position = ts_stack_position(stack, version).bytes;
+    let last_external_token = ts_stack_last_external_token(stack, version);
 
     let mut did_reuse = true;
     let mut lookahead = NULL_SUBTREE;
