@@ -172,7 +172,7 @@ unsafe fn stack_write(arr: &mut TreeCursorEntryArray, index: u32, entry: TreeCur
 }
 
 #[inline]
-unsafe fn stack_read(arr: &TreeCursorEntryArray, index: u32) -> TreeCursorEntry {
+const unsafe fn stack_read(arr: &TreeCursorEntryArray, index: u32) -> TreeCursorEntry {
     ptr::read(arr.contents.add(index as usize))
 }
 
@@ -215,7 +215,7 @@ unsafe fn stack_pop(arr: &mut TreeCursorEntryArray) -> TreeCursorEntry {
 }
 
 #[inline]
-unsafe fn tree_cursor_read_ref(cursor: &TreeCursor) -> TreeCursor {
+const unsafe fn tree_cursor_read_ref(cursor: &TreeCursor) -> TreeCursor {
     ptr::read(cursor)
 }
 
