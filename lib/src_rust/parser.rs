@@ -519,6 +519,10 @@ unsafe fn ts_range_array_as_array(self_: &TSRangeArray) -> &Array<TSRange> {
     &*ptr::from_ref(self_).cast::<Array<TSRange>>()
 }
 
+unsafe fn ts_range_array_as_array_mut(self_: &mut TSRangeArray) -> &mut Array<TSRange> {
+    &mut *ptr::from_mut(self_).cast::<Array<TSRange>>()
+}
+
 unsafe fn subtree_array_get(self_: &SubtreeArray, index: u32) -> Subtree {
     *array_get_ref(subtree_array_as_array(self_), index)
 }
@@ -2752,7 +2756,7 @@ pub unsafe extern "C" fn ts_parser_delete(self_: *mut TSParser) {
         array_delete(std::ptr::addr_of_mut!(parser.reduce_actions));
     }
     if !parser.included_range_differences.contents.is_null() {
-        array_delete(std::ptr::addr_of_mut!(parser.included_range_differences).cast::<Array<TSRange>>());
+        array_delete(ts_range_array_as_array_mut(&mut parser.included_range_differences));
     }
     if !parser.old_tree.ptr.is_null() {
         ts_subtree_release(&mut parser.tree_pool, parser.old_tree);
@@ -2923,7 +2927,7 @@ pub unsafe extern "C" fn ts_parser_parse(
     }
 
     ts_lexer_set_input(&mut parser.lexer, input);
-    array_clear(std::ptr::addr_of_mut!(parser.included_range_differences).cast::<Array<TSRange>>());
+    array_clear(ts_range_array_as_array_mut(&mut parser.included_range_differences));
     parser.included_range_difference_index = 0;
 
     parser.operation_count = 0;
