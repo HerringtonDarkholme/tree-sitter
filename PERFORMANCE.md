@@ -1088,3 +1088,62 @@ Source-code analysis:
   because the aggregate Rust throughput improved versus the previous checkpoint,
   and prior checkpoint investigation showed the named outlier cases move between
   runs. No rollback was performed.
+
+### 2026-06-24 23:19 EDT
+
+- Repo head: `7f782d91`
+- Batch base: `9ff73abd`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: 10 small Rust-core raw-pointer/reference cleanups from
+  `Use raw field addresses in subtree release` through
+  `Use stack ref when printing dot graph`
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 25987.8 | 24731.8 | +5.08% |
+| TypeScript error parses | 32 | 1713.0 | 1682.7 | +1.80% |
+| JavaScript normal parses | 2 | 17319.4 | 16077.9 | +7.72% |
+| JavaScript error parses | 37 | 2097.9 | 1990.4 | +5.40% |
+| Overall parser throughput | 82 | 2364.5 | 2289.8 | +3.26% |
+
+The previous checkpoint at `98118c0e` recorded Rust overall throughput of
+2336.1 bytes/ms on the same TypeScript/JavaScript gate. This checkpoint is
++1.22% versus that Rust throughput, so no aggregate parser regression was
+observed.
+
+This run reported no per-case Rust-vs-C regressions above the 5% threshold.
+
+TypeScript-normal note:
+
+- The previous checkpoint showed TypeScript normal parses at -2.17% Rust vs C,
+  including large per-file outliers. This run did not reproduce that slowdown:
+  TypeScript normal parses measured +5.08% Rust vs C, and no per-case outlier
+  exceeded the 5% threshold.
+- Because the sign changed between adjacent 10-repetition checkpoints, the
+  TypeScript-normal gap should be treated as a noisy area to keep watching, not
+  as a confirmed source-change regression from this batch.
+
+Source-code analysis:
+
+- This batch changed Rust-internal bodies in `subtree.rs`, `language.rs`,
+  `parser.rs`, and `stack.rs`, replacing temporary references from raw pointer
+  fields and repeated `(*self_)` field access with local `&Stack`, `&mut Stack`,
+  `&mut TSParser`, and raw field-address operations.
+- No exported `#[no_mangle] extern "C"` signatures, C header declarations,
+  public FFI struct layouts, allocation headers, generated parser templates, or
+  included C header text were edited.
+- Parser hot-path changes were limited to binding the existing parser pointer
+  as a local `&mut TSParser` inside `ts_parser_parse`; all parse-loop calls,
+  stack operations, tree creation, scanner-state behavior, and reset paths are
+  preserved.
+- Most stack changes affect helper bodies and debug/DOT graph code, not parser
+  table lookup or lexing. The only stack parse-path effects are local reference
+  bindings around existing operations, with unchanged public function
+  signatures and unchanged stack-head/node/subtree ownership behavior.
+- No reproducible >5% regression was observed in this checkpoint. No rollback
+  was performed.
