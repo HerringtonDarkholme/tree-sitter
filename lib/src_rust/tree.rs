@@ -17,7 +17,7 @@ use super::subtree::{
     ts_subtree_edit, ts_subtree_padding, ts_subtree_pool_delete, ts_subtree_pool_new,
     ts_subtree_print_dot_graph, ts_subtree_release, ts_subtree_retain, Subtree,
 };
-use super::tree_cursor::{ts_tree_cursor_init, TreeCursor, TreeCursorEntryArray};
+use super::tree_cursor::{ts_tree_cursor_init_ref, TreeCursor, TreeCursorEntryArray};
 
 // ---------------------------------------------------------------------------
 // Extern C functions (still in C or other Rust modules)
@@ -259,8 +259,8 @@ pub unsafe extern "C" fn ts_tree_get_changed_ranges(
         },
         root_alias_symbol: 0,
     };
-    ts_tree_cursor_init(&mut cursor1, ts_tree_root_node(old_tree));
-    ts_tree_cursor_init(&mut cursor2, ts_tree_root_node(new_tree));
+    ts_tree_cursor_init_ref(&mut cursor1, ts_tree_root_node(old_tree));
+    ts_tree_cursor_init_ref(&mut cursor2, ts_tree_root_node(new_tree));
 
     let mut included_range_differences = TSRangeArray {
         contents: std::ptr::null_mut(),

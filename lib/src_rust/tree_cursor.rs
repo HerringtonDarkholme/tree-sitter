@@ -466,18 +466,21 @@ pub unsafe extern "C" fn ts_tree_cursor_new(node: TSNode) -> TSTreeCursor {
         id: ptr::null(),
         context: [0, 0, 0],
     };
-    ts_tree_cursor_init(std::ptr::addr_of_mut!(self_).cast::<TreeCursor>(), node);
+    ts_tree_cursor_init_ref(&mut *std::ptr::addr_of_mut!(self_).cast::<TreeCursor>(), node);
     self_
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_tree_cursor_reset(self_: *mut TSTreeCursor, node: TSNode) {
-    ts_tree_cursor_init(self_.cast::<TreeCursor>(), node);
+    ts_tree_cursor_init_ref(&mut *self_.cast::<TreeCursor>(), node);
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_tree_cursor_init(self_: *mut TreeCursor, node: TSNode) {
-    let cursor = &mut *self_;
+    ts_tree_cursor_init_ref(&mut *self_, node);
+}
+
+pub(crate) unsafe fn ts_tree_cursor_init_ref(cursor: &mut TreeCursor, node: TSNode) {
     cursor.tree = node.tree.cast::<TSTree>();
     cursor.root_alias_symbol = node.context[3] as TSSymbol;
     array_clear(&mut cursor.stack);
