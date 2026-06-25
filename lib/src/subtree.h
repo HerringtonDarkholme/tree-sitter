@@ -173,62 +173,6 @@ typedef struct {
   MutableSubtreeArray tree_stack;
 } SubtreePool;
 
-void ts_external_scanner_state_init(ExternalScannerState *self, const char *data, unsigned length);
-const char *ts_external_scanner_state_data(const ExternalScannerState *self);
-bool ts_external_scanner_state_eq(const ExternalScannerState *self, const char *buffer, unsigned length);
-void ts_external_scanner_state_delete(ExternalScannerState *self);
-
-void ts_subtree_array_copy(SubtreeArray self, SubtreeArray *dest);
-void ts_subtree_array_clear(SubtreePool *pool, SubtreeArray *self);
-void ts_subtree_array_delete(SubtreePool *pool, SubtreeArray *self);
-void ts_subtree_array_remove_trailing_extras(SubtreeArray *self, SubtreeArray *destination);
-void ts_subtree_array_reverse(SubtreeArray *self);
-
-SubtreePool ts_subtree_pool_new(uint32_t capacity);
-void ts_subtree_pool_delete(SubtreePool *self);
-
-Subtree ts_subtree_new_leaf(
-  SubtreePool *pool, TSSymbol symbol, Length padding, Length size,
-  uint32_t lookahead_bytes, TSStateId parse_state,
-  bool has_external_tokens, bool depends_on_column,
-  bool is_keyword, const TSLanguage *language
-);
-Subtree ts_subtree_new_error(
-  SubtreePool *pool, int32_t lookahead_char, Length padding, Length size,
-  uint32_t bytes_scanned, TSStateId parse_state, const TSLanguage *language
-);
-MutableSubtree ts_subtree_new_node(
-  TSSymbol symbol,
-  SubtreeArray *chiildren,
-  unsigned production_id,
-  const TSLanguage *language
-);
-Subtree ts_subtree_new_error_node(
-  SubtreeArray *children,
-  bool extra,
-  const TSLanguage * language
-);
-Subtree ts_subtree_new_missing_leaf(
-  SubtreePool *pool,
-  TSSymbol symbol,
-  Length padding,
-  uint32_t lookahead_bytes,
-  const TSLanguage *language
-);
-MutableSubtree ts_subtree_make_mut(SubtreePool *pool, Subtree self);
-void ts_subtree_retain(Subtree self);
-void ts_subtree_release(SubtreePool *pool, Subtree self);
-int ts_subtree_compare(Subtree left, Subtree right, SubtreePool *pool);
-void ts_subtree_set_symbol(MutableSubtree *self, TSSymbol symbol, const TSLanguage *language);
-void ts_subtree_compress(MutableSubtree self, unsigned count, const TSLanguage *language, MutableSubtreeArray *stack);
-void ts_subtree_summarize_children(MutableSubtree self, const TSLanguage *language);
-Subtree ts_subtree_edit(Subtree self, const TSInputEdit *edit, SubtreePool *pool);
-char *ts_subtree_string(Subtree self, TSSymbol alias_symbol, bool alias_is_named, const TSLanguage *language, bool include_all);
-void ts_subtree_print_dot_graph(Subtree self, const TSLanguage *language, FILE *f);
-Subtree ts_subtree_last_external_token(Subtree tree);
-const ExternalScannerState *ts_subtree_external_scanner_state(Subtree self);
-bool ts_subtree_external_scanner_state_eq(Subtree self, Subtree other);
-
 #define SUBTREE_GET(self, name) ((self).data.is_inline ? (self).data.name : (self).ptr->name)
 
 static inline TSSymbol ts_subtree_symbol(Subtree self) { return SUBTREE_GET(self, symbol); }
