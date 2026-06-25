@@ -354,15 +354,12 @@ unsafe extern "C" fn ts_lexer__mark_end(_self: *mut TSLexer) {
         // If the lexer is right at the beginning of included range,
         // then the token should be considered to end at the *end* of the
         // previous included range, rather than here.
-        let current_included_range = &*self_
-            .included_ranges
-            .add(self_.current_included_range_index as usize);
-        if self_.current_included_range_index > 0
+        let range_index = self_.current_included_range_index as usize;
+        let current_included_range = &*self_.included_ranges.add(range_index);
+        if range_index > 0
             && self_.current_position.bytes == current_included_range.start_byte
         {
-            let previous_included_range = &*self_
-                .included_ranges
-                .add(self_.current_included_range_index as usize - 1);
+            let previous_included_range = &*self_.included_ranges.add(range_index - 1);
             self_.token_end_position = Length {
                 bytes: previous_included_range.end_byte,
                 extent: previous_included_range.end_point,
