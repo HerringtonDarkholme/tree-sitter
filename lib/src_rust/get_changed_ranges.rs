@@ -100,6 +100,40 @@ unsafe fn array_push_range(arr: &mut TSRangeArray, range: TSRange) {
     arr.size += 1;
 }
 
+fn ts_range_edit_ref(range: &mut TSRange, edit: &TSInputEdit) {
+    if range.end_byte >= edit.old_end_byte {
+        if range.end_byte != u32::MAX {
+            range.end_byte = edit.new_end_byte + (range.end_byte - edit.old_end_byte);
+            range.end_point = point_add(
+                edit.new_end_point,
+                point_sub(range.end_point, edit.old_end_point),
+            );
+            if range.end_byte < edit.new_end_byte {
+                range.end_byte = u32::MAX;
+                range.end_point = POINT_MAX;
+            }
+        }
+    } else if range.end_byte > edit.start_byte {
+        range.end_byte = edit.start_byte;
+        range.end_point = edit.start_point;
+    }
+
+    if range.start_byte >= edit.old_end_byte {
+        range.start_byte = edit.new_end_byte + (range.start_byte - edit.old_end_byte);
+        range.start_point = point_add(
+            edit.new_end_point,
+            point_sub(range.start_point, edit.old_end_point),
+        );
+        if range.start_byte < edit.new_end_byte {
+            range.start_byte = u32::MAX;
+            range.start_point = POINT_MAX;
+        }
+    } else if range.start_byte > edit.start_byte {
+        range.start_byte = edit.start_byte;
+        range.start_point = edit.start_point;
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Array helpers for TreeCursorEntry stack (mirrors tree_cursor.rs helpers)
 // ---------------------------------------------------------------------------
@@ -566,36 +600,88 @@ pub unsafe extern "C" fn ts_range_edit(
     let range = &mut *range;
     let edit = &*edit;
 
-    if range.end_byte >= edit.old_end_byte {
-        if range.end_byte != u32::MAX {
-            range.end_byte = edit.new_end_byte + (range.end_byte - edit.old_end_byte);
-            range.end_point = point_add(
-                edit.new_end_point,
-                point_sub(range.end_point, edit.old_end_point),
-            );
-            if range.end_byte < edit.new_end_byte {
-                range.end_byte = u32::MAX;
-                range.end_point = POINT_MAX;
-            }
-        }
-    } else if range.end_byte > edit.start_byte {
-        range.end_byte = edit.start_byte;
-        range.end_point = edit.start_point;
+    ts_range_edit_ref(range, edit);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ffi::TSPoint;
+
+    fn point(row: u32, column: u32) -> TSPoint {
+        TSPoint { row, column }
     }
 
-    if range.start_byte >= edit.old_end_byte {
-        range.start_byte = edit.new_end_byte + (range.start_byte - edit.old_end_byte);
-        range.start_point = point_add(
-            edit.new_end_point,
-            point_sub(range.start_point, edit.old_end_point),
-        );
-        if range.start_byte < edit.new_end_byte {
-            range.start_byte = u32::MAX;
-            range.start_point = POINT_MAX;
+    fn range(start_byte: u32, end_byte: u32) -> TSRange {
+        TSRange {
+            start_point: point(0, start_byte),
+            end_point: point(0, end_byte),
+            start_byte,
+            end_byte,
         }
-    } else if range.start_byte > edit.start_byte {
-        range.start_byte = edit.start_byte;
-        range.start_point = edit.start_point;
+    }
+
+    fn edit() -> TSInputEdit {
+        TSInputEdit {
+            start_byte: 5,
+            old_end_byte: 10,
+            new_end_byte: 12,
+            start_point: point(0, 5),
+            old_end_point: point(0, 10),
+            new_end_point: point(1, 2),
+        }
+    }
+
+    fn assert_range_eq(actual: TSRange, expected: TSRange) {
+        assert_eq!(actual.start_byte, expected.start_byte);
+        assert_eq!(actual.end_byte, expected.end_byte);
+        assert_eq!(actual.start_point.row, expected.start_point.row);
+        assert_eq!(actual.start_point.column, expected.start_point.column);
+        assert_eq!(actual.end_point.row, expected.end_point.row);
+        assert_eq!(actual.end_point.column, expected.end_point.column);
+    }
+
+    #[test]
+    fn edit_range_after_changed_range() {
+        let mut edited_range = range(14, 18);
+
+        ts_range_edit_ref(&mut edited_range, &edit());
+
+        assert_range_eq(
+            edited_range,
+            TSRange {
+                start_point: point(1, 6),
+                end_point: point(1, 10),
+                start_byte: 16,
+                end_byte: 20,
+            },
+        );
+    }
+
+    #[test]
+    fn edit_range_overlapping_changed_range() {
+        let mut edited_range = range(7, 14);
+
+        ts_range_edit_ref(&mut edited_range, &edit());
+
+        assert_range_eq(
+            edited_range,
+            TSRange {
+                start_point: point(0, 5),
+                end_point: point(1, 6),
+                start_byte: 5,
+                end_byte: 16,
+            },
+        );
+    }
+
+    #[test]
+    fn edit_range_before_changed_range() {
+        let mut edited_range = range(1, 4);
+
+        ts_range_edit_ref(&mut edited_range, &edit());
+
+        assert_range_eq(edited_range, range(1, 4));
     }
 }
 
