@@ -633,7 +633,7 @@ unsafe fn ts_parser__breakdown_top_of_stack(
             }
 
             ts_subtree_release(&mut self_.tree_pool, parent);
-            array_delete(std::ptr::addr_of_mut!(slice.subtrees).cast::<Array<Subtree>>());
+            array_delete(subtree_array_as_array_mut(&mut slice.subtrees));
 
             let parser = ptr::from_mut(self_);
             LOG!(
@@ -1540,11 +1540,10 @@ unsafe fn ts_parser__reduce(
             {
                 ts_subtree_array_clear(&mut self_.tree_pool, &mut self_.trailing_extras);
                 ts_subtree_release(&mut self_.tree_pool, ts_subtree_from_mut(parent));
-                let trailing_extras =
-                    &mut *std::ptr::addr_of_mut!(self_.trailing_extras).cast::<Array<Subtree>>();
-                let trailing_extras2 =
-                    &mut *std::ptr::addr_of_mut!(self_.trailing_extras2).cast::<Array<Subtree>>();
-                array_swap(trailing_extras, trailing_extras2);
+                array_swap(
+                    subtree_array_as_array_mut(&mut self_.trailing_extras),
+                    subtree_array_as_array_mut(&mut self_.trailing_extras2),
+                );
                 parent = ts_subtree_new_node(
                     symbol,
                     &mut next_slice_children,
@@ -1553,7 +1552,7 @@ unsafe fn ts_parser__reduce(
                 );
             } else {
                 array_clear(
-                    std::ptr::addr_of_mut!(self_.trailing_extras2).cast::<Array<Subtree>>(),
+                    subtree_array_as_array_mut(&mut self_.trailing_extras2),
                 );
                 // Use the original size from next_slice.subtrees to delete all subtrees
                 ts_subtree_array_delete(&mut self_.tree_pool, &mut next_slice.subtrees);
@@ -1637,7 +1636,7 @@ unsafe fn ts_parser__accept(
                     ts_subtree_retain(*child);
                 }
                 array_splice(
-                    std::ptr::addr_of_mut!(trees).cast::<Array<Subtree>>(),
+                    subtree_array_as_array_mut(&mut trees),
                     j as u32,
                     1,
                     child_count,
@@ -1820,7 +1819,7 @@ unsafe fn ts_parser__recover_to_state(
             if error_child_count > 0 {
                 let error_children = parser_subtree_children(error_tree);
                 array_splice(
-                    std::ptr::addr_of_mut!(slice.subtrees).cast::<Array<Subtree>>(),
+                    subtree_array_as_array_mut(&mut slice.subtrees),
                     0,
                     0,
                     error_child_count,
@@ -1846,7 +1845,7 @@ unsafe fn ts_parser__recover_to_state(
             );
             ts_stack_push(stack, slice.version, error, false, goal_state);
         } else {
-            array_delete(std::ptr::addr_of_mut!(slice.subtrees).cast::<Array<Subtree>>());
+            array_delete(subtree_array_as_array_mut(&mut slice.subtrees));
         }
 
         for j in 0..self_.trailing_extras.size {
@@ -2003,8 +2002,8 @@ unsafe fn ts_parser__recover(
         size: 0,
         capacity: 0,
     };
-    array_reserve(std::ptr::addr_of_mut!(children).cast::<Array<Subtree>>(), 1);
-    array_push(std::ptr::addr_of_mut!(children).cast::<Array<Subtree>>(), lookahead);
+    array_reserve(subtree_array_as_array_mut(&mut children), 1);
+    array_push(subtree_array_as_array_mut(&mut children), lookahead);
     let mut error_repeat = ts_subtree_new_node(
         ts_builtin_sym_error_repeat,
         &mut children,
@@ -2758,9 +2757,9 @@ pub unsafe extern "C" fn ts_parser_delete(self_: *mut TSParser) {
     ts_parser__set_cached_token(parser, 0, NULL_SUBTREE, NULL_SUBTREE);
     ts_subtree_pool_delete(&mut parser.tree_pool);
     reusable_node_delete(&mut parser.reusable_node);
-    array_delete(std::ptr::addr_of_mut!(parser.trailing_extras).cast::<Array<Subtree>>());
-    array_delete(std::ptr::addr_of_mut!(parser.trailing_extras2).cast::<Array<Subtree>>());
-    array_delete(std::ptr::addr_of_mut!(parser.scratch_trees).cast::<Array<Subtree>>());
+    array_delete(subtree_array_as_array_mut(&mut parser.trailing_extras));
+    array_delete(subtree_array_as_array_mut(&mut parser.trailing_extras2));
+    array_delete(subtree_array_as_array_mut(&mut parser.scratch_trees));
     ts_free(self_.cast::<c_void>());
 }
 
