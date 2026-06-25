@@ -2074,7 +2074,7 @@ unsafe fn ts_parser__handle_error(
                     let lookahead_bytes =
                         ts_subtree_total_bytes(lookahead) + ts_subtree_lookahead_bytes(lookahead);
 
-                    let version_with_missing_tree = ts_stack_copy_version(self_.stack, v);
+                    let version_with_missing_tree = ts_stack_copy_version(&mut *self_.stack, v);
                     let missing_tree = ts_subtree_new_missing_leaf(
                         &mut self_.tree_pool,
                         missing_symbol,
@@ -2442,7 +2442,7 @@ unsafe fn ts_parser__advance(
         // this version can simply be removed. But if all versions end up paused,
         // then error recovery is needed.
         LOG!(parser, c"detect_error lookahead:%s".as_ptr().cast::<i8>(), TREE_NAME!(parser, lookahead));
-        ts_stack_pause(self_.stack, version, lookahead);
+        ts_stack_pause(&mut *self_.stack, version, lookahead);
         return true;
     }
 }
@@ -2494,7 +2494,7 @@ unsafe fn ts_parser__condense_stack(self_: &mut TSParser) -> u32 {
                         i -= 1;
                         break;
                     }
-                    ts_stack_swap_versions(self_.stack, i, j);
+                    ts_stack_swap_versions(&mut *self_.stack, i, j);
                 }
 
                 ErrorComparison::TakeRight => {
@@ -2528,7 +2528,7 @@ unsafe fn ts_parser__condense_stack(self_: &mut TSParser) -> u32 {
                 if !has_unpaused_version && self_.accept_count < MAX_VERSION_COUNT {
                     LOG!(self_, c"resume version:%u".as_ptr().cast::<i8>(), i);
                     min_error_cost = ts_stack_error_cost(&*self_.stack, i);
-                    let lookahead = ts_stack_resume(self_.stack, i);
+                    let lookahead = ts_stack_resume(&mut *self_.stack, i);
                     ts_parser__handle_error(&mut *self_, i, lookahead);
                     has_unpaused_version = true;
                 } else {

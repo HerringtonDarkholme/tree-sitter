@@ -1317,11 +1317,10 @@ pub unsafe fn ts_stack_renumber_version(
 
 /// Swap two versions.
 pub unsafe fn ts_stack_swap_versions(
-    self_: *mut Stack,
+    stack: &mut Stack,
     v1: StackVersion,
     v2: StackVersion,
 ) {
-    let stack = &mut *self_;
     let temp = stack_head_array_read(&stack.heads, v1);
     let other = stack_head_array_read(&stack.heads, v2);
     stack_head_array_write(&mut stack.heads, v1, other);
@@ -1330,10 +1329,9 @@ pub unsafe fn ts_stack_swap_versions(
 
 /// Copy a version, creating a new one.
 pub unsafe fn ts_stack_copy_version(
-    self_: *mut Stack,
+    stack: &mut Stack,
     version: StackVersion,
 ) -> StackVersion {
-    let stack = &mut *self_;
     debug_assert!(version < stack.heads.size);
     let version_head = stack_head_array_read(&stack.heads, version);
     array_push(&mut stack.heads, version_head);
@@ -1398,11 +1396,10 @@ pub unsafe fn ts_stack_halt(self_: &mut Stack, version: StackVersion) {
 
 /// Pause a version with a lookahead token.
 pub unsafe fn ts_stack_pause(
-    self_: *mut Stack,
+    stack: &mut Stack,
     version: StackVersion,
     lookahead: Subtree,
 ) {
-    let stack = &mut *self_;
     let head = stack_head_mut(stack, version);
     head.status = StackStatus::Paused;
     head.lookahead_when_paused = lookahead;
@@ -1426,10 +1423,9 @@ pub unsafe fn ts_stack_is_paused(self_: &Stack, version: StackVersion) -> bool {
 
 /// Resume a paused version, returning its stored lookahead.
 pub unsafe fn ts_stack_resume(
-    self_: *mut Stack,
+    stack: &mut Stack,
     version: StackVersion,
 ) -> Subtree {
-    let stack = &mut *self_;
     let head = stack_head_mut(stack, version);
     debug_assert!(head.status == StackStatus::Paused);
     let result = head.lookahead_when_paused;
