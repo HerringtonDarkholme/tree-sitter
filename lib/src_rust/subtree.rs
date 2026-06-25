@@ -410,11 +410,10 @@ static EMPTY_EXTERNAL_SCANNER_STATE: ExternalScannerState = ExternalScannerState
 // ===========================================================================
 
 pub unsafe fn ts_external_scanner_state_init(
-    self_: *mut ExternalScannerState,
+    self_: &mut ExternalScannerState,
     data: *const u8,
     length: u32,
 ) {
-    let self_ = &mut *self_;
     self_.length = length;
     if length > EXTERNAL_SCANNER_STATE_INLINE_SIZE as u32 {
         self_.data.long_data = ts_malloc(length as usize) as *mut u8;

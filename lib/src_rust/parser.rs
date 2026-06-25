@@ -1168,9 +1168,11 @@ unsafe fn ts_parser__lex(
 
         if found_external_token {
             let mut_result = ts_subtree_to_mut_unsafe(result);
+            let external_scanner_state =
+                &mut *ptr::addr_of_mut!((*mut_result.ptr).data.external_scanner_state)
+                    .cast::<ExternalScannerState>();
             ts_external_scanner_state_init(
-                ptr::addr_of_mut!((*mut_result.ptr).data.external_scanner_state)
-                    as *mut ExternalScannerState,
+                external_scanner_state,
                 self_.lexer.debug_buffer.as_ptr(),
                 external_scanner_state_len,
             );
