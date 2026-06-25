@@ -3,7 +3,10 @@
 #![allow(non_snake_case)]
 
 use core::ffi::c_void;
-use std::ptr;
+use std::{
+    ptr,
+    sync::atomic::{AtomicU32, Ordering},
+};
 
 use crate::ffi::{TSInputEdit, TSLanguage, TSPoint, TSStateId, TSSymbol};
 
@@ -1267,8 +1270,8 @@ pub unsafe fn ts_subtree_retain(self_: Subtree) {
         return;
     }
     debug_assert!((*self_.ptr).ref_count > 0);
-    let ref_count = &(*self_.ptr).ref_count as *const u32 as *const std::sync::atomic::AtomicU32;
-    let prev = (*ref_count).fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let ref_count = ptr::addr_of!((*self_.ptr).ref_count).cast::<AtomicU32>();
+    let prev = (*ref_count).fetch_add(1, Ordering::SeqCst);
     debug_assert!(prev.wrapping_add(1) != 0);
 }
 
@@ -1281,8 +1284,8 @@ pub unsafe fn ts_subtree_release(pool: &mut SubtreePool, self_: Subtree) {
     pool.tree_stack.size = 0;
 
     debug_assert!((*self_.ptr).ref_count > 0);
-    let ref_count = &(*self_.ptr).ref_count as *const u32 as *const std::sync::atomic::AtomicU32;
-    if (*ref_count).fetch_sub(1, std::sync::atomic::Ordering::SeqCst) == 1 {
+    let ref_count = ptr::addr_of!((*self_.ptr).ref_count).cast::<AtomicU32>();
+    if (*ref_count).fetch_sub(1, Ordering::SeqCst) == 1 {
         mutable_array_push(&mut pool.tree_stack, ts_subtree_to_mut_unsafe(self_));
     }
 
@@ -1296,20 +1299,18 @@ pub unsafe fn ts_subtree_release(pool: &mut SubtreePool, self_: Subtree) {
                     continue;
                 }
                 debug_assert!((*child.ptr).ref_count > 0);
-                let child_ref = &(*child.ptr).ref_count as *const u32
-                    as *const std::sync::atomic::AtomicU32;
-                if (*child_ref).fetch_sub(1, std::sync::atomic::Ordering::SeqCst) == 1 {
+                let child_ref = ptr::addr_of!((*child.ptr).ref_count).cast::<AtomicU32>();
+                if (*child_ref).fetch_sub(1, Ordering::SeqCst) == 1 {
                     mutable_array_push(&mut pool.tree_stack, ts_subtree_to_mut_unsafe(child));
                 }
             }
             ts_free(children as *mut c_void);
         } else {
             if (*tree.ptr).has_external_tokens() {
-                ts_external_scanner_state_delete(
-                    &mut *(&mut (*tree.ptr).data.external_scanner_state
-                        as *mut std::mem::ManuallyDrop<ExternalScannerState>
-                        as *mut ExternalScannerState),
-                );
+                let external_scanner_state =
+                    ptr::addr_of_mut!((*tree.ptr).data.external_scanner_state)
+                        .cast::<ExternalScannerState>();
+                ts_external_scanner_state_delete(&mut *external_scanner_state);
             }
             ts_subtree_pool_free(pool, tree);
         }
