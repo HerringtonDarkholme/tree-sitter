@@ -1364,9 +1364,9 @@ pub unsafe fn ts_stack_merge(
     }
     let stack = &mut *self_;
     {
-        let heads = &mut stack.heads;
+        let stack_heads = &mut stack.heads;
         let subtree_pool = &mut *stack.subtree_pool;
-        let (head1, head2) = stack_head_array_pair_mut(heads, version1, version2);
+        let (head1, head2) = stack_head_array_pair_mut(stack_heads, version1, version2);
         for i in 0..(*head2.node).link_count as usize {
             stack_node_add_link(head1.node, (*head2.node).links[i], subtree_pool);
         }
