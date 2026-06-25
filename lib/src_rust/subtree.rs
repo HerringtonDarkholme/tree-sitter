@@ -1772,12 +1772,13 @@ pub unsafe fn ts_subtree_last_external_token(mut tree: Subtree) -> Subtree {
 pub unsafe fn ts_subtree_external_scanner_state(
     self_: &Subtree,
 ) -> &ExternalScannerState {
-    if !self_.ptr.is_null()
-        && !self_.data.is_inline()
-        && (*self_.ptr).has_external_tokens()
-        && (*self_.ptr).child_count == 0
-    {
-        &*(*self_.ptr).data.external_scanner_state
+    if self_.ptr.is_null() || self_.data.is_inline() {
+        return &EMPTY_EXTERNAL_SCANNER_STATE;
+    }
+
+    let data = &*self_.ptr;
+    if data.has_external_tokens() && data.child_count == 0 {
+        &*data.data.external_scanner_state
     } else {
         &EMPTY_EXTERNAL_SCANNER_STATE
     }
