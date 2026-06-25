@@ -331,7 +331,7 @@ unsafe fn ts_tree_cursor_child_iterator_next(
 }
 
 #[inline]
-unsafe fn length_backtrack(a: Length, b: Length) -> Length {
+const unsafe fn length_backtrack(a: Length, b: Length) -> Length {
     if length_is_undefined(a) || b.extent.row != 0 {
         return LENGTH_UNDEFINED;
     }
