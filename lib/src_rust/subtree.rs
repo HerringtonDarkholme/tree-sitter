@@ -1785,7 +1785,7 @@ pub unsafe fn ts_subtree_external_scanner_state(
 
     let data = &*self_.ptr;
     if data.has_external_tokens() && data.child_count == 0 {
-        &*data.data.external_scanner_state
+        &data.data.external_scanner_state
     } else {
         &EMPTY_EXTERNAL_SCANNER_STATE
     }
