@@ -260,7 +260,7 @@ pub unsafe extern "C" fn ts_tree_root_node_with_offset(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn ts_tree_language(self_: *const TSTree) -> *const TSLanguage {
+pub const unsafe extern "C" fn ts_tree_language(self_: *const TSTree) -> *const TSLanguage {
     let tree = &*self_;
     ts_tree_language_ref(tree)
 }

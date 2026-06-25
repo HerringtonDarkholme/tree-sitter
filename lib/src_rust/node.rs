@@ -144,7 +144,7 @@ unsafe fn ts_node__is_relevant(self_: TSNode, include_anonymous: bool) -> bool {
 }
 
 #[inline]
-unsafe fn ts_node__relevant_child_count(
+const unsafe fn ts_node__relevant_child_count(
     self_: TSNode,
     include_anonymous: bool,
 ) -> u32 {
@@ -536,12 +536,12 @@ pub unsafe extern "C" fn ts_node_new(
 // ---------------------------------------------------------------------------
 
 #[no_mangle]
-pub unsafe extern "C" fn ts_node_start_byte(self_: TSNode) -> u32 {
+pub const unsafe extern "C" fn ts_node_start_byte(self_: TSNode) -> u32 {
     self_.context[0]
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn ts_node_start_point(self_: TSNode) -> TSPoint {
+pub const unsafe extern "C" fn ts_node_start_point(self_: TSNode) -> TSPoint {
     TSPoint { row: self_.context[1], column: self_.context[2] }
 }
 
@@ -576,7 +576,7 @@ pub unsafe extern "C" fn ts_node_type(self_: TSNode) -> *const i8 {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn ts_node_language(self_: TSNode) -> *const TSLanguage {
+pub const unsafe extern "C" fn ts_node_language(self_: TSNode) -> *const TSLanguage {
     let tree = self_.tree.cast::<TSTree>();
     (*tree).language
 }
@@ -617,7 +617,7 @@ pub unsafe extern "C" fn ts_node_is_null(self_: TSNode) -> bool {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn ts_node_is_extra(self_: TSNode) -> bool {
+pub const unsafe extern "C" fn ts_node_is_extra(self_: TSNode) -> bool {
     ts_subtree_extra(ts_node__subtree(self_))
 }
 
@@ -633,17 +633,17 @@ pub unsafe extern "C" fn ts_node_is_named(self_: TSNode) -> bool {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn ts_node_is_missing(self_: TSNode) -> bool {
+pub const unsafe extern "C" fn ts_node_is_missing(self_: TSNode) -> bool {
     ts_subtree_missing(ts_node__subtree(self_))
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn ts_node_has_changes(self_: TSNode) -> bool {
+pub const unsafe extern "C" fn ts_node_has_changes(self_: TSNode) -> bool {
     ts_subtree_has_changes(ts_node__subtree(self_))
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn ts_node_has_error(self_: TSNode) -> bool {
+pub const unsafe extern "C" fn ts_node_has_error(self_: TSNode) -> bool {
     ts_subtree_error_cost(ts_node__subtree(self_)) > 0
 }
 
@@ -653,12 +653,12 @@ pub unsafe extern "C" fn ts_node_is_error(self_: TSNode) -> bool {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn ts_node_descendant_count(self_: TSNode) -> u32 {
+pub const unsafe extern "C" fn ts_node_descendant_count(self_: TSNode) -> u32 {
     ts_subtree_visible_descendant_count(ts_node__subtree(self_)) + 1
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn ts_node_parse_state(self_: TSNode) -> TSStateId {
+pub const unsafe extern "C" fn ts_node_parse_state(self_: TSNode) -> TSStateId {
     ts_subtree_parse_state(ts_node__subtree(self_))
 }
 
@@ -679,7 +679,7 @@ pub unsafe extern "C" fn ts_node_next_parse_state(self_: TSNode) -> TSStateId {
 // ---------------------------------------------------------------------------
 
 #[no_mangle]
-pub unsafe extern "C" fn ts_node_child_count(self_: TSNode) -> u32 {
+pub const unsafe extern "C" fn ts_node_child_count(self_: TSNode) -> u32 {
     let tree = ts_node__subtree(self_);
     if ts_subtree_child_count(tree) > 0 {
         (*tree.ptr).data.children.visible_child_count
@@ -689,7 +689,7 @@ pub unsafe extern "C" fn ts_node_child_count(self_: TSNode) -> u32 {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn ts_node_named_child_count(self_: TSNode) -> u32 {
+pub const unsafe extern "C" fn ts_node_named_child_count(self_: TSNode) -> u32 {
     let tree = ts_node__subtree(self_);
     if ts_subtree_child_count(tree) > 0 {
         (*tree.ptr).data.children.named_child_count

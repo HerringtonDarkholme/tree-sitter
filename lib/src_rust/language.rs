@@ -603,7 +603,7 @@ pub unsafe extern "C" fn ts_language_delete(self_: *const TSLanguage) {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn ts_language_symbol_count(
+pub const unsafe extern "C" fn ts_language_symbol_count(
     self_: *const TSLanguage,
 ) -> u32 {
     let l = lang(self_);
@@ -611,7 +611,7 @@ pub unsafe extern "C" fn ts_language_symbol_count(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn ts_language_state_count(
+pub const unsafe extern "C" fn ts_language_state_count(
     self_: *const TSLanguage,
 ) -> u32 {
     (*lang(self_)).state_count
@@ -651,14 +651,14 @@ pub unsafe extern "C" fn ts_language_subtypes(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn ts_language_abi_version(
+pub const unsafe extern "C" fn ts_language_abi_version(
     self_: *const TSLanguage,
 ) -> u32 {
     (*lang(self_)).abi_version
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn ts_language_metadata(
+pub const unsafe extern "C" fn ts_language_metadata(
     self_: *const TSLanguage,
 ) -> *const TSLanguageMetadata {
     let l = lang(self_);
@@ -670,7 +670,7 @@ pub unsafe extern "C" fn ts_language_metadata(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn ts_language_name(
+pub const unsafe extern "C" fn ts_language_name(
     self_: *const TSLanguage,
 ) -> *const i8 {
     let l = lang(self_);
@@ -682,7 +682,7 @@ pub unsafe extern "C" fn ts_language_name(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn ts_language_field_count(
+pub const unsafe extern "C" fn ts_language_field_count(
     self_: *const TSLanguage,
 ) -> u32 {
     (*lang(self_)).field_count
@@ -711,7 +711,7 @@ pub unsafe extern "C" fn ts_language_table_entry(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn ts_language_lex_mode_for_state(
+pub const unsafe extern "C" fn ts_language_lex_mode_for_state(
     self_: *const TSLanguage,
     state: TSStateId,
 ) -> TSLexerMode {
@@ -754,7 +754,7 @@ pub unsafe extern "C" fn ts_language_is_reserved_word(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn ts_language_symbol_metadata(
+pub const unsafe extern "C" fn ts_language_symbol_metadata(
     self_: *const TSLanguage,
     symbol: TSSymbol,
 ) -> TSSymbolMetadata {
@@ -768,7 +768,7 @@ pub unsafe extern "C" fn ts_language_symbol_metadata(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn ts_language_public_symbol(
+pub const unsafe extern "C" fn ts_language_public_symbol(
     self_: *const TSLanguage,
     symbol: TSSymbol,
 ) -> TSSymbol {
@@ -935,7 +935,7 @@ pub unsafe extern "C" fn ts_lookahead_iterator_reset_state(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn ts_lookahead_iterator_language(
+pub const unsafe extern "C" fn ts_lookahead_iterator_language(
     self_: *const LookaheadIterator,
 ) -> *const TSLanguage {
     (*self_).language
@@ -962,7 +962,7 @@ pub unsafe extern "C" fn ts_lookahead_iterator_next(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn ts_lookahead_iterator_current_symbol(
+pub const unsafe extern "C" fn ts_lookahead_iterator_current_symbol(
     self_: *const LookaheadIterator,
 ) -> TSSymbol {
     (*self_).symbol
