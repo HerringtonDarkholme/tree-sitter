@@ -677,18 +677,20 @@ unsafe fn stack_node_add_link(
                 return;
             }
 
-            if (*existing_link.node).state == (*link.node).state
-                && (*existing_link.node).position.bytes == (*link.node).position.bytes
-                && (*existing_link.node).error_cost == (*link.node).error_cost
+            let existing_node = stack_node_ref(existing_link.node);
+            let link_node = stack_node_ref(link.node);
+            if existing_node.state == link_node.state
+                && existing_node.position.bytes == link_node.position.bytes
+                && existing_node.error_cost == link_node.error_cost
             {
-                for j in 0..(*link.node).link_count as usize {
+                for j in 0..link_node.link_count as usize {
                     stack_node_add_link(
                         stack_node_mut(existing_link.node),
-                        (*link.node).links[j],
+                        link_node.links[j],
                         subtree_pool,
                     );
                 }
-                let mut dynamic_precedence = (*link.node).dynamic_precedence;
+                let mut dynamic_precedence = link_node.dynamic_precedence;
                 if !link.subtree.ptr.is_null() {
                     dynamic_precedence += ts_subtree_dynamic_precedence(link.subtree);
                 }
