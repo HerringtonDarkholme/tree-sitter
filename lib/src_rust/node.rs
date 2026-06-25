@@ -24,7 +24,7 @@ use super::subtree::{
     TSFieldMapEntry,
 };
 use super::subtree::ts_subtree_parse_state;
-use super::tree::{ts_tree_root_node, TSTree};
+use super::tree::{tree_ref, ts_tree_root_node_ref, TSTree};
 
 // ---------------------------------------------------------------------------
 // Types
@@ -720,7 +720,7 @@ pub const unsafe extern "C" fn ts_node_named_child_count(self_: TSNode) -> u32 {
 #[no_mangle]
 pub unsafe extern "C" fn ts_node_parent(self_: TSNode) -> TSNode {
     let tree = node_tree(self_);
-    let mut node = ts_tree_root_node(tree);
+    let mut node = ts_tree_root_node_ref(tree, tree_ref(tree));
     if node.id == self_.id { return ts_node__null(); }
 
     loop {

@@ -57,7 +57,7 @@ pub struct TSTree {
 }
 
 #[inline]
-const unsafe fn tree_ref<'a>(tree: *const TSTree) -> &'a TSTree {
+pub(crate) const unsafe fn tree_ref<'a>(tree: *const TSTree) -> &'a TSTree {
     &*tree
 }
 
@@ -105,7 +105,7 @@ unsafe fn ts_tree_delete_ref(tree: &mut TSTree) {
     ts_free(tree.included_ranges.cast::<c_void>());
 }
 
-unsafe fn ts_tree_root_node_ref(tree_ptr: *const TSTree, tree: &TSTree) -> TSNode {
+pub(crate) unsafe fn ts_tree_root_node_ref(tree_ptr: *const TSTree, tree: &TSTree) -> TSNode {
     ts_node_new(tree_ptr, &tree.root, ts_subtree_padding(tree.root), 0)
 }
 
