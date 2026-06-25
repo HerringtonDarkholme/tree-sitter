@@ -124,7 +124,12 @@ fn ts_lexer__clear_chunk(self_: &mut Lexer) {
 }
 
 unsafe fn ts_lexer__included_range(self_: &Lexer, index: usize) -> &TSRange {
-    &*self_.included_ranges.add(index)
+    ts_lexer__included_ranges(self_).get_unchecked(index)
+}
+
+#[inline]
+unsafe fn ts_lexer__included_ranges(self_: &Lexer) -> &[TSRange] {
+    std::slice::from_raw_parts(self_.included_ranges, self_.included_range_count as usize)
 }
 
 /// Call the input callback to obtain a new chunk of source code.
