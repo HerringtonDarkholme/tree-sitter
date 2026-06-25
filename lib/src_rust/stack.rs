@@ -851,7 +851,10 @@ unsafe fn stack__iter(
             if should_stop {
                 if !should_pop {
                     let iter = stack_iterator_array_get_mut(&mut stack.iterators, i);
-                    ts_subtree_array_delete(&mut *stack.subtree_pool, &mut iter.subtrees);
+                    ts_subtree_array_delete(
+                        subtree_pool_mut(stack.subtree_pool),
+                        &mut iter.subtrees,
+                    );
                 }
                 array_erase(&mut stack.iterators, i);
                 i = i.wrapping_sub(1);
@@ -1065,7 +1068,7 @@ pub unsafe fn ts_stack_delete(self_: &mut Stack) {
     );
     let heads = &mut self_.heads;
     let node_pool = &mut self_.node_pool;
-    let subtree_pool = &mut *self_.subtree_pool;
+    let subtree_pool = subtree_pool_mut(self_.subtree_pool);
     for i in 0..heads.size {
         stack_head_delete(
             stack_head_array_get_mut(heads, i),
@@ -1124,7 +1127,7 @@ pub unsafe fn ts_stack_set_last_external_token(
     version: StackVersion,
     token: Subtree,
 ) {
-    let subtree_pool = &mut *self_.subtree_pool;
+    let subtree_pool = subtree_pool_mut(self_.subtree_pool);
     let head = stack_head_array_get_mut(&mut self_.heads, version);
     if !token.ptr.is_null() {
         ts_subtree_retain(token);
@@ -1330,7 +1333,7 @@ pub unsafe fn ts_stack_has_advanced_since_error(
 pub unsafe fn ts_stack_remove_version(self_: &mut Stack, version: StackVersion) {
     let heads = &mut self_.heads;
     let node_pool = &mut self_.node_pool;
-    let subtree_pool = &mut *self_.subtree_pool;
+    let subtree_pool = subtree_pool_mut(self_.subtree_pool);
     stack_head_delete(
         stack_head_array_get_mut(heads, version),
         node_pool,
@@ -1353,7 +1356,7 @@ pub unsafe fn ts_stack_renumber_version(
 
     let heads = &mut stack.heads;
     let node_pool = &mut stack.node_pool;
-    let subtree_pool = &mut *stack.subtree_pool;
+    let subtree_pool = subtree_pool_mut(stack.subtree_pool);
     let (source_head, target_head) = stack_head_array_pair_mut(heads, v1, v2);
     if !target_head.summary.is_null() && source_head.summary.is_null() {
         source_head.summary = target_head.summary;
@@ -1404,7 +1407,7 @@ pub unsafe fn ts_stack_merge(
     }
     {
         let stack_heads = &mut stack.heads;
-        let subtree_pool = &mut *stack.subtree_pool;
+        let subtree_pool = subtree_pool_mut(stack.subtree_pool);
         let (head1, head2) = stack_head_array_pair_mut(stack_heads, version1, version2);
         for i in 0..(*head2.node).link_count as usize {
             stack_node_add_link(stack_node_mut(head1.node), (*head2.node).links[i], subtree_pool);
@@ -1486,7 +1489,7 @@ pub unsafe fn ts_stack_clear(self_: &mut Stack) {
     stack_node_retain(stack_node_mut(self_.base_node));
     let heads = &mut self_.heads;
     let node_pool = &mut self_.node_pool;
-    let subtree_pool = &mut *self_.subtree_pool;
+    let subtree_pool = subtree_pool_mut(self_.subtree_pool);
     for i in 0..heads.size {
         stack_head_delete(
             stack_head_array_get_mut(heads, i),
