@@ -144,7 +144,7 @@ unsafe fn ts_node__is_relevant(self_: TSNode, include_anonymous: bool) -> bool {
 }
 
 #[inline]
-unsafe fn ts_node__relevant_child_count(
+const unsafe fn ts_node__relevant_child_count(
     self_: TSNode,
     include_anonymous: bool,
 ) -> u32 {
