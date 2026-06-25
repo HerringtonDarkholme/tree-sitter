@@ -2168,3 +2168,66 @@ Source-code analysis:
   boundary only; parser control flow and stack mutation order remain the same.
 - Full `cargo test --all` passed after each code commit in this checkpoint.
   No rollback was performed.
+
+### 2026-06-25 13:01 EDT
+
+- Repo head: `18a8eb92`
+- Batch base: `b2650730`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: 10 small cleanup commits from
+  `Trim unused subtree header helpers` through `Trim atomic header includes`
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 25464.8 | 23550.9 | +8.13% |
+| TypeScript error parses | 32 | 1644.7 | 1626.3 | +1.13% |
+| JavaScript normal parses | 2 | 16865.5 | 15630.3 | +7.90% |
+| JavaScript error parses | 37 | 2006.4 | 1944.7 | +3.17% |
+| Overall parser throughput | 82 | 2267.9 | 2222.0 | +2.07% |
+
+Prior checkpoint at `32de820d` recorded Rust overall throughput of 2311.3
+bytes/ms on the same TypeScript/JavaScript gate, so this batch measured -1.88%
+absolute Rust throughput. The Rust-vs-C delta moved from +4.01% to +2.07%,
+while C overall throughput was effectively unchanged.
+
+The first checkpoint run at this same head measured Rust overall throughput of
+2235.0 bytes/ms and C throughput of 2148.8 bytes/ms, still +4.01% overall for
+Rust. It reported five per-case Rust slowdowns over 5% versus C:
+`javascript error corePublic.ts` (80.81%),
+`javascript error compound-statement-without-trailing-newline.py` (49.37%),
+`typescript normal transform.ts` (9.23%),
+`javascript error parser.c` (7.94%), and
+`javascript error marker-index.h` (6.76%).
+
+Because that outlier set did not match the prior checkpoint or the source-code
+risk profile, the command was repeated before recording the checkpoint. The
+repeat reduced the outlier list to one borderline case:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `javascript error compound-statement-without-trailing-newline.py` | 2831.6 | 3012.0 | 5.99% |
+
+Source-code analysis:
+
+- The batch has two Rust parser-stack signature cleanups:
+  `ts_stack_merge`/`ts_stack_can_merge` and `ts_stack_push` now take internal
+  `Stack` references instead of raw `*mut Stack` parameters. The raw conversion
+  remains at the parser/stack boundary, and stack ownership, mutation order, FFI
+  exports, parser control flow, parse-table data, and `#[repr(C)]` layouts are
+  unchanged.
+- The remaining eight commits are C header cleanup: removing unused static
+  inline helpers, stale internal macros, dead internal headers
+  (`error_costs.h`, `portable/endian.h`, `unicode/utf16.h`), and two unused
+  `atomic.h` includes. These files are not used by the Rust parser hot path.
+- The generated parser headers `crates/generate/src/templates/alloc.h`,
+  `crates/generate/src/templates/array.h`, and `crates/generate/src/parser.h.inc`
+  were not edited. The public generated parser ABI remains unchanged.
+- Full `cargo test --all` passed after every commit in this checkpoint.
+- The per-case slowdown report was not stable across two runs, while aggregate
+  Rust throughput stayed within a small band and remained ahead of C overall.
+  No rollback was performed.
