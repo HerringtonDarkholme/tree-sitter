@@ -1872,11 +1872,12 @@ unsafe fn ts_parser__recover(
 ) {
     let parser = self_ as *mut TSParser;
     let mut did_recover = false;
-    let previous_version_count = ts_stack_version_count(&*self_.stack);
-    let position = ts_stack_position(&*self_.stack, version);
+    let stack = &mut *self_.stack;
+    let previous_version_count = ts_stack_version_count(stack);
+    let position = ts_stack_position(stack, version);
     let summary = ts_stack_get_summary(self_.stack, version);
-    let node_count_since_error = ts_stack_node_count_since_error(&mut *self_.stack, version);
-    let current_error_cost = ts_stack_error_cost(&*self_.stack, version);
+    let node_count_since_error = ts_stack_node_count_since_error(stack, version);
+    let current_error_cost = ts_stack_error_cost(stack, version);
 
     // Strategy 1: Find a previous state where the lookahead is valid.
     if !summary.is_null() && !ts_subtree_is_error(lookahead) {
