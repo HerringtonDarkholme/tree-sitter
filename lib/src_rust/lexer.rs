@@ -233,8 +233,8 @@ unsafe fn ts_lexer_goto(self_: &mut Lexer, position: Length) {
         // If the given position is beyond any of included ranges, move to the EOF
         // state - past the end of the included ranges.
         self_.current_included_range_index = self_.included_range_count;
-        let last_included_range =
-            &*self_.included_ranges.add(self_.included_range_count as usize - 1);
+        let last_range_index = self_.included_range_count as usize - 1;
+        let last_included_range = &*self_.included_ranges.add(last_range_index);
         self_.current_position = Length {
             bytes: last_included_range.end_byte,
             extent: last_included_range.end_point,
