@@ -184,7 +184,7 @@ pub unsafe fn array_init<T>(arr: *mut Array<T>) {
 
 pub unsafe fn array_delete<T>(arr: *mut Array<T>) {
     if !(*arr).contents.is_null() {
-        ts_free((*arr).contents as *mut c_void);
+        ts_free((*arr).contents.cast::<c_void>());
     }
     (*arr).contents = ptr::null_mut();
     (*arr).size = 0;
