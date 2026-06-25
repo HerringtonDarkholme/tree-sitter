@@ -53,6 +53,16 @@ unsafe fn input_edit_ref<'a>(edit: *const TSInputEdit) -> &'a TSInputEdit {
     &*edit
 }
 
+#[inline]
+unsafe fn subtree_ref<'a>(subtree: *const Subtree) -> &'a Subtree {
+    &*subtree
+}
+
+#[inline]
+unsafe fn tree_cursor_mut<'a>(cursor: *mut TreeCursor) -> &'a mut TreeCursor {
+    &mut *cursor
+}
+
 /// Iterator — internal state for tree diffing
 struct Iterator {
     cursor: TreeCursor,
@@ -768,12 +778,12 @@ pub unsafe extern "C" fn ts_subtree_get_changed_ranges(
     ranges: *mut *mut TSRange,
 ) -> u32 {
     ts_subtree_get_changed_ranges_ref(
-        &*old_tree,
-        &*new_tree,
-        &mut *cursor1,
-        &mut *cursor2,
+        subtree_ref(old_tree),
+        subtree_ref(new_tree),
+        tree_cursor_mut(cursor1),
+        tree_cursor_mut(cursor2),
         language,
-        &*included_range_differences,
+        range_array_ref(included_range_differences),
         ranges,
     )
 }
