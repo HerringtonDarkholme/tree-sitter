@@ -2599,7 +2599,7 @@ unsafe fn ts_parser__condense_stack(self_: &mut TSParser) -> u32 {
                     LOG!(self_, c"resume version:%u".as_ptr().cast::<i8>(), i);
                     min_error_cost = ts_stack_error_cost(parser_stack_ref(self_.stack), i);
                     let lookahead = ts_stack_resume(parser_stack_mut(self_.stack), i);
-                    ts_parser__handle_error(&mut *self_, i, lookahead);
+                    ts_parser__handle_error(self_, i, lookahead);
                     has_unpaused_version = true;
                 } else {
                     ts_stack_remove_version(parser_stack_mut(self_.stack), i);
@@ -2639,7 +2639,7 @@ unsafe fn ts_parser__balance_subtree(self_: &mut TSParser) -> bool {
     }
 
     while self_.tree_pool.tree_stack.size > 0 {
-        if !ts_parser__check_progress(&mut *self_, None, None, 1) {
+        if !ts_parser__check_progress(self_, None, None, 1) {
             return false;
         }
 
@@ -2668,7 +2668,7 @@ unsafe fn ts_parser__balance_subtree(self_: &mut TSParser) -> bool {
                     // size since larger values of i take longer to process. Shifting by 4 empirically provides good check
                     // intervals (e.g. 193 operations when i=3100) to prevent blocking during large compressions.
                     let operations = if i >> 4 > 0 { i >> 4 } else { 1 };
-                    if !ts_parser__check_progress(&mut *self_, None, None, operations) {
+                    if !ts_parser__check_progress(self_, None, None, operations) {
                         return false;
                     }
                     i /= 2;
