@@ -1194,3 +1194,62 @@ Source-code analysis:
 - No source change was made and no rollback was performed. Keep the
   TypeScript-normal aggregate and tiny-file outliers on the watchlist for the
   next 10-change checkpoint.
+
+### 2026-06-25 00:00 EDT
+
+- Repo head: `4f4904c9`
+- Batch base: `1cd98830`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: 10 small Rust-core raw-pointer/reference cleanups from
+  `Use stack fields when pushing` through
+  `Use heap ref for external scanner state`
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language javascript --repetitions 30 --error-limit 8 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 26712.8 | 25832.5 | +3.41% |
+| TypeScript error parses | 32 | 1760.0 | 1688.3 | +4.25% |
+| JavaScript normal parses | 2 | 17328.9 | 17035.0 | +1.73% |
+| JavaScript error parses | 37 | 2055.6 | 2047.7 | +0.38% |
+| Overall parser throughput | 82 | 2385.5 | 2322.1 | +2.73% |
+
+The previous TypeScript/JavaScript checkpoint at `1cd98830` recorded Rust
+overall throughput of 2364.5 bytes/ms. This checkpoint is +0.89% versus that
+Rust throughput, so no aggregate parser regression was observed.
+
+Per-case regression investigation:
+
+- The first 10-repetition run reported JavaScript error outliers in
+  `compound-statement-without-trailing-newline.py` and `crlf-line-endings.py`.
+- A second 10-repetition rerun did not reproduce `crlf-line-endings.py`; it
+  instead reported `typescript normal corePublic.ts` and a much smaller
+  `compound-statement-without-trailing-newline.py` outlier.
+- The 30-repetition checkpoint only kept
+  `javascript error compound-statement-without-trailing-newline.py` above 5%:
+  Rust 3120.6 bytes/ms, C 3369.1 bytes/ms, slowdown 7.37%.
+- Because the outlier set changed between repeated runs, and the remaining
+  outlier is a mismatched-language error-corpus parse while JavaScript error
+  aggregate throughput stayed slightly positive, this is tracked as noisy
+  per-case variance rather than a confirmed source-change regression.
+
+Source-code analysis:
+
+- This batch changed Rust-internal bodies in `stack.rs` and `subtree.rs`,
+  replacing repeated raw-pointer dereferences with local references or copied
+  `Subtree` values.
+- No exported `#[no_mangle] extern "C"` signatures, C header declarations,
+  public FFI struct layouts, allocation headers, generated parser templates, or
+  included C header text were edited.
+- Stack changes were limited to local reference bindings in stack push,
+  summary, release, and link append paths. The link merge recursion, stack-head
+  ownership, subtree retain/release behavior, and public stack function
+  signatures are unchanged.
+- Subtree changes were limited to local references in compare, set-symbol,
+  edit, clone, external-scanner-state, and DOT graph helper bodies. Allocation
+  sizes, heap layout, scanner-state copying, tree edit traversal, and subtree
+  ownership behavior are unchanged.
+- No rollback was performed.
