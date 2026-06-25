@@ -269,6 +269,19 @@ const unsafe fn lang(self_: *const TSLanguage) -> *const TSLanguageFull {
     self_.cast::<TSLanguageFull>()
 }
 
+#[inline]
+unsafe fn parse_action_entry<'a>(
+    language: *const TSLanguageFull,
+    index: usize,
+) -> &'a TSParseActionEntry {
+    &*(*language).parse_actions.add(index)
+}
+
+#[inline]
+unsafe fn parse_action_at(language: *const TSLanguageFull, index: usize) -> *const TSParseAction {
+    (*language).parse_actions.add(index).cast::<TSParseAction>()
+}
+
 // ---------------------------------------------------------------------------
 // Extern C declarations for functions we call from other C modules
 // ---------------------------------------------------------------------------
@@ -447,12 +460,9 @@ pub unsafe fn ts_lookahead_iterator__next(self_: &mut LookaheadIterator) -> bool
     // Depending on if the symbol is terminal or non-terminal, the table value
     // either represents a list of actions or a successor state.
     if u32::from(self_.symbol) < (*l).token_count {
-        let entry = &*(*l).parse_actions.add(self_.table_value as usize);
+        let entry = parse_action_entry(l, self_.table_value as usize);
         self_.action_count = u16::from(entry.entry.count);
-        self_.actions = (*l)
-            .parse_actions
-            .add(self_.table_value as usize + 1)
-            .cast::<TSParseAction>();
+        self_.actions = parse_action_at(l, self_.table_value as usize + 1);
         self_.next_state = 0;
     } else {
         self_.action_count = 0;
@@ -718,10 +728,10 @@ pub unsafe extern "C" fn ts_language_table_entry(
     } else {
         debug_assert!(u32::from(symbol) < (*l).token_count);
         let action_index = ts_language_lookup(self_, state, symbol) as usize;
-        let entry = &*(*l).parse_actions.add(action_index);
+        let entry = parse_action_entry(l, action_index);
         (*result).action_count = u32::from(entry.entry.count);
         (*result).is_reusable = entry.entry.reusable;
-        (*result).actions = (*l).parse_actions.add(action_index + 1).cast::<TSParseAction>();
+        (*result).actions = parse_action_at(l, action_index + 1);
     }
 }
 
