@@ -283,13 +283,18 @@ unsafe fn ts_tree_cursor_iterate_children(
     }
 }
 
+#[inline]
+unsafe fn cursor_child<'a>(parent: Subtree, index: u32) -> &'a Subtree {
+    &*ts_subtree_children(parent).add(index as usize)
+}
+
 unsafe fn ts_tree_cursor_child_iterator_next(
     self_: &mut CursorChildIterator,
 ) -> Option<CursorChild> {
     if self_.parent.ptr.is_null() || self_.child_index == (*self_.parent.ptr).child_count {
         return None;
     }
-    let child = &*ts_subtree_children(self_.parent).add(self_.child_index as usize);
+    let child = cursor_child(self_.parent, self_.child_index);
     let entry = TreeCursorEntry {
         subtree: child,
         position: self_.position,
@@ -315,7 +320,7 @@ unsafe fn ts_tree_cursor_child_iterator_next(
     self_.child_index += 1;
 
     if self_.child_index < (*self_.parent.ptr).child_count {
-        let next_child = *ts_subtree_children(self_.parent).add(self_.child_index as usize);
+        let next_child = *cursor_child(self_.parent, self_.child_index);
         self_.position = length_add(self_.position, ts_subtree_padding(next_child));
     }
 
@@ -342,7 +347,7 @@ unsafe fn ts_tree_cursor_child_iterator_previous(
     if self_.parent.ptr.is_null() || self_.child_index as i8 == -1 {
         return None;
     }
-    let child = &*ts_subtree_children(self_.parent).add(self_.child_index as usize);
+    let child = cursor_child(self_.parent, self_.child_index);
     let entry = TreeCursorEntry {
         subtree: child,
         position: self_.position,
@@ -365,7 +370,7 @@ unsafe fn ts_tree_cursor_child_iterator_previous(
 
     // unsigned can underflow so compare it to child_count
     if self_.child_index < (*self_.parent.ptr).child_count {
-        let previous_child = *ts_subtree_children(self_.parent).add(self_.child_index as usize);
+        let previous_child = *cursor_child(self_.parent, self_.child_index);
         let size = ts_subtree_size(previous_child);
         self_.position = length_backtrack(self_.position, size);
     }
