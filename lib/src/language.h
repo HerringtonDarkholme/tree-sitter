@@ -14,9 +14,7 @@ typedef struct {
   const TSLanguage *language;
   const uint16_t *data;
   const uint16_t *group_end;
-  TSStateId state;
   uint16_t table_value;
-  uint16_t section_index;
   uint16_t group_count;
   bool is_small_state;
 
