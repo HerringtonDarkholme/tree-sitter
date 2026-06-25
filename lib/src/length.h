@@ -9,7 +9,4 @@ typedef struct {
   TSPoint extent;
 } Length;
 
-static const Length LENGTH_UNDEFINED = {0, {0, 1}};
-static const Length LENGTH_MAX = {UINT32_MAX, {UINT32_MAX, UINT32_MAX}};
-
 #endif
