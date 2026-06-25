@@ -320,7 +320,7 @@ unsafe extern "C" fn ts_lexer__advance(lexer: *mut TSLexer, skip: bool) {
     if self_.logger.log.is_some() {
         let character = self_.data.lookahead;
         if skip {
-            if 32 <= character && character < 127 {
+            if (32..127).contains(&character) {
                 ts_lexer__log_shim(
                     lexer,
                     b"skip character:'%c'\0".as_ptr() as *const i8,
@@ -333,7 +333,7 @@ unsafe extern "C" fn ts_lexer__advance(lexer: *mut TSLexer, skip: bool) {
                     character,
                 );
             }
-        } else if 32 <= character && character < 127 {
+        } else if (32..127).contains(&character) {
             ts_lexer__log_shim(
                 lexer,
                 b"consume character:'%c'\0".as_ptr() as *const i8,
