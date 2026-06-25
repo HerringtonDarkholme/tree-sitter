@@ -1225,7 +1225,8 @@ pub unsafe fn ts_stack_record_summary(
         &mut session as *mut SummarizeStackSession as *mut c_void,
         -1,
     );
-    let head = stack_head_mut(&mut *self_, version);
+    let stack = &mut *self_;
+    let head = stack_head_mut(stack, version);
     if !head.summary.is_null() {
         array_delete(head.summary);
         ts_free(head.summary as *mut c_void);
@@ -1238,7 +1239,8 @@ pub unsafe fn ts_stack_get_summary(
     self_: *mut Stack,
     version: StackVersion,
 ) -> *mut StackSummary {
-    stack_head(&*self_, version).summary
+    let stack = &*self_;
+    stack_head(stack, version).summary
 }
 
 /// Get the dynamic precedence of a version.
