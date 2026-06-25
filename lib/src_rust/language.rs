@@ -265,7 +265,7 @@ const _: () = assert!(std::mem::size_of::<LookaheadIterator>() == 56);
 // ---------------------------------------------------------------------------
 
 #[inline(always)]
-unsafe fn lang(self_: *const TSLanguage) -> *const TSLanguageFull {
+const unsafe fn lang(self_: *const TSLanguage) -> *const TSLanguageFull {
     self_ as *const TSLanguageFull
 }
 
