@@ -154,6 +154,16 @@ struct SummarizeStackSession {
     max_depth: u32,
 }
 
+#[inline]
+unsafe fn stack_mut<'a>(stack: *mut Stack) -> &'a mut Stack {
+    stack.as_mut().unwrap_unchecked()
+}
+
+#[inline]
+unsafe fn subtree_pool_mut<'a>(pool: *mut SubtreePool) -> &'a mut SubtreePool {
+    pool.as_mut().unwrap_unchecked()
+}
+
 // ---------------------------------------------------------------------------
 // Extern C declarations
 // ---------------------------------------------------------------------------
@@ -1016,7 +1026,7 @@ unsafe extern "C" fn summarize_stack_callback(
 /// Create a new parse stack.
 pub unsafe fn ts_stack_new(subtree_pool: *mut SubtreePool) -> *mut Stack {
     let self_ = ts_calloc(1, std::mem::size_of::<Stack>()).cast::<Stack>();
-    let stack = &mut *self_;
+    let stack = stack_mut(self_);
 
     array_init(&mut stack.heads);
     array_init(&mut stack.slices);
@@ -1049,9 +1059,9 @@ pub unsafe fn ts_stack_delete(self_: &mut Stack) {
         array_delete(&mut self_.iterators);
     }
     stack_node_release(
-        &mut *self_.base_node,
+        stack_node_mut(self_.base_node),
         &mut self_.node_pool,
-        &mut *self_.subtree_pool,
+        subtree_pool_mut(self_.subtree_pool),
     );
     let heads = &mut self_.heads;
     let node_pool = &mut self_.node_pool;
