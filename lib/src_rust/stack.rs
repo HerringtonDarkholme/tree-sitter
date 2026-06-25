@@ -343,7 +343,7 @@ unsafe fn stack_head_mut(self_: &mut Stack, version: StackVersion) -> &mut Stack
 
 #[inline]
 unsafe fn stack_head_array_get(self_: &Array<StackHead>, version: StackVersion) -> &StackHead {
-    &*array_get(self_, version)
+    array_get_ref(self_, version)
 }
 
 #[inline]
@@ -351,7 +351,7 @@ unsafe fn stack_head_array_get_mut(
     self_: &mut Array<StackHead>,
     version: StackVersion,
 ) -> &mut StackHead {
-    &mut *array_get(self_, version)
+    array_get_mut(self_, version)
 }
 
 #[inline]
@@ -398,12 +398,12 @@ unsafe fn stack_head_array_back_mut(self_: &mut Array<StackHead>) -> &mut StackH
 
 #[inline]
 unsafe fn stack_slice_array_get(self_: &StackSliceArray, index: u32) -> &StackSlice {
-    &*array_get(self_, index)
+    array_get_ref(self_, index)
 }
 
 #[inline]
 unsafe fn stack_slice_array_get_mut(self_: &mut StackSliceArray, index: u32) -> &mut StackSlice {
-    &mut *array_get(self_, index)
+    array_get_mut(self_, index)
 }
 
 #[inline]
@@ -418,12 +418,12 @@ const unsafe fn subtree_array_read_ref(self_: &SubtreeArray) -> SubtreeArray {
 
 #[inline]
 unsafe fn stack_node_pool_get(self_: &Array<*mut StackNode>, index: u32) -> *mut StackNode {
-    *array_get(self_, index)
+    *array_get_ref(self_, index)
 }
 
 #[inline]
 unsafe fn stack_node_array_get(self_: &StackNodeArray, index: u32) -> *mut StackNode {
-    *array_get(self_, index)
+    *array_get_ref(self_, index)
 }
 
 #[inline]
@@ -431,12 +431,12 @@ unsafe fn stack_summary_array_get(
     self_: &StackSummary,
     index: u32,
 ) -> &StackSummaryEntry {
-    &*array_get(self_, index)
+    array_get_ref(self_, index)
 }
 
 #[inline]
 unsafe fn stack_iterator_array_get(self_: &Array<StackIterator>, index: u32) -> &StackIterator {
-    &*array_get(self_, index)
+    array_get_ref(self_, index)
 }
 
 #[inline]
@@ -444,7 +444,7 @@ unsafe fn stack_iterator_array_get_mut(
     self_: &mut Array<StackIterator>,
     index: u32,
 ) -> &mut StackIterator {
-    &mut *array_get(self_, index)
+    array_get_mut(self_, index)
 }
 
 #[inline]
