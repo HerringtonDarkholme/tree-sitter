@@ -15,7 +15,7 @@ use super::error_costs::{
     ERROR_COST_PER_MISSING_TREE, ERROR_COST_PER_RECOVERY, ERROR_COST_PER_SKIPPED_CHAR,
     ERROR_COST_PER_SKIPPED_LINE, ERROR_COST_PER_SKIPPED_TREE,
 };
-use super::language::ts_language_symbol_name;
+use super::language::{ts_language_symbol_metadata, ts_language_symbol_name};
 use super::length::{length_add, length_saturating_sub, length_sub, length_zero, Length};
 
 // ---------------------------------------------------------------------------
@@ -348,8 +348,6 @@ extern "C" {
     #[link_name = "memcmp"]
     fn libc_memcmp(s1: *const c_void, s2: *const c_void, n: usize) -> i32;
 
-    fn ts_language_symbol_metadata(language: *const TSLanguage, symbol: TSSymbol)
-        -> TSSymbolMetadata;
 }
 
 // ---------------------------------------------------------------------------

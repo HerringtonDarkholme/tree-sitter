@@ -4,9 +4,7 @@
 use core::ffi::c_void;
 use std::ptr;
 
-use crate::ffi::{
-    TSFieldId, TSLanguage, TSNode, TSPoint, TSSymbol, TSTreeCursor,
-};
+use crate::ffi::{TSFieldId, TSNode, TSPoint, TSSymbol, TSTreeCursor};
 
 use super::alloc::{ts_calloc, ts_free, ts_realloc};
 use super::length::{
@@ -17,12 +15,11 @@ use super::subtree::{
     ts_subtree_children, ts_subtree_child_count, ts_subtree_extra,
     ts_subtree_padding, ts_subtree_size, ts_subtree_symbol,
     ts_subtree_total_size, ts_subtree_visible, ts_subtree_visible_child_count,
-    ts_subtree_visible_descendant_count, Subtree,
-    TSFieldMapEntry, TSSymbolMetadata, NULL_SUBTREE,
+    ts_subtree_visible_descendant_count, Subtree, TSFieldMapEntry, NULL_SUBTREE,
 };
 use super::language::{
     ts_language_alias_at, ts_language_alias_sequence, ts_language_field_map,
-    TSLanguageFull,
+    ts_language_symbol_metadata, TSLanguageFull,
 };
 use super::tree::TSTree;
 
@@ -43,13 +40,6 @@ extern "C" {
     ) -> TSNode;
     fn ts_node_start_byte(self_: TSNode) -> u32;
     fn ts_node_start_point(self_: TSNode) -> TSPoint;
-
-    // language.rs (exported)
-    fn ts_language_symbol_metadata(
-        self_: *const TSLanguage,
-        symbol: TSSymbol,
-    ) -> TSSymbolMetadata;
-
     fn memcpy(dest: *mut c_void, src: *const c_void, n: usize) -> *mut c_void;
 }
 
