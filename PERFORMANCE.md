@@ -2994,3 +2994,59 @@ Source-code analysis:
   was performed.
 - Full `cargo test --all` passed after every committed code change in this
   checkpoint.
+
+### 2026-06-25 17:57 EDT
+
+- Repo head: `8f3b555e`
+- Batch base: `3330f77b`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: 10 small parser stack accessor cleanups:
+  `Use parser stack accessors in reduce tail` through
+  `Use parser stack accessors in stack condensing`.
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 25463.9 | 24791.1 | +2.71% |
+| TypeScript error parses | 32 | 1703.4 | 1649.3 | +3.28% |
+| JavaScript normal parses | 2 | 17512.5 | 15781.5 | +10.97% |
+| JavaScript error parses | 37 | 2075.7 | 1942.3 | +6.87% |
+| Overall parser throughput | 82 | 2347.1 | 2241.3 | +4.72% |
+
+Per-case regressions over 5%:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `typescript error jquery.js` | 14715.5 | 15682.6 | 6.17% |
+| `typescript error compound-statement-without-trailing-newline.py` | 912.8 | 966.5 | 5.56% |
+| `javascript error compound-statement-without-trailing-newline.py` | 2752.8 | 2908.3 | 5.35% |
+
+Prior checkpoint at `a964b3ca` measured Rust overall throughput of 2314.7
+bytes/ms and a Rust-vs-C delta of +2.76%. This checkpoint measured 2347.1
+bytes/ms, so absolute Rust throughput moved by about +1.40%. C throughput moved
+from 2252.6 to 2241.3 bytes/ms, and the Rust-vs-C delta moved to +4.72%.
+
+Source-code analysis:
+
+- The batch contains no exported `#[no_mangle] extern "C"` signature changes,
+  no struct layout changes, no C header field changes, and no parser action or
+  parsing table semantic changes.
+- The parser commits replace direct raw stack reference formation
+  (`&*self_.stack` and `&mut *self_.stack`) with the existing
+  `parser_stack_ref` and `parser_stack_mut` accessors across reduce tail,
+  accept, reduction loop, state recovery, recovery setup/tail, error handling,
+  advance, isolated parser checks, and stack condensing.
+- The final search for direct `self_.stack` raw-reference formation in
+  `parser.rs` is empty. Remaining parser raw-pointer work is now in other
+  parser-owned pointer fields and exported API/FFI boundary handling.
+- The three per-case slowdowns are narrow error fixtures just over the 5%
+  threshold, while every aggregate bucket is faster than C and absolute Rust
+  throughput improved versus the prior checkpoint. The changed code is
+  mechanical reference formation around identical stack operations, so these
+  outliers do not currently point to a source-level regression in this batch.
+- Full `cargo test --all` passed before every committed code change in this
+  checkpoint.
