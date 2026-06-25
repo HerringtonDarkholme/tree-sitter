@@ -14,7 +14,6 @@ extern "C" {
 #include "./parser.h"
 
 #define TS_TREE_STATE_NONE USHRT_MAX
-#define NULL_SUBTREE ((Subtree) {.ptr = NULL})
 
 // The serialized state of an external scanner.
 //
@@ -156,20 +155,6 @@ typedef union {
   SubtreeInlineData data;
   const SubtreeHeapData *ptr;
 } Subtree;
-
-// Like Subtree, but mutable.
-typedef union {
-  SubtreeInlineData data;
-  SubtreeHeapData *ptr;
-} MutableSubtree;
-
-typedef Array(Subtree) SubtreeArray;
-typedef Array(MutableSubtree) MutableSubtreeArray;
-
-typedef struct {
-  MutableSubtreeArray free_trees;
-  MutableSubtreeArray tree_stack;
-} SubtreePool;
 
 static inline TSSymbol ts_subtree_symbol(Subtree self) {
   return self.data.is_inline ? self.data.symbol : self.ptr->symbol;
