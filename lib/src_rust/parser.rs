@@ -349,6 +349,16 @@ unsafe fn parser_stack_ref<'a>(stack: *const Stack) -> &'a Stack {
 }
 
 #[inline]
+unsafe fn parser_ptr_mut<'a>(parser: *mut TSParser) -> &'a mut TSParser {
+    parser.as_mut().unwrap_unchecked()
+}
+
+#[inline]
+unsafe fn parser_ptr_ref<'a>(parser: *const TSParser) -> &'a TSParser {
+    parser.as_ref().unwrap_unchecked()
+}
+
+#[inline]
 unsafe fn parser_language_full<'a>(language: *const TSLanguage) -> &'a TSLanguageFull {
     language.cast::<TSLanguageFull>().as_ref().unwrap_unchecked()
 }
@@ -2770,7 +2780,7 @@ pub unsafe extern "C" fn ts_parser_delete(self_: *mut TSParser) {
     }
 
     ts_parser_set_language(self_, ptr::null());
-    let parser = &mut *self_;
+    let parser = parser_ptr_mut(self_);
     ts_stack_delete(parser_stack_mut(parser.stack));
     if !parser.reduce_actions.contents.is_null() {
         array_delete(std::ptr::addr_of_mut!(parser.reduce_actions));
@@ -2809,7 +2819,7 @@ pub unsafe extern "C" fn ts_parser_set_language(
     language: *const TSLanguage,
 ) -> bool {
     ts_parser_reset(self_);
-    let parser = &mut *self_;
+    let parser = parser_ptr_mut(self_);
     ts_language_delete(parser.language);
     parser.language = ptr::null();
 
@@ -2844,7 +2854,7 @@ pub unsafe extern "C" fn ts_parser_set_logger(
     self_: *mut TSParser,
     logger: TSLogger,
 ) {
-    let parser = &mut *self_;
+    let parser = parser_ptr_mut(self_);
     parser.lexer.logger = logger;
 }
 
@@ -2853,7 +2863,7 @@ pub unsafe extern "C" fn ts_parser_print_dot_graphs(
     self_: *mut TSParser,
     fd: i32,
 ) {
-    let parser = &mut *self_;
+    let parser = parser_ptr_mut(self_);
     if !parser.dot_graph_file.is_null() {
         fclose(parser.dot_graph_file);
     }
@@ -2881,7 +2891,7 @@ pub unsafe extern "C" fn ts_parser_set_included_ranges(
     ranges: *const TSRange,
     count: u32,
 ) -> bool {
-    let parser = &mut *self_;
+    let parser = parser_ptr_mut(self_);
     ts_lexer_set_included_ranges(&mut parser.lexer, ranges, count)
 }
 
@@ -2890,14 +2900,14 @@ pub unsafe extern "C" fn ts_parser_included_ranges(
     self_: *const TSParser,
     count: *mut u32,
 ) -> *const TSRange {
-    let parser = &*self_;
+    let parser = parser_ptr_ref(self_);
     ts_lexer_included_ranges(&parser.lexer, count)
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_parser_reset(self_: *mut TSParser) {
-    ts_parser__external_scanner_destroy(&mut *self_);
-    let parser = &mut *self_;
+    let parser = parser_ptr_mut(self_);
+    ts_parser__external_scanner_destroy(parser);
     if !parser.wasm_store.is_null() {
         ts_wasm_store_reset(parser.wasm_store);
     }
