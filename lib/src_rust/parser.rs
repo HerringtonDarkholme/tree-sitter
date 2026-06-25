@@ -559,7 +559,7 @@ unsafe fn ts_parser__breakdown_top_of_stack(
     let mut did_break_down = false;
 
     loop {
-        let pop = ts_stack_pop_pending(self_.stack, version);
+        let pop = ts_stack_pop_pending(&mut *self_.stack, version);
         if pop.size == 0 {
             break;
         }
@@ -1427,7 +1427,7 @@ unsafe fn ts_parser__reduce(
     let parser = ptr::from_mut(self_);
     let initial_version_count = ts_stack_version_count(&*self_.stack);
 
-    let pop = ts_stack_pop_count(self_.stack, version, count);
+    let pop = ts_stack_pop_count(&mut *self_.stack, version, count);
     let mut removed_version_count: u32 = 0;
     let stack = &mut *self_.stack;
     let halted_version_count = ts_stack_halted_version_count(stack);
@@ -1571,7 +1571,7 @@ unsafe fn ts_parser__accept(
     debug_assert!(ts_subtree_is_eof(lookahead));
     ts_stack_push(self_.stack, version, lookahead, false, 1);
 
-    let pop = ts_stack_pop_all(self_.stack, version);
+    let pop = ts_stack_pop_all(&mut *self_.stack, version);
     for i in 0..pop.size {
         let mut trees = stack_slice_subtrees_read_ref(stack_slice_array_get(&pop, i));
 
@@ -1744,7 +1744,7 @@ unsafe fn ts_parser__recover_to_state(
     depth: u32,
     goal_state: TSStateId,
 ) -> bool {
-    let mut pop = ts_stack_pop_count(self_.stack, version, depth);
+    let mut pop = ts_stack_pop_count(&mut *self_.stack, version, depth);
     let mut previous_version = STACK_VERSION_NONE;
 
     let mut i: u32 = 0;
@@ -1764,7 +1764,7 @@ unsafe fn ts_parser__recover_to_state(
             continue;
         }
 
-        let mut error_trees = ts_stack_pop_error(self_.stack, slice.version);
+        let mut error_trees = ts_stack_pop_error(&mut *self_.stack, slice.version);
         if error_trees.size > 0 {
             debug_assert!(error_trees.size == 1);
             let error_tree = *error_trees.contents;
@@ -1965,7 +1965,7 @@ unsafe fn ts_parser__recover(
 
     // Merge with existing error on top of stack
     if node_count_since_error > 0 {
-        let mut pop = ts_stack_pop_count(self_.stack, version, 1);
+        let mut pop = ts_stack_pop_count(&mut *self_.stack, version, 1);
 
         if pop.size > 1 {
             for pi in 1..pop.size {
@@ -2122,7 +2122,7 @@ unsafe fn ts_parser__handle_error(
         debug_assert!(did_merge);
     }
 
-    ts_stack_record_summary(self_.stack, version, MAX_SUMMARY_DEPTH);
+    ts_stack_record_summary(&mut *self_.stack, version, MAX_SUMMARY_DEPTH);
 
     // Begin recovery with the current lookahead node, rather than waiting for the
     // next turn of the parse loop. This ensures that the tree accounts for the

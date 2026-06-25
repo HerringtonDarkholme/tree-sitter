@@ -764,13 +764,12 @@ unsafe fn ts_stack__add_slice(
 
 /// Core iteration function for walking the stack graph.
 unsafe fn stack__iter(
-    self_: *mut Stack,
+    stack: &mut Stack,
     version: StackVersion,
     callback: StackCallback,
     payload: *mut c_void,
     goal_subtree_count: Option<u32>,
 ) -> StackSliceArray {
-    let stack = &mut *self_;
     array_clear(&mut stack.slices);
     array_clear(&mut stack.iterators);
 
@@ -1131,7 +1130,7 @@ pub unsafe fn ts_stack_push(
 
 /// Pop a given number of entries from a version.
 pub unsafe fn ts_stack_pop_count(
-    self_: *mut Stack,
+    self_: &mut Stack,
     version: StackVersion,
     count: u32,
 ) -> StackSliceArray {
@@ -1146,10 +1145,10 @@ pub unsafe fn ts_stack_pop_count(
 
 /// Pop an error from the top of a version.
 pub unsafe fn ts_stack_pop_error(
-    self_: *mut Stack,
+    self_: &mut Stack,
     version: StackVersion,
 ) -> SubtreeArray {
-    let node = stack_head(&*self_, version).node;
+    let node = stack_head(self_, version).node;
     for i in 0..(*node).link_count as usize {
         if !(*node).links[i].subtree.ptr.is_null()
             && ts_subtree_is_error((*node).links[i].subtree)
@@ -1165,7 +1164,7 @@ pub unsafe fn ts_stack_pop_error(
             if pop.size > 0 {
                 debug_assert!(pop.size == 1);
                 let first_pop = stack_slice_array_get(&pop, 0);
-                ts_stack_renumber_version(self_, first_pop.version, version);
+                ts_stack_renumber_version(ptr::from_mut(self_), first_pop.version, version);
                 return subtree_array_read_ref(&first_pop.subtrees);
             }
             break;
@@ -1180,7 +1179,7 @@ pub unsafe fn ts_stack_pop_error(
 
 /// Pop pending entries from a version.
 pub unsafe fn ts_stack_pop_pending(
-    self_: *mut Stack,
+    self_: &mut Stack,
     version: StackVersion,
 ) -> StackSliceArray {
     let mut pop = stack__iter(
@@ -1192,7 +1191,7 @@ pub unsafe fn ts_stack_pop_pending(
     );
     if pop.size > 0 {
         let first_pop = stack_slice_array_get_mut(&mut pop, 0);
-        ts_stack_renumber_version(self_, first_pop.version, version);
+        ts_stack_renumber_version(ptr::from_mut(self_), first_pop.version, version);
         first_pop.version = version;
     }
     pop
@@ -1200,7 +1199,7 @@ pub unsafe fn ts_stack_pop_pending(
 
 /// Pop all entries from a version.
 pub unsafe fn ts_stack_pop_all(
-    self_: *mut Stack,
+    self_: &mut Stack,
     version: StackVersion,
 ) -> StackSliceArray {
     stack__iter(self_, version, pop_all_callback, ptr::null_mut(), Some(0))
@@ -1208,7 +1207,7 @@ pub unsafe fn ts_stack_pop_all(
 
 /// Record a summary of parse states near the top of a version.
 pub unsafe fn ts_stack_record_summary(
-    self_: *mut Stack,
+    self_: &mut Stack,
     version: StackVersion,
     max_depth: u32,
 ) {
@@ -1224,8 +1223,7 @@ pub unsafe fn ts_stack_record_summary(
         ptr::addr_of_mut!(session).cast::<c_void>(),
         None,
     );
-    let stack = &mut *self_;
-    let head = stack_head_mut(stack, version);
+    let head = stack_head_mut(self_, version);
     if !head.summary.is_null() {
         array_delete(head.summary);
         ts_free(head.summary.cast::<c_void>());
