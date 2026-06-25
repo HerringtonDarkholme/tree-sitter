@@ -395,35 +395,35 @@ pub unsafe fn ts_language_lookaheads(
 
 /// Advance a lookahead iterator to the next valid symbol.
 #[inline]
-pub unsafe fn ts_lookahead_iterator__next(self_: *mut LookaheadIterator) -> bool {
-    let l = lang((*self_).language);
+pub unsafe fn ts_lookahead_iterator__next(self_: &mut LookaheadIterator) -> bool {
+    let l = lang(self_.language);
 
-    if (*self_).is_small_state {
-        (*self_).data = (*self_).data.add(1);
-        if (*self_).data == (*self_).group_end {
-            if (*self_).group_count == 0 {
+    if self_.is_small_state {
+        self_.data = self_.data.add(1);
+        if self_.data == self_.group_end {
+            if self_.group_count == 0 {
                 return false;
             }
-            (*self_).group_count -= 1;
-            (*self_).table_value = *(*self_).data;
-            (*self_).data = (*self_).data.add(1);
-            let symbol_count = *(*self_).data;
-            (*self_).data = (*self_).data.add(1);
-            (*self_).group_end = (*self_).data.add(symbol_count as usize);
-            (*self_).symbol = *(*self_).data;
+            self_.group_count -= 1;
+            self_.table_value = *self_.data;
+            self_.data = self_.data.add(1);
+            let symbol_count = *self_.data;
+            self_.data = self_.data.add(1);
+            self_.group_end = self_.data.add(symbol_count as usize);
+            self_.symbol = *self_.data;
         } else {
-            (*self_).symbol = *(*self_).data;
+            self_.symbol = *self_.data;
             return true;
         }
     } else {
         loop {
-            (*self_).data = (*self_).data.add(1);
-            (*self_).symbol = (*self_).symbol.wrapping_add(1);
-            if (*self_).symbol >= (*l).symbol_count as u16 {
+            self_.data = self_.data.add(1);
+            self_.symbol = self_.symbol.wrapping_add(1);
+            if self_.symbol >= (*l).symbol_count as u16 {
                 return false;
             }
-            (*self_).table_value = *(*self_).data;
-            if (*self_).table_value != 0 {
+            self_.table_value = *self_.data;
+            if self_.table_value != 0 {
                 break;
             }
         }
@@ -431,17 +431,17 @@ pub unsafe fn ts_lookahead_iterator__next(self_: *mut LookaheadIterator) -> bool
 
     // Depending on if the symbol is terminal or non-terminal, the table value
     // either represents a list of actions or a successor state.
-    if u32::from((*self_).symbol) < (*l).token_count {
-        let entry = &*(*l).parse_actions.add((*self_).table_value as usize);
-        (*self_).action_count = u16::from(entry.entry.count);
-        (*self_).actions = (*l)
+    if u32::from(self_.symbol) < (*l).token_count {
+        let entry = &*(*l).parse_actions.add(self_.table_value as usize);
+        self_.action_count = u16::from(entry.entry.count);
+        self_.actions = (*l)
             .parse_actions
-            .add((*self_).table_value as usize + 1)
+            .add(self_.table_value as usize + 1)
             .cast::<TSParseAction>();
-        (*self_).next_state = 0;
+        self_.next_state = 0;
     } else {
-        (*self_).action_count = 0;
-        (*self_).next_state = (*self_).table_value;
+        self_.action_count = 0;
+        self_.next_state = self_.table_value;
     }
     true
 }
@@ -958,7 +958,7 @@ pub unsafe extern "C" fn ts_lookahead_iterator_reset(
 pub unsafe extern "C" fn ts_lookahead_iterator_next(
     self_: *mut LookaheadIterator,
 ) -> bool {
-    ts_lookahead_iterator__next(self_)
+    ts_lookahead_iterator__next(&mut *self_)
 }
 
 #[no_mangle]
