@@ -1576,7 +1576,7 @@ unsafe fn ts_parser__accept(
         let mut trees = stack_slice_subtrees_read_ref(stack_slice_array_get(&pop, i));
 
         let mut root = NULL_SUBTREE;
-        let mut j = trees.size as i64 - 1;
+        let mut j = i64::from(trees.size) - 1;
         while j >= 0 {
             let tree = subtree_array_get(&trees, j as u32);
             if !ts_subtree_extra(tree) {
