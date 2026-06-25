@@ -1464,7 +1464,7 @@ unsafe fn ts_parser__reduce(
         let mut parent = ts_subtree_new_node(
             symbol,
             &mut children,
-            production_id as u32,
+            u32::from(production_id),
             self_.language,
         );
 
@@ -1499,7 +1499,7 @@ unsafe fn ts_parser__reduce(
                 parent = ts_subtree_new_node(
                     symbol,
                     &mut next_slice_children,
-                    production_id as u32,
+                    u32::from(production_id),
                     self_.language,
                 );
             } else {
@@ -1596,7 +1596,7 @@ unsafe fn ts_parser__accept(
                 root = ts_subtree_from_mut(ts_subtree_new_node(
                     ts_subtree_symbol(tree),
                     &mut trees,
-                    (*tree.ptr).data.children.production_id as u32,
+                    u32::from((*tree.ptr).data.children.production_id),
                     self_.language,
                 ));
                 ts_subtree_release(&mut self_.tree_pool, tree);
