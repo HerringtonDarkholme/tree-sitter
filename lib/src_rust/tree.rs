@@ -123,6 +123,44 @@ pub struct TSTree {
     pub included_range_count: u32,
 }
 
+unsafe fn ts_tree_init_ref(
+    tree: &mut TSTree,
+    root: Subtree,
+    language: *const TSLanguage,
+    included_ranges: *const TSRange,
+    included_range_count: u32,
+) {
+    tree.root = root;
+    tree.language = ts_language_copy(language);
+    let range_size = included_range_count as usize * std::mem::size_of::<TSRange>();
+    tree.included_ranges =
+        ts_calloc(included_range_count as usize, std::mem::size_of::<TSRange>()) as *mut TSRange;
+    memcpy(
+        tree.included_ranges as *mut c_void,
+        included_ranges as *const c_void,
+        range_size,
+    );
+    tree.included_range_count = included_range_count;
+}
+
+unsafe fn ts_tree_copy_ref(tree: &TSTree) -> *mut TSTree {
+    ts_subtree_retain(tree.root);
+    ts_tree_new(
+        tree.root,
+        tree.language,
+        tree.included_ranges,
+        tree.included_range_count,
+    )
+}
+
+unsafe fn ts_tree_delete_ref(tree: &mut TSTree) {
+    let mut pool = ts_subtree_pool_new(0);
+    ts_subtree_release(&mut pool, tree.root);
+    ts_subtree_pool_delete(&mut pool);
+    ts_language_delete(tree.language);
+    ts_free(tree.included_ranges as *mut c_void);
+}
+
 unsafe fn ts_tree_root_node_ref(tree_ptr: *const TSTree, tree: &TSTree) -> TSNode {
     ts_node_new(tree_ptr, &tree.root, ts_subtree_padding(tree.root), 0)
 }
@@ -172,6 +210,13 @@ unsafe fn ts_tree_edit_ref(tree: &mut TSTree, edit: &TSInputEdit) {
     ts_subtree_pool_delete(&mut pool);
 }
 
+#[cfg(not(target_family = "wasm"))]
+unsafe fn ts_tree_print_dot_graph_ref(tree: &TSTree, file_descriptor: i32) {
+    let file = fdopen(_ts_dup(file_descriptor), b"a\0".as_ptr() as *const i8);
+    ts_subtree_print_dot_graph(tree.root, tree.language, file);
+    fclose(file);
+}
+
 // ---------------------------------------------------------------------------
 // Lifecycle: ts_tree_new, ts_tree_copy, ts_tree_delete
 // ---------------------------------------------------------------------------
@@ -185,30 +230,14 @@ pub unsafe extern "C" fn ts_tree_new(
 ) -> *mut TSTree {
     let result = ts_malloc(std::mem::size_of::<TSTree>()) as *mut TSTree;
     let tree = &mut *result;
-    tree.root = root;
-    tree.language = ts_language_copy(language);
-    let range_size = included_range_count as usize * std::mem::size_of::<TSRange>();
-    tree.included_ranges =
-        ts_calloc(included_range_count as usize, std::mem::size_of::<TSRange>()) as *mut TSRange;
-    memcpy(
-        tree.included_ranges as *mut c_void,
-        included_ranges as *const c_void,
-        range_size,
-    );
-    tree.included_range_count = included_range_count;
+    ts_tree_init_ref(tree, root, language, included_ranges, included_range_count);
     result
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_tree_copy(self_: *const TSTree) -> *mut TSTree {
     let tree = &*self_;
-    ts_subtree_retain(tree.root);
-    ts_tree_new(
-        tree.root,
-        tree.language,
-        tree.included_ranges,
-        tree.included_range_count,
-    )
+    ts_tree_copy_ref(tree)
 }
 
 #[no_mangle]
@@ -217,11 +246,7 @@ pub unsafe extern "C" fn ts_tree_delete(self_: *mut TSTree) {
         return;
     }
     let tree = &mut *self_;
-    let mut pool = ts_subtree_pool_new(0);
-    ts_subtree_release(&mut pool, tree.root);
-    ts_subtree_pool_delete(&mut pool);
-    ts_language_delete(tree.language);
-    ts_free(tree.included_ranges as *mut c_void);
+    ts_tree_delete_ref(tree);
     ts_free(self_ as *mut c_void);
 }
 
@@ -352,9 +377,7 @@ pub unsafe extern "C" fn _ts_dup(file_descriptor: i32) -> i32 {
 #[no_mangle]
 pub unsafe extern "C" fn ts_tree_print_dot_graph(self_: *const TSTree, file_descriptor: i32) {
     let tree = &*self_;
-    let file = fdopen(_ts_dup(file_descriptor), b"a\0".as_ptr() as *const i8);
-    ts_subtree_print_dot_graph(tree.root, tree.language, file);
-    fclose(file);
+    ts_tree_print_dot_graph_ref(tree, file_descriptor);
 }
 
 #[cfg(target_family = "wasm")]
