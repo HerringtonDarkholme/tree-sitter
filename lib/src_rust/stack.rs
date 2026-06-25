@@ -768,7 +768,7 @@ unsafe fn stack__iter(
     version: StackVersion,
     callback: StackCallback,
     payload: *mut c_void,
-    goal_subtree_count: i32,
+    goal_subtree_count: Option<u32>,
 ) -> StackSliceArray {
     let stack = &mut *self_;
     array_clear(&mut stack.slices);
@@ -786,15 +786,15 @@ unsafe fn stack__iter(
         is_pending: true,
     };
 
-    let include_subtrees = goal_subtree_count >= 0;
-    if include_subtrees {
+    if let Some(goal_subtree_count) = goal_subtree_count {
         let reserve_count =
-            ts_subtree_alloc_size(goal_subtree_count as u32) / std::mem::size_of::<Subtree>();
+            ts_subtree_alloc_size(goal_subtree_count) / std::mem::size_of::<Subtree>();
         array_reserve(
             ptr::addr_of_mut!(new_iterator.subtrees).cast::<Array<Subtree>>(),
-            reserve_count as u32,
+            u32::try_from(reserve_count).unwrap(),
         );
     }
+    let include_subtrees = goal_subtree_count.is_some();
 
     array_push(&mut stack.iterators, new_iterator);
 
@@ -1140,7 +1140,7 @@ pub unsafe fn ts_stack_pop_count(
         version,
         pop_count_callback,
         ptr::addr_of!(count).cast_mut().cast::<c_void>(),
-        count as i32,
+        Some(count),
     )
 }
 
@@ -1160,7 +1160,7 @@ pub unsafe fn ts_stack_pop_error(
                 version,
                 pop_error_callback,
                 ptr::addr_of_mut!(found_error).cast::<c_void>(),
-                1,
+                Some(1),
             );
             if pop.size > 0 {
                 debug_assert!(pop.size == 1);
@@ -1188,7 +1188,7 @@ pub unsafe fn ts_stack_pop_pending(
         version,
         pop_pending_callback,
         ptr::null_mut(),
-        0,
+        Some(0),
     );
     if pop.size > 0 {
         let first_pop = stack_slice_array_get_mut(&mut pop, 0);
@@ -1203,7 +1203,7 @@ pub unsafe fn ts_stack_pop_all(
     self_: *mut Stack,
     version: StackVersion,
 ) -> StackSliceArray {
-    stack__iter(self_, version, pop_all_callback, ptr::null_mut(), 0)
+    stack__iter(self_, version, pop_all_callback, ptr::null_mut(), Some(0))
 }
 
 /// Record a summary of parse states near the top of a version.
@@ -1222,7 +1222,7 @@ pub unsafe fn ts_stack_record_summary(
         version,
         summarize_stack_callback,
         ptr::addr_of_mut!(session).cast::<c_void>(),
-        -1,
+        None,
     );
     let stack = &mut *self_;
     let head = stack_head_mut(stack, version);
