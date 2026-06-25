@@ -2671,8 +2671,11 @@ pub unsafe extern "C" fn ts_parser_new() -> *mut TSParser {
     parser.operation_count = 0;
     parser.old_tree = NULL_SUBTREE;
     let new_array: Array<TSRange> = array_new();
-    parser.included_range_differences =
-        core::mem::transmute::<Array<TSRange>, TSRangeArray>(new_array);
+    parser.included_range_differences = TSRangeArray {
+        contents: new_array.contents,
+        size: new_array.size,
+        capacity: new_array.capacity,
+    };
     parser.included_range_difference_index = 0;
     ts_parser__set_cached_token(parser, 0, NULL_SUBTREE, NULL_SUBTREE);
     self_
