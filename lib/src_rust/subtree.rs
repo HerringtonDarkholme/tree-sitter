@@ -780,6 +780,29 @@ unsafe fn subtree_children<'a>(self_: Subtree) -> &'a [Subtree] {
 }
 
 #[inline]
+unsafe fn mutable_subtree_children<'a>(self_: MutableSubtree) -> &'a mut [Subtree] {
+    let count = (*self_.ptr).child_count as usize;
+    if count == 0 {
+        &mut []
+    } else {
+        std::slice::from_raw_parts_mut(ts_subtree_children(ts_subtree_from_mut(self_)), count)
+    }
+}
+
+#[inline]
+unsafe fn mutable_subtree_child(self_: MutableSubtree, index: usize) -> Subtree {
+    *mutable_subtree_children(self_).get_unchecked(index)
+}
+
+#[inline]
+unsafe fn mutable_subtree_child_mut<'a>(
+    self_: MutableSubtree,
+    index: usize,
+) -> &'a mut Subtree {
+    mutable_subtree_children(self_).get_unchecked_mut(index)
+}
+
+#[inline]
 pub unsafe fn ts_subtree_set_extra(self_: &mut MutableSubtree, is_extra: bool) {
     if self_.data.is_inline() {
         self_.data.set_extra(is_extra);
@@ -1361,9 +1384,7 @@ pub unsafe fn ts_subtree_compress(
             break;
         }
 
-        let child = ts_subtree_to_mut_unsafe(
-            *ts_subtree_children(ts_subtree_from_mut(tree)).add(0),
-        );
+        let child = ts_subtree_to_mut_unsafe(mutable_subtree_child(tree, 0));
         if child.data.is_inline()
             || (*child.ptr).child_count < 2
             || (*child.ptr).ref_count > 1
@@ -1372,9 +1393,7 @@ pub unsafe fn ts_subtree_compress(
             break;
         }
 
-        let grandchild = ts_subtree_to_mut_unsafe(
-            *ts_subtree_children(ts_subtree_from_mut(child)).add(0),
-        );
+        let grandchild = ts_subtree_to_mut_unsafe(mutable_subtree_child(child, 0));
         if grandchild.data.is_inline()
             || (*grandchild.ptr).child_count < 2
             || (*grandchild.ptr).ref_count > 1
@@ -1385,25 +1404,20 @@ pub unsafe fn ts_subtree_compress(
 
         // Rotate: tree[0] = grandchild, child[0] = grandchild[last], grandchild[last] = child
         let gc_last = (*grandchild.ptr).child_count as usize - 1;
-        *ts_subtree_children(ts_subtree_from_mut(tree)).add(0) =
-            ts_subtree_from_mut(grandchild);
-        *ts_subtree_children(ts_subtree_from_mut(child)).add(0) =
-            *ts_subtree_children(ts_subtree_from_mut(grandchild)).add(gc_last);
-        *ts_subtree_children(ts_subtree_from_mut(grandchild)).add(gc_last) =
-            ts_subtree_from_mut(child);
+        *mutable_subtree_child_mut(tree, 0) = ts_subtree_from_mut(grandchild);
+        *mutable_subtree_child_mut(child, 0) = mutable_subtree_child(grandchild, gc_last);
+        *mutable_subtree_child_mut(grandchild, gc_last) = ts_subtree_from_mut(child);
         mutable_array_push(stack, tree);
         tree = grandchild;
     }
 
     while stack.size > initial_stack_size {
         tree = mutable_array_pop(stack);
-        let child = ts_subtree_to_mut_unsafe(
-            *ts_subtree_children(ts_subtree_from_mut(tree)).add(0),
-        );
-        let grandchild = ts_subtree_to_mut_unsafe(
-            *ts_subtree_children(ts_subtree_from_mut(child))
-                .add((*child.ptr).child_count as usize - 1),
-        );
+        let child = ts_subtree_to_mut_unsafe(mutable_subtree_child(tree, 0));
+        let grandchild = ts_subtree_to_mut_unsafe(mutable_subtree_child(
+            child,
+            (*child.ptr).child_count as usize - 1,
+        ));
         ts_subtree_summarize_children(grandchild, language);
         ts_subtree_summarize_children(child, language);
         ts_subtree_summarize_children(tree, language);
