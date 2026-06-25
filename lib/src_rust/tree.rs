@@ -145,9 +145,14 @@ unsafe fn ts_tree_included_ranges_ref(tree: &TSTree, length: &mut u32) -> *mut T
     ranges
 }
 
+#[inline]
+unsafe fn tree_included_range_mut(tree: &mut TSTree, index: u32) -> &mut TSRange {
+    &mut *tree.included_ranges.add(index as usize)
+}
+
 unsafe fn ts_tree_edit_ref(tree: &mut TSTree, edit: &TSInputEdit) {
     for i in 0..tree.included_range_count {
-        ts_range_edit_ref(&mut *tree.included_ranges.add(i as usize), edit);
+        ts_range_edit_ref(tree_included_range_mut(tree, i), edit);
     }
     let mut pool = ts_subtree_pool_new(0);
     tree.root = ts_subtree_edit(tree.root, edit, &mut pool);
