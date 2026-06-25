@@ -86,22 +86,24 @@ pub union ExternalScannerStateData {
 /// inline nodes from heap-allocated ones.
 ///
 /// Little-endian layout (matches the C struct bitfields):
-///   byte 0: is_inline:1, visible:1, named:1, extra:1, has_changes:1, is_missing:1, is_keyword:1, unused:1
-///   byte 1: symbol
-///   bytes 2-3: parse_state (u16 LE)
-///   byte 4: padding_columns
-///   byte 5: padding_rows:4 (low), lookahead_bytes:4 (high)
-///   byte 6: padding_bytes
-///   byte 7: size_bytes
+///   byte 0: `is_inline:1`, `visible:1`, `named:1`, `extra:1`,
+///   `has_changes:1`, `is_missing:1`, `is_keyword:1`, `unused:1`
+///   byte 1: `symbol`
+///   bytes 2-3: `parse_state` (u16 LE)
+///   byte 4: `padding_columns`
+///   byte 5: `padding_rows:4` (low), `lookahead_bytes:4` (high)
+///   byte 6: `padding_bytes`
+///   byte 7: `size_bytes`
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct SubtreeInlineData {
-    /// Byte 0: packed bitfields (is_inline, visible, named, extra, has_changes, is_missing, is_keyword)
+    /// Byte 0: packed bitfields (`is_inline`, `visible`, `named`, `extra`,
+    /// `has_changes`, `is_missing`, `is_keyword`)
     pub flags: u8,
     pub symbol: u8,
     pub parse_state: u16,
     pub padding_columns: u8,
-    /// Low 4 bits = padding_rows, high 4 bits = lookahead_bytes
+    /// Low 4 bits = `padding_rows`, high 4 bits = `lookahead_bytes`
     pub rows_and_lookahead: u8,
     pub padding_bytes: u8,
     pub size_bytes: u8,
@@ -172,10 +174,10 @@ pub struct SubtreeHeapData {
     pub parse_state: TSStateId,
 
     /// Packed bitfield flags (11 bits used, matches C bitfield layout)
-    /// bit 0: visible, bit 1: named, bit 2: extra, bit 3: fragile_left,
-    /// bit 4: fragile_right, bit 5: has_changes, bit 6: has_external_tokens,
-    /// bit 7: has_external_scanner_state_change, bit 8: depends_on_column,
-    /// bit 9: is_missing, bit 10: is_keyword
+    /// bit 0: `visible`, bit 1: `named`, bit 2: `extra`, bit 3: `fragile_left`,
+    /// bit 4: `fragile_right`, bit 5: `has_changes`, bit 6: `has_external_tokens`,
+    /// bit 7: `has_external_scanner_state_change`, bit 8: `depends_on_column`,
+    /// bit 9: `is_missing`, bit 10: `is_keyword`
     pub flags: u16,
     // 2 bytes padding here for 4-byte alignment of the union (inserted by repr(C))
 
