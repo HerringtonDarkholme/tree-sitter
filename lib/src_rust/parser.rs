@@ -2311,13 +2311,13 @@ unsafe fn ts_parser__advance(
                         parser,
                         b"reduce sym:%s, child_count:%u\0".as_ptr() as *const i8,
                         SYM_NAME!(parser, action.reduce.symbol),
-                        action.reduce.child_count as u32
+                        u32::from(action.reduce.child_count)
                     );
                     let reduction_version = ts_parser__reduce(
                         self_,
                         version,
                         action.reduce.symbol,
-                        action.reduce.child_count as u32,
+                        u32::from(action.reduce.child_count),
                         action.reduce.dynamic_precedence as i32,
                         action.reduce.production_id,
                         is_fragile,
