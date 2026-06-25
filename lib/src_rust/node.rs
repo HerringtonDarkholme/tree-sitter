@@ -372,14 +372,7 @@ unsafe fn ts_node__first_child_for_byte(
                         if iterator.child_index
                             < ts_subtree_child_count(ts_node__subtree(child))
                         {
-                            last_iterator = Some(NodeChildIterator {
-                                parent: iterator.parent,
-                                tree: iterator.tree,
-                                position: iterator.position,
-                                child_index: iterator.child_index,
-                                structural_child_index: iterator.structural_child_index,
-                                alias_sequence: iterator.alias_sequence,
-                            });
+                            last_iterator = Some(iterator);
                         }
                         did_descend = true;
                         node = child;
