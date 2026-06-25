@@ -1125,7 +1125,7 @@ pub unsafe fn ts_subtree_new_error(
         false,
         language,
     );
-    let data = result.ptr as *mut SubtreeHeapData;
+    let data = result.ptr.cast_mut();
     (*data).set_fragile_left(true);
     (*data).set_fragile_right(true);
     (*data).data.lookahead_char = lookahead_char;
@@ -1137,12 +1137,12 @@ pub unsafe fn ts_subtree_new_error(
 pub unsafe fn ts_subtree_clone(self_: Subtree) -> MutableSubtree {
     let data = &*self_.ptr;
     let alloc_size = ts_subtree_alloc_size(data.child_count);
-    let new_children = ts_malloc(alloc_size) as *mut Subtree;
+    let new_children = ts_malloc(alloc_size).cast::<Subtree>();
     let old_children = ts_subtree_children(self_);
-    ptr::copy_nonoverlapping(old_children as *const u8, new_children as *mut u8, alloc_size);
-    let result = (new_children as *mut u8)
-        .add(data.child_count as usize * std::mem::size_of::<Subtree>())
-        as *mut SubtreeHeapData;
+    ptr::copy_nonoverlapping(old_children.cast::<u8>(), new_children.cast::<u8>(), alloc_size);
+    let result = new_children
+        .add(data.child_count as usize)
+        .cast::<SubtreeHeapData>();
     if data.child_count > 0 {
         for i in 0..data.child_count {
             ts_subtree_retain(*new_children.add(i as usize));
