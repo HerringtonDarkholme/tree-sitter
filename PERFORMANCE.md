@@ -2062,3 +2062,67 @@ Source-code analysis:
   parser control flow, stack ownership, subtree ownership, and query execution
   semantics remain unchanged.
 - The perf run shows no source regression signal. No rollback was performed.
+
+### 2026-06-25 12:03 EDT
+
+- Repo head: `4d6c2113`
+- Batch base: `b607e4e4`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: 10 small Clippy/readability cleanup commits from
+  `Use C-string literals in language helpers` through
+  `Remove redundant macro trailing commas`
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 24718.6 | 24199.4 | +2.15% |
+| TypeScript error parses | 32 | 1662.8 | 1618.1 | +2.76% |
+| JavaScript normal parses | 2 | 16817.8 | 15908.5 | +5.72% |
+| JavaScript error parses | 37 | 1921.7 | 1961.9 | -2.05% |
+| Overall parser throughput | 82 | 2245.3 | 2223.9 | +0.96% |
+
+Prior checkpoint at `4f83c221` recorded Rust overall throughput of 2347.3
+bytes/ms on the same TypeScript/JavaScript gate, so this batch measured -4.35%
+absolute Rust throughput. The Rust-vs-C delta moved from +5.41% to +0.96%,
+while C overall throughput was effectively flat. This is below the 5% absolute
+Rust regression threshold, but the JavaScript error outliers remain worth
+watching in the next checkpoint.
+
+Per-case regression investigation:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `javascript error release.sh` | 249.7 | 702.4 | 64.45% |
+| `javascript error relocate.sh` | 393.7 | 593.3 | 33.65% |
+| `javascript error compound-statement-without-trailing-newline.py` | 2645.9 | 3273.6 | 19.18% |
+| `javascript error install.sh` | 386.2 | 459.8 | 16.02% |
+| `javascript error proc.go` | 812.0 | 956.6 | 15.12% |
+| `javascript error update-authors.sh` | 625.2 | 686.0 | 8.85% |
+
+Source-code analysis:
+
+- This batch did not change C headers, `#[repr(C)]` layouts, allocation sizes,
+  generated parser templates, parse-table data, stack ownership, subtree
+  ownership, or query execution semantics.
+- Several exported Rust `extern "C"` functions were marked `const` by the
+  Clippy const cleanup. This changes Rust source qualifiers only; exported
+  symbol names, argument lists, return types, and the C ABI remain unchanged.
+- The C-string literal commits replace nul-terminated byte strings with
+  `c"..."` literals in language helpers and debug graph/logging paths. These
+  keep the same pointer values at call sites and are outside normal benchmark
+  parsing unless parser logging or dot graph generation is enabled.
+- `Annotate parser range transmute` only spells the existing transmute source
+  and destination types explicitly. It does not change the represented array
+  layout or parser control flow.
+- `Remove redundant tree cursor continues` affects tree cursor traversal, not
+  the parser throughput benchmark hot loop.
+- The non-core CLI/generate/loader cleanups remove redundant macro trailing
+  commas or simplify style parsing/format strings; they do not participate in
+  benchmark parser execution.
+- The JavaScript error outliers are not tied to a plausible source-code change
+  in this batch, and the aggregate result still shows Rust slightly ahead of C.
+  No rollback was performed.
