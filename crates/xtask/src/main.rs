@@ -221,7 +221,7 @@ struct MigrationGate {
     /// Skip ast-grep consumer tests.
     #[arg(long)]
     skip_ast_grep: bool,
-    /// Also build the SwiftPM package.
+    /// Also build the `SwiftPM` package.
     #[arg(long)]
     swift_build: bool,
 }
