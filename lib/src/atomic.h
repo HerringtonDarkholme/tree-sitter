@@ -1,9 +1,7 @@
 #ifndef TREE_SITTER_ATOMIC_H_
 #define TREE_SITTER_ATOMIC_H_
 
-#include <stddef.h>
 #include <stdint.h>
-#include <stdlib.h>
 
 #ifdef __TINYC__
 
