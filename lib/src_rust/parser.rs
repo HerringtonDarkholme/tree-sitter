@@ -330,7 +330,7 @@ fn ts_parse_options_none() -> TSParseOptions {
 }
 
 #[inline]
-fn ts_parse_state_empty() -> TSParseState {
+const fn ts_parse_state_empty() -> TSParseState {
     TSParseState {
         payload: ptr::null_mut(),
         current_byte_offset: 0,
@@ -342,7 +342,7 @@ fn ts_parse_state_empty() -> TSParseState {
 // ReusableNode inline helpers (from reusable_node.h)
 // ---------------------------------------------------------------------------
 
-unsafe fn reusable_node_new() -> ReusableNode {
+const unsafe fn reusable_node_new() -> ReusableNode {
     ReusableNode {
         stack: array_new(),
         last_external_token: NULL_SUBTREE,
