@@ -1401,7 +1401,8 @@ pub unsafe fn ts_stack_pause(
     version: StackVersion,
     lookahead: Subtree,
 ) {
-    let head = stack_head_mut(&mut *self_, version);
+    let stack = &mut *self_;
+    let head = stack_head_mut(stack, version);
     head.status = StackStatus::Paused;
     head.lookahead_when_paused = lookahead;
     head.node_count_at_last_error = (*head.node).node_count;
@@ -1427,7 +1428,8 @@ pub unsafe fn ts_stack_resume(
     self_: *mut Stack,
     version: StackVersion,
 ) -> Subtree {
-    let head = stack_head_mut(&mut *self_, version);
+    let stack = &mut *self_;
+    let head = stack_head_mut(stack, version);
     debug_assert!(head.status == StackStatus::Paused);
     let result = head.lookahead_when_paused;
     head.status = StackStatus::Active;
