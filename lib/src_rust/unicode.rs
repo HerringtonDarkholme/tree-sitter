@@ -51,19 +51,15 @@ pub fn utf8_next(string: &[u8], offset: usize) -> (u32, i32) {
         code_point = (code_point << 6) | i32::from(b & 0x3F);
     }
 
-    // Check for overlong encodings and surrogates
-    let valid = match expected_len {
-        2 => code_point >= 0x80,
-        3 => code_point >= 0x800 && !(0xD800..=0xDFFF).contains(&code_point),
-        4 => (0x1_0000..=0x0010_FFFF).contains(&code_point),
-        _ => false,
+    // Check for overlong encodings and surrogates.
+    let bytes_consumed = match expected_len {
+        2 if code_point >= 0x80 => 2,
+        3 if code_point >= 0x800 && !(0xD800..=0xDFFF).contains(&code_point) => 3,
+        4 if (0x1_0000..=0x0010_FFFF).contains(&code_point) => 4,
+        _ => return (1, -1),
     };
 
-    if valid {
-        (expected_len as u32, code_point)
-    } else {
-        (1, -1)
-    }
+    (bytes_consumed, code_point)
 }
 
 /// Decode one UTF-16LE code point from `string[..length]`.
