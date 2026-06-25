@@ -11,7 +11,10 @@ use std::{
 use crate::ffi::{TSInputEdit, TSLanguage, TSPoint, TSStateId, TSSymbol};
 
 use super::alloc::{ts_calloc, ts_free, ts_malloc, ts_realloc};
-use super::error_costs::*;
+use super::error_costs::{
+    ERROR_COST_PER_MISSING_TREE, ERROR_COST_PER_RECOVERY, ERROR_COST_PER_SKIPPED_CHAR,
+    ERROR_COST_PER_SKIPPED_LINE, ERROR_COST_PER_SKIPPED_TREE,
+};
 use super::length::{length_add, length_saturating_sub, length_sub, length_zero, Length};
 
 // ---------------------------------------------------------------------------
@@ -227,7 +230,7 @@ impl SubtreeHeapData {
         has_external_scanner_state_change: bool,
         depends_on_column: bool, is_missing: bool, is_keyword: bool,
     ) -> u16 {
-        (visible as u16) << 0
+        (visible as u16)
         | (named as u16) << 1
         | (extra as u16) << 2
         | (fragile_left as u16) << 3
