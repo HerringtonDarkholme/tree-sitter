@@ -1516,3 +1516,44 @@ Source-code analysis:
   reverse-loop index seed. Parse control flow, stack ownership, and subtree
   layout are unchanged.
 - No rollback was performed.
+
+### 2026-06-25 04:36 EDT
+
+- Repo head: `7f716db7`
+- Batch base: `3985e779`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: 10 small clippy cleanup commits from
+  `Use From for language action count` through
+  `Make subtree leaf parse state accessor const`
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language tsx --repetitions 10 --error-limit 4 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 27080.8 | 25392.8 | +6.65% |
+| TypeScript error parses | 24 | 1749.1 | 1709.4 | +2.32% |
+| TSX normal parses | 1 | 5852.9 | 5675.7 | +3.12% |
+| TSX error parses | 27 | 1750.9 | 1710.5 | +2.36% |
+| Overall parser throughput | 63 | 2139.6 | 2089.2 | +2.41% |
+
+Per-case regression investigation:
+
+- The 10-repetition checkpoint reported no per-case regressions above the 5%
+  threshold, so no rerun or rollback was needed.
+
+Source-code analysis:
+
+- This batch did not change exported FFI signatures, `#[repr(C)]` layouts,
+  allocation behavior, parse-table data, generated parser templates, or C
+  headers.
+- The changes are clippy-oriented idiomatic cleanups: one lossless `From`
+  conversion, a `map_or_else` simplification, and `const fn` annotations for
+  pure subtree flag/metadata helpers.
+- Parser-facing changes are limited to compile-time-callable annotations and
+  equivalent helper construction/conversion logic. Runtime parse control flow,
+  stack ownership, allocation, subtree layout, and raw pointer operations are
+  unchanged.
+- No rollback was performed.
