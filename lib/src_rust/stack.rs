@@ -924,20 +924,22 @@ unsafe extern "C" fn pop_count_callback(
     payload: *mut c_void,
     iterator: *const StackIterator,
 ) -> StackAction {
+    let iterator = stack_iterator_ref(iterator);
     let goal_subtree_count = *payload.cast::<u32>();
-    if (*iterator).subtree_count == goal_subtree_count {
+    if iterator.subtree_count == goal_subtree_count {
         StackActionPop | StackActionStop
     } else {
         StackActionNone
     }
 }
 
-const unsafe extern "C" fn pop_pending_callback(
+unsafe extern "C" fn pop_pending_callback(
     _payload: *mut c_void,
     iterator: *const StackIterator,
 ) -> StackAction {
-    if (*iterator).subtree_count >= 1 {
-        if (*iterator).is_pending {
+    let iterator = stack_iterator_ref(iterator);
+    if iterator.subtree_count >= 1 {
+        if iterator.is_pending {
             StackActionPop | StackActionStop
         } else {
             StackActionStop
@@ -951,10 +953,11 @@ unsafe extern "C" fn pop_error_callback(
     payload: *mut c_void,
     iterator: *const StackIterator,
 ) -> StackAction {
-    if (*iterator).subtrees.size > 0 {
+    let iterator = stack_iterator_ref(iterator);
+    if iterator.subtrees.size > 0 {
         let found_error = bool_payload_mut(payload);
         if !*found_error
-            && ts_subtree_is_error(*(*iterator).subtrees.contents.add(0))
+            && ts_subtree_is_error(*iterator.subtrees.contents.add(0))
         {
             *found_error = true;
             StackActionPop | StackActionStop
@@ -964,6 +967,11 @@ unsafe extern "C" fn pop_error_callback(
     } else {
         StackActionNone
     }
+}
+
+#[inline]
+unsafe fn stack_iterator_ref<'a>(iterator: *const StackIterator) -> &'a StackIterator {
+    iterator.as_ref().unwrap_unchecked()
 }
 
 #[inline]
@@ -990,7 +998,8 @@ unsafe extern "C" fn pop_all_callback(
     _payload: *mut c_void,
     iterator: *const StackIterator,
 ) -> StackAction {
-    if (*(*iterator).node).link_count == 0 {
+    let iterator = stack_iterator_ref(iterator);
+    if (*iterator.node).link_count == 0 {
         StackActionPop
     } else {
         StackActionNone
@@ -1001,9 +1010,10 @@ unsafe extern "C" fn summarize_stack_callback(
     payload: *mut c_void,
     iterator: *const StackIterator,
 ) -> StackAction {
+    let iterator = stack_iterator_ref(iterator);
     let session = summarize_stack_session_mut(payload);
-    let state = (*(*iterator).node).state;
-    let depth = (*iterator).subtree_count;
+    let state = (*iterator.node).state;
+    let depth = iterator.subtree_count;
     if depth > session.max_depth {
         return StackActionStop;
     }
@@ -1019,7 +1029,7 @@ unsafe extern "C" fn summarize_stack_callback(
     array_push(
         session.summary,
         StackSummaryEntry {
-            position: (*(*iterator).node).position,
+            position: (*iterator.node).position,
             depth,
             state,
         },
