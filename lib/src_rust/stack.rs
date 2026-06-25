@@ -507,7 +507,7 @@ unsafe fn stack_node_release(
         }
 
         let first_predecessor = if node.link_count > 0 {
-            let mut i = node.link_count as i32 - 1;
+            let mut i = i32::from(node.link_count) - 1;
             while i > 0 {
                 let link = node.links[i as usize];
                 if !link.subtree.ptr.is_null() {
@@ -1607,7 +1607,7 @@ pub unsafe fn ts_stack_print_dot_graph(
                 fprintf(
                     f,
                     b"label=\"%d\"\0".as_ptr() as *const i8,
-                    node_ref.state as i32,
+                    i32::from(node_ref.state),
                 );
             }
 
