@@ -2475,3 +2475,86 @@ Source-code analysis:
   touched code paths and is close to the threshold. No rollback was performed.
 - Full `cargo test --all` passed after every committed code change in this
   checkpoint.
+
+### 2026-06-25 15:01 EDT
+
+- Repo head: `d478e797`
+- Batch base: `b52d8559`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: node pointer accessor cleanup and Rust-side libc import cleanup
+  commits from `Extract node child lookup` through
+  `Use node tree helper for parent lookup`
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 24389.8 | 23235.7 | +4.97% |
+| TypeScript error parses | 32 | 1628.2 | 1565.0 | +4.04% |
+| JavaScript normal parses | 2 | 14308.4 | 15584.0 | -8.18% |
+| JavaScript error parses | 37 | 1799.1 | 1816.7 | -0.97% |
+| Overall parser throughput | 82 | 2155.8 | 2116.2 | +1.87% |
+
+Per-case regressions over 5% in the full run:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `typescript error mixed-spaces-tabs.py` | 124.3 | 296.8 | 58.12% |
+| `typescript error compound-statement-without-trailing-newline.py` | 537.8 | 891.7 | 39.69% |
+| `typescript error crlf-line-endings.py` | 664.3 | 1035.6 | 35.86% |
+| `javascript error doc-build.sh` | 493.6 | 746.6 | 33.88% |
+| `javascript error proc.go` | 787.6 | 921.4 | 14.52% |
+| `typescript error jquery.js` | 12853.0 | 14885.8 | 13.66% |
+| `typescript error text-editor-component.js` | 14273.0 | 16446.8 | 13.22% |
+| `javascript normal text-editor-component.js` | 14254.5 | 15988.1 | 10.84% |
+| `javascript error packageJsonCache.ts` | 3509.5 | 3819.3 | 8.11% |
+| `javascript error parser.ts` | 5005.2 | 5433.0 | 7.87% |
+
+Prior checkpoint at `f89eaef3` recorded Rust overall throughput of 2288.4
+bytes/ms and a Rust-vs-C delta of +2.82%. This full checkpoint measured 2155.8
+bytes/ms, so absolute Rust throughput moved by about -5.80%; C throughput also
+moved down from 2225.6 to 2116.2 bytes/ms in the same run series, and the
+Rust-vs-C delta moved to +1.87%.
+
+Because the full run showed a JavaScript normal regression over 5% on only two
+normal cases, a narrower JavaScript-only rerun was used to check noise:
+
+```sh
+cargo xtask perf-gate --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| JavaScript normal parses | 2 | 17359.7 | 16054.8 | +8.13% |
+| JavaScript error parses | 37 | 2089.0 | 1992.6 | +4.84% |
+| JavaScript overall | 39 | 2716.7 | 2588.0 | +4.97% |
+
+The JavaScript rerun reported no per-case regressions over 5%.
+
+Source-code analysis:
+
+- The node commits centralize `TSNode` tree/language/subtree access behind
+  existing internal helpers. They do not change exported
+  `#[no_mangle] extern "C"` symbols, C ABI, struct layout, parsing tables, or
+  parser control flow.
+- The tree/tree-cursor/lexer changes remove libc `memcpy` imports and use typed
+  Rust pointer copies. The changed paths copy included ranges and tree cursor
+  stacks; these are not expected to affect fresh parser throughput materially.
+- The stack change replaces generic array `memcpy`/`memmove` imports with
+  `ptr::copy`, preserving overlapping-copy behavior. This code is closer to the
+  parser hot path than the other import cleanups, so it remains the first
+  source-code area to recheck if future repeated perf runs show a stable parser
+  regression.
+- The subtree scanner-state comparison and language string lookup commits
+  preserve C semantics explicitly: zero-length scanner-state equality is
+  handled before slice creation, and the language helper preserves
+  `strncmp`-style ordering for the sorted field-name lookup.
+- The full run's JavaScript regression did not reproduce in the targeted
+  rerun, which measured JavaScript normal at +8.13% and reported no per-case
+  regressions. Given that and the positive full-run overall delta, no rollback
+  was performed.
+- Full `cargo test --all` passed after every committed code change in this
+  checkpoint.
