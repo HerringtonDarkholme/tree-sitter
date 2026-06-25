@@ -81,7 +81,7 @@ pub struct TSLanguageMetadata {
     pub patch_version: u8,
 }
 
-/// TSLexMode (older ABI < 15, without reserved_word_set_id)
+/// `TSLexMode` (older ABI < 15, without `reserved_word_set_id`)
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct TSLexMode {
@@ -89,7 +89,7 @@ pub struct TSLexMode {
     pub external_lex_state: u16,
 }
 
-/// TSLexerMode (ABI >= 15, with reserved_word_set_id)
+/// `TSLexerMode` (ABI >= 15, with `reserved_word_set_id`)
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct TSLexerMode {
@@ -98,16 +98,16 @@ pub struct TSLexerMode {
     pub reserved_word_set_id: u16,
 }
 
-/// TSParseActionType enum
+/// `TSParseActionType` enum
 pub const TSParseActionTypeShift: u8 = 0;
 pub const TSParseActionTypeReduce: u8 = 1;
 pub const TSParseActionTypeAccept: u8 = 2;
 pub const TSParseActionTypeRecover: u8 = 3;
 
-/// TSParseAction — a union in C. We use repr(C) with manual field access.
+/// `TSParseAction` — a union in C. We use repr(C) with manual field access.
 /// The C union has:
 ///   shift: { type: u8, state: u16, extra: bool, repetition: bool }
-///   reduce: { type: u8, child_count: u8, symbol: u16, dynamic_precedence: i16, production_id: u16 }
+///   reduce: { type: u8, `child_count`: u8, symbol: u16, `dynamic_precedence`: i16, `production_id`: u16 }
 ///   type: u8
 ///
 /// Total size is 8 bytes (the `reduce` variant is largest).
@@ -138,8 +138,8 @@ pub struct TSParseActionReduce {
     pub production_id: u16,
 }
 
-/// TSParseActionEntry — a union in C:
-///   action: TSParseAction
+/// `TSParseActionEntry` — a union in C:
+///   action: `TSParseAction`
 ///   entry: { count: u8, reusable: bool }
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -155,13 +155,13 @@ pub struct TSParseActionEntryData {
     pub reusable: bool,
 }
 
-/// TSMapSlice (from parser.h, also defined in subtree.rs — re-import from there)
+/// `TSMapSlice` (from parser.h, also defined in subtree.rs — re-import from there)
 pub use super::subtree::TSMapSlice;
 
-/// TSFieldMapEntry (from parser.h, also defined in subtree.rs)
+/// `TSFieldMapEntry` (from parser.h, also defined in subtree.rs)
 pub use super::subtree::TSFieldMapEntry;
 
-/// Full repr(C) mirror of the TSLanguage struct from parser.h.
+/// Full repr(C) mirror of the `TSLanguage` struct from parser.h.
 /// Used to read fields at correct offsets via pointer cast.
 #[repr(C)]
 pub struct TSLanguageFull {
