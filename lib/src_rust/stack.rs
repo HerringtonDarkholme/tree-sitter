@@ -1361,19 +1361,19 @@ pub unsafe fn ts_stack_merge(
     if !ts_stack_can_merge(self_, version1, version2) {
         return false;
     }
-    let head1 = stack_head_mut(&mut *self_, version1);
-    let head2 = stack_head(&*self_, version2);
-    for i in 0..(*head2.node).link_count as usize {
-        stack_node_add_link(
-            head1.node,
-            (*head2.node).links[i],
-            &mut *(*self_).subtree_pool,
-        );
+    let stack = &mut *self_;
+    {
+        let heads = &mut stack.heads;
+        let subtree_pool = &mut *stack.subtree_pool;
+        let (head1, head2) = stack_head_array_pair_mut(heads, version1, version2);
+        for i in 0..(*head2.node).link_count as usize {
+            stack_node_add_link(head1.node, (*head2.node).links[i], subtree_pool);
+        }
+        if (*head1.node).state == ERROR_STATE {
+            head1.node_count_at_last_error = (*head1.node).node_count;
+        }
     }
-    if (*head1.node).state == ERROR_STATE {
-        head1.node_count_at_last_error = (*head1.node).node_count;
-    }
-    ts_stack_remove_version(&mut *self_, version2);
+    ts_stack_remove_version(stack, version2);
     true
 }
 
