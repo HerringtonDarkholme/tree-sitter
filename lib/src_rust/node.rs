@@ -8,7 +8,12 @@ use crate::ffi::{
 };
 
 use super::length::{length_add, length_zero, Length};
-use super::point::{point_add, point_eq, point_gt, point_lt, point_lte};
+use super::language::{
+    ts_language_alias_sequence, ts_language_field_id_for_name, ts_language_field_map,
+    ts_language_next_state, ts_language_public_symbol, ts_language_symbol_metadata,
+    ts_language_symbol_name, TSLanguageFull,
+};
+use super::point::{point_add, point_eq, point_gt, point_lt, point_lte, ts_point_edit};
 use super::subtree::{
     ts_builtin_sym_error, ts_subtree_child_count, ts_subtree_children,
     ts_subtree_error_cost, ts_subtree_extra, ts_subtree_has_changes,
@@ -16,51 +21,10 @@ use super::subtree::{
     ts_subtree_size, ts_subtree_string, ts_subtree_symbol, ts_subtree_total_bytes,
     ts_subtree_visible, ts_subtree_visible_descendant_count,
     Subtree, NULL_SUBTREE, TS_TREE_STATE_NONE,
-    TSFieldMapEntry, TSSymbolMetadata,
+    TSFieldMapEntry,
 };
 use super::subtree::ts_subtree_parse_state;
-use super::language::{ts_language_alias_sequence, ts_language_field_map, TSLanguageFull};
-use super::tree::TSTree;
-
-// ---------------------------------------------------------------------------
-// Extern C functions (exported from other Rust modules)
-// ---------------------------------------------------------------------------
-
-extern "C" {
-    // language.rs (exported)
-    fn ts_language_symbol_metadata(
-        self_: *const TSLanguage,
-        symbol: TSSymbol,
-    ) -> TSSymbolMetadata;
-    fn ts_language_public_symbol(
-        self_: *const TSLanguage,
-        symbol: TSSymbol,
-    ) -> TSSymbol;
-    fn ts_language_symbol_name(
-        self_: *const TSLanguage,
-        symbol: TSSymbol,
-    ) -> *const i8;
-    fn ts_language_next_state(
-        self_: *const TSLanguage,
-        state: TSStateId,
-        symbol: TSSymbol,
-    ) -> TSStateId;
-    fn ts_language_field_id_for_name(
-        self_: *const TSLanguage,
-        name: *const i8,
-        name_length: u32,
-    ) -> TSFieldId;
-
-    // tree.rs (exported)
-    fn ts_tree_root_node(self_: *const crate::ffi::TSTree) -> TSNode;
-
-    // point.rs (exported)
-    fn ts_point_edit(
-        point: *mut TSPoint,
-        byte: *mut u32,
-        edit: *const TSInputEdit,
-    );
-}
+use super::tree::{ts_tree_root_node, TSTree};
 
 // ---------------------------------------------------------------------------
 // Types
@@ -748,7 +712,7 @@ pub unsafe extern "C" fn ts_node_named_child_count(self_: TSNode) -> u32 {
 #[no_mangle]
 pub unsafe extern "C" fn ts_node_parent(self_: TSNode) -> TSNode {
     let tree = self_.tree as *const TSTree;
-    let mut node = ts_tree_root_node(tree as *const crate::ffi::TSTree);
+    let mut node = ts_tree_root_node(tree);
     if node.id == self_.id { return ts_node__null(); }
 
     loop {
