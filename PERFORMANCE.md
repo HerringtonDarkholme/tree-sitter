@@ -1345,3 +1345,48 @@ Source-code analysis:
   reusable-node end-offset computation. The scanner state, EOF handling, tree
   reuse descent, and parse action flow remain semantically unchanged.
 - No rollback was performed.
+
+### 2026-06-25 02:21 EDT
+
+- Repo head: `8a5d1c2d`
+- Batch base: `177dd6b0`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: 10 small clippy/idiomatic cleanup commits from
+  `Use expression for shifted subtree` through `Use From for subtree lengths`
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language tsx --repetitions 10 --error-limit 4 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 26700.9 | 25630.6 | +4.18% |
+| TypeScript error parses | 24 | 1737.8 | 1725.6 | +0.71% |
+| TSX normal parses | 1 | 5743.4 | 5532.9 | +3.80% |
+| TSX error parses | 27 | 1759.4 | 1709.0 | +2.95% |
+| Overall parser throughput | 63 | 2136.0 | 2095.7 | +1.93% |
+
+Per-case regression investigation:
+
+- The first 10-repetition run reported two TSX mismatched-language error
+  outliers above 5%: `corePublic.ts` at 8.04% and `multiple-newlines.py` at
+  7.33%, while aggregate Rust throughput stayed positive.
+- A second 10-repetition run did not reproduce either outlier and reported no
+  per-case regressions above 5%.
+- Because the outliers disappeared on immediate rerun and the aggregate
+  TypeScript, TSX, and overall results stayed positive, this checkpoint treats
+  the first-run outliers as benchmark noise rather than a confirmed source
+  regression.
+
+Source-code analysis:
+
+- This batch did not change exported FFI signatures, `#[repr(C)]` layouts,
+  allocation behavior, parse-table data, generated parser templates, or C
+  headers.
+- Parser-facing changes were limited to local expression initializers in
+  reduction and shift helpers. The shift/reduce control flow and stack/tree
+  ownership behavior are unchanged.
+- The remaining changes are clippy cleanups for documentation, local binding
+  names, and lossless integer/boolean widening with `From`.
+- No rollback was performed.
