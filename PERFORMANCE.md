@@ -205,6 +205,92 @@ Source-code analysis:
 - Full `cargo test --all` passed before every committed code change in this
   checkpoint.
 
+### 2026-06-25 17:04 EDT
+
+- Repo head: `8085dfda`
+- Batch base: `2f1dc597`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: 10 small Rust-core pointer-accessor cleanups:
+  `Use pointer accessors in lexer callbacks` through
+  `Use pointer accessors in stack callbacks`.
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+Primary run:
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 21109.1 | 24003.2 | -12.06% |
+| TypeScript error parses | 32 | 1621.6 | 1596.1 | +1.60% |
+| JavaScript normal parses | 2 | 17688.1 | 16376.3 | +8.01% |
+| JavaScript error parses | 37 | 2067.9 | 1989.1 | +3.96% |
+| Overall parser throughput | 82 | 2270.1 | 2217.6 | +2.37% |
+
+Per-case regressions over 5% in the primary run:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `typescript error no_newline_at_eof.go` | 770.2 | 1199.7 | 35.80% |
+| `typescript error jquery.js` | 11455.3 | 15479.7 | 26.00% |
+| `typescript normal codeFixProvider.ts` | 14841.4 | 17261.0 | 14.02% |
+| `typescript normal parser.ts` | 21281.6 | 24497.9 | 13.13% |
+| `typescript error value.go` | 971.5 | 1102.0 | 11.84% |
+| `typescript error letter_test.go` | 1530.7 | 1715.4 | 10.77% |
+| `typescript error rule.cc` | 562.7 | 615.3 | 8.55% |
+| `typescript error parser.c` | 1060.3 | 1125.7 | 5.81% |
+
+TypeScript-only rerun to check whether the normal-case regression was stable:
+
+```sh
+cargo xtask perf-gate --language typescript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 25943.4 | 24645.0 | +5.27% |
+| TypeScript error parses | 32 | 1683.1 | 1605.6 | +4.83% |
+| TypeScript overall | 43 | 2100.7 | 2003.8 | +4.83% |
+
+Per-case regressions over 5% in the TypeScript rerun:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `typescript error python2-grammar-crlf.py` | 953.1 | 1114.8 | 14.51% |
+| `typescript error python3-grammar.py` | 2178.5 | 2306.7 | 5.56% |
+| `typescript error python2-grammar.py` | 1030.0 | 1089.3 | 5.44% |
+
+Prior checkpoint at `4811d155` measured Rust overall throughput of 2282.5
+bytes/ms in the primary run. This checkpoint measured 2270.1 bytes/ms, so
+absolute Rust throughput moved by about -0.54%. The Rust-vs-C delta remained
+positive at +2.37%, while C throughput moved from 2165.4 to 2217.6 bytes/ms.
+
+Source-code analysis:
+
+- The batch contains no exported `#[no_mangle] extern "C"` signature changes,
+  no struct layout changes, no C header field changes, and no parsing table or
+  parser action semantic changes.
+- The lexer and node commits only replace existing FFI-boundary raw reference
+  creation with local pointer accessor helpers.
+- The subtree commits centralize array, pool, mutable-subtree, heap-data, and
+  edit pointer conversions. They preserve the existing subtree allocation,
+  reference counting, child iteration, and external scanner state ownership
+  logic.
+- The stack commits touch generic array accessor wrappers and two callback
+  payload conversions. They do not alter stack versioning, push/pop semantics,
+  merge behavior, or parser action control flow.
+- The primary TypeScript normal regression did not reproduce in the
+  TypeScript-only rerun. The rerun measured TypeScript normal at +5.27% vs C
+  and reported a different set of per-case outliers, all in error cases. Given
+  the non-reproducing normal-case result, the small absolute overall Rust
+  throughput movement (-0.54%), and the lack of source changes to parsing
+  decisions, this checkpoint treats the primary TypeScript normal drop as
+  benchmark noise and performs no rollback.
+- Full `cargo test --all` passed before every committed code change in this
+  checkpoint.
+
 ### 2026-06-24 13:33 EDT
 
 - Repo head: `51ab1851`
