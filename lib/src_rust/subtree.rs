@@ -612,7 +612,7 @@ unsafe fn mutable_array_delete(arr: &mut MutableSubtreeArray) {
     arr.capacity = 0;
 }
 
-fn mutable_array_new() -> MutableSubtreeArray {
+const fn mutable_array_new() -> MutableSubtreeArray {
     MutableSubtreeArray {
         contents: ptr::null_mut(),
         size: 0,
