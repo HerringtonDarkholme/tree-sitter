@@ -1312,7 +1312,7 @@ unsafe fn ts_parser__reuse_node(
             if !reusable_node_descend(&mut self_.reusable_node) {
                 reusable_node_advance(&mut self_.reusable_node);
                 ts_parser__breakdown_top_of_stack(self_, version);
-                *state = ts_stack_state(&*self_.stack, version);
+                *state = ts_stack_state(parser_stack_ref(self_.stack), version);
             }
             continue;
         }
@@ -2696,8 +2696,8 @@ unsafe fn ts_parser__balance_subtree(self_: &mut TSParser) -> bool {
 unsafe fn ts_parser_has_outstanding_parse(self_: &TSParser) -> bool {
     self_.canceled_balancing
         || !self_.external_scanner_payload.is_null()
-        || ts_stack_state(&*self_.stack, 0) != 1
-        || ts_stack_node_count_since_error(&mut *self_.stack, 0) != 0
+        || ts_stack_state(parser_stack_ref(self_.stack), 0) != 1
+        || ts_stack_node_count_since_error(parser_stack_mut(self_.stack), 0) != 0
 }
 
 // ---------------------------------------------------------------------------
