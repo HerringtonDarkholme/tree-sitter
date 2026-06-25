@@ -769,10 +769,11 @@ unsafe fn stack__iter(
     payload: *mut c_void,
     goal_subtree_count: i32,
 ) -> StackSliceArray {
-    array_clear(&mut (*self_).slices);
-    array_clear(&mut (*self_).iterators);
+    let stack = &mut *self_;
+    array_clear(&mut stack.slices);
+    array_clear(&mut stack.iterators);
 
-    let head = stack_head(&*self_, version);
+    let head = stack_head(stack, version);
     let mut new_iterator = StackIterator {
         node: head.node,
         subtrees: SubtreeArray {
@@ -794,13 +795,13 @@ unsafe fn stack__iter(
         );
     }
 
-    array_push(&mut (*self_).iterators, new_iterator);
+    array_push(&mut stack.iterators, new_iterator);
 
-    while (*self_).iterators.size > 0 {
+    while stack.iterators.size > 0 {
         let mut i: u32 = 0;
-        let mut size = (*self_).iterators.size;
+        let mut size = stack.iterators.size;
         while i < size {
-            let iterator = stack_iterator_array_get(&(*self_).iterators, i);
+            let iterator = stack_iterator_array_get(&stack.iterators, i);
             let node = iterator.node;
 
             let action = callback(payload, iterator as *const StackIterator);
@@ -808,20 +809,20 @@ unsafe fn stack__iter(
             let should_stop = (action & StackActionStop) != 0 || (*node).link_count == 0;
 
             if should_pop {
-                let mut subtrees = stack_iterator_subtrees_read(&(*self_).iterators, i);
+                let mut subtrees = stack_iterator_subtrees_read(&stack.iterators, i);
                 if !should_stop {
                     ts_subtree_array_copy(subtree_array_read_ref(&subtrees), &mut subtrees);
                 }
                 ts_subtree_array_reverse(&mut subtrees);
-                ts_stack__add_slice(&mut *self_, version, node, &subtrees);
+                ts_stack__add_slice(stack, version, node, &subtrees);
             }
 
             if should_stop {
                 if !should_pop {
-                    let iter = stack_iterator_array_get_mut(&mut (*self_).iterators, i);
-                    ts_subtree_array_delete(&mut *(*self_).subtree_pool, &mut iter.subtrees);
+                    let iter = stack_iterator_array_get_mut(&mut stack.iterators, i);
+                    ts_subtree_array_delete(&mut *stack.subtree_pool, &mut iter.subtrees);
                 }
-                array_erase(&mut (*self_).iterators, i);
+                array_erase(&mut stack.iterators, i);
                 i = i.wrapping_sub(1);
                 size -= 1;
                 i = i.wrapping_add(1);
@@ -834,16 +835,16 @@ unsafe fn stack__iter(
                 let link: StackLink;
                 if j == (*node).link_count as u32 {
                     link = (*node).links[0];
-                    next_iterator = stack_iterator_array_get_mut(&mut (*self_).iterators, i);
+                    next_iterator = stack_iterator_array_get_mut(&mut stack.iterators, i);
                 } else {
-                    if (*self_).iterators.size >= MAX_ITERATOR_COUNT as u32 {
+                    if stack.iterators.size >= MAX_ITERATOR_COUNT as u32 {
                         j += 1;
                         continue;
                     }
                     link = (*node).links[j as usize];
-                    let current_iterator = stack_iterator_array_read(&(*self_).iterators, i);
-                    array_push(&mut (*self_).iterators, current_iterator);
-                    next_iterator = stack_iterator_array_back_mut(&(*self_).iterators);
+                    let current_iterator = stack_iterator_array_read(&stack.iterators, i);
+                    array_push(&mut stack.iterators, current_iterator);
+                    next_iterator = stack_iterator_array_back_mut(&stack.iterators);
                     ts_subtree_array_copy(
                         stack_iterator_subtrees_read_ref(next_iterator),
                         &mut next_iterator.subtrees,
@@ -876,7 +877,7 @@ unsafe fn stack__iter(
         }
     }
 
-    stack_slice_array_read_ref(&(*self_).slices)
+    stack_slice_array_read_ref(&stack.slices)
 }
 
 // Callbacks for stack__iter
