@@ -338,6 +338,16 @@ const fn ts_parse_state_empty() -> TSParseState {
     }
 }
 
+#[inline]
+unsafe fn parser_stack_mut<'a>(stack: *mut Stack) -> &'a mut Stack {
+    stack.as_mut().unwrap_unchecked()
+}
+
+#[inline]
+unsafe fn parser_stack_ref<'a>(stack: *const Stack) -> &'a Stack {
+    stack.as_ref().unwrap_unchecked()
+}
+
 // ---------------------------------------------------------------------------
 // ReusableNode inline helpers (from reusable_node.h)
 // ---------------------------------------------------------------------------
@@ -590,7 +600,7 @@ unsafe fn ts_parser__breakdown_top_of_stack(
     let mut did_break_down = false;
 
     loop {
-        let pop = ts_stack_pop_pending(&mut *self_.stack, version);
+        let pop = ts_stack_pop_pending(parser_stack_mut(self_.stack), version);
         if pop.size == 0 {
             break;
         }
@@ -599,7 +609,7 @@ unsafe fn ts_parser__breakdown_top_of_stack(
         let mut pending = false;
         for i in 0..pop.size {
             let mut slice = stack_slice_array_read(&pop, i);
-            let mut state = ts_stack_state(&*self_.stack, slice.version);
+            let mut state = ts_stack_state(parser_stack_ref(self_.stack), slice.version);
             let parent = subtree_array_get(&slice.subtrees, 0);
 
             let n = ts_subtree_child_count(parent);
@@ -614,12 +624,12 @@ unsafe fn ts_parser__breakdown_top_of_stack(
                 }
 
                 ts_subtree_retain(child);
-                ts_stack_push(&mut *self_.stack, slice.version, child, pending, state);
+                ts_stack_push(parser_stack_mut(self_.stack), slice.version, child, pending, state);
             }
 
             for j in 1..slice.subtrees.size {
                 let tree = subtree_array_get(&slice.subtrees, j);
-                ts_stack_push(&mut *self_.stack, slice.version, tree, false, state);
+                ts_stack_push(parser_stack_mut(self_.stack), slice.version, tree, false, state);
             }
 
             ts_subtree_release(&mut self_.tree_pool, parent);
