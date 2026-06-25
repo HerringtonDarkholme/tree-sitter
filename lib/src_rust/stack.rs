@@ -396,7 +396,7 @@ unsafe fn stack_head_array_back(self_: &Array<StackHead>) -> &StackHead {
 }
 
 #[inline]
-unsafe fn stack_head_array_back_mut(self_: &Array<StackHead>) -> &mut StackHead {
+unsafe fn stack_head_array_back_mut(self_: &mut Array<StackHead>) -> &mut StackHead {
     &mut *array_back(self_)
 }
 
@@ -475,7 +475,7 @@ unsafe fn stack_iterator_subtrees_read(
 }
 
 #[inline]
-unsafe fn stack_iterator_array_back_mut(self_: &Array<StackIterator>) -> &mut StackIterator {
+unsafe fn stack_iterator_array_back_mut(self_: &mut Array<StackIterator>) -> &mut StackIterator {
     &mut *array_back(self_)
 }
 
@@ -846,7 +846,7 @@ unsafe fn stack__iter(
                     link = (*node).links[j as usize];
                     let current_iterator = stack_iterator_array_read(&stack.iterators, i);
                     array_push(&mut stack.iterators, current_iterator);
-                    next_iterator = stack_iterator_array_back_mut(&stack.iterators);
+                    next_iterator = stack_iterator_array_back_mut(&mut stack.iterators);
                     ts_subtree_array_copy(
                         stack_iterator_subtrees_read_ref(next_iterator),
                         &mut next_iterator.subtrees,
@@ -1343,7 +1343,7 @@ pub unsafe fn ts_stack_copy_version(
     debug_assert!(version < stack.heads.size);
     let version_head = stack_head_array_read(&stack.heads, version);
     array_push(&mut stack.heads, version_head);
-    let head = stack_head_array_back_mut(&stack.heads);
+    let head = stack_head_array_back_mut(&mut stack.heads);
     stack_node_retain(head.node.as_mut());
     if !head.last_external_token.ptr.is_null() {
         ts_subtree_retain(head.last_external_token);
@@ -1669,7 +1669,7 @@ pub unsafe fn ts_stack_print_dot_graph(
                     next_iterator = stack_iterator_array_get_mut(&mut stack.iterators, i);
                 } else {
                     array_push(&mut stack.iterators, stack_iterator_read_ref(&iterator));
-                    next_iterator = stack_iterator_array_back_mut(&stack.iterators);
+                    next_iterator = stack_iterator_array_back_mut(&mut stack.iterators);
                 }
                 next_iterator.node = link.node;
             }
