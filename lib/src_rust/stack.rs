@@ -707,7 +707,7 @@ unsafe fn stack_head_delete(
         }
         if !self_.summary.is_null() {
             array_delete(self_.summary);
-            ts_free(self_.summary as *mut c_void);
+            ts_free(self_.summary.cast::<c_void>());
         }
         stack_node_release(self_.node, pool, subtree_pool);
     }
