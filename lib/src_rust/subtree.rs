@@ -232,17 +232,17 @@ impl SubtreeHeapData {
         has_external_scanner_state_change: bool,
         depends_on_column: bool, is_missing: bool, is_keyword: bool,
     ) -> u16 {
-        (visible as u16)
-        | (named as u16) << 1
-        | (extra as u16) << 2
-        | (fragile_left as u16) << 3
-        | (fragile_right as u16) << 4
-        | (has_changes as u16) << 5
-        | (has_external_tokens as u16) << 6
-        | (has_external_scanner_state_change as u16) << 7
-        | (depends_on_column as u16) << 8
-        | (is_missing as u16) << 9
-        | (is_keyword as u16) << 10
+        u16::from(visible)
+        | u16::from(named) << 1
+        | u16::from(extra) << 2
+        | u16::from(fragile_left) << 3
+        | u16::from(fragile_right) << 4
+        | u16::from(has_changes) << 5
+        | u16::from(has_external_tokens) << 6
+        | u16::from(has_external_scanner_state_change) << 7
+        | u16::from(depends_on_column) << 8
+        | u16::from(is_missing) << 9
+        | u16::from(is_keyword) << 10
     }
 }
 
