@@ -1771,11 +1771,11 @@ pub unsafe fn ts_subtree_last_external_token(mut tree: Subtree) -> Subtree {
         if data.child_count == 0 {
             break;
         }
-        let children = ts_subtree_children(tree);
+        let children = subtree_children(tree);
         let mut i = data.child_count as usize;
         while i > 0 {
             i -= 1;
-            let child = *children.add(i);
+            let child = *children.get_unchecked(i);
             if ts_subtree_has_external_tokens(child) {
                 tree = child;
                 break;
