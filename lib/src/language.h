@@ -14,12 +14,6 @@ extern "C" {
 #define LANGUAGE_VERSION_WITH_PRIMARY_STATES 14
 
 typedef struct {
-  const TSParseAction *actions;
-  uint32_t action_count;
-  bool is_reusable;
-} TableEntry;
-
-typedef struct {
   const TSLanguage *language;
   const uint16_t *data;
   const uint16_t *group_end;
@@ -35,70 +29,7 @@ typedef struct {
   uint16_t action_count;
 } LookaheadIterator;
 
-void ts_language_table_entry(const TSLanguage *self, TSStateId state, TSSymbol symbol, TableEntry *result);
-TSLexerMode ts_language_lex_mode_for_state(const TSLanguage *self, TSStateId state);
-bool ts_language_is_reserved_word(const TSLanguage *self, TSStateId state, TSSymbol symbol);
 TSSymbolMetadata ts_language_symbol_metadata(const TSLanguage *self, TSSymbol symbol);
-TSSymbol ts_language_public_symbol(const TSLanguage *self, TSSymbol symbol);
-
-static inline const TSParseAction *ts_language_actions(
-  const TSLanguage *self,
-  TSStateId state,
-  TSSymbol symbol,
-  uint32_t *count
-) {
-  TableEntry entry;
-  ts_language_table_entry(self, state, symbol, &entry);
-  *count = entry.action_count;
-  return entry.actions;
-}
-
-static inline bool ts_language_has_reduce_action(
-  const TSLanguage *self,
-  TSStateId state,
-  TSSymbol symbol
-) {
-  TableEntry entry;
-  ts_language_table_entry(self, state, symbol, &entry);
-  return entry.action_count > 0 && entry.actions[0].type == TSParseActionTypeReduce;
-}
-
-// Lookup the table value for a given symbol and state.
-//
-// For non-terminal symbols, the table value represents a successor state.
-// For terminal symbols, it represents an index in the actions table.
-// For 'large' parse states, this is a direct lookup. For 'small' parse
-// states, this requires searching through the symbol groups to find
-// the given symbol.
-static inline uint16_t ts_language_lookup(
-  const TSLanguage *self,
-  TSStateId state,
-  TSSymbol symbol
-) {
-  if (state >= self->large_state_count) {
-    uint32_t index = self->small_parse_table_map[state - self->large_state_count];
-    const uint16_t *data = &self->small_parse_table[index];
-    uint16_t group_count = *(data++);
-    for (unsigned i = 0; i < group_count; i++) {
-      uint16_t section_value = *(data++);
-      uint16_t symbol_count = *(data++);
-      for (unsigned j = 0; j < symbol_count; j++) {
-        if (*(data++) == symbol) return section_value;
-      }
-    }
-    return 0;
-  } else {
-    return self->parse_table[state * self->symbol_count + symbol];
-  }
-}
-
-static inline bool ts_language_has_actions(
-  const TSLanguage *self,
-  TSStateId state,
-  TSSymbol symbol
-) {
-  return ts_language_lookup(self, state, symbol) != 0;
-}
 
 // Iterate over all of the symbols that are valid in the given state.
 //
@@ -190,26 +121,6 @@ static inline bool ts_language_state_is_primary(
   }
 }
 
-static inline const bool *ts_language_enabled_external_tokens(
-  const TSLanguage *self,
-  unsigned external_scanner_state
-) {
-  if (external_scanner_state == 0) {
-    return NULL;
-  } else {
-    return self->external_scanner.states + self->external_token_count * external_scanner_state;
-  }
-}
-
-static inline const TSSymbol *ts_language_alias_sequence(
-  const TSLanguage *self,
-  uint32_t production_id
-) {
-  return production_id ?
-    &self->alias_sequences[production_id * self->max_alias_sequence_length] :
-    NULL;
-}
-
 static inline TSSymbol ts_language_alias_at(
   const TSLanguage *self,
   uint32_t production_id,
@@ -257,32 +168,6 @@ static inline void ts_language_aliases_for_symbol(
       break;
     }
     idx += count;
-  }
-}
-
-static inline void ts_language_write_symbol_as_dot_string(
-  const TSLanguage *self,
-  FILE *f,
-  TSSymbol symbol
-) {
-  const char *name = ts_language_symbol_name(self, symbol);
-  for (const char *chr = name; *chr; chr++) {
-    switch (*chr) {
-      case '"':
-      case '\\':
-        fputc('\\', f);
-        fputc(*chr, f);
-        break;
-      case '\n':
-        fputs("\\n", f);
-        break;
-      case '\t':
-        fputs("\\t", f);
-        break;
-      default:
-        fputc(*chr, f);
-        break;
-    }
   }
 }
 
