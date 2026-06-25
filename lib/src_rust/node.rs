@@ -59,6 +59,16 @@ const unsafe fn ts_node__subtree(self_: TSNode) -> Subtree {
     *self_.id.cast::<Subtree>()
 }
 
+#[inline]
+const unsafe fn node_tree(self_: TSNode) -> *const TSTree {
+    self_.tree.cast::<TSTree>()
+}
+
+#[inline]
+const unsafe fn node_language(self_: TSNode) -> *const TSLanguage {
+    (*node_tree(self_)).language
+}
+
 // ---------------------------------------------------------------------------
 // Internal helpers — child iteration
 // ---------------------------------------------------------------------------
@@ -69,21 +79,20 @@ unsafe fn ts_node_iterate_children(node: &TSNode) -> NodeChildIterator {
     if ts_subtree_child_count(subtree) == 0 {
         return NodeChildIterator {
             parent: NULL_SUBTREE,
-            tree: node.tree.cast::<TSTree>(),
+            tree: node_tree(*node),
             position: length_zero(),
             child_index: 0,
             structural_child_index: 0,
             alias_sequence: ptr::null(),
         };
     }
-    let tree = node.tree.cast::<TSTree>();
     let alias_sequence = ts_language_alias_sequence(
-        (*tree).language,
+        node_language(*node),
         u32::from((*subtree.ptr).data.children.production_id),
     );
     NodeChildIterator {
         parent: subtree,
-        tree,
+        tree: node_tree(*node),
         position: Length {
             bytes: ts_node_start_byte(*node),
             extent: ts_node_start_point(*node),
@@ -499,16 +508,15 @@ unsafe fn ts_node__field_name_from_language(
     self_: TSNode,
     structural_child_index: u32,
 ) -> *const i8 {
-    let tree = self_.tree.cast::<TSTree>();
     let mut field_map: *const TSFieldMapEntry = ptr::null();
     let mut field_map_end: *const TSFieldMapEntry = ptr::null();
     ts_language_field_map(
-        (*tree).language,
+        node_language(self_),
         u32::from((*ts_node__subtree(self_).ptr).data.children.production_id),
         &mut field_map,
         &mut field_map_end,
     );
-    let lang = (*tree).language.cast::<TSLanguageFull>();
+    let lang = node_language(self_).cast::<TSLanguageFull>();
     while field_map != field_map_end {
         if !(*field_map).inherited && (*field_map).child_index == structural_child_index as u8 {
             return *(*lang).field_names.add((*field_map).field_id as usize);
@@ -566,8 +574,7 @@ pub unsafe extern "C" fn ts_node_symbol(self_: TSNode) -> TSSymbol {
     if symbol == 0 {
         symbol = ts_subtree_symbol(ts_node__subtree(self_));
     }
-    let tree = self_.tree.cast::<TSTree>();
-    ts_language_public_symbol((*tree).language, symbol)
+    ts_language_public_symbol(node_language(self_), symbol)
 }
 
 #[no_mangle]
@@ -576,14 +583,12 @@ pub unsafe extern "C" fn ts_node_type(self_: TSNode) -> *const i8 {
     if symbol == 0 {
         symbol = ts_subtree_symbol(ts_node__subtree(self_));
     }
-    let tree = self_.tree.cast::<TSTree>();
-    ts_language_symbol_name((*tree).language, symbol)
+    ts_language_symbol_name(node_language(self_), symbol)
 }
 
 #[no_mangle]
 pub const unsafe extern "C" fn ts_node_language(self_: TSNode) -> *const TSLanguage {
-    let tree = self_.tree.cast::<TSTree>();
-    (*tree).language
+    node_language(self_)
 }
 
 #[no_mangle]
@@ -593,20 +598,19 @@ pub unsafe extern "C" fn ts_node_grammar_symbol(self_: TSNode) -> TSSymbol {
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_node_grammar_type(self_: TSNode) -> *const i8 {
-    let tree = self_.tree.cast::<TSTree>();
     let symbol = ts_subtree_symbol(ts_node__subtree(self_));
-    ts_language_symbol_name((*tree).language, symbol)
+    ts_language_symbol_name(node_language(self_), symbol)
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_node_string(self_: TSNode) -> *mut i8 {
-    let tree = self_.tree.cast::<TSTree>();
     let alias_symbol = ts_node__alias(&self_) as TSSymbol;
+    let language = node_language(self_);
     ts_subtree_string(
         ts_node__subtree(self_),
         alias_symbol,
-        ts_language_symbol_metadata((*tree).language, alias_symbol).visible,
-        (*tree).language,
+        ts_language_symbol_metadata(language, alias_symbol).visible,
+        language,
         false,
     )
 }
