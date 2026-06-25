@@ -833,10 +833,10 @@ unsafe fn stack__iter(
             }
 
             let mut j: u32 = 1;
-            while j <= (*node).link_count as u32 {
+            while j <= u32::from((*node).link_count) {
                 let next_iterator: &mut StackIterator;
                 let link: StackLink;
-                if j == (*node).link_count as u32 {
+                if j == u32::from((*node).link_count) {
                     link = (*node).links[0];
                     next_iterator = stack_iterator_array_get_mut(&mut stack.iterators, i);
                 } else {
@@ -1536,7 +1536,7 @@ pub unsafe fn ts_stack_print_dot_graph(
                 fprintf(
                     f,
                     b" %u\0".as_ptr() as *const i8,
-                    entry.state as u32,
+                    u32::from(entry.state),
                 );
             }
         }
@@ -1552,7 +1552,7 @@ pub unsafe fn ts_stack_print_dot_graph(
                 fprintf(
                     f,
                     b" %2X\0".as_ptr() as *const i8,
-                    *data.add(j as usize) as u32,
+                    u32::from(*data.add(j as usize)),
                 );
             }
         }
