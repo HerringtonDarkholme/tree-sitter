@@ -160,9 +160,6 @@ struct SummarizeStackSession {
 
 extern "C" {
     fn fprintf(f: *mut c_void, format: *const i8, ...) -> i32;
-    fn memcpy(dest: *mut c_void, src: *const c_void, n: usize) -> *mut c_void;
-    fn memmove(dest: *mut c_void, src: *const c_void, n: usize) -> *mut c_void;
-    fn memset(dest: *mut c_void, c: i32, n: usize) -> *mut c_void;
 
     #[cfg(target_os = "macos")]
     #[link_name = "__stderrp"]
@@ -246,29 +243,25 @@ pub unsafe fn array_back<T>(arr: *const Array<T>) -> *mut T {
 
 pub unsafe fn array_erase<T>(arr: *mut Array<T>, index: u32) {
     debug_assert!(index < (*arr).size);
-    let elem_size = std::mem::size_of::<T>();
-    let contents = (*arr).contents.cast::<u8>();
-    memmove(
-        contents.add(index as usize * elem_size).cast::<c_void>(),
-        contents
-            .add((index as usize + 1) * elem_size)
-            .cast::<c_void>(),
-        ((*arr).size as usize - index as usize - 1) * elem_size,
-    );
+    let count = (*arr).size as usize - index as usize - 1;
+    if count > 0 {
+        ptr::copy(
+            (*arr).contents.add(index as usize + 1),
+            (*arr).contents.add(index as usize),
+            count,
+        );
+    }
     (*arr).size -= 1;
 }
 
 pub unsafe fn array_insert<T>(arr: *mut Array<T>, index: u32, element: T) {
-    let elem_size = std::mem::size_of::<T>();
     array_grow(arr, 1);
-    let contents = (*arr).contents.cast::<u8>();
-    if ((*arr).size as usize) > index as usize {
-        memmove(
-            contents
-                .add((index as usize + 1) * elem_size)
-                .cast::<c_void>(),
-            contents.add(index as usize * elem_size).cast::<c_void>(),
-            ((*arr).size as usize - index as usize) * elem_size,
+    let count = (*arr).size as usize - index as usize;
+    if count > 0 {
+        ptr::copy(
+            (*arr).contents.add(index as usize),
+            (*arr).contents.add(index as usize + 1),
+            count,
         );
     }
     *(*arr).contents.add(index as usize) = element;
@@ -294,7 +287,6 @@ pub unsafe fn array_splice<T>(
     new_count: u32,
     new_contents: *const T,
 ) {
-    let elem_size = std::mem::size_of::<T>();
     let new_size = (*arr).size + new_count - old_count;
     let old_end = index + old_count;
     let new_end = index + new_count;
@@ -302,20 +294,17 @@ pub unsafe fn array_splice<T>(
 
     array_reserve(arr, new_size);
 
-    let contents = (*arr).contents.cast::<u8>();
-    if (*arr).size > old_end {
-        memmove(
-            contents.add(new_end as usize * elem_size).cast::<c_void>(),
-            contents.add(old_end as usize * elem_size).cast::<c_void>(),
-            ((*arr).size - old_end) as usize * elem_size,
+    let contents = (*arr).contents;
+    let count = ((*arr).size - old_end) as usize;
+    if count > 0 {
+        ptr::copy(
+            contents.add(old_end as usize),
+            contents.add(new_end as usize),
+            count,
         );
     }
     if new_count > 0 && !new_contents.is_null() {
-        memcpy(
-            contents.add(index as usize * elem_size).cast::<c_void>(),
-            new_contents.cast::<c_void>(),
-            new_count as usize * elem_size,
-        );
+        ptr::copy(new_contents, contents.add(index as usize), new_count as usize);
     }
     (*arr).size = new_size;
 }
@@ -325,15 +314,10 @@ pub unsafe fn array_swap<T>(self_: &mut Array<T>, other: &mut Array<T>) {
 }
 
 pub unsafe fn array_assign<T>(self_: &mut Array<T>, other: &Array<T>) {
-    let elem_size = std::mem::size_of::<T>();
     array_reserve(ptr::from_mut(self_), other.size);
     self_.size = other.size;
     if other.size > 0 {
-        memcpy(
-            self_.contents.cast::<c_void>(),
-            other.contents.cast::<c_void>(),
-            other.size as usize * elem_size,
-        );
+        ptr::copy(other.contents, self_.contents, other.size as usize);
     }
 }
 
