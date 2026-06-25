@@ -19,10 +19,10 @@ use super::subtree::{
     ts_builtin_sym_error_repeat, ts_external_scanner_state_data, ts_subtree_alloc_size,
     ts_subtree_child_count, ts_subtree_dynamic_precedence, ts_subtree_error_cost,
     ts_subtree_external_scanner_state_eq, ts_subtree_extra, ts_subtree_is_error,
-    ts_subtree_named, ts_subtree_padding, ts_subtree_release, ts_subtree_retain,
-    ts_subtree_size, ts_subtree_symbol, ts_subtree_total_bytes, ts_subtree_total_size,
-    ts_subtree_visible, ts_subtree_visible_descendant_count, Subtree, SubtreeArray, SubtreePool,
-    NULL_SUBTREE,
+    ts_subtree_external_scanner_state, ts_subtree_named, ts_subtree_padding,
+    ts_subtree_release, ts_subtree_retain, ts_subtree_size, ts_subtree_symbol,
+    ts_subtree_total_bytes, ts_subtree_total_size, ts_subtree_visible,
+    ts_subtree_visible_descendant_count, Subtree, SubtreeArray, SubtreePool, NULL_SUBTREE,
 };
 use super::subtree::{ts_subtree_array_copy, ts_subtree_array_delete, ts_subtree_array_reverse};
 use super::language::ts_language_write_symbol_as_dot_string;
@@ -1571,8 +1571,9 @@ pub unsafe fn ts_stack_print_dot_graph(
 
         if !head.summary.is_null() {
             fprintf(f, c"\nsummary:".as_ptr().cast::<i8>());
-            for j in 0..(*head.summary).size {
-                let entry = stack_summary_array_get(&*head.summary, j);
+            let summary = stack_summary_ref(head.summary);
+            for j in 0..summary.size {
+                let entry = stack_summary_array_get(summary, j);
                 fprintf(
                     f,
                     c" %u".as_ptr().cast::<i8>(),
@@ -1582,7 +1583,7 @@ pub unsafe fn ts_stack_print_dot_graph(
         }
 
         if !head.last_external_token.ptr.is_null() {
-            let state = &*(*head.last_external_token.ptr).data.external_scanner_state;
+            let state = ts_subtree_external_scanner_state(&head.last_external_token);
             let data = ts_external_scanner_state_data(state);
             fprintf(f, c"\nexternal_scanner_state:".as_ptr().cast::<i8>());
             for j in 0..state.length {
