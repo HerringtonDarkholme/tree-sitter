@@ -1695,3 +1695,55 @@ Source-code analysis:
   changes, this is most likely benchmark/C-run variance rather than a source
   regression from this batch.
 - No rollback was performed.
+
+### 2026-06-25 06:55 EDT
+
+- Repo head: `97927e34`
+- Batch base: `de6d0d76`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: 10 small parser raw-pointer cleanup commits from
+  `Use pointer casts in parser scanner helpers` through
+  `Use pointer casts in parser logging buffers`
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language tsx --repetitions 10 --error-limit 4 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 26754.7 | 25575.5 | +4.61% |
+| TypeScript error parses | 24 | 1733.2 | 1714.2 | +1.11% |
+| TSX normal parses | 1 | 5773.2 | 5776.3 | -0.06% |
+| TSX error parses | 27 | 1750.0 | 1717.1 | +1.92% |
+| Overall parser throughput | 63 | 2128.5 | 2097.4 | +1.48% |
+
+Prior checkpoint at `b255b076` recorded Rust overall throughput of 2140.5
+bytes/ms on the same TypeScript/TSX gate, so this batch was effectively flat
+at -0.56% absolute Rust throughput. The Rust-vs-C delta moved from +1.46% to
++1.48%.
+
+Per-case regression investigation:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `typescript normal builderStatePublic.ts` | 19112.4 | 20742.8 | 7.86% |
+
+Source-code analysis:
+
+- This batch did not change exported FFI signatures, `#[repr(C)]` layouts,
+  allocation sizes, parse-table data, generated parser templates, C headers,
+  parser control flow, stack ownership, or subtree ownership.
+- The runtime edits are pointer-cast spelling and raw-reference extraction
+  cleanups in `parser.rs`: language pointer casts, `Array<T>` alias pointer
+  extraction, external scanner buffer/data casts, `memcmp` pointer arguments,
+  parser self-pointers for logging/state/control paths, and logging buffer
+  casts.
+- Integer payload casts and non-alias wrapper layout casts were deliberately
+  left unchanged.
+- The reported TypeScript normal per-case slowdown is isolated while aggregate
+  TypeScript normal and overall Rust-vs-C throughput remain in line with prior
+  checkpoints. Given the lack of semantic parser changes and the small
+  aggregate movement, this is most likely benchmark/C-run variance rather than
+  a source regression from this batch.
+- No rollback was performed.
