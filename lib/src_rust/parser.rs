@@ -1425,7 +1425,7 @@ unsafe fn ts_parser__reduce(
     is_fragile: bool,
     end_of_non_terminal_extra: bool,
 ) -> StackVersion {
-    let parser = self_ as *mut TSParser;
+    let parser = ptr::from_mut(self_);
     let initial_version_count = ts_stack_version_count(&*self_.stack);
 
     let pop = ts_stack_pop_count(self_.stack, version, count);
@@ -1820,7 +1820,7 @@ unsafe fn ts_parser__recover(
     version: StackVersion,
     mut lookahead: Subtree,
 ) {
-    let parser = self_ as *mut TSParser;
+    let parser = ptr::from_mut(self_);
     let mut did_recover = false;
     let stack = &mut *self_.stack;
     let previous_version_count = ts_stack_version_count(stack);
@@ -2037,7 +2037,7 @@ unsafe fn ts_parser__handle_error(
     version: StackVersion,
     lookahead: Subtree,
 ) {
-    let parser = self_ as *mut TSParser;
+    let parser = ptr::from_mut(self_);
     let previous_version_count = ts_stack_version_count(&*self_.stack);
 
     // Perform any reductions that can happen in this state, regardless of the lookahead. After
@@ -2179,7 +2179,7 @@ unsafe fn ts_parser__advance(
     version: StackVersion,
     allow_node_reuse: bool,
 ) -> bool {
-    let parser = self_ as *mut TSParser;
+    let parser = ptr::from_mut(self_);
     let stack = &*self_.stack;
     let mut state = ts_stack_state(stack, version);
     let position = ts_stack_position(stack, version).bytes;
