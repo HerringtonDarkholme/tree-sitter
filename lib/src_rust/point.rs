@@ -56,7 +56,7 @@ pub const fn point_eq(a: TSPoint, b: TSPoint) -> bool {
     a.row == b.row && a.column == b.column
 }
 
-fn ts_point_edit_ref(point: &mut TSPoint, byte: &mut u32, edit: &TSInputEdit) {
+pub(crate) fn point_edit(point: &mut TSPoint, byte: &mut u32, edit: &TSInputEdit) {
     let start_byte = *byte;
     let start_point = *point;
 
@@ -86,7 +86,7 @@ pub unsafe extern "C" fn ts_point_edit(
     let byte = &mut *byte;
     let edit = &*edit;
 
-    ts_point_edit_ref(point, byte, edit);
+    point_edit(point, byte, edit);
 }
 
 #[cfg(test)]
@@ -114,7 +114,7 @@ mod tests {
         let mut point = point_new(0, 14);
         let mut byte = 14;
 
-        ts_point_edit_ref(&mut point, &mut byte, &edit());
+        point_edit(&mut point, &mut byte, &edit());
 
         assert_eq!(byte, 16);
         assert_point_eq(point, point_new(1, 6));
@@ -125,7 +125,7 @@ mod tests {
         let mut point = point_new(0, 7);
         let mut byte = 7;
 
-        ts_point_edit_ref(&mut point, &mut byte, &edit());
+        point_edit(&mut point, &mut byte, &edit());
 
         assert_eq!(byte, 12);
         assert_point_eq(point, point_new(1, 2));
@@ -136,7 +136,7 @@ mod tests {
         let mut point = point_new(0, 4);
         let mut byte = 4;
 
-        ts_point_edit_ref(&mut point, &mut byte, &edit());
+        point_edit(&mut point, &mut byte, &edit());
 
         assert_eq!(byte, 4);
         assert_point_eq(point, point_new(0, 4));

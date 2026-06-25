@@ -13,7 +13,7 @@ use super::language::{
     ts_language_next_state, ts_language_public_symbol, ts_language_symbol_metadata,
     ts_language_symbol_name, TSLanguageFull,
 };
-use super::point::{point_add, point_eq, point_gt, point_lt, point_lte, ts_point_edit};
+use super::point::{point_add, point_edit, point_eq, point_gt, point_lt, point_lte};
 use super::subtree::{
     ts_builtin_sym_error, ts_subtree_child_count, ts_subtree_children,
     ts_subtree_error_cost, ts_subtree_extra, ts_subtree_has_changes,
@@ -1058,7 +1058,7 @@ pub unsafe extern "C" fn ts_node_edit(
     let mut start_byte = ts_node_start_byte(*self_);
     let mut start_point = ts_node_start_point(*self_);
 
-    ts_point_edit(&mut start_point, &mut start_byte, edit);
+    point_edit(&mut start_point, &mut start_byte, &*edit);
 
     (*self_).context[0] = start_byte;
     (*self_).context[1] = start_point.row;
