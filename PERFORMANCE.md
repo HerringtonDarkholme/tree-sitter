@@ -184,6 +184,62 @@ Source-code analysis:
 - Full `cargo test --all` passed before every committed code change in this
   checkpoint.
 
+### 2026-06-25 19:16 EDT
+
+- Repo head: `43436438`
+- Batch base: `e85423b2`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: 10 small Rust-core visibility cleanups:
+  `Keep Rust-only language helpers internal` through
+  `Restrict lexer API visibility`.
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 25391.3 | 24946.8 | +1.78% |
+| TypeScript error parses | 32 | 1712.8 | 1642.5 | +4.28% |
+| JavaScript normal parses | 2 | 17606.7 | 16032.8 | +9.82% |
+| JavaScript error parses | 37 | 2092.7 | 1882.5 | +11.17% |
+| Overall parser throughput | 82 | 2362.1 | 2210.0 | +6.88% |
+
+Per-case regressions over 5%:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `typescript normal transform.ts` | 18526.8 | 24329.4 | 23.85% |
+| `typescript normal builderStatePublic.ts` | 17798.9 | 20607.4 | 13.63% |
+| `typescript error doc-build.sh` | 580.9 | 661.2 | 12.15% |
+| `typescript error clean-old.sh` | 427.8 | 461.6 | 7.34% |
+
+Prior checkpoint at `e85423b2` measured Rust overall throughput of 2268.0
+bytes/ms and a Rust-vs-C delta of +3.70%. This checkpoint measured 2362.1
+bytes/ms, so absolute Rust throughput moved by about +4.15%. C throughput moved
+from 2187.1 to 2210.0 bytes/ms, and the Rust-vs-C delta moved to +6.88%.
+
+Source-code analysis:
+
+- The batch contains no exported `#[no_mangle] extern "C"` signature changes,
+  no struct layout changes, no C header changes, and no parser table or parser
+  action semantic changes.
+- The first five commits remove `#[no_mangle] extern "C"` from Rust-only helper
+  functions after checking that their call sites are internal. C-visible API and
+  binding symbols were left exported.
+- The remaining five commits restrict Rust-only helper visibility to
+  `pub(crate)` in `subtree.rs`, `stack.rs`, and `lexer.rs`. This does not change
+  function signatures, call sites, control flow, or data representation.
+- The two TypeScript normal-case slowdowns are worth watching because normal
+  TypeScript throughput had previously been a concern. In this batch, however,
+  the edited code is visibility metadata and stale-comment cleanup, so there is
+  no source-level parser behavior change that explains those per-case outliers.
+  If the same cases reproduce in the next checkpoint, inspect inlining/codegen
+  around the affected helpers before considering rollback.
+- Full `cargo test --all` passed before every committed code change in this
+  checkpoint.
+
 ### 2026-06-25 18:20 EDT
 
 - Repo head: `0786a35a`
