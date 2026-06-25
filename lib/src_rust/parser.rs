@@ -953,7 +953,7 @@ unsafe fn ts_parser__can_reuse_first_leaf(
     tree: Subtree,
     table_entry: &TableEntry,
 ) -> bool {
-    let lang = self_.language.cast::<TSLanguageFull>();
+    let lang = parser_language_full(self_.language);
     let leaf_symbol = ts_subtree_leaf_symbol(tree);
     let leaf_state = ts_subtree_leaf_parse_state(tree);
     let current_lex_mode = ts_language_lex_mode_for_state(self_.language, state);
@@ -973,7 +973,7 @@ unsafe fn ts_parser__can_reuse_first_leaf(
             ptr::from_ref(&current_lex_mode).cast::<c_void>(),
             core::mem::size_of::<TSLexerMode>(),
         ) == 0
-        && (leaf_symbol != (*lang).keyword_capture_token
+        && (leaf_symbol != lang.keyword_capture_token
             || (!ts_subtree_is_keyword(tree) && ts_subtree_parse_state(tree) == state))
     {
         return true;
@@ -995,7 +995,7 @@ unsafe fn ts_parser__lex(
     parse_state: TSStateId,
 ) -> Subtree {
     let parser = ptr::from_mut(self_);
-    let lang = self_.language.cast::<TSLanguageFull>();
+    let lang = parser_language_full(self_.language);
     let mut lex_mode = ts_language_lex_mode_for_state(self_.language, parse_state);
     if lex_mode.lex_state == u16::MAX {
         LOG!(
@@ -1052,7 +1052,7 @@ unsafe fn ts_parser__lex(
                 if self_.lexer.token_end_position.bytes <= current_position.bytes
                     && !external_scanner_state_changed
                 {
-                    let symbol = *(*lang).external_scanner.symbol_map.add(
+                    let symbol = *lang.external_scanner.symbol_map.add(
                         self_.lexer.data.result_symbol as usize,
                     );
                     let next_parse_state =
@@ -1067,7 +1067,7 @@ unsafe fn ts_parser__lex(
                     {
                         LOG!(parser,
                             c"ignore_empty_external_token symbol:%s".as_ptr().cast::<i8>(),
-                            SYM_NAME!(parser, *(*lang).external_scanner.symbol_map.add(
+                            SYM_NAME!(parser, *lang.external_scanner.symbol_map.add(
                                 self_.lexer.data.result_symbol as usize
                             )));
                         found_token = false;
@@ -1147,8 +1147,8 @@ unsafe fn ts_parser__lex(
         let lookahead_bytes = lookahead_end_byte - self_.lexer.token_end_position.bytes;
 
         if found_external_token {
-            symbol = *(*lang).external_scanner.symbol_map.add(symbol as usize);
-        } else if symbol == (*lang).keyword_capture_token && symbol != 0 {
+            symbol = *lang.external_scanner.symbol_map.add(symbol as usize);
+        } else if symbol == lang.keyword_capture_token && symbol != 0 {
             let end_byte = self_.lexer.token_end_position.bytes;
             let token_start_position = self_.lexer.token_start_position;
             ts_lexer_reset(&mut self_.lexer, token_start_position);
