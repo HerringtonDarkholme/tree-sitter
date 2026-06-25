@@ -5,7 +5,6 @@
 extern "C" {
 #endif
 
-#include <limits.h>
 #include <stdint.h>
 
 #define U_EXPORT
