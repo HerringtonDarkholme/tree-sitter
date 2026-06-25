@@ -341,16 +341,6 @@ struct Edit {
 }
 
 // ---------------------------------------------------------------------------
-// extern "C" — functions from not-yet-rewritten C modules
-// ---------------------------------------------------------------------------
-
-extern "C" {
-    #[link_name = "memcmp"]
-    fn libc_memcmp(s1: *const c_void, s2: *const c_void, n: usize) -> i32;
-
-}
-
-// ---------------------------------------------------------------------------
 // Partial TSLanguage layout (mirrors parser.h) for static-inline helpers
 // ---------------------------------------------------------------------------
 
@@ -463,12 +453,15 @@ pub unsafe fn ts_external_scanner_state_eq(
     buffer: *const u8,
     length: u32,
 ) -> bool {
-    self_.length == length
-        && libc_memcmp(
-            ts_external_scanner_state_data(self_).cast::<c_void>(),
-            buffer.cast::<c_void>(),
-            length as usize,
-        ) == 0
+    if self_.length != length {
+        return false;
+    }
+    if length == 0 {
+        return true;
+    }
+    let length = length as usize;
+    std::slice::from_raw_parts(ts_external_scanner_state_data(self_), length)
+        == std::slice::from_raw_parts(buffer, length)
 }
 
 // ===========================================================================
