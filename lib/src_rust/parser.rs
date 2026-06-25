@@ -1868,7 +1868,7 @@ unsafe fn ts_parser__recover(
 ) {
     let parser = ptr::from_mut(self_);
     let mut did_recover = false;
-    let stack = &mut *self_.stack;
+    let stack = parser_stack_mut(self_.stack);
     let previous_version_count = ts_stack_version_count(stack);
     let position = ts_stack_position(stack, version);
     let summary = ts_stack_get_summary(stack, version);
@@ -1894,8 +1894,8 @@ unsafe fn ts_parser__recover(
             // Check for redundant versions
             let would_merge = 'merge: {
                 for j in 0..previous_version_count {
-                    if ts_stack_state(&*self_.stack, j) == entry.state
-                        && ts_stack_position(&*self_.stack, j).bytes == position.bytes
+                    if ts_stack_state(stack, j) == entry.state
+                        && ts_stack_position(stack, j).bytes == position.bytes
                     {
                         break 'merge true;
                     }
@@ -1931,10 +1931,10 @@ unsafe fn ts_parser__recover(
 
     // Remove halted versions
     let mut i = previous_version_count;
-    while i < ts_stack_version_count(&*self_.stack) {
-        if !ts_stack_is_active(&*self_.stack, i) {
+    while i < ts_stack_version_count(stack) {
+        if !ts_stack_is_active(stack, i) {
             LOG!(parser, c"removed paused version:%u".as_ptr().cast::<i8>(), i);
-            ts_stack_remove_version(&mut *self_.stack, i);
+            ts_stack_remove_version(stack, i);
             LOG_STACK!(parser);
         } else {
             i += 1;
@@ -1950,20 +1950,20 @@ unsafe fn ts_parser__recover(
             capacity: 0,
         };
         let parent = ts_subtree_new_error_node(&mut children, false, self_.language);
-        ts_stack_push(&mut *self_.stack, version, parent, false, 1);
+        ts_stack_push(stack, version, parent, false, 1);
         ts_parser__accept(self_, version, lookahead);
         return;
     }
 
     // Strategy 2: skip the current token
-    if did_recover && ts_stack_version_count(&*self_.stack) > MAX_VERSION_COUNT {
-        ts_stack_halt(&mut *self_.stack, version);
+    if did_recover && ts_stack_version_count(stack) > MAX_VERSION_COUNT {
+        ts_stack_halt(stack, version);
         ts_subtree_release(&mut self_.tree_pool, lookahead);
         return;
     }
 
     if did_recover && ts_subtree_has_external_scanner_state_change(lookahead) {
-        ts_stack_halt(&mut *self_.stack, version);
+        ts_stack_halt(stack, version);
         ts_subtree_release(&mut self_.tree_pool, lookahead);
         return;
     }
@@ -1973,7 +1973,7 @@ unsafe fn ts_parser__recover(
         + ts_subtree_total_bytes(lookahead) * ERROR_COST_PER_SKIPPED_CHAR
         + ts_subtree_total_size(lookahead).extent.row * ERROR_COST_PER_SKIPPED_LINE;
     if ts_parser__better_version_exists(self_, version, false, new_cost) {
-        ts_stack_halt(&mut *self_.stack, version);
+        ts_stack_halt(stack, version);
         ts_subtree_release(&mut self_.tree_pool, lookahead);
         return;
     }
