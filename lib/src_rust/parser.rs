@@ -2014,7 +2014,7 @@ unsafe fn ts_parser__recover(
 
     // Merge with existing error on top of stack
     if node_count_since_error > 0 {
-        let mut pop = ts_stack_pop_count(&mut *self_.stack, version, 1);
+        let mut pop = ts_stack_pop_count(stack, version, 1);
 
         if pop.size > 1 {
             for pi in 1..pop.size {
@@ -2023,17 +2023,16 @@ unsafe fn ts_parser__recover(
                     &mut stack_slice_array_get_mut(&mut pop, pi).subtrees,
                 );
             }
-            while ts_stack_version_count(&*self_.stack) > stack_slice_array_get(&pop, 0).version + 1
-            {
+            while ts_stack_version_count(stack) > stack_slice_array_get(&pop, 0).version + 1 {
                 ts_stack_remove_version(
-                    &mut *self_.stack,
+                    stack,
                     stack_slice_array_get(&pop, 0).version + 1,
                 );
             }
         }
 
         ts_stack_renumber_version(
-            &mut *self_.stack,
+            stack,
             stack_slice_array_get(&pop, 0).version,
             version,
         );
@@ -2052,7 +2051,7 @@ unsafe fn ts_parser__recover(
 
     // Push the ERROR
     ts_stack_push(
-        &mut *self_.stack,
+        stack,
         version,
         ts_subtree_from_mut(error_repeat),
         false,
@@ -2060,14 +2059,14 @@ unsafe fn ts_parser__recover(
     );
     if ts_subtree_has_external_tokens(lookahead) {
         ts_stack_set_last_external_token(
-            &mut *self_.stack,
+            stack,
             version,
             ts_subtree_last_external_token(lookahead),
         );
     }
 
     let mut has_error = true;
-    for vi in 0..ts_stack_version_count(&*self_.stack) {
+    for vi in 0..ts_stack_version_count(stack) {
         let status = ts_parser__version_status(self_, vi);
         if !status.is_in_error {
             has_error = false;
