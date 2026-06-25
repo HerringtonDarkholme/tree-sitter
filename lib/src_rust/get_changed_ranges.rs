@@ -267,7 +267,7 @@ unsafe fn iterator_new(
 }
 
 #[inline]
-unsafe fn iterator_done(self_: &Iterator) -> bool {
+const unsafe fn iterator_done(self_: &Iterator) -> bool {
     self_.cursor.stack.size == 0
 }
 
