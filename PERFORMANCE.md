@@ -205,6 +205,61 @@ Source-code analysis:
 - Full `cargo test --all` passed before every committed code change in this
   checkpoint.
 
+### 2026-06-25 17:30 EDT
+
+- Repo head: `a964b3ca`
+- Batch base: `289df69a`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: 10 small Rust-core pointer-accessor cleanups:
+  `Use pointer accessors for stack nodes` through
+  `Use parser stack accessors in reduce setup`.
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 25658.3 | 23488.0 | +9.24% |
+| TypeScript error parses | 32 | 1665.8 | 1646.0 | +1.21% |
+| JavaScript normal parses | 2 | 16745.5 | 16447.5 | +1.81% |
+| JavaScript error parses | 37 | 2077.1 | 1974.6 | +5.19% |
+| Overall parser throughput | 82 | 2314.7 | 2252.6 | +2.76% |
+
+Per-case regressions over 5%:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `typescript error compound-statement-without-trailing-newline.py` | 899.6 | 994.3 | 9.53% |
+| `typescript error crlf-line-endings.py` | 1298.7 | 1369.9 | 5.20% |
+
+Prior checkpoint at `289df69a` measured Rust overall throughput of 2270.1
+bytes/ms and a Rust-vs-C delta of +2.37%. This checkpoint measured 2314.7
+bytes/ms, so absolute Rust throughput moved by about +1.96%. C throughput moved
+from 2217.6 to 2252.6 bytes/ms, and the Rust-vs-C delta moved to +2.76%.
+
+Source-code analysis:
+
+- The batch contains no exported `#[no_mangle] extern "C"` signature changes,
+  no struct layout changes, no C header field changes, and no parsing table or
+  parser action semantic changes.
+- The stack commits centralize raw stack node, subtree pool, graph-output, and
+  lifecycle pointer conversions behind local accessors. They do not alter stack
+  versioning, push/pop semantics, merge behavior, summary recording, or
+  retain/release ownership.
+- The parser commits add local stack pointer accessors and apply them to
+  breakdown, version-status comparison, lexing, shift, and reduce setup call
+  sites. These are reference-formation cleanups only; the same stack operations
+  are called with the same version/state/subtree values.
+- The two per-case TypeScript error slowdowns are isolated to error-fixture
+  parses. The same checkpoint shows TypeScript normal at +9.24% vs C,
+  JavaScript error at +5.19% vs C, and aggregate Rust throughput higher than the
+  previous checkpoint. The outliers do not indicate a stable source-level
+  parser regression in this batch, so no rollback was performed.
+- Full `cargo test --all` passed before every committed code change in this
+  checkpoint.
+
 ### 2026-06-25 17:04 EDT
 
 - Repo head: `8085dfda`
