@@ -24,8 +24,6 @@ use super::tree_cursor::{ts_tree_cursor_init_ref, TreeCursor, TreeCursorEntryArr
 // ---------------------------------------------------------------------------
 
 extern "C" {
-    fn memcpy(dest: *mut c_void, src: *const c_void, n: usize) -> *mut c_void;
-
     #[cfg(not(target_os = "windows"))]
     fn dup(fd: i32) -> i32;
     #[cfg(not(target_os = "windows"))]
@@ -77,14 +75,15 @@ unsafe fn ts_tree_init_ref(
 ) {
     tree.root = root;
     tree.language = ts_language_copy(language);
-    let range_size = included_range_count as usize * std::mem::size_of::<TSRange>();
     tree.included_ranges =
         ts_calloc(included_range_count as usize, std::mem::size_of::<TSRange>()).cast::<TSRange>();
-    memcpy(
-        tree.included_ranges.cast::<c_void>(),
-        included_ranges.cast::<c_void>(),
-        range_size,
-    );
+    if included_range_count > 0 {
+        std::ptr::copy_nonoverlapping(
+            included_ranges,
+            tree.included_ranges,
+            included_range_count as usize,
+        );
+    }
     tree.included_range_count = included_range_count;
 }
 
@@ -134,14 +133,15 @@ const fn ts_tree_language_ref(tree: &TSTree) -> *const TSLanguage {
 
 unsafe fn ts_tree_included_ranges_ref(tree: &TSTree, length: &mut u32) -> *mut TSRange {
     *length = tree.included_range_count;
-    let range_size = tree.included_range_count as usize * std::mem::size_of::<TSRange>();
     let ranges =
         ts_calloc(tree.included_range_count as usize, std::mem::size_of::<TSRange>()).cast::<TSRange>();
-    memcpy(
-        ranges.cast::<c_void>(),
-        tree.included_ranges as *const c_void,
-        range_size,
-    );
+    if tree.included_range_count > 0 {
+        std::ptr::copy_nonoverlapping(
+            tree.included_ranges,
+            ranges,
+            tree.included_range_count as usize,
+        );
+    }
     ranges
 }
 
