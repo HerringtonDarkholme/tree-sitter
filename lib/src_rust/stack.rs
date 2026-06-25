@@ -306,14 +306,12 @@ pub unsafe fn array_splice<T>(
             ((*arr).size - old_end) as usize * elem_size,
         );
     }
-    if new_count > 0 {
-        if !new_contents.is_null() {
-            memcpy(
-                contents.add(index as usize * elem_size) as *mut c_void,
-                new_contents as *const c_void,
-                new_count as usize * elem_size,
-            );
-        }
+    if new_count > 0 && !new_contents.is_null() {
+        memcpy(
+            contents.add(index as usize * elem_size) as *mut c_void,
+            new_contents as *const c_void,
+            new_count as usize * elem_size,
+        );
     }
     (*arr).size = new_size;
 }
