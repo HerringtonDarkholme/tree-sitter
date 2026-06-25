@@ -1605,9 +1605,8 @@ pub unsafe fn ts_subtree_summarize_children(
 pub unsafe fn ts_subtree_compare(
     left: Subtree,
     right: Subtree,
-    pool: *mut SubtreePool,
+    pool: &mut SubtreePool,
 ) -> i32 {
-    let pool = subtree_pool_mut(pool);
     mutable_array_push(&mut pool.tree_stack, ts_subtree_to_mut_unsafe(left));
     mutable_array_push(&mut pool.tree_stack, ts_subtree_to_mut_unsafe(right));
 
