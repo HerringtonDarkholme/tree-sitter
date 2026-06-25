@@ -200,17 +200,23 @@ unsafe fn ts_range_array_intersects_ref(
 
 #[inline]
 unsafe fn stack_back(arr: &TreeCursorEntryArray) -> &TreeCursorEntry {
-    &*arr.contents.add(arr.size as usize - 1)
+    debug_assert!(arr.size > 0);
+    stack_slice(arr).get_unchecked(arr.size as usize - 1)
 }
 
 #[inline]
 unsafe fn stack_get(arr: &TreeCursorEntryArray, index: u32) -> &TreeCursorEntry {
-    &*arr.contents.add(index as usize)
+    stack_slice(arr).get_unchecked(index as usize)
 }
 
 #[inline]
 unsafe fn stack_write(arr: &mut TreeCursorEntryArray, index: u32, entry: TreeCursorEntry) {
     ptr::write(arr.contents.add(index as usize), entry);
+}
+
+#[inline]
+unsafe fn stack_slice(arr: &TreeCursorEntryArray) -> &[TreeCursorEntry] {
+    std::slice::from_raw_parts(arr.contents, arr.size as usize)
 }
 
 #[inline]
