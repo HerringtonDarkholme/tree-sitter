@@ -1477,3 +1477,42 @@ Source-code analysis:
   recovery/log state values, and debug/DOT output fields. Parse control flow,
   stack ownership, and subtree layout are unchanged.
 - No rollback was performed.
+
+### 2026-06-25 03:58 EDT
+
+- Repo head: `77f89d0c`
+- Batch base: `edd7fdbc`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: 10 small clippy cleanup commits from
+  `Use From for repeat depth delta` through `Use From for parser tree index`
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language tsx --repetitions 10 --error-limit 4 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 26534.3 | 25266.0 | +5.02% |
+| TypeScript error parses | 24 | 1751.0 | 1718.2 | +1.90% |
+| TSX normal parses | 1 | 5755.0 | 5770.1 | -0.26% |
+| TSX error parses | 27 | 1745.5 | 1717.7 | +1.62% |
+| Overall parser throughput | 63 | 2135.7 | 2099.8 | +1.71% |
+
+Per-case regression investigation:
+
+- The 10-repetition checkpoint reported no per-case regressions above the 5%
+  threshold, so no rerun or rollback was needed.
+
+Source-code analysis:
+
+- This batch did not change exported FFI signatures, `#[repr(C)]` layouts,
+  allocation behavior, parse-table data, generated parser templates, or C
+  headers.
+- The changes are clippy-oriented lossless integer widening cleanups using
+  `From` in `subtree.rs`, `language.rs`, `parser.rs`, and `stack.rs`.
+- Parser-facing changes are limited to equivalent widening conversions in
+  debug/DOT output, logging state values, reduction dynamic precedence, and a
+  reverse-loop index seed. Parse control flow, stack ownership, and subtree
+  layout are unchanged.
+- No rollback was performed.
