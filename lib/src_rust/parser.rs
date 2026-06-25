@@ -2746,7 +2746,7 @@ unsafe fn ts_parser_has_outstanding_parse(self_: &TSParser) -> bool {
 #[no_mangle]
 pub unsafe extern "C" fn ts_parser_new() -> *mut TSParser {
     let self_ = ts_calloc(1, core::mem::size_of::<TSParser>()).cast::<TSParser>();
-    let parser = &mut *self_;
+    let parser = parser_ptr_mut(self_);
     ts_lexer_init(&mut parser.lexer);
     array_init(&mut parser.reduce_actions);
     array_reserve(std::ptr::addr_of_mut!(parser.reduce_actions), 4);
