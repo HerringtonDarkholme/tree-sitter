@@ -10,7 +10,6 @@ The license for these files is contained in the `LICENSE` file within this direc
 
 * Source files taken from the [`icu4c/source/common/unicode`](https://github.com/unicode-org/icu/tree/552b01f61127d30d6589aa4bf99468224979b661/icu4c/source/common/unicode) directory:
   * `utf8.h`
-  * `utf16.h`
   * `umachine.h`
 * Empty source files that are referenced by the above source files, but whose original contents in `libicu` are not needed:
   * `ptypes.h`
@@ -26,4 +25,4 @@ To incorporate changes from the upstream `icu` repository:
 
 * Update `ICU_SHA` with the new Git SHA.
 * Update `LICENSE` with the license text from the directory mentioned above.
-* Update `utf8.h`, `utf16.h`, and `umachine.h` with their new contents in the `icu` repository.
+* Update `utf8.h` and `umachine.h` with their new contents in the `icu` repository.
