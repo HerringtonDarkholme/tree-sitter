@@ -107,13 +107,14 @@ impl CoreImpl {
     fn source_path(self, default_src_path: &std::path::Path) -> PathBuf {
         match self {
             Self::Rust => default_src_path.to_path_buf(),
-            Self::C => env::var("TREE_SITTER_C_CORE_SRC_DIR")
-                .map(PathBuf::from)
-                .unwrap_or_else(|_| {
+            Self::C => env::var("TREE_SITTER_C_CORE_SRC_DIR").map_or_else(
+                |_| {
                     panic!(
                         "TREE_SITTER_C_CORE_SRC_DIR must point to a pre-rewrite lib/src directory when TREE_SITTER_CORE_IMPL=c"
                     );
-                }),
+                },
+                PathBuf::from,
+            ),
         }
     }
 }
