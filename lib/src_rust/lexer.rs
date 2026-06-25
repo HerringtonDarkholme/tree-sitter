@@ -267,10 +267,10 @@ unsafe fn ts_lexer__do_advance(self_: &mut Lexer, skip: bool) {
         self_.current_position.bytes += self_.lookahead_size;
     }
 
-    let mut current_range_ptr =
-        self_.included_ranges.add(self_.current_included_range_index as usize);
+    let mut has_current_range = true;
     loop {
-        let current_range = &*current_range_ptr;
+        let range_index = self_.current_included_range_index as usize;
+        let current_range = ts_lexer__included_range(self_, range_index);
         if self_.current_position.bytes < current_range.end_byte
             && current_range.end_byte != current_range.start_byte
         {
@@ -280,14 +280,14 @@ unsafe fn ts_lexer__do_advance(self_: &mut Lexer, skip: bool) {
             self_.current_included_range_index += 1;
         }
         if self_.current_included_range_index < self_.included_range_count {
-            current_range_ptr = current_range_ptr.add(1);
-            let next_range = &*current_range_ptr;
+            let next_range_index = self_.current_included_range_index as usize;
+            let next_range = ts_lexer__included_range(self_, next_range_index);
             self_.current_position = Length {
                 bytes: next_range.start_byte,
                 extent: next_range.start_point,
             };
         } else {
-            current_range_ptr = ptr::null_mut();
+            has_current_range = false;
             break;
         }
     }
@@ -296,7 +296,7 @@ unsafe fn ts_lexer__do_advance(self_: &mut Lexer, skip: bool) {
         self_.token_start_position = self_.current_position;
     }
 
-    if !current_range_ptr.is_null() {
+    if has_current_range {
         if self_.current_position.bytes < self_.chunk_start
             || self_.current_position.bytes >= self_.chunk_start + self_.chunk_size
         {
