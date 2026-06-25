@@ -74,6 +74,16 @@ const fn node_is_null(self_: TSNode) -> bool {
     self_.id.is_null()
 }
 
+#[inline]
+const unsafe fn node_child_count(self_: TSNode) -> u32 {
+    let tree = ts_node__subtree(self_);
+    if ts_subtree_child_count(tree) > 0 {
+        (*tree.ptr).data.children.visible_child_count
+    } else {
+        0
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Internal helpers — child iteration
 // ---------------------------------------------------------------------------
@@ -386,7 +396,7 @@ unsafe fn ts_node__first_child_for_byte(
                 if ts_node_end_byte(child) > goal {
                     if ts_node__is_relevant(child, include_anonymous) {
                         return child;
-                    } else if ts_node_child_count(child) > 0 {
+                    } else if node_child_count(child) > 0 {
                         if iterator.child_index
                             < ts_subtree_child_count(ts_node__subtree(child))
                         {
@@ -690,12 +700,7 @@ pub unsafe extern "C" fn ts_node_next_parse_state(self_: TSNode) -> TSStateId {
 
 #[no_mangle]
 pub const unsafe extern "C" fn ts_node_child_count(self_: TSNode) -> u32 {
-    let tree = ts_node__subtree(self_);
-    if ts_subtree_child_count(tree) > 0 {
-        (*tree.ptr).data.children.visible_child_count
-    } else {
-        0
-    }
+    node_child_count(self_)
 }
 
 #[no_mangle]
@@ -750,7 +755,7 @@ pub unsafe extern "C" fn ts_node_child_with_descendant(
 
             // If the descendant is empty, and the end byte is within `self`,
             // we check whether `self` contains it or not.
-            if is_empty && iter.position.bytes >= end_byte && ts_node_child_count(self_) > 0 {
+            if is_empty && iter.position.bytes >= end_byte && node_child_count(self_) > 0 {
                 let child = ts_node_child_with_descendant(self_, descendant);
                 if !node_is_null(child) {
                     return if ts_node__is_relevant(self_, true) { self_ } else { child };
@@ -761,7 +766,7 @@ pub unsafe extern "C" fn ts_node_child_with_descendant(
                 iter.position.bytes <= end_byte
             } else {
                 iter.position.bytes < end_byte
-            }) || ts_node_child_count(self_) == 0) {
+            }) || node_child_count(self_) == 0) {
                 break;
             }
         }
@@ -790,7 +795,7 @@ pub unsafe extern "C" fn ts_node_child_by_field_id(
 ) -> TSNode {
     // Loop replaces C's "goto recur" tail-call pattern
     'recur: loop {
-        if field_id == 0 || ts_node_child_count(self_) == 0 {
+        if field_id == 0 || node_child_count(self_) == 0 {
             return ts_node__null();
         }
 
@@ -846,7 +851,7 @@ pub unsafe extern "C" fn ts_node_child_by_field_id(
                     }
                 } else if ts_node__is_relevant(child, true) {
                     return child;
-                } else if ts_node_child_count(child) > 0 {
+                } else if node_child_count(child) > 0 {
                     return ts_node_child(child, 0);
                 }
                 field_map = field_map.add(1);
