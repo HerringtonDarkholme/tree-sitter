@@ -2985,8 +2985,7 @@ pub unsafe extern "C" fn ts_parser_parse(
             return result;
         }
 
-        if !old_tree.is_null() {
-            let old_tree = &*old_tree;
+        if let Some(old_tree) = old_tree.as_ref() {
             ts_subtree_retain(old_tree.root);
             parser.old_tree = old_tree.root;
             ts_range_array_get_changed_ranges(
