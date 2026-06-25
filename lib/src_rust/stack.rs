@@ -1376,8 +1376,9 @@ pub unsafe fn ts_stack_can_merge(
     version1: StackVersion,
     version2: StackVersion,
 ) -> bool {
-    let head1 = stack_head(&*self_, version1);
-    let head2 = stack_head(&*self_, version2);
+    let stack = &*self_;
+    let head1 = stack_head(stack, version1);
+    let head2 = stack_head(stack, version2);
     head1.status == StackStatus::Active
         && head2.status == StackStatus::Active
         && (*head1.node).state == (*head2.node).state
