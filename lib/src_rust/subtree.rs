@@ -1831,7 +1831,7 @@ unsafe fn language_field_map(
     start: *mut *const TSFieldMapEntry,
     end: *mut *const TSFieldMapEntry,
 ) {
-    let lang = language as *const TSLanguageData;
+    let lang = language.cast::<TSLanguageData>();
     if (*lang).field_count == 0 {
         *start = ptr::null();
         *end = ptr::null();
@@ -2051,7 +2051,7 @@ unsafe fn ts_subtree__write_to_string(
                     if !(*map).inherited
                         && (*map).child_index == structural_child_index as u8
                     {
-                        let lang = language as *const TSLanguageData;
+                        let lang = language.cast::<TSLanguageData>();
                         child_field_name =
                             *(*lang).field_names.add((*map).field_id as usize);
                         break;
@@ -2172,7 +2172,7 @@ unsafe fn ts_subtree__print_dot_graph(
     fprintf(f, b"\"]\n\0".as_ptr() as *const i8);
 
     let mut child_start_offset = start_offset;
-    let lang = language as *const TSLanguageData;
+    let lang = language.cast::<TSLanguageData>();
     let mut child_info_offset =
         u32::from((*lang).max_alias_sequence_length) * u32::from(ts_subtree_production_id(tree));
     let n = ts_subtree_child_count(tree);
