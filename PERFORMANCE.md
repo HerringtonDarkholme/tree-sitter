@@ -2424,6 +2424,92 @@ Source-code analysis:
 - Full `cargo test --all` passed after every committed code change in this
   checkpoint.
 
+### 2026-06-25 15:55 EDT
+
+- Repo head: `ae9c7b3d`
+- Batch base: `768f0fe1`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: typed array/slice access helper cleanup
+  commits from `Add typed array access helpers` through
+  `Use slice for lexer included ranges`
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+Primary checkpoint rerun:
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 24932.6 | 24607.1 | +1.32% |
+| TypeScript error parses | 32 | 1710.0 | 1622.8 | +5.38% |
+| JavaScript normal parses | 2 | 16645.2 | 15747.0 | +5.70% |
+| JavaScript error parses | 37 | 1998.4 | 1957.1 | +2.11% |
+| Overall parser throughput | 82 | 2316.9 | 2225.7 | +4.10% |
+
+Per-case regressions over 5% in the checkpoint rerun:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `javascript error parser.c` | 1174.2 | 1510.3 | 22.25% |
+| `javascript error malloc.c` | 1080.6 | 1327.9 | 18.62% |
+| `javascript error compound-statement-without-trailing-newline.py` | 2864.5 | 3219.2 | 11.02% |
+| `typescript error compound-statement-without-trailing-newline.py` | 906.8 | 975.1 | 7.00% |
+| `typescript normal transform.ts` | 21924.9 | 23192.6 | 5.47% |
+
+The first run of the same command reported a lower overall Rust throughput and
+a different per-case regression set:
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 25412.0 | 23624.6 | +7.57% |
+| TypeScript error parses | 32 | 1641.1 | 1591.8 | +3.10% |
+| JavaScript normal parses | 2 | 16924.3 | 15576.5 | +8.65% |
+| JavaScript error parses | 37 | 1997.3 | 1929.6 | +3.51% |
+| Overall parser throughput | 82 | 2261.2 | 2187.2 | +3.38% |
+
+First-run per-case regressions over 5%:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `javascript error update-authors.sh` | 420.5 | 609.6 | 31.02% |
+| `javascript error test.sh` | 508.8 | 695.7 | 26.86% |
+| `javascript error release.sh` | 537.5 | 730.4 | 26.41% |
+| `javascript error relocate.sh` | 444.8 | 595.1 | 25.25% |
+| `typescript error doc-build.sh` | 478.9 | 640.7 | 25.25% |
+| `typescript error clean-old.sh` | 382.5 | 440.4 | 13.15% |
+| `typescript normal performanceCore.ts` | 21894.7 | 23906.8 | 8.42% |
+
+Prior checkpoint at `e6779351` recorded Rust overall throughput of 2357.7
+bytes/ms and a Rust-vs-C delta of +5.25%. The checkpoint rerun measured 2316.9
+bytes/ms, so absolute Rust throughput moved by about -1.73%; C throughput moved
+from 2240.1 to 2225.7 bytes/ms, and the Rust-vs-C delta moved to +4.10%.
+
+Source-code analysis:
+
+- This batch centralizes raw array pointer access behind typed helpers and
+  slice views. It does not change exported `#[no_mangle] extern "C"` symbols,
+  C ABI, struct layout, parser tables, or parser control flow.
+- The parser changes are helper-only: generic `Array<T>` reference helpers and
+  local casts for `SubtreeArray`, `MutableSubtreeArray`, and `TSRangeArray`.
+  The changed call sites preserve the same underlying pointer/index semantics.
+- The `get_changed_ranges`, `tree_cursor`, and `lexer` changes convert local
+  indexing helpers to `from_raw_parts`/`from_raw_parts_mut` plus unchecked
+  indexing. These paths are outside fresh parser table execution except for
+  lexer included-range lookup, whose helper still indexes the same
+  `included_ranges` allocation and is guarded by the same range-count checks.
+- The two full runs disagreed on the per-case regression set:
+  `performanceCore.ts` in the first run did not reproduce in the rerun, and the
+  shell-script JavaScript error cases were replaced by different C/Python
+  fixtures. This points to benchmark noise rather than a stable source-level
+  regression.
+- Both full runs were aggregate-positive versus C. Given the non-reproducing
+  per-case set and ABI/control-flow-neutral source diff, no rollback was
+  performed.
+- Full `cargo test --all` passed after every committed code change in this
+  checkpoint.
+
 ### 2026-06-25 15:21 EDT
 
 - Repo head: `e6779351`
