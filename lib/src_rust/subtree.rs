@@ -736,7 +736,7 @@ pub const unsafe fn ts_subtree_missing(self_: Subtree) -> bool {
 }
 
 #[inline]
-pub const unsafe fn ts_subtree_is_keyword(self_: Subtree) -> bool {
+pub(crate) const unsafe fn ts_subtree_is_keyword(self_: Subtree) -> bool {
     if self_.data.is_inline() {
         self_.data.is_keyword()
     } else {
@@ -754,7 +754,7 @@ pub const unsafe fn ts_subtree_parse_state(self_: Subtree) -> TSStateId {
 }
 
 #[inline]
-pub unsafe fn ts_subtree_lookahead_bytes(self_: Subtree) -> u32 {
+pub(crate) unsafe fn ts_subtree_lookahead_bytes(self_: Subtree) -> u32 {
     if self_.data.is_inline() {
         u32::from(self_.data.lookahead_bytes())
     } else {
@@ -859,7 +859,7 @@ pub unsafe fn ts_subtree_leaf_symbol(self_: Subtree) -> TSSymbol {
 }
 
 #[inline]
-pub const unsafe fn ts_subtree_leaf_parse_state(self_: Subtree) -> TSStateId {
+pub(crate) const unsafe fn ts_subtree_leaf_parse_state(self_: Subtree) -> TSStateId {
     if self_.data.is_inline() {
         return self_.data.parse_state;
     }
@@ -976,7 +976,7 @@ pub const unsafe fn ts_subtree_error_cost(self_: Subtree) -> u32 {
 // --- #30: dynamic_precedence, production_id ---
 
 #[inline]
-pub const unsafe fn ts_subtree_dynamic_precedence(self_: Subtree) -> i32 {
+pub(crate) const unsafe fn ts_subtree_dynamic_precedence(self_: Subtree) -> i32 {
     if self_.data.is_inline() || (*self_.ptr).child_count == 0 {
         0
     } else {
@@ -985,7 +985,7 @@ pub const unsafe fn ts_subtree_dynamic_precedence(self_: Subtree) -> i32 {
 }
 
 #[inline]
-pub const unsafe fn ts_subtree_production_id(self_: Subtree) -> u16 {
+pub(crate) const unsafe fn ts_subtree_production_id(self_: Subtree) -> u16 {
     if ts_subtree_child_count(self_) > 0 {
         (*self_.ptr).data.children.production_id
     } else {
@@ -996,12 +996,12 @@ pub const unsafe fn ts_subtree_production_id(self_: Subtree) -> u16 {
 // --- #31: fragile/external/depends_on_column accessors ---
 
 #[inline]
-pub const unsafe fn ts_subtree_fragile_left(self_: Subtree) -> bool {
+pub(crate) const unsafe fn ts_subtree_fragile_left(self_: Subtree) -> bool {
     if self_.data.is_inline() { false } else { (*self_.ptr).fragile_left() }
 }
 
 #[inline]
-pub const unsafe fn ts_subtree_fragile_right(self_: Subtree) -> bool {
+pub(crate) const unsafe fn ts_subtree_fragile_right(self_: Subtree) -> bool {
     if self_.data.is_inline() { false } else { (*self_.ptr).fragile_right() }
 }
 
@@ -1011,17 +1011,17 @@ pub const unsafe fn ts_subtree_has_external_tokens(self_: Subtree) -> bool {
 }
 
 #[inline]
-pub const unsafe fn ts_subtree_has_external_scanner_state_change(self_: Subtree) -> bool {
+pub(crate) const unsafe fn ts_subtree_has_external_scanner_state_change(self_: Subtree) -> bool {
     if self_.data.is_inline() { false } else { (*self_.ptr).has_external_scanner_state_change() }
 }
 
 #[inline]
-pub const unsafe fn ts_subtree_depends_on_column(self_: Subtree) -> bool {
+pub(crate) const unsafe fn ts_subtree_depends_on_column(self_: Subtree) -> bool {
     if self_.data.is_inline() { false } else { (*self_.ptr).depends_on_column() }
 }
 
 #[inline]
-pub const unsafe fn ts_subtree_is_fragile(self_: Subtree) -> bool {
+pub(crate) const unsafe fn ts_subtree_is_fragile(self_: Subtree) -> bool {
     if self_.data.is_inline() {
         false
     } else {
