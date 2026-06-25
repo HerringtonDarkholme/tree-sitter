@@ -1474,11 +1474,11 @@ unsafe fn ts_parser__reduce(
     end_of_non_terminal_extra: bool,
 ) -> StackVersion {
     let parser = ptr::from_mut(self_);
-    let initial_version_count = ts_stack_version_count(&*self_.stack);
+    let initial_version_count = ts_stack_version_count(parser_stack_ref(self_.stack));
 
-    let pop = ts_stack_pop_count(&mut *self_.stack, version, count);
+    let pop = ts_stack_pop_count(parser_stack_mut(self_.stack), version, count);
     let mut removed_version_count: u32 = 0;
-    let stack = &mut *self_.stack;
+    let stack = parser_stack_mut(self_.stack);
     let halted_version_count = ts_stack_halted_version_count(stack);
     let mut i: u32 = 0;
     while i < pop.size {
