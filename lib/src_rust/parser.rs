@@ -1007,7 +1007,7 @@ unsafe fn ts_parser__lex(
 
             if found_token {
                 found_external_token = true;
-                called_get_column = (*self_).lexer.did_get_column;
+                called_get_column = self_.lexer.did_get_column;
                 break;
             }
 
@@ -2906,8 +2906,8 @@ pub unsafe extern "C" fn ts_parser_parse(
                 LOG!(
                     self_,
                     b"different_included_range %u - %u\0".as_ptr() as *const i8,
-                    (*range).start_byte,
-                    (*range).end_byte
+                    range.start_byte,
+                    range.end_byte
                 );
             }
         } else {
@@ -2980,7 +2980,7 @@ pub unsafe extern "C" fn ts_parser_parse(
                 &parser.included_range_differences,
                 parser.included_range_difference_index,
             );
-            if (*range).end_byte <= position {
+            if range.end_byte <= position {
                 parser.included_range_difference_index += 1;
             } else {
                 break;
