@@ -116,17 +116,30 @@ unsafe fn tree_cursor_entry_array_get(
     arr: &TreeCursorEntryArray,
     index: u32,
 ) -> &TreeCursorEntry {
-    &*arr.contents.add(index as usize)
+    tree_cursor_entry_slice(arr).get_unchecked(index as usize)
 }
 
 #[inline]
 unsafe fn tree_cursor_entry_array_back(arr: &TreeCursorEntryArray) -> &TreeCursorEntry {
-    &*arr.contents.add(arr.size as usize - 1)
+    debug_assert!(arr.size > 0);
+    tree_cursor_entry_slice(arr).get_unchecked(arr.size as usize - 1)
 }
 
 #[inline]
 unsafe fn tree_cursor_entry_array_back_mut(arr: &mut TreeCursorEntryArray) -> &mut TreeCursorEntry {
-    &mut *arr.contents.add(arr.size as usize - 1)
+    debug_assert!(arr.size > 0);
+    let index = arr.size as usize - 1;
+    tree_cursor_entry_slice_mut(arr).get_unchecked_mut(index)
+}
+
+#[inline]
+unsafe fn tree_cursor_entry_slice(arr: &TreeCursorEntryArray) -> &[TreeCursorEntry] {
+    std::slice::from_raw_parts(arr.contents, arr.size as usize)
+}
+
+#[inline]
+unsafe fn tree_cursor_entry_slice_mut(arr: &mut TreeCursorEntryArray) -> &mut [TreeCursorEntry] {
+    std::slice::from_raw_parts_mut(arr.contents, arr.size as usize)
 }
 
 #[inline]
