@@ -1147,3 +1147,50 @@ Source-code analysis:
   signatures and unchanged stack-head/node/subtree ownership behavior.
 - No reproducible >5% regression was observed in this checkpoint. No rollback
   was performed.
+
+### 2026-06-24 23:34 EDT
+
+Focused TypeScript-normal investigation after a report that TypeScript normal
+parses appeared consistently slower than C.
+
+- Repo head: `bcd5a99c`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Aggregate command:
+
+```sh
+cargo xtask perf-gate --language typescript --repetitions 100 --error-limit 0 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 26063.0 | 24820.3 | +5.01% |
+
+This higher-repetition TypeScript-normal run reported no per-case Rust-vs-C
+regressions above the 5% threshold, so it does not confirm a broad
+TypeScript-normal parser regression.
+
+Focused single-file check:
+
+```sh
+TREE_SITTER_BENCHMARK_EXAMPLE_FILTER=builderStatePublic.ts \
+TREE_SITTER_BENCHMARK_REPETITION_COUNT=1000 \
+cargo bench benchmark -p tree-sitter-cli --offline
+```
+
+| Case | Bytes | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| `builderStatePublic.ts` | 382 | 16262 | 20528 | -20.78% |
+
+Source-code analysis:
+
+- `builderStatePublic.ts` is only 382 bytes in the local TypeScript checkout,
+  so fixed parser and benchmark-loop overhead is a large part of its measured
+  time. Earlier direct 100-repetition focused runs flipped the sign, measuring
+  Rust faster on the same file, which confirms high noise sensitivity for this
+  tiny case.
+- The 100-repetition aggregate TypeScript-normal run is a better signal for
+  parser throughput because it includes the larger TypeScript samples and did
+  not show any >5% per-case regression.
+- No source change was made and no rollback was performed. Keep the
+  TypeScript-normal aggregate and tiny-file outliers on the watchlist for the
+  next 10-change checkpoint.
