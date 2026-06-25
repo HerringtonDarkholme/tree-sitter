@@ -556,7 +556,7 @@ unsafe extern "C" fn ts_string_input_read(
     _point: TSPoint,
     length: *mut u32,
 ) -> *const i8 {
-    let input = &*(payload as *const TSStringInput);
+    let input = payload.cast::<TSStringInput>().as_ref().unwrap_unchecked();
     if byte >= input.length {
         *length = 0;
         c"".as_ptr().cast::<i8>()
