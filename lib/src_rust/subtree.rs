@@ -881,7 +881,7 @@ pub unsafe fn ts_subtree_is_repetition(self_: Subtree) -> u32 {
 // --- #28: visible_descendant_count, visible_child_count ---
 
 #[inline]
-pub unsafe fn ts_subtree_visible_descendant_count(self_: Subtree) -> u32 {
+pub const unsafe fn ts_subtree_visible_descendant_count(self_: Subtree) -> u32 {
     if self_.data.is_inline() || (*self_.ptr).child_count == 0 {
         0
     } else {
@@ -890,7 +890,7 @@ pub unsafe fn ts_subtree_visible_descendant_count(self_: Subtree) -> u32 {
 }
 
 #[inline]
-pub unsafe fn ts_subtree_visible_child_count(self_: Subtree) -> u32 {
+pub const unsafe fn ts_subtree_visible_child_count(self_: Subtree) -> u32 {
     if ts_subtree_child_count(self_) > 0 {
         (*self_.ptr).data.children.visible_child_count
     } else {
@@ -901,7 +901,7 @@ pub unsafe fn ts_subtree_visible_child_count(self_: Subtree) -> u32 {
 // --- #29: error_cost ---
 
 #[inline]
-pub unsafe fn ts_subtree_error_cost(self_: Subtree) -> u32 {
+pub const unsafe fn ts_subtree_error_cost(self_: Subtree) -> u32 {
     if ts_subtree_missing(self_) {
         ERROR_COST_PER_MISSING_TREE + ERROR_COST_PER_RECOVERY
     } else if self_.data.is_inline() {
@@ -914,7 +914,7 @@ pub unsafe fn ts_subtree_error_cost(self_: Subtree) -> u32 {
 // --- #30: dynamic_precedence, production_id ---
 
 #[inline]
-pub unsafe fn ts_subtree_dynamic_precedence(self_: Subtree) -> i32 {
+pub const unsafe fn ts_subtree_dynamic_precedence(self_: Subtree) -> i32 {
     if self_.data.is_inline() || (*self_.ptr).child_count == 0 {
         0
     } else {
@@ -923,7 +923,7 @@ pub unsafe fn ts_subtree_dynamic_precedence(self_: Subtree) -> i32 {
 }
 
 #[inline]
-pub unsafe fn ts_subtree_production_id(self_: Subtree) -> u16 {
+pub const unsafe fn ts_subtree_production_id(self_: Subtree) -> u16 {
     if ts_subtree_child_count(self_) > 0 {
         (*self_.ptr).data.children.production_id
     } else {
