@@ -1119,8 +1119,11 @@ pub unsafe fn ts_stack_push(
     pending: bool,
     state: TSStateId,
 ) {
-    let head = stack_head_mut(&mut *self_, version);
-    let new_node = stack_node_new(head.node, subtree, pending, state, &mut (*self_).node_pool);
+    let stack = &mut *self_;
+    let heads = &mut stack.heads;
+    let node_pool = &mut stack.node_pool;
+    let head = stack_head_array_get_mut(heads, version);
+    let new_node = stack_node_new(head.node, subtree, pending, state, node_pool);
     if subtree.ptr.is_null() {
         head.node_count_at_last_error = (*new_node).node_count;
     }
