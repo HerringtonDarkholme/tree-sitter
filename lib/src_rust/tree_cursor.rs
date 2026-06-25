@@ -242,16 +242,16 @@ unsafe fn ts_tree_cursor_is_entry_visible(
     let entry = tree_cursor_entry_array_get(&self_.stack, index);
     if index == 0 || ts_subtree_visible(*entry.subtree) {
         return true;
-    } else if !ts_subtree_extra(*entry.subtree) {
+    }
+    if !ts_subtree_extra(*entry.subtree) {
         let parent_entry = tree_cursor_entry_array_get(&self_.stack, index - 1);
         return ts_language_alias_at(
             (*self_.tree).language,
             (*(*parent_entry.subtree).ptr).data.children.production_id as u32,
             entry.structural_child_index,
         ) != 0;
-    } else {
-        return false;
     }
+    false
 }
 
 #[inline]
@@ -744,11 +744,11 @@ pub unsafe extern "C" fn ts_tree_cursor_goto_descendant(
             && next_descendant_index > goal_descendant_index
         {
             break;
-        } else if cursor.stack.size <= 1 {
-            return;
-        } else {
-            cursor.stack.size -= 1;
         }
+        if cursor.stack.size <= 1 {
+            return;
+        }
+        cursor.stack.size -= 1;
     }
 
     // Descend to the goal node.
@@ -765,10 +765,9 @@ pub unsafe extern "C" fn ts_tree_cursor_goto_descendant(
                 array_push(&mut cursor.stack, entry);
                 if child.visible && entry.descendant_index == goal_descendant_index {
                     return;
-                } else {
-                    did_descend = true;
-                    break;
                 }
+                did_descend = true;
+                break;
             }
         }
         if !did_descend {
