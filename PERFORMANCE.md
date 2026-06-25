@@ -126,6 +126,64 @@ Source-code analysis:
 - Full `cargo test --all` passed before every committed code change in this
   checkpoint.
 
+### 2026-06-25 18:20 EDT
+
+- Repo head: `0786a35a`
+- Batch base: `adbc3547`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: 10 small parser pointer-access cleanup commits:
+  `Use parser stack accessors in parser API paths` through
+  `Use language helper in external scanner`.
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 25273.0 | 23228.4 | +8.80% |
+| TypeScript error parses | 32 | 1667.4 | 1612.5 | +3.40% |
+| JavaScript normal parses | 2 | 17168.0 | 15597.0 | +10.07% |
+| JavaScript error parses | 37 | 2053.8 | 1931.4 | +6.33% |
+| Overall parser throughput | 82 | 2307.0 | 2204.6 | +4.64% |
+
+Per-case regressions over 5%:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `typescript error compound-statement-without-trailing-newline.py` | 938.1 | 998.0 | 6.01% |
+
+Prior checkpoint at `8f3b555e` measured Rust overall throughput of 2347.1
+bytes/ms and a Rust-vs-C delta of +4.72%. This checkpoint measured 2307.0
+bytes/ms, so absolute Rust throughput moved by about -1.71%. C throughput moved
+from 2241.3 to 2204.6 bytes/ms, and the Rust-vs-C delta moved slightly to
++4.64%.
+
+Source-code analysis:
+
+- The batch contains no exported `#[no_mangle] extern "C"` signature changes,
+  no struct layout changes, no C header field changes, and no parser action or
+  parsing table semantic changes.
+- The parser stack/API commits finish replacing direct parser stack reference
+  formation in parser API paths and replace a few redundant `&mut *self_`
+  reborrows with the existing parser reference.
+- The typed-array commits route parser-local generic array operations through
+  existing or matching local helpers for `SubtreeArray`, `MutableSubtreeArray`,
+  and `TSRangeArray`. These are reference-formation cleanups around unchanged
+  array operations and do not alter allocation, capacity, or element movement.
+- The external scanner commits use typed pointer access for the embedded scanner
+  state and centralize `TSLanguageFull` access behind a helper in lexing and
+  scanner callbacks. Nullable scanner create/destroy paths still perform the
+  null checks before using the helper.
+- The single per-case slowdown is the same narrow TypeScript error fixture that
+  appeared in prior checkpoints. All aggregate buckets remain faster than C,
+  and both Rust and C absolute throughput moved down compared with the prior
+  run, so this does not currently indicate a source-level regression in this
+  batch.
+- Full `cargo test --all` passed before every committed code change in this
+  checkpoint.
+
 ### 2026-06-25 16:40 EDT
 
 - Repo head: `4811d155`
