@@ -32,7 +32,7 @@ use super::language::ts_language_write_symbol_as_dot_string;
 // ---------------------------------------------------------------------------
 
 const MAX_LINK_COUNT: usize = 8;
-const MAX_NODE_POOL_SIZE: usize = 50;
+const MAX_NODE_POOL_SIZE: u32 = 50;
 const MAX_ITERATOR_COUNT: usize = 64;
 
 // ---------------------------------------------------------------------------
@@ -525,7 +525,7 @@ unsafe fn stack_node_release(
             ptr::null_mut()
         };
 
-        if pool.size < MAX_NODE_POOL_SIZE as u32 {
+        if pool.size < MAX_NODE_POOL_SIZE {
             array_push(pool, self_);
         } else {
             ts_free(self_.cast::<c_void>());
@@ -989,7 +989,7 @@ pub unsafe fn ts_stack_new(subtree_pool: *mut SubtreePool) -> *mut Stack {
     array_reserve(&mut stack.heads, 4);
     array_reserve(&mut stack.slices, 4);
     array_reserve(&mut stack.iterators, 4);
-    array_reserve(&mut stack.node_pool, MAX_NODE_POOL_SIZE as u32);
+    array_reserve(&mut stack.node_pool, MAX_NODE_POOL_SIZE);
 
     stack.subtree_pool = subtree_pool;
     stack.base_node = stack_node_new(
