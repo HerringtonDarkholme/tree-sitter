@@ -30,7 +30,7 @@ use super::tree::{ts_tree_root_node, TSTree};
 // Types
 // ---------------------------------------------------------------------------
 
-/// NodeChildIterator — internal iterator for walking children
+/// `NodeChildIterator` — internal iterator for walking children
 struct NodeChildIterator {
     parent: Subtree,
     tree: *const TSTree,
@@ -56,7 +56,7 @@ const unsafe fn ts_node__alias(self_: &TSNode) -> u32 {
 
 #[inline]
 const unsafe fn ts_node__subtree(self_: TSNode) -> Subtree {
-    *(self_.id as *const Subtree)
+    *self_.id.cast::<Subtree>()
 }
 
 // ---------------------------------------------------------------------------
@@ -69,14 +69,14 @@ unsafe fn ts_node_iterate_children(node: &TSNode) -> NodeChildIterator {
     if ts_subtree_child_count(subtree) == 0 {
         return NodeChildIterator {
             parent: NULL_SUBTREE,
-            tree: node.tree as *const TSTree,
+            tree: node.tree.cast::<TSTree>(),
             position: length_zero(),
             child_index: 0,
             structural_child_index: 0,
             alias_sequence: ptr::null(),
         };
     }
-    let tree = node.tree as *const TSTree;
+    let tree = node.tree.cast::<TSTree>();
     let alias_sequence = ts_language_alias_sequence(
         (*tree).language,
         u32::from((*subtree.ptr).data.children.production_id),
@@ -114,7 +114,7 @@ unsafe fn ts_node_child_iterator_next(
     }
     *result = ts_node_new(
         self_.tree,
-        child as *const Subtree,
+        std::ptr::from_ref::<Subtree>(child),
         self_.position,
         alias_symbol,
     );
@@ -135,7 +135,7 @@ unsafe fn ts_node__is_relevant(self_: TSNode, include_anonymous: bool) -> bool {
     } else {
         let alias = ts_node__alias(&self_) as TSSymbol;
         if alias != 0 {
-            let t = self_.tree as *const TSTree;
+            let t = self_.tree.cast::<TSTree>();
             ts_language_symbol_metadata((*t).language, alias).named
         } else {
             ts_subtree_visible(tree) && ts_subtree_named(tree)
@@ -144,7 +144,7 @@ unsafe fn ts_node__is_relevant(self_: TSNode, include_anonymous: bool) -> bool {
 }
 
 #[inline]
-const unsafe fn ts_node__relevant_child_count(
+unsafe fn ts_node__relevant_child_count(
     self_: TSNode,
     include_anonymous: bool,
 ) -> u32 {
@@ -494,7 +494,7 @@ unsafe fn ts_node__field_name_from_language(
     self_: TSNode,
     structural_child_index: u32,
 ) -> *const i8 {
-    let tree = self_.tree as *const TSTree;
+    let tree = self_.tree.cast::<TSTree>();
     let mut field_map: *const TSFieldMapEntry = ptr::null();
     let mut field_map_end: *const TSFieldMapEntry = ptr::null();
     ts_language_field_map(
@@ -503,7 +503,7 @@ unsafe fn ts_node__field_name_from_language(
         &mut field_map,
         &mut field_map_end,
     );
-    let lang = (*tree).language as *const TSLanguageFull;
+    let lang = (*tree).language.cast::<TSLanguageFull>();
     while field_map != field_map_end {
         if !(*field_map).inherited && (*field_map).child_index == structural_child_index as u8 {
             return *(*lang).field_names.add((*field_map).field_id as usize);
@@ -526,8 +526,8 @@ pub unsafe extern "C" fn ts_node_new(
 ) -> TSNode {
     TSNode {
         context: [position.bytes, position.extent.row, position.extent.column, u32::from(alias)],
-        id: subtree as *const core::ffi::c_void,
-        tree: tree as *const crate::ffi::TSTree,
+        id: subtree.cast::<core::ffi::c_void>(),
+        tree: tree.cast::<crate::ffi::TSTree>(),
     }
 }
 
@@ -561,7 +561,7 @@ pub unsafe extern "C" fn ts_node_symbol(self_: TSNode) -> TSSymbol {
     if symbol == 0 {
         symbol = ts_subtree_symbol(ts_node__subtree(self_));
     }
-    let tree = self_.tree as *const TSTree;
+    let tree = self_.tree.cast::<TSTree>();
     ts_language_public_symbol((*tree).language, symbol)
 }
 
@@ -571,13 +571,13 @@ pub unsafe extern "C" fn ts_node_type(self_: TSNode) -> *const i8 {
     if symbol == 0 {
         symbol = ts_subtree_symbol(ts_node__subtree(self_));
     }
-    let tree = self_.tree as *const TSTree;
+    let tree = self_.tree.cast::<TSTree>();
     ts_language_symbol_name((*tree).language, symbol)
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_node_language(self_: TSNode) -> *const TSLanguage {
-    let tree = self_.tree as *const TSTree;
+    let tree = self_.tree.cast::<TSTree>();
     (*tree).language
 }
 
@@ -588,14 +588,14 @@ pub unsafe extern "C" fn ts_node_grammar_symbol(self_: TSNode) -> TSSymbol {
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_node_grammar_type(self_: TSNode) -> *const i8 {
-    let tree = self_.tree as *const TSTree;
+    let tree = self_.tree.cast::<TSTree>();
     let symbol = ts_subtree_symbol(ts_node__subtree(self_));
     ts_language_symbol_name((*tree).language, symbol)
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_node_string(self_: TSNode) -> *mut i8 {
-    let tree = self_.tree as *const TSTree;
+    let tree = self_.tree.cast::<TSTree>();
     let alias_symbol = ts_node__alias(&self_) as TSSymbol;
     ts_subtree_string(
         ts_node__subtree(self_),
@@ -625,7 +625,7 @@ pub unsafe extern "C" fn ts_node_is_extra(self_: TSNode) -> bool {
 pub unsafe extern "C" fn ts_node_is_named(self_: TSNode) -> bool {
     let alias = ts_node__alias(&self_) as TSSymbol;
     if alias != 0 {
-        let tree = self_.tree as *const TSTree;
+        let tree = self_.tree.cast::<TSTree>();
         ts_language_symbol_metadata((*tree).language, alias).named
     } else {
         ts_subtree_named(ts_node__subtree(self_))
@@ -664,7 +664,7 @@ pub unsafe extern "C" fn ts_node_parse_state(self_: TSNode) -> TSStateId {
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_node_next_parse_state(self_: TSNode) -> TSStateId {
-    let tree = self_.tree as *const TSTree;
+    let tree = self_.tree.cast::<TSTree>();
     let language = (*tree).language;
     let state = ts_node_parse_state(self_);
     if state == TS_TREE_STATE_NONE {
@@ -704,7 +704,7 @@ pub unsafe extern "C" fn ts_node_named_child_count(self_: TSNode) -> u32 {
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_node_parent(self_: TSNode) -> TSNode {
-    let tree = self_.tree as *const TSTree;
+    let tree = self_.tree.cast::<TSTree>();
     let mut node = ts_tree_root_node(tree);
     if node.id == self_.id { return ts_node__null(); }
 
@@ -784,7 +784,7 @@ pub unsafe extern "C" fn ts_node_child_by_field_id(
             return ts_node__null();
         }
 
-        let tree = self_.tree as *const TSTree;
+        let tree = self_.tree.cast::<TSTree>();
         let mut field_map: *const TSFieldMapEntry = ptr::null();
         let mut field_map_end: *const TSFieldMapEntry = ptr::null();
         ts_language_field_map(
@@ -857,7 +857,7 @@ pub unsafe extern "C" fn ts_node_child_by_field_name(
     name: *const i8,
     name_length: u32,
 ) -> TSNode {
-    let tree = self_.tree as *const TSTree;
+    let tree = self_.tree.cast::<TSTree>();
     let field_id = ts_language_field_id_for_name((*tree).language, name, name_length);
     ts_node_child_by_field_id(self_, field_id)
 }

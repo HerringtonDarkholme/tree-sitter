@@ -228,7 +228,7 @@ macro_rules! TREE_NAME {
 // Types
 // ---------------------------------------------------------------------------
 
-/// ReduceAction — from reduce_action.h
+/// `ReduceAction` — from `reduce_action.h`
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct ReduceAction {
@@ -238,10 +238,10 @@ struct ReduceAction {
     production_id: u16,
 }
 
-/// ReduceActionSet — Array(ReduceAction)
+/// `ReduceActionSet` — Array(ReduceAction)
 type ReduceActionSet = Array<ReduceAction>;
 
-/// StackEntry — for ReusableNode (from reusable_node.h)
+/// `StackEntry` — for `ReusableNode` (from `reusable_node.h`)
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct StackEntry {
@@ -250,14 +250,14 @@ struct StackEntry {
     byte_offset: u32,
 }
 
-/// ReusableNode — for incremental reparsing (from reusable_node.h)
+/// `ReusableNode` — for incremental reparsing (from `reusable_node.h`)
 #[repr(C)]
 struct ReusableNode {
     stack: Array<StackEntry>,
     last_external_token: Subtree,
 }
 
-/// TokenCache — cached lookahead token
+/// `TokenCache` — cached lookahead token
 #[repr(C)]
 struct TokenCache {
     token: Subtree,
@@ -265,7 +265,7 @@ struct TokenCache {
     byte_index: u32,
 }
 
-/// ErrorStatus — for comparing parse versions
+/// `ErrorStatus` — for comparing parse versions
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct ErrorStatus {
@@ -275,7 +275,7 @@ struct ErrorStatus {
     is_in_error: bool,
 }
 
-/// ErrorComparison
+/// `ErrorComparison`
 #[derive(PartialEq, Eq)]
 enum ErrorComparison {
     TakeLeft,
@@ -285,14 +285,14 @@ enum ErrorComparison {
     TakeRight,
 }
 
-/// TSStringInput — for string-based parsing
+/// `TSStringInput` — for string-based parsing
 #[repr(C)]
 struct TSStringInput {
     string: *const i8,
     length: u32,
 }
 
-/// TSParser — the main parser struct
+/// `TSParser` — the main parser struct
 #[repr(C)]
 pub struct TSParser {
     lexer: Lexer,
@@ -473,7 +473,7 @@ const unsafe fn stack_slice_subtrees_read_ref(self_: &StackSlice) -> SubtreeArra
 }
 
 unsafe fn subtree_array_get(self_: &SubtreeArray, index: u32) -> Subtree {
-    *array_get(self_ as *const SubtreeArray as *const Array<Subtree>, index)
+    *array_get(std::ptr::from_ref::<SubtreeArray>(self_).cast::<Array<Subtree>>(), index)
 }
 
 unsafe fn stack_summary_array_get(self_: &StackSummary, index: u32) -> &StackSummaryEntry {
@@ -481,11 +481,11 @@ unsafe fn stack_summary_array_get(self_: &StackSummary, index: u32) -> &StackSum
 }
 
 unsafe fn mutable_subtree_array_back(self_: &MutableSubtreeArray) -> MutableSubtree {
-    *array_back(self_ as *const MutableSubtreeArray as *const Array<MutableSubtree>)
+    *array_back(std::ptr::from_ref::<MutableSubtreeArray>(self_).cast::<Array<MutableSubtree>>())
 }
 
 unsafe fn ts_range_array_get(self_: &TSRangeArray, index: u32) -> &TSRange {
-    &*array_get(self_ as *const TSRangeArray as *const Array<TSRange>, index)
+    &*array_get(std::ptr::from_ref::<TSRangeArray>(self_).cast::<Array<TSRange>>(), index)
 }
 
 const unsafe fn ts_logger_read_ref(self_: &TSLogger) -> TSLogger {
@@ -518,7 +518,7 @@ unsafe extern "C" fn ts_string_input_read(
     let input = &*(payload as *const TSStringInput);
     if byte >= input.length {
         *length = 0;
-        b"\0".as_ptr() as *const i8
+        b"\0".as_ptr().cast::<i8>()
     } else {
         *length = input.length - byte;
         input.string.add(byte as usize)
@@ -534,12 +534,12 @@ unsafe fn ts_parser__log(self_: &mut TSParser) {
         log_fn(
             self_.lexer.logger.payload,
             TSLogTypeParse,
-            self_.lexer.debug_buffer.as_ptr() as *const i8,
+            self_.lexer.debug_buffer.as_ptr().cast::<i8>(),
         );
     }
 
     if !self_.dot_graph_file.is_null() {
-        fprintf(self_.dot_graph_file, b"graph {\nlabel=\"\0".as_ptr() as *const i8);
+        fprintf(self_.dot_graph_file, b"graph {\nlabel=\"\0".as_ptr().cast::<i8>());
         let mut chr = self_.lexer.debug_buffer.as_ptr();
         while *chr != 0 {
             if *chr == b'"' || *chr == b'\\' {
@@ -548,7 +548,7 @@ unsafe fn ts_parser__log(self_: &mut TSParser) {
             fputc(i32::from(*chr), self_.dot_graph_file);
             chr = chr.add(1);
         }
-        fprintf(self_.dot_graph_file, b"\"\n}\n\n\0".as_ptr() as *const i8);
+        fprintf(self_.dot_graph_file, b"\"\n}\n\n\0".as_ptr().cast::<i8>());
     }
 }
 
@@ -592,12 +592,12 @@ unsafe fn ts_parser__breakdown_top_of_stack(
             }
 
             ts_subtree_release(&mut self_.tree_pool, parent);
-            array_delete(&mut slice.subtrees as *mut SubtreeArray as *mut Array<Subtree>);
+            array_delete(std::ptr::addr_of_mut!(slice.subtrees).cast::<Array<Subtree>>());
 
             let parser = ptr::from_mut(self_);
             LOG!(
                 parser,
-                b"breakdown_top_of_stack tree:%s\0".as_ptr() as *const i8,
+                b"breakdown_top_of_stack tree:%s\0".as_ptr().cast::<i8>(),
                 SYM_NAME!(parser, ts_subtree_symbol(parent))
             );
             LOG_STACK!(parser);
@@ -621,7 +621,7 @@ unsafe fn ts_parser__breakdown_lookahead(
     let mut did_descend = false;
     let mut tree = reusable_node_tree(reusable_node);
     while ts_subtree_child_count(tree) > 0 && ts_subtree_parse_state(tree) != state {
-        LOG!(parser, b"state_mismatch sym:%s\0".as_ptr() as *const i8,
+        LOG!(parser, b"state_mismatch sym:%s\0".as_ptr().cast::<i8>(),
             SYM_NAME!(parser, ts_subtree_symbol(tree)));
         reusable_node_descend(reusable_node);
         tree = reusable_node_tree(reusable_node);
@@ -727,11 +727,10 @@ unsafe fn ts_parser__better_version_exists(
         let status_i = ts_parser__version_status(self_, i);
         match ts_parser__compare_versions(status, status_i) {
             ErrorComparison::TakeRight => return true,
-            ErrorComparison::PreferRight => {
-                if ts_stack_can_merge(self_.stack, i, version) {
+            ErrorComparison::PreferRight
+                if ts_stack_can_merge(self_.stack, i, version) => {
                     return true;
                 }
-            }
             _ => {}
         }
     }
@@ -933,7 +932,7 @@ unsafe fn ts_parser__lex(
     if lex_mode.lex_state == u16::MAX {
         LOG!(
             parser,
-            b"no_lookahead_after_non_terminal_extra\0".as_ptr() as *const i8
+            b"no_lookahead_after_non_terminal_extra\0".as_ptr().cast::<i8>()
         );
         return NULL_SUBTREE;
     }
@@ -960,7 +959,7 @@ unsafe fn ts_parser__lex(
         let column_data = self_.lexer.column_data;
 
         if lex_mode.external_lex_state != 0 {
-            LOG!(parser, b"lex_external state:%d, row:%u, column:%u\0".as_ptr() as *const i8,
+            LOG!(parser, b"lex_external state:%d, row:%u, column:%u\0".as_ptr().cast::<i8>(),
                 i32::from(lex_mode.external_lex_state),
                 current_position.extent.row,
                 current_position.extent.column);
@@ -996,7 +995,7 @@ unsafe fn ts_parser__lex(
                         || token_is_extra
                     {
                         LOG!(parser,
-                            b"ignore_empty_external_token symbol:%s\0".as_ptr() as *const i8,
+                            b"ignore_empty_external_token symbol:%s\0".as_ptr().cast::<i8>(),
                             SYM_NAME!(parser, *(*lang).external_scanner.symbol_map.add(
                                 self_.lexer.data.result_symbol as usize
                             )));
@@ -1015,7 +1014,7 @@ unsafe fn ts_parser__lex(
             self_.lexer.column_data = column_data;
         }
 
-        LOG!(parser, b"lex_internal state:%d, row:%u, column:%u\0".as_ptr() as *const i8,
+        LOG!(parser, b"lex_internal state:%d, row:%u, column:%u\0".as_ptr().cast::<i8>(),
             i32::from(lex_mode.lex_state),
             current_position.extent.row,
             current_position.extent.column);
@@ -1034,7 +1033,7 @@ unsafe fn ts_parser__lex(
         }
 
         if !skipped_error {
-            LOG!(parser, b"skip_unrecognized_character\0".as_ptr() as *const i8);
+            LOG!(parser, b"skip_unrecognized_character\0".as_ptr().cast::<i8>());
             skipped_error = true;
             error_start_position = self_.lexer.token_start_position;
             error_end_position = self_.lexer.token_start_position;
@@ -1042,7 +1041,7 @@ unsafe fn ts_parser__lex(
         }
 
         if self_.lexer.current_position.bytes == error_end_position.bytes {
-            if (self_.lexer.data.eof.unwrap())(&self_.lexer.data as *const _) {
+            if (self_.lexer.data.eof.unwrap())(std::ptr::addr_of!(self_.lexer.data)) {
                 self_.lexer.data.result_symbol = ts_builtin_sym_error;
                 break;
             }
@@ -1211,11 +1210,11 @@ unsafe fn ts_parser__reuse_node(
     let parser = ptr::from_mut(self_);
     let mut result;
     loop {
-        result = reusable_node_tree(&mut self_.reusable_node);
+        result = reusable_node_tree(&self_.reusable_node);
         if result.ptr.is_null() {
             break;
         }
-        let byte_offset = reusable_node_byte_offset(&mut self_.reusable_node);
+        let byte_offset = reusable_node_byte_offset(&self_.reusable_node);
 
         // Do not reuse an EOF node if the included ranges array has changes
         // later on in the file.
@@ -1226,13 +1225,13 @@ unsafe fn ts_parser__reuse_node(
         };
 
         if byte_offset > position {
-            LOG!(parser, b"before_reusable_node symbol:%s\0".as_ptr() as *const i8,
+            LOG!(parser, b"before_reusable_node symbol:%s\0".as_ptr().cast::<i8>(),
                 SYM_NAME!(parser, ts_subtree_symbol(result)));
             break;
         }
 
         if byte_offset < position {
-            LOG!(parser, b"past_reusable_node symbol:%s\0".as_ptr() as *const i8,
+            LOG!(parser, b"past_reusable_node symbol:%s\0".as_ptr().cast::<i8>(),
                 SYM_NAME!(parser, ts_subtree_symbol(result)));
             if end_byte_offset <= position || !reusable_node_descend(&mut self_.reusable_node) {
                 reusable_node_advance(&mut self_.reusable_node);
@@ -1244,7 +1243,7 @@ unsafe fn ts_parser__reuse_node(
             &self_.reusable_node.last_external_token,
             &last_external_token,
         ) {
-            LOG!(parser, b"reusable_node_has_different_external_scanner_state symbol:%s\0".as_ptr() as *const i8,
+            LOG!(parser, b"reusable_node_has_different_external_scanner_state symbol:%s\0".as_ptr().cast::<i8>(),
                 SYM_NAME!(parser, ts_subtree_symbol(result)));
             reusable_node_advance(&mut self_.reusable_node);
             continue;
@@ -1252,19 +1251,19 @@ unsafe fn ts_parser__reuse_node(
 
         let mut reason: *const i8 = ptr::null();
         if ts_subtree_has_changes(result) {
-            reason = b"has_changes\0".as_ptr() as *const i8;
+            reason = b"has_changes\0".as_ptr().cast::<i8>();
         } else if ts_subtree_is_error(result) {
-            reason = b"is_error\0".as_ptr() as *const i8;
+            reason = b"is_error\0".as_ptr().cast::<i8>();
         } else if ts_subtree_missing(result) {
-            reason = b"is_missing\0".as_ptr() as *const i8;
+            reason = b"is_missing\0".as_ptr().cast::<i8>();
         } else if ts_subtree_is_fragile(result) {
-            reason = b"is_fragile\0".as_ptr() as *const i8;
+            reason = b"is_fragile\0".as_ptr().cast::<i8>();
         } else if ts_parser__has_included_range_difference(self_, byte_offset, end_byte_offset) {
-            reason = b"contains_different_included_range\0".as_ptr() as *const i8;
+            reason = b"contains_different_included_range\0".as_ptr().cast::<i8>();
         }
 
         if !reason.is_null() {
-            LOG!(parser, b"cant_reuse_node_%s tree:%s\0".as_ptr() as *const i8,
+            LOG!(parser, b"cant_reuse_node_%s tree:%s\0".as_ptr().cast::<i8>(),
                 reason, SYM_NAME!(parser, ts_subtree_symbol(result)));
             if !reusable_node_descend(&mut self_.reusable_node) {
                 reusable_node_advance(&mut self_.reusable_node);
@@ -1277,14 +1276,14 @@ unsafe fn ts_parser__reuse_node(
         let leaf_symbol = ts_subtree_leaf_symbol(result);
         ts_language_table_entry(self_.language, *state, leaf_symbol, table_entry);
         if !ts_parser__can_reuse_first_leaf(self_, *state, result, table_entry) {
-            LOG!(parser, b"cant_reuse_node symbol:%s, first_leaf_symbol:%s\0".as_ptr() as *const i8,
+            LOG!(parser, b"cant_reuse_node symbol:%s, first_leaf_symbol:%s\0".as_ptr().cast::<i8>(),
                 SYM_NAME!(parser, ts_subtree_symbol(result)),
                 SYM_NAME!(parser, leaf_symbol));
             reusable_node_advance_past_leaf(&mut self_.reusable_node);
             break;
         }
 
-        LOG!(parser, b"reuse_node symbol:%s\0".as_ptr() as *const i8,
+        LOG!(parser, b"reuse_node symbol:%s\0".as_ptr().cast::<i8>(),
             SYM_NAME!(parser, ts_subtree_symbol(result)));
         ts_subtree_retain(result);
         return result;
@@ -1311,28 +1310,28 @@ unsafe fn ts_parser__select_tree(
     }
 
     if ts_subtree_error_cost(right) < ts_subtree_error_cost(left) {
-        LOG!(parser, b"select_smaller_error symbol:%s, over_symbol:%s\0".as_ptr() as *const i8,
+        LOG!(parser, b"select_smaller_error symbol:%s, over_symbol:%s\0".as_ptr().cast::<i8>(),
             SYM_NAME!(parser, ts_subtree_symbol(right)),
             SYM_NAME!(parser, ts_subtree_symbol(left)));
         return true;
     }
 
     if ts_subtree_error_cost(left) < ts_subtree_error_cost(right) {
-        LOG!(parser, b"select_smaller_error symbol:%s, over_symbol:%s\0".as_ptr() as *const i8,
+        LOG!(parser, b"select_smaller_error symbol:%s, over_symbol:%s\0".as_ptr().cast::<i8>(),
             SYM_NAME!(parser, ts_subtree_symbol(left)),
             SYM_NAME!(parser, ts_subtree_symbol(right)));
         return false;
     }
 
     if ts_subtree_dynamic_precedence(right) > ts_subtree_dynamic_precedence(left) {
-        LOG!(parser, b"select_higher_precedence symbol:%s, prec:%d, over_symbol:%s, other_prec:%d\0".as_ptr() as *const i8,
+        LOG!(parser, b"select_higher_precedence symbol:%s, prec:%d, over_symbol:%s, other_prec:%d\0".as_ptr().cast::<i8>(),
             SYM_NAME!(parser, ts_subtree_symbol(right)), ts_subtree_dynamic_precedence(right),
             SYM_NAME!(parser, ts_subtree_symbol(left)), ts_subtree_dynamic_precedence(left));
         return true;
     }
 
     if ts_subtree_dynamic_precedence(left) > ts_subtree_dynamic_precedence(right) {
-        LOG!(parser, b"select_higher_precedence symbol:%s, prec:%d, over_symbol:%s, other_prec:%d\0".as_ptr() as *const i8,
+        LOG!(parser, b"select_higher_precedence symbol:%s, prec:%d, over_symbol:%s, other_prec:%d\0".as_ptr().cast::<i8>(),
             SYM_NAME!(parser, ts_subtree_symbol(left)), ts_subtree_dynamic_precedence(left),
             SYM_NAME!(parser, ts_subtree_symbol(right)), ts_subtree_dynamic_precedence(right));
         return false;
@@ -1345,19 +1344,19 @@ unsafe fn ts_parser__select_tree(
     let comparison = ts_subtree_compare(left, right, &mut self_.tree_pool);
     match comparison {
         -1 => {
-            LOG!(parser, b"select_earlier symbol:%s, over_symbol:%s\0".as_ptr() as *const i8,
+            LOG!(parser, b"select_earlier symbol:%s, over_symbol:%s\0".as_ptr().cast::<i8>(),
                 SYM_NAME!(parser, ts_subtree_symbol(left)),
                 SYM_NAME!(parser, ts_subtree_symbol(right)));
             false
         }
         1 => {
-            LOG!(parser, b"select_earlier symbol:%s, over_symbol:%s\0".as_ptr() as *const i8,
+            LOG!(parser, b"select_earlier symbol:%s, over_symbol:%s\0".as_ptr().cast::<i8>(),
                 SYM_NAME!(parser, ts_subtree_symbol(right)),
                 SYM_NAME!(parser, ts_subtree_symbol(left)));
             true
         }
         _ => {
-            LOG!(parser, b"select_existing symbol:%s, over_symbol:%s\0".as_ptr() as *const i8,
+            LOG!(parser, b"select_existing symbol:%s, over_symbol:%s\0".as_ptr().cast::<i8>(),
                 SYM_NAME!(parser, ts_subtree_symbol(left)),
                 SYM_NAME!(parser, ts_subtree_symbol(right)));
             false
@@ -1371,8 +1370,8 @@ unsafe fn ts_parser__select_children(
     children: &SubtreeArray,
 ) -> bool {
     let scratch_trees =
-        &mut *(&mut self_.scratch_trees as *mut SubtreeArray as *mut Array<Subtree>);
-    let children = &*(children as *const SubtreeArray as *const Array<Subtree>);
+        &mut *std::ptr::addr_of_mut!(self_.scratch_trees).cast::<Array<Subtree>>();
+    let children = &*std::ptr::from_ref::<SubtreeArray>(children).cast::<Array<Subtree>>();
     array_assign(scratch_trees, children);
 
     let scratch_tree = ts_subtree_new_node(
@@ -1445,7 +1444,7 @@ unsafe fn ts_parser__reduce(
             while i + 1 < pop.size {
                 LOG!(
                     parser,
-                    b"aborting reduce with too many versions\0".as_ptr() as *const i8
+                    b"aborting reduce with too many versions\0".as_ptr().cast::<i8>()
                 );
                 let mut next_slice = stack_slice_array_read(&pop, i + 1);
                 if next_slice.version != slice.version {
@@ -1493,9 +1492,9 @@ unsafe fn ts_parser__reduce(
                 ts_subtree_array_clear(&mut self_.tree_pool, &mut self_.trailing_extras);
                 ts_subtree_release(&mut self_.tree_pool, ts_subtree_from_mut(parent));
                 let trailing_extras =
-                    &mut *(&mut self_.trailing_extras as *mut SubtreeArray as *mut Array<Subtree>);
+                    &mut *std::ptr::addr_of_mut!(self_.trailing_extras).cast::<Array<Subtree>>();
                 let trailing_extras2 =
-                    &mut *(&mut self_.trailing_extras2 as *mut SubtreeArray as *mut Array<Subtree>);
+                    &mut *std::ptr::addr_of_mut!(self_.trailing_extras2).cast::<Array<Subtree>>();
                 array_swap(trailing_extras, trailing_extras2);
                 parent = ts_subtree_new_node(
                     symbol,
@@ -1505,7 +1504,7 @@ unsafe fn ts_parser__reduce(
                 );
             } else {
                 array_clear(
-                    &mut self_.trailing_extras2 as *mut SubtreeArray as *mut Array<Subtree>,
+                    std::ptr::addr_of_mut!(self_.trailing_extras2).cast::<Array<Subtree>>(),
                 );
                 // Use the original size from next_slice.subtrees to delete all subtrees
                 ts_subtree_array_delete(&mut self_.tree_pool, &mut next_slice.subtrees);
@@ -1588,7 +1587,7 @@ unsafe fn ts_parser__accept(
                     ts_subtree_retain(*children.add(k as usize));
                 }
                 array_splice(
-                    &mut trees as *mut SubtreeArray as *mut Array<Subtree>,
+                    std::ptr::addr_of_mut!(trees).cast::<Array<Subtree>>(),
                     j as u32,
                     1,
                     child_count,
@@ -1679,13 +1678,12 @@ unsafe fn ts_parser__do_all_potential_reductions(
             for j in 0..entry.action_count {
                 let action = *entry.actions.add(j as usize);
                 match action.type_ {
-                    TSPARSE_ACTION_TYPE_SHIFT | TSPARSE_ACTION_TYPE_RECOVER => {
-                        if !action.shift.extra && !action.shift.repetition {
+                    TSPARSE_ACTION_TYPE_SHIFT | TSPARSE_ACTION_TYPE_RECOVER
+                        if !action.shift.extra && !action.shift.repetition => {
                             has_shift_action = true;
                         }
-                    }
-                    TSPARSE_ACTION_TYPE_REDUCE => {
-                        if action.reduce.child_count > 0 {
+                    TSPARSE_ACTION_TYPE_REDUCE
+                        if action.reduce.child_count > 0 => {
                             ts_reduce_action_set_add(
                                 &mut self_.reduce_actions,
                                 ReduceAction {
@@ -1698,7 +1696,6 @@ unsafe fn ts_parser__do_all_potential_reductions(
                                 },
                             );
                         }
-                    }
                     _ => {}
                 }
             }
@@ -1774,7 +1771,7 @@ unsafe fn ts_parser__recover_to_state(
             let error_child_count = ts_subtree_child_count(error_tree);
             if error_child_count > 0 {
                 array_splice(
-                    &mut slice.subtrees as *mut SubtreeArray as *mut Array<Subtree>,
+                    std::ptr::addr_of_mut!(slice.subtrees).cast::<Array<Subtree>>(),
                     0,
                     0,
                     error_child_count,
@@ -1800,7 +1797,7 @@ unsafe fn ts_parser__recover_to_state(
             );
             ts_stack_push(self_.stack, slice.version, error, false, goal_state);
         } else {
-            array_delete(&mut slice.subtrees as *mut SubtreeArray as *mut Array<Subtree>);
+            array_delete(std::ptr::addr_of_mut!(slice.subtrees).cast::<Array<Subtree>>());
         }
 
         for j in 0..self_.trailing_extras.size {
@@ -1875,7 +1872,7 @@ unsafe fn ts_parser__recover(
             ) && ts_parser__recover_to_state(self_, version, depth, entry.state)
             {
                 did_recover = true;
-                LOG!(parser, b"recover_to_previous state:%u, depth:%u\0".as_ptr() as *const i8,
+                LOG!(parser, b"recover_to_previous state:%u, depth:%u\0".as_ptr().cast::<i8>(),
                     u32::from(entry.state), depth);
                 LOG_STACK!(parser);
                 break;
@@ -1887,7 +1884,7 @@ unsafe fn ts_parser__recover(
     let mut i = previous_version_count;
     while i < ts_stack_version_count(&*self_.stack) {
         if !ts_stack_is_active(&*self_.stack, i) {
-            LOG!(parser, b"removed paused version:%u\0".as_ptr() as *const i8, i);
+            LOG!(parser, b"removed paused version:%u\0".as_ptr().cast::<i8>(), i);
             ts_stack_remove_version(&mut *self_.stack, i);
             LOG_STACK!(parser);
         } else {
@@ -1897,7 +1894,7 @@ unsafe fn ts_parser__recover(
 
     // EOF: wrap everything and terminate
     if ts_subtree_is_eof(lookahead) {
-        LOG!(parser, b"recover_eof\0".as_ptr() as *const i8);
+        LOG!(parser, b"recover_eof\0".as_ptr().cast::<i8>());
         let mut children: SubtreeArray = SubtreeArray {
             contents: ptr::null_mut(),
             size: 0,
@@ -1950,15 +1947,15 @@ unsafe fn ts_parser__recover(
     }
 
     // Wrap the lookahead in an ERROR
-    LOG!(parser, b"skip_token symbol:%s\0".as_ptr() as *const i8,
+    LOG!(parser, b"skip_token symbol:%s\0".as_ptr().cast::<i8>(),
         SYM_NAME!(parser, ts_subtree_symbol(lookahead)));
     let mut children: SubtreeArray = SubtreeArray {
         contents: ptr::null_mut(),
         size: 0,
         capacity: 0,
     };
-    array_reserve(&mut children as *mut SubtreeArray as *mut Array<Subtree>, 1);
-    array_push(&mut children as *mut SubtreeArray as *mut Array<Subtree>, lookahead);
+    array_reserve(std::ptr::addr_of_mut!(children).cast::<Array<Subtree>>(), 1);
+    array_push(std::ptr::addr_of_mut!(children).cast::<Array<Subtree>>(), lookahead);
     let mut error_repeat = ts_subtree_new_node(
         ts_builtin_sym_error_repeat,
         &mut children,
@@ -1993,7 +1990,7 @@ unsafe fn ts_parser__recover(
         );
         let slot = &mut stack_slice_array_get_mut(&mut pop, 0).subtrees;
         array_push(
-            slot as *mut SubtreeArray as *mut Array<Subtree>,
+            std::ptr::from_mut::<SubtreeArray>(slot).cast::<Array<Subtree>>(),
             ts_subtree_from_mut(error_repeat),
         );
         error_repeat = ts_subtree_new_node(
@@ -2100,7 +2097,7 @@ unsafe fn ts_parser__handle_error(
                     ) {
                         LOG!(
                             parser,
-                            b"recover_with_missing symbol:%s, state:%u\0".as_ptr() as *const i8,
+                            b"recover_with_missing symbol:%s, state:%u\0".as_ptr().cast::<i8>(),
                             SYM_NAME!(parser, missing_symbol),
                             u32::from(ts_stack_state(&*self_.stack, version_with_missing_tree))
                         );
@@ -2271,10 +2268,10 @@ unsafe fn ts_parser__advance(
                     let next_state;
                     if action.shift.extra {
                         next_state = state;
-                        LOG!(parser, b"shift_extra\0".as_ptr() as *const i8);
+                        LOG!(parser, b"shift_extra\0".as_ptr().cast::<i8>());
                     } else {
                         next_state = action.shift.state;
-                        LOG!(parser, b"shift state:%u\0".as_ptr() as *const i8, u32::from(next_state));
+                        LOG!(parser, b"shift state:%u\0".as_ptr().cast::<i8>(), u32::from(next_state));
                     }
 
                     if ts_subtree_child_count(lookahead) > 0 {
@@ -2311,7 +2308,7 @@ unsafe fn ts_parser__advance(
                     let end_of_non_terminal_extra = lookahead.ptr.is_null();
                     LOG!(
                         parser,
-                        b"reduce sym:%s, child_count:%u\0".as_ptr() as *const i8,
+                        b"reduce sym:%s, child_count:%u\0".as_ptr().cast::<i8>(),
                         SYM_NAME!(parser, action.reduce.symbol),
                         u32::from(action.reduce.child_count)
                     );
@@ -2332,7 +2329,7 @@ unsafe fn ts_parser__advance(
                 }
 
                 TSPARSE_ACTION_TYPE_ACCEPT => {
-                    LOG!(parser, b"accept\0".as_ptr() as *const i8);
+                    LOG!(parser, b"accept\0".as_ptr().cast::<i8>());
                     ts_parser__accept(self_, version, lookahead);
                     return true;
                 }
@@ -2411,7 +2408,7 @@ unsafe fn ts_parser__advance(
             if table_entry.action_count > 0 {
                 LOG!(
                     parser,
-                    b"switch from_keyword:%s, to_word_token:%s\0".as_ptr() as *const i8,
+                    b"switch from_keyword:%s, to_word_token:%s\0".as_ptr().cast::<i8>(),
                     TREE_NAME!(parser, lookahead),
                     SYM_NAME!(parser, (*language).keyword_capture_token)
                 );
@@ -2444,7 +2441,7 @@ unsafe fn ts_parser__advance(
         // versions that exist. If some other version advances successfully, then
         // this version can simply be removed. But if all versions end up paused,
         // then error recovery is needed.
-        LOG!(parser, b"detect_error lookahead:%s\0".as_ptr() as *const i8, TREE_NAME!(parser, lookahead));
+        LOG!(parser, b"detect_error lookahead:%s\0".as_ptr().cast::<i8>(), TREE_NAME!(parser, lookahead));
         ts_stack_pause(self_.stack, version, lookahead);
         return true;
     }
@@ -2529,7 +2526,7 @@ unsafe fn ts_parser__condense_stack(self_: &mut TSParser) -> u32 {
         while i < n {
             if ts_stack_is_paused(&*self_.stack, i) {
                 if !has_unpaused_version && self_.accept_count < MAX_VERSION_COUNT {
-                    LOG!(self_, b"resume version:%u\0".as_ptr() as *const i8, i);
+                    LOG!(self_, b"resume version:%u\0".as_ptr().cast::<i8>(), i);
                     min_error_cost = ts_stack_error_cost(&*self_.stack, i);
                     let lookahead = ts_stack_resume(self_.stack, i);
                     ts_parser__handle_error(&mut *self_, i, lookahead);
@@ -2548,7 +2545,7 @@ unsafe fn ts_parser__condense_stack(self_: &mut TSParser) -> u32 {
     }
 
     if made_changes {
-        LOG!(self_, b"condense\0".as_ptr() as *const i8);
+        LOG!(self_, b"condense\0".as_ptr().cast::<i8>());
         LOG_STACK!(self_);
     }
 
@@ -2562,10 +2559,10 @@ unsafe fn ts_parser__balance_subtree(self_: &mut TSParser) -> bool {
     // push the initial finished tree onto it. Otherwise, if we're resuming balancing after a
     // cancellation, we don't want to clear the tree stack.
     if !self_.canceled_balancing {
-        array_clear(&mut self_.tree_pool.tree_stack as *mut MutableSubtreeArray as *mut Array<MutableSubtree>);
+        array_clear(std::ptr::addr_of_mut!(self_.tree_pool.tree_stack).cast::<Array<MutableSubtree>>());
         if ts_subtree_child_count(finished_tree) > 0 && (*finished_tree.ptr).ref_count == 1 {
             array_push(
-                &mut self_.tree_pool.tree_stack as *mut MutableSubtreeArray as *mut Array<MutableSubtree>,
+                std::ptr::addr_of_mut!(self_.tree_pool.tree_stack).cast::<Array<MutableSubtree>>(),
                 ts_subtree_to_mut_unsafe(finished_tree),
             );
         }
@@ -2594,7 +2591,7 @@ unsafe fn ts_parser__balance_subtree(self_: &mut TSParser) -> bool {
                         tree,
                         i,
                         self_.language,
-                        &mut self_.tree_pool.tree_stack as *mut MutableSubtreeArray,
+                        std::ptr::addr_of_mut!(self_.tree_pool.tree_stack),
                     );
 
                     // We scale the operation count increment in `ts_parser__check_progress` proportionately to the compression
@@ -2609,14 +2606,14 @@ unsafe fn ts_parser__balance_subtree(self_: &mut TSParser) -> bool {
             }
         }
 
-        array_pop(&mut self_.tree_pool.tree_stack as *mut MutableSubtreeArray as *mut Array<MutableSubtree>);
+        array_pop(std::ptr::addr_of_mut!(self_.tree_pool.tree_stack).cast::<Array<MutableSubtree>>());
 
         for i in 0..(*tree.ptr).child_count {
             let tree_subtree = ts_subtree_from_mut(tree);
             let child = *ts_subtree_children(tree_subtree).add(i as usize);
             if ts_subtree_child_count(child) > 0 && (*child.ptr).ref_count == 1 {
                 array_push(
-                    &mut self_.tree_pool.tree_stack as *mut MutableSubtreeArray as *mut Array<MutableSubtree>,
+                    std::ptr::addr_of_mut!(self_.tree_pool.tree_stack).cast::<Array<MutableSubtree>>(),
                     ts_subtree_to_mut_unsafe(child),
                 );
             }
@@ -2639,11 +2636,11 @@ unsafe fn ts_parser_has_outstanding_parse(self_: &TSParser) -> bool {
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_parser_new() -> *mut TSParser {
-    let self_ = ts_calloc(1, core::mem::size_of::<TSParser>()) as *mut TSParser;
+    let self_ = ts_calloc(1, core::mem::size_of::<TSParser>()).cast::<TSParser>();
     let parser = &mut *self_;
     ts_lexer_init(&mut parser.lexer);
     array_init(&mut parser.reduce_actions);
-    array_reserve(&mut parser.reduce_actions as *mut ReduceActionSet, 4);
+    array_reserve(std::ptr::addr_of_mut!(parser.reduce_actions), 4);
     parser.tree_pool = ts_subtree_pool_new(32);
     parser.stack = ts_stack_new(&mut parser.tree_pool);
     parser.finished_tree = NULL_SUBTREE;
@@ -2673,10 +2670,10 @@ pub unsafe extern "C" fn ts_parser_delete(self_: *mut TSParser) {
     let parser = &mut *self_;
     ts_stack_delete(&mut *parser.stack);
     if !parser.reduce_actions.contents.is_null() {
-        array_delete(&mut parser.reduce_actions as *mut ReduceActionSet);
+        array_delete(std::ptr::addr_of_mut!(parser.reduce_actions));
     }
     if !parser.included_range_differences.contents.is_null() {
-        array_delete(&mut parser.included_range_differences as *mut TSRangeArray as *mut Array<TSRange>);
+        array_delete(std::ptr::addr_of_mut!(parser.included_range_differences).cast::<Array<TSRange>>());
     }
     if !parser.old_tree.ptr.is_null() {
         ts_subtree_release(&mut parser.tree_pool, parser.old_tree);
@@ -2687,10 +2684,10 @@ pub unsafe extern "C" fn ts_parser_delete(self_: *mut TSParser) {
     ts_parser__set_cached_token(parser, 0, NULL_SUBTREE, NULL_SUBTREE);
     ts_subtree_pool_delete(&mut parser.tree_pool);
     reusable_node_delete(&mut parser.reusable_node);
-    array_delete(&mut parser.trailing_extras as *mut SubtreeArray as *mut Array<Subtree>);
-    array_delete(&mut parser.trailing_extras2 as *mut SubtreeArray as *mut Array<Subtree>);
-    array_delete(&mut parser.scratch_trees as *mut SubtreeArray as *mut Array<Subtree>);
-    ts_free(self_ as *mut c_void);
+    array_delete(std::ptr::addr_of_mut!(parser.trailing_extras).cast::<Array<Subtree>>());
+    array_delete(std::ptr::addr_of_mut!(parser.trailing_extras2).cast::<Array<Subtree>>());
+    array_delete(std::ptr::addr_of_mut!(parser.scratch_trees).cast::<Array<Subtree>>());
+    ts_free(self_.cast::<c_void>());
 }
 
 // ---------------------------------------------------------------------------
@@ -2768,7 +2765,7 @@ pub unsafe extern "C" fn ts_parser_print_dot_graphs(
         }
         #[cfg(not(target_os = "windows"))]
         {
-            parser.dot_graph_file = fdopen(fd, b"a\0".as_ptr() as *const i8);
+            parser.dot_graph_file = fdopen(fd, b"a\0".as_ptr().cast::<i8>());
         }
     } else {
         parser.dot_graph_file = ptr::null_mut();
@@ -2847,13 +2844,13 @@ pub unsafe extern "C" fn ts_parser_parse(
     }
 
     ts_lexer_set_input(&mut parser.lexer, input);
-    array_clear(&mut parser.included_range_differences as *mut TSRangeArray as *mut Array<TSRange>);
+    array_clear(std::ptr::addr_of_mut!(parser.included_range_differences).cast::<Array<TSRange>>());
     parser.included_range_difference_index = 0;
 
     parser.operation_count = 0;
 
     if ts_parser_has_outstanding_parse(parser) {
-        LOG!(self_, b"resume_parsing\0".as_ptr() as *const i8);
+        LOG!(self_, b"resume_parsing\0".as_ptr().cast::<i8>());
         if parser.canceled_balancing {
             // goto balance
             debug_assert!(!parser.finished_tree.ptr.is_null());
@@ -2862,7 +2859,7 @@ pub unsafe extern "C" fn ts_parser_parse(
                 return ptr::null_mut();
             }
             parser.canceled_balancing = false;
-            LOG!(self_, b"done\0".as_ptr() as *const i8);
+            LOG!(self_, b"done\0".as_ptr().cast::<i8>());
             LOG_TREE!(self_, parser.finished_tree);
 
             result = ts_tree_new(
@@ -2897,20 +2894,20 @@ pub unsafe extern "C" fn ts_parser_parse(
                 &mut parser.included_range_differences,
             );
             reusable_node_reset(&mut parser.reusable_node, old_tree.root);
-            LOG!(self_, b"parse_after_edit\0".as_ptr() as *const i8);
+            LOG!(self_, b"parse_after_edit\0".as_ptr().cast::<i8>());
             LOG_TREE!(self_, parser.old_tree);
             for i in 0..parser.included_range_differences.size {
                 let range = ts_range_array_get(&parser.included_range_differences, i);
                 LOG!(
                     self_,
-                    b"different_included_range %u - %u\0".as_ptr() as *const i8,
+                    b"different_included_range %u - %u\0".as_ptr().cast::<i8>(),
                     range.start_byte,
                     range.end_byte
                 );
             }
         } else {
             reusable_node_clear(&mut parser.reusable_node);
-            LOG!(self_, b"new_parse\0".as_ptr() as *const i8);
+            LOG!(self_, b"new_parse\0".as_ptr().cast::<i8>());
         }
     }
 
@@ -2929,7 +2926,7 @@ pub unsafe extern "C" fn ts_parser_parse(
             while ts_stack_is_active(&*parser.stack, version) {
                 LOG!(
                     self_,
-                    b"process version:%u, version_count:%u, state:%d, row:%u, col:%u\0".as_ptr() as *const i8,
+                    b"process version:%u, version_count:%u, state:%d, row:%u, col:%u\0".as_ptr().cast::<i8>(),
                     version,
                     ts_stack_version_count(&*parser.stack),
                     i32::from(ts_stack_state(&*parser.stack, version)),
@@ -2997,7 +2994,7 @@ pub unsafe extern "C" fn ts_parser_parse(
         return ptr::null_mut();
     }
     parser.canceled_balancing = false;
-    LOG!(self_, b"done\0".as_ptr() as *const i8);
+    LOG!(self_, b"done\0".as_ptr().cast::<i8>());
     LOG_TREE!(self_, parser.finished_tree);
 
     result = ts_tree_new(
@@ -3055,7 +3052,7 @@ pub unsafe extern "C" fn ts_parser_parse_string_encoding(
         self_,
         old_tree,
         TSInput {
-            payload: &input as *const TSStringInput as *mut c_void,
+            payload: std::ptr::addr_of!(input) as *mut c_void,
             read: Some(ts_string_input_read),
             encoding,
             decode: None,

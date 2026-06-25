@@ -448,7 +448,7 @@ pub unsafe fn ts_lookahead_iterator__next(self_: *mut LookaheadIterator) -> bool
 
 /// Whether the state is a "primary state" (ABI >= 14).
 #[inline]
-pub unsafe fn ts_language_state_is_primary(
+pub const unsafe fn ts_language_state_is_primary(
     self_: *const TSLanguage,
     state: TSStateId,
 ) -> bool {
@@ -462,7 +462,7 @@ pub unsafe fn ts_language_state_is_primary(
 
 /// Get enabled external tokens for a given external scanner state.
 #[inline]
-pub unsafe fn ts_language_enabled_external_tokens(
+pub const unsafe fn ts_language_enabled_external_tokens(
     self_: *const TSLanguage,
     external_scanner_state: u32,
 ) -> *const bool {
@@ -476,7 +476,7 @@ pub unsafe fn ts_language_enabled_external_tokens(
 
 /// Get the alias sequence for a production ID.
 #[inline]
-pub unsafe fn ts_language_alias_sequence(
+pub const unsafe fn ts_language_alias_sequence(
     self_: *const TSLanguage,
     production_id: u32,
 ) -> *const TSSymbol {
@@ -490,7 +490,7 @@ pub unsafe fn ts_language_alias_sequence(
 
 /// Get the alias at a specific position in a production's alias sequence.
 #[inline]
-pub unsafe fn ts_language_alias_at(
+pub const unsafe fn ts_language_alias_at(
     self_: *const TSLanguage,
     production_id: u32,
     child_index: u32,
@@ -544,8 +544,8 @@ pub unsafe fn ts_language_aliases_for_symbol(
         let count = *(*l).alias_map.add(idx);
         idx += 1;
         if symbol == original_symbol {
-            *start = (*l).alias_map.add(idx) as *const TSSymbol;
-            *end = (*l).alias_map.add(idx + count as usize) as *const TSSymbol;
+            *start = (*l).alias_map.add(idx).cast::<TSSymbol>();
+            *end = (*l).alias_map.add(idx + count as usize).cast::<TSSymbol>();
             break;
         }
         idx += count as usize;
@@ -568,10 +568,10 @@ pub unsafe fn ts_language_write_symbol_as_dot_string(
                 fputc(i32::from(*chr), f);
             }
             b'\n' => {
-                fputs(b"\\n\0".as_ptr() as *const i8, f);
+                fputs(b"\\n\0".as_ptr().cast::<i8>(), f);
             }
             b'\t' => {
-                fputs(b"\\t\0".as_ptr() as *const i8, f);
+                fputs(b"\\t\0".as_ptr().cast::<i8>(), f);
             }
             _ => {
                 fputc(i32::from(*chr), f);
@@ -706,7 +706,7 @@ pub unsafe extern "C" fn ts_language_table_entry(
         let entry = &*(*l).parse_actions.add(action_index);
         (*result).action_count = u32::from(entry.entry.count);
         (*result).is_reusable = entry.entry.reusable;
-        (*result).actions = (*l).parse_actions.add(action_index + 1) as *const TSParseAction;
+        (*result).actions = (*l).parse_actions.add(action_index + 1).cast::<TSParseAction>();
     }
 }
 
@@ -717,7 +717,7 @@ pub unsafe extern "C" fn ts_language_lex_mode_for_state(
 ) -> TSLexerMode {
     let l = lang(self_);
     if (*l).abi_version < 15 {
-        let mode = *((*l).lex_modes as *const TSLexMode).add(state as usize);
+        let mode = *(*l).lex_modes.cast::<TSLexMode>().add(state as usize);
         TSLexerMode {
             lex_state: mode.lex_state,
             external_lex_state: mode.external_lex_state,
@@ -809,9 +809,9 @@ pub unsafe extern "C" fn ts_language_symbol_name(
     symbol: TSSymbol,
 ) -> *const i8 {
     if symbol == ts_builtin_sym_error {
-        b"ERROR\0".as_ptr() as *const i8
+        b"ERROR\0".as_ptr().cast::<i8>()
     } else if symbol == ts_builtin_sym_error_repeat {
-        b"_ERROR\0".as_ptr() as *const i8
+        b"_ERROR\0".as_ptr().cast::<i8>()
     } else if u32::from(symbol) < ts_language_symbol_count(self_) {
         *(*lang(self_)).symbol_names.add(symbol as usize)
     } else {
@@ -826,7 +826,7 @@ pub unsafe extern "C" fn ts_language_symbol_for_name(
     length: u32,
     is_named: bool,
 ) -> TSSymbol {
-    if is_named && strncmp(string, b"ERROR\0".as_ptr() as *const i8, length as usize) == 0 {
+    if is_named && strncmp(string, b"ERROR\0".as_ptr().cast::<i8>(), length as usize) == 0 {
         return ts_builtin_sym_error;
     }
     let count = ts_language_symbol_count(self_) as u16;
@@ -886,11 +886,10 @@ pub unsafe extern "C" fn ts_language_field_id_for_name(
     let count = ts_language_field_count(self_) as u16;
     for i in 1..=count {
         match strncmp(name, *(*l).field_names.add(i as usize), name_length as usize) {
-            0 => {
-                if *(*(*l).field_names.add(i as usize)).add(name_length as usize) == 0 {
+            0
+                if *(*(*l).field_names.add(i as usize)).add(name_length as usize) == 0 => {
                     return i;
                 }
-            }
             n if n < 0 => return 0,
             _ => {}
         }
@@ -911,7 +910,7 @@ pub unsafe extern "C" fn ts_lookahead_iterator_new(
     if u32::from(state) >= (*lang(self_)).state_count {
         return ptr::null_mut();
     }
-    let iterator = ts_malloc(std::mem::size_of::<LookaheadIterator>()) as *mut LookaheadIterator;
+    let iterator = ts_malloc(std::mem::size_of::<LookaheadIterator>()).cast::<LookaheadIterator>();
     *iterator = ts_language_lookaheads(self_, state);
     iterator
 }
@@ -920,7 +919,7 @@ pub unsafe extern "C" fn ts_lookahead_iterator_new(
 pub unsafe extern "C" fn ts_lookahead_iterator_delete(
     self_: *mut LookaheadIterator,
 ) {
-    ts_free(self_ as *mut c_void);
+    ts_free(self_.cast::<c_void>());
 }
 
 #[no_mangle]

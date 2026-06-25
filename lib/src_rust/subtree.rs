@@ -455,7 +455,7 @@ pub unsafe fn ts_external_scanner_state_delete(self_: &mut ExternalScannerState)
     }
 }
 
-pub unsafe fn ts_external_scanner_state_data(self_: &ExternalScannerState) -> *const u8 {
+pub const unsafe fn ts_external_scanner_state_data(self_: &ExternalScannerState) -> *const u8 {
     if self_.length > EXTERNAL_SCANNER_STATE_INLINE_SIZE as u32 {
         self_.data.long_data
     } else {
@@ -594,7 +594,7 @@ unsafe fn mutable_array_grow(arr: &mut MutableSubtreeArray, count: u32) {
     }
 }
 
-pub(crate) unsafe fn mutable_array_push(arr: &mut MutableSubtreeArray, element: MutableSubtree) {
+pub unsafe fn mutable_array_push(arr: &mut MutableSubtreeArray, element: MutableSubtree) {
     mutable_array_grow(arr, 1);
     *arr.contents.add(arr.size as usize) = element;
     arr.size += 1;
@@ -769,7 +769,7 @@ pub const fn ts_subtree_alloc_size(child_count: u32) -> usize {
 }
 
 #[inline]
-pub unsafe fn ts_subtree_children(self_: Subtree) -> *mut Subtree {
+pub const unsafe fn ts_subtree_children(self_: Subtree) -> *mut Subtree {
     if self_.data.is_inline() {
         ptr::null_mut()
     } else {
@@ -1619,7 +1619,7 @@ pub unsafe fn ts_subtree_edit(
     let input_edit = &*input_edit;
     let mut stack: Vec<EditEntry> = Vec::new();
     stack.push(EditEntry {
-        tree: &mut self_ as *mut Subtree,
+        tree: std::ptr::addr_of_mut!(self_),
         edit: Edit {
             start: Length {
                 bytes: input_edit.start_byte,
@@ -1879,7 +1879,7 @@ unsafe fn ts_subtree__write_char_to_string(s: *mut i8, n: usize, chr: i32) -> us
         snprintf(s, n, c"'\\t'".as_ptr().cast::<i8>()) as usize
     } else if chr == i32::from(b'\r') {
         snprintf(s, n, c"'\\r'".as_ptr().cast::<i8>()) as usize
-    } else if chr >= 0x20 && chr < 0x7F {
+    } else if (0x20..0x7F).contains(&chr) {
         snprintf(s, n, c"'%c'".as_ptr().cast::<i8>(), chr) as usize
     } else {
         snprintf(s, n, c"%d".as_ptr().cast::<i8>(), chr) as usize
@@ -1897,7 +1897,7 @@ unsafe fn ts_subtree__write_to_string(
     field_name: *const i8,
 ) -> usize {
     if self_.ptr.is_null() {
-        return snprintf(string, limit, b"(NULL)\0".as_ptr().cast::<i8>()) as usize;
+        return snprintf(string, limit, c"(NULL)".as_ptr().cast::<i8>()) as usize;
     }
 
     let mut cursor = string;
@@ -1919,11 +1919,11 @@ unsafe fn ts_subtree__write_to_string(
     if is_visible {
         if !is_root {
             cursor = cursor.add(
-                snprintf(*writer, limit, b" \0".as_ptr().cast::<i8>()) as usize,
+                snprintf(*writer, limit, c" ".as_ptr().cast::<i8>()) as usize,
             );
             if !field_name.is_null() {
                 cursor = cursor.add(
-                    snprintf(*writer, limit, b"%s: \0".as_ptr().cast::<i8>(), field_name)
+                    snprintf(*writer, limit, c"%s: ".as_ptr().cast::<i8>(), field_name)
                         as usize,
                 );
             }
@@ -1934,7 +1934,7 @@ unsafe fn ts_subtree__write_to_string(
             && (*self_.ptr).size.bytes > 0
         {
             cursor = cursor.add(
-                snprintf(*writer, limit, b"(UNEXPECTED \0".as_ptr().cast::<i8>()) as usize,
+                snprintf(*writer, limit, c"(UNEXPECTED ".as_ptr().cast::<i8>()) as usize,
             );
             cursor = cursor.add(ts_subtree__write_char_to_string(
                 *writer,
@@ -1950,11 +1950,11 @@ unsafe fn ts_subtree__write_to_string(
             let symbol_name = ts_language_symbol_name(language, symbol);
             if ts_subtree_missing(self_) {
                 cursor = cursor.add(
-                    snprintf(*writer, limit, b"(MISSING \0".as_ptr().cast::<i8>()) as usize,
+                    snprintf(*writer, limit, c"(MISSING ".as_ptr().cast::<i8>()) as usize,
                 );
                 if alias_is_named || ts_subtree_named(self_) {
                     cursor = cursor.add(
-                        snprintf(*writer, limit, b"%s\0".as_ptr().cast::<i8>(), symbol_name)
+                        snprintf(*writer, limit, c"%s".as_ptr().cast::<i8>(), symbol_name)
                             as usize,
                     );
                 } else {
@@ -1962,14 +1962,14 @@ unsafe fn ts_subtree__write_to_string(
                         snprintf(
                             *writer,
                             limit,
-                            b"\"%s\"\0".as_ptr().cast::<i8>(),
+                            c"\"%s\"".as_ptr().cast::<i8>(),
                             symbol_name,
                         ) as usize,
                     );
                 }
             } else {
                 cursor = cursor.add(
-                    snprintf(*writer, limit, b"(%s\0".as_ptr().cast::<i8>(), symbol_name)
+                    snprintf(*writer, limit, c"(%s".as_ptr().cast::<i8>(), symbol_name)
                         as usize,
                 );
             }
@@ -1983,11 +1983,11 @@ unsafe fn ts_subtree__write_to_string(
         let symbol_name = ts_language_symbol_name(language, symbol);
         if ts_subtree_child_count(self_) > 0 {
             cursor = cursor.add(
-                snprintf(*writer, limit, b"(%s\0".as_ptr().cast::<i8>(), symbol_name) as usize,
+                snprintf(*writer, limit, c"(%s".as_ptr().cast::<i8>(), symbol_name) as usize,
             );
         } else if ts_subtree_named(self_) {
             cursor = cursor.add(
-                snprintf(*writer, limit, b"(%s)\0".as_ptr().cast::<i8>(), symbol_name)
+                snprintf(*writer, limit, c"(%s)".as_ptr().cast::<i8>(), symbol_name)
                     as usize,
             );
         } else {
@@ -1995,7 +1995,7 @@ unsafe fn ts_subtree__write_to_string(
                 snprintf(
                     *writer,
                     limit,
-                    b"(\"%s\")\0".as_ptr().cast::<i8>(),
+                    c"(\"%s\")".as_ptr().cast::<i8>(),
                     symbol_name,
                 ) as usize,
             );
@@ -2126,25 +2126,25 @@ unsafe fn ts_subtree__print_dot_graph(
     let end_offset = start_offset + ts_subtree_total_bytes(tree);
     fprintf(
         f,
-        b"tree_%p [label=\"\0".as_ptr() as *const i8,
-        self_ as *const c_void,
+        b"tree_%p [label=\"\0".as_ptr().cast::<i8>(),
+        self_.cast::<c_void>(),
     );
     language_write_symbol_as_dot_string(language, f, symbol);
-    fprintf(f, b"\"\0".as_ptr() as *const i8);
+    fprintf(f, b"\"\0".as_ptr().cast::<i8>());
 
     if ts_subtree_child_count(tree) == 0 {
-        fprintf(f, b", shape=plaintext\0".as_ptr() as *const i8);
+        fprintf(f, b", shape=plaintext\0".as_ptr().cast::<i8>());
     }
     if ts_subtree_extra(tree) {
-        fprintf(f, b", fontcolor=gray\0".as_ptr() as *const i8);
+        fprintf(f, b", fontcolor=gray\0".as_ptr().cast::<i8>());
     }
     if ts_subtree_has_changes(tree) {
-        fprintf(f, b", color=green, penwidth=2\0".as_ptr() as *const i8);
+        fprintf(f, b", color=green, penwidth=2\0".as_ptr().cast::<i8>());
     }
 
     fprintf(
         f,
-        b", tooltip=\"range: %u - %u\nstate: %d\nerror-cost: %u\nhas-changes: %u\ndepends-on-column: %u\ndescendant-count: %u\nrepeat-depth: %u\nlookahead-bytes: %u\0".as_ptr() as *const i8,
+        b", tooltip=\"range: %u - %u\nstate: %d\nerror-cost: %u\nhas-changes: %u\ndepends-on-column: %u\ndescendant-count: %u\nrepeat-depth: %u\nlookahead-bytes: %u\0".as_ptr().cast::<i8>(),
         start_offset,
         end_offset,
         i32::from(ts_subtree_parse_state(tree)),
@@ -2162,12 +2162,12 @@ unsafe fn ts_subtree__print_dot_graph(
     {
         fprintf(
             f,
-            b"\ncharacter: '%c'\0".as_ptr() as *const i8,
+            b"\ncharacter: '%c'\0".as_ptr().cast::<i8>(),
             (*tree.ptr).data.lookahead_char,
         );
     }
 
-    fprintf(f, b"\"]\n\0".as_ptr() as *const i8);
+    fprintf(f, b"\"]\n\0".as_ptr().cast::<i8>());
 
     let mut child_start_offset = start_offset;
     let lang = language.cast::<TSLanguageData>();
@@ -2175,7 +2175,7 @@ unsafe fn ts_subtree__print_dot_graph(
         u32::from((*lang).max_alias_sequence_length) * u32::from(ts_subtree_production_id(tree));
     let n = ts_subtree_child_count(tree);
     for i in 0..n {
-        let child = ts_subtree_children(tree).add(i as usize) as *const Subtree;
+        let child = ts_subtree_children(tree).add(i as usize).cast_const();
         let mut subtree_alias_symbol: TSSymbol = 0;
         if !ts_subtree_extra(*child) && child_info_offset != 0 {
             subtree_alias_symbol = *(*lang).alias_sequences.add(child_info_offset as usize);
@@ -2190,9 +2190,9 @@ unsafe fn ts_subtree__print_dot_graph(
         );
         fprintf(
             f,
-            b"tree_%p -> tree_%p [tooltip=%u]\n\0".as_ptr() as *const i8,
-            self_ as *const c_void,
-            child as *const c_void,
+            b"tree_%p -> tree_%p [tooltip=%u]\n\0".as_ptr().cast::<i8>(),
+            self_.cast::<c_void>(),
+            child.cast::<c_void>(),
             i,
         );
         child_start_offset += ts_subtree_total_bytes(*child);
@@ -2204,8 +2204,8 @@ pub unsafe fn ts_subtree_print_dot_graph(
     language: *const TSLanguage,
     f: *mut c_void,
 ) {
-    fprintf(f, b"digraph tree {\n\0".as_ptr() as *const i8);
-    fprintf(f, b"edge [arrowhead=none]\n\0".as_ptr() as *const i8);
-    ts_subtree__print_dot_graph(&self_ as *const Subtree, 0, language, 0, f);
-    fprintf(f, b"}\n\0".as_ptr() as *const i8);
+    fprintf(f, b"digraph tree {\n\0".as_ptr().cast::<i8>());
+    fprintf(f, b"edge [arrowhead=none]\n\0".as_ptr().cast::<i8>());
+    ts_subtree__print_dot_graph(std::ptr::addr_of!(self_), 0, language, 0, f);
+    fprintf(f, b"}\n\0".as_ptr().cast::<i8>());
 }

@@ -56,7 +56,7 @@ use crate::ffi::TSInputEdit;
 // Forward-declared types from other modules (not yet rewritten)
 // ---------------------------------------------------------------------------
 
-/// TreeCursorEntry — mirrors tree_cursor.h
+/// `TreeCursorEntry` — mirrors `tree_cursor.h`
 #[repr(C)]
 pub struct TreeCursorEntry {
     pub subtree: *const Subtree,
@@ -74,7 +74,7 @@ pub struct TreeCursorEntryArray {
     pub capacity: u32,
 }
 
-/// TreeCursor — mirrors tree_cursor.h
+/// `TreeCursor` — mirrors `tree_cursor.h`
 #[repr(C)]
 pub struct TreeCursor {
     pub tree: *const TSTree,
@@ -82,7 +82,7 @@ pub struct TreeCursor {
     pub root_alias_symbol: TSSymbol,
 }
 
-/// TSRangeArray — Array(TSRange), mirrors get_changed_ranges.h
+/// `TSRangeArray` — Array(TSRange), mirrors `get_changed_ranges.h`
 #[repr(C)]
 pub struct TSRangeArray {
     pub contents: *mut TSRange,
@@ -94,7 +94,7 @@ pub struct TSRangeArray {
 // Types from tree.h
 // ---------------------------------------------------------------------------
 
-/// ParentCacheEntry — used for parent lookups (defined in tree.h)
+/// `ParentCacheEntry` — used for parent lookups (defined in tree.h)
 #[repr(C)]
 pub struct ParentCacheEntry {
     pub child: *const Subtree,
@@ -103,7 +103,7 @@ pub struct ParentCacheEntry {
     pub alias_symbol: TSSymbol,
 }
 
-/// TSTree — the main tree struct (defined in tree.h)
+/// `TSTree` — the main tree struct (defined in tree.h)
 #[repr(C)]
 pub struct TSTree {
     pub root: Subtree,
@@ -123,10 +123,10 @@ unsafe fn ts_tree_init_ref(
     tree.language = ts_language_copy(language);
     let range_size = included_range_count as usize * std::mem::size_of::<TSRange>();
     tree.included_ranges =
-        ts_calloc(included_range_count as usize, std::mem::size_of::<TSRange>()) as *mut TSRange;
+        ts_calloc(included_range_count as usize, std::mem::size_of::<TSRange>()).cast::<TSRange>();
     memcpy(
-        tree.included_ranges as *mut c_void,
-        included_ranges as *const c_void,
+        tree.included_ranges.cast::<c_void>(),
+        included_ranges.cast::<c_void>(),
         range_size,
     );
     tree.included_range_count = included_range_count;
@@ -147,7 +147,7 @@ unsafe fn ts_tree_delete_ref(tree: &mut TSTree) {
     ts_subtree_release(&mut pool, tree.root);
     ts_subtree_pool_delete(&mut pool);
     ts_language_delete(tree.language);
-    ts_free(tree.included_ranges as *mut c_void);
+    ts_free(tree.included_ranges.cast::<c_void>());
 }
 
 unsafe fn ts_tree_root_node_ref(tree_ptr: *const TSTree, tree: &TSTree) -> TSNode {
@@ -180,10 +180,9 @@ unsafe fn ts_tree_included_ranges_ref(tree: &TSTree, length: &mut u32) -> *mut T
     *length = tree.included_range_count;
     let range_size = tree.included_range_count as usize * std::mem::size_of::<TSRange>();
     let ranges =
-        ts_calloc(tree.included_range_count as usize, std::mem::size_of::<TSRange>())
-            as *mut TSRange;
+        ts_calloc(tree.included_range_count as usize, std::mem::size_of::<TSRange>()).cast::<TSRange>();
     memcpy(
-        ranges as *mut c_void,
+        ranges.cast::<c_void>(),
         tree.included_ranges as *const c_void,
         range_size,
     );
@@ -201,7 +200,7 @@ unsafe fn ts_tree_edit_ref(tree: &mut TSTree, edit: &TSInputEdit) {
 
 #[cfg(not(target_family = "wasm"))]
 unsafe fn ts_tree_print_dot_graph_ref(tree: &TSTree, file_descriptor: i32) {
-    let file = fdopen(_ts_dup(file_descriptor), b"a\0".as_ptr() as *const i8);
+    let file = fdopen(_ts_dup(file_descriptor), b"a\0".as_ptr().cast::<i8>());
     ts_subtree_print_dot_graph(tree.root, tree.language, file);
     fclose(file);
 }
@@ -217,7 +216,7 @@ pub unsafe extern "C" fn ts_tree_new(
     included_ranges: *const TSRange,
     included_range_count: u32,
 ) -> *mut TSTree {
-    let result = ts_malloc(std::mem::size_of::<TSTree>()) as *mut TSTree;
+    let result = ts_malloc(std::mem::size_of::<TSTree>()).cast::<TSTree>();
     let tree = &mut *result;
     ts_tree_init_ref(tree, root, language, included_ranges, included_range_count);
     result
@@ -236,7 +235,7 @@ pub unsafe extern "C" fn ts_tree_delete(self_: *mut TSTree) {
     }
     let tree = &mut *self_;
     ts_tree_delete_ref(tree);
-    ts_free(self_ as *mut c_void);
+    ts_free(self_.cast::<c_void>());
 }
 
 // ---------------------------------------------------------------------------
@@ -343,14 +342,14 @@ pub unsafe extern "C" fn ts_tree_get_changed_ranges(
 
     // array_delete for included_range_differences
     if !included_range_differences.contents.is_null() {
-        ts_free(included_range_differences.contents as *mut c_void);
+        ts_free(included_range_differences.contents.cast::<c_void>());
     }
     // array_delete for cursor stacks
     if !cursor1.stack.contents.is_null() {
-        ts_free(cursor1.stack.contents as *mut c_void);
+        ts_free(cursor1.stack.contents.cast::<c_void>());
     }
     if !cursor2.stack.contents.is_null() {
-        ts_free(cursor2.stack.contents as *mut c_void);
+        ts_free(cursor2.stack.contents.cast::<c_void>());
     }
 
     result

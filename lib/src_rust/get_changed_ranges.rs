@@ -25,7 +25,7 @@ use super::tree_cursor::{TreeCursor, TreeCursorEntry, TreeCursorEntryArray};
 // Types
 // ---------------------------------------------------------------------------
 
-/// TSRangeArray — Array(TSRange)
+/// `TSRangeArray` — Array(TSRange)
 #[repr(C)]
 pub struct TSRangeArray {
     pub contents: *mut TSRange,
@@ -42,7 +42,7 @@ struct Iterator {
     prev_external_token: Subtree,
 }
 
-/// IteratorComparison — result of comparing two iterators
+/// `IteratorComparison` — result of comparing two iterators
 #[derive(PartialEq, Eq)]
 enum IteratorComparison {
     IteratorDiffers,
@@ -83,12 +83,12 @@ unsafe fn array_grow_range(arr: &mut TSRangeArray, count: u32) {
             new_capacity *= 2;
         }
         if arr.contents.is_null() {
-            arr.contents = ts_calloc(new_capacity as usize, std::mem::size_of::<TSRange>()) as *mut TSRange;
+            arr.contents = ts_calloc(new_capacity as usize, std::mem::size_of::<TSRange>()).cast::<TSRange>();
         } else {
             arr.contents = ts_realloc(
-                arr.contents as *mut c_void,
+                arr.contents.cast::<c_void>(),
                 new_capacity as usize * std::mem::size_of::<TSRange>(),
-            ) as *mut TSRange;
+            ).cast::<TSRange>();
         }
         arr.capacity = new_capacity;
     }
@@ -192,12 +192,12 @@ unsafe fn stack_grow(arr: &mut TreeCursorEntryArray, count: u32) {
             arr.contents = ts_calloc(
                 new_capacity as usize,
                 std::mem::size_of::<TreeCursorEntry>(),
-            ) as *mut TreeCursorEntry;
+            ).cast::<TreeCursorEntry>();
         } else {
             arr.contents = ts_realloc(
-                arr.contents as *mut c_void,
+                arr.contents.cast::<c_void>(),
                 new_capacity as usize * std::mem::size_of::<TreeCursorEntry>(),
-            ) as *mut TreeCursorEntry;
+            ).cast::<TreeCursorEntry>();
         }
         arr.capacity = new_capacity;
     }
@@ -380,7 +380,7 @@ unsafe fn iterator_descend(self_: &mut Iterator, goal_position: u32) -> bool {
 
             if child_right.bytes > goal_position {
                 stack_push(&mut self_.cursor.stack, TreeCursorEntry {
-                    subtree: child as *const Subtree,
+                    subtree: std::ptr::from_ref::<Subtree>(child),
                     position,
                     child_index: i,
                     structural_child_index,
@@ -452,7 +452,7 @@ unsafe fn iterator_advance(self_: &mut Iterator) {
             let next_child = &*ts_subtree_children(*parent).add(child_index as usize);
 
             stack_push(&mut self_.cursor.stack, TreeCursorEntry {
-                subtree: next_child as *const Subtree,
+                subtree: std::ptr::from_ref::<Subtree>(next_child),
                 position,
                 child_index,
                 structural_child_index,
