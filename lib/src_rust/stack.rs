@@ -499,28 +499,29 @@ unsafe fn stack_node_release(
     subtree_pool: &mut SubtreePool,
 ) {
     loop {
-        debug_assert!((*self_).ref_count != 0);
-        (*self_).ref_count -= 1;
-        if (*self_).ref_count > 0 {
+        let node = &mut *self_;
+        debug_assert!(node.ref_count != 0);
+        node.ref_count -= 1;
+        if node.ref_count > 0 {
             return;
         }
 
         let mut first_predecessor: *mut StackNode = ptr::null_mut();
-        if (*self_).link_count > 0 {
-            let mut i = (*self_).link_count as i32 - 1;
+        if node.link_count > 0 {
+            let mut i = node.link_count as i32 - 1;
             while i > 0 {
-                let link = (*self_).links[i as usize];
+                let link = node.links[i as usize];
                 if !link.subtree.ptr.is_null() {
                     ts_subtree_release(subtree_pool, link.subtree);
                 }
                 stack_node_release(link.node, pool, subtree_pool);
                 i -= 1;
             }
-            let link = (*self_).links[0];
+            let link = node.links[0];
             if !link.subtree.ptr.is_null() {
                 ts_subtree_release(subtree_pool, link.subtree);
             }
-            first_predecessor = (*self_).links[0].node;
+            first_predecessor = link.node;
         }
 
         if pool.size < MAX_NODE_POOL_SIZE as u32 {
