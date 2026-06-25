@@ -1326,6 +1326,88 @@ Source-code analysis:
   benchmark variance rather than a source-code regression in this batch.
 - No rollback was performed.
 
+### 2026-06-25 09:26 EDT
+
+- Repo head: `469a0a98`
+- Batch base: `91c0ecb8`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: 10 small Clippy/stack cleanup commits from
+  `Use u32 stack node pool size` through
+  `Flip stack iterator subtree branch`
+- Doc-only follow-up commit: `e0c1907d` clarifies that fixing Clippy warnings
+  comes before broader raw pointer cleanup in `ROADMAP.md`.
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language tsx --repetitions 10 --error-limit 4 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 25273.7 | 23576.8 | +7.20% |
+| TypeScript error parses | 24 | 1650.3 | 1588.1 | +3.92% |
+| TSX normal parses | 1 | 5030.9 | 5403.1 | -6.89% |
+| TSX error parses | 27 | 1628.9 | 1612.2 | +1.04% |
+| Overall parser throughput | 63 | 1997.4 | 1956.1 | +2.11% |
+
+Prior checkpoint at `91c0ecb8` recorded Rust overall throughput of 2043.4
+bytes/ms on the same TypeScript/TSX gate, so this repeat run measured -2.25%
+absolute Rust throughput. The Rust-vs-C delta moved from +2.55% to +2.11%.
+
+Per-case regression investigation:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `typescript normal performanceCore.ts` | 15099.2 | 21297.8 | 29.10% |
+| `tsx error install.sh` | 316.7 | 389.8 | 18.76% |
+| `typescript error deeply-nested-custom.html` | 6235.8 | 7227.1 | 13.72% |
+| `tsx error cluster.c` | 2069.2 | 2306.9 | 10.30% |
+| `tsx normal parser.ts` | 5030.9 | 5403.1 | 6.89% |
+| `tsx error malloc.c` | 1004.3 | 1075.5 | 6.62% |
+| `typescript normal builderStatePublic.ts` | 17634.6 | 18653.3 | 5.46% |
+
+The first run at this same head reported a better aggregate result and a
+different single per-case outlier:
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 24602.3 | 22862.6 | +7.61% |
+| TypeScript error parses | 24 | 1670.9 | 1593.0 | +4.89% |
+| TSX normal parses | 1 | 5477.2 | 5476.0 | +0.02% |
+| TSX error parses | 27 | 1677.4 | 1628.2 | +3.02% |
+| Overall parser throughput | 63 | 2044.1 | 1968.6 | +3.83% |
+
+First-run outlier was `typescript error
+compound-statement-without-trailing-newline.py` at 28.01%. The repeat run
+removed that outlier but introduced a different set, including a TSX normal
+aggregate regression that was not present in the first run.
+
+Source-code analysis:
+
+- This batch did not change exported FFI signatures, `#[repr(C)]` layouts,
+  allocation sizes, parse-table data, generated parser templates, C headers,
+  parser control flow, stack ownership, subtree ownership, or generated parser
+  ABI.
+- The runtime edits are limited to internal `stack.rs` Clippy cleanups: using
+  `u32` constants to match existing stack-array sizes, rewriting two reverse
+  loops from signed-index `while` loops to `u32` reverse ranges, replacing
+  reference-to-raw-pointer expressions with `ptr::addr_of!`, `ptr::from_ref`,
+  or `.cast::<T>()`, and marking the stack version count accessor `const`.
+- One internal stack iterator sentinel changed from a signed `i32` where `-1`
+  meant "do not collect subtrees" to `Option<u32>`. Call sites map previous
+  nonnegative values to `Some(...)` and the previous `-1` case to `None`;
+  subtree collection, reserve sizing, and callback behavior are otherwise
+  unchanged.
+- One iterator branch was inverted to handle the null-subtree case first. The
+  two branch bodies are unchanged, and retain/release behavior for non-null
+  subtrees is preserved.
+- Given the different outlier sets between the first and repeat runs, the
+  first-run TSX normal result of +0.02% versus the repeat result of -6.89%,
+  and the absence of parser-control-flow or ownership changes, the >5% cases
+  are most consistent with benchmark variance rather than a confirmed
+  source-code regression in this batch.
+- No rollback was performed.
+
 ### 2026-06-25 01:24 EDT
 
 - Repo head: `dbf0cdb2`
