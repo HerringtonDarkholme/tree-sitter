@@ -2423,3 +2423,55 @@ Source-code analysis:
   outlier workload, no rollback was performed.
 - Full `cargo test --all` passed after every committed code change in this
   checkpoint.
+
+### 2026-06-25 14:38 EDT
+
+- Repo head: `f89eaef3`
+- Batch base: `ef39ecef`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: wrapper-boundary and internal child/range lookup cleanup commits
+  from `Use tree cursor init helper internally` through
+  `Extract empty tree cursor setup`
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 25374.0 | 24091.5 | +5.32% |
+| TypeScript error parses | 32 | 1645.4 | 1625.0 | +1.26% |
+| JavaScript normal parses | 2 | 17281.3 | 15914.6 | +8.59% |
+| JavaScript error parses | 37 | 2052.8 | 1952.7 | +5.12% |
+| Overall parser throughput | 82 | 2288.4 | 2225.6 | +2.82% |
+
+Per-case regressions over 5%:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `javascript error compound-statement-without-trailing-newline.py` | 2960.2 | 3121.1 | 5.16% |
+
+Prior checkpoint at `6c0bc71e` recorded Rust overall throughput of 2301.2
+bytes/ms and a Rust-vs-C delta of +1.67%. This checkpoint measured 2288.4
+bytes/ms, so absolute Rust throughput moved by about -0.56%; C throughput moved
+from 2263.4 to 2225.6 bytes/ms in the same run series, and the Rust-vs-C delta
+improved to +2.82%.
+
+Source-code analysis:
+
+- This batch centralizes raw pointer casts at existing FFI wrapper boundaries
+  for tree cursors, trees, range arrays, range edits, and subtree changed-range
+  calls. Exported `#[no_mangle] extern "C"` symbols and signatures are
+  unchanged.
+- The internal helper extractions name existing raw pointer arithmetic for
+  cursor child lookup, changed-range child lookup, tree included-range lookup,
+  and temporary changed-range cursor initialization. They do not change parser
+  tables, lexer/parser hot loops, stack/subtree ownership, or retain/release
+  behavior.
+- The changed runtime paths are tree cursor operations, tree edit/range edit,
+  and changed-range calculation. The perf gate workload here measures parser
+  throughput, so the single 5.16% JavaScript error outlier does not match the
+  touched code paths and is close to the threshold. No rollback was performed.
+- Full `cargo test --all` passed after every committed code change in this
+  checkpoint.
