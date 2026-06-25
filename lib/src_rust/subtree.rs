@@ -2074,7 +2074,7 @@ unsafe fn ts_subtree__write_to_string(
 
     if is_visible {
         cursor = cursor.add(
-            snprintf(*writer, limit, b")\0".as_ptr().cast::<i8>()) as usize,
+            snprintf(*writer, limit, c")".as_ptr().cast::<i8>()) as usize,
         );
     }
 
@@ -2126,25 +2126,25 @@ unsafe fn ts_subtree__print_dot_graph(
     let end_offset = start_offset + ts_subtree_total_bytes(tree);
     fprintf(
         f,
-        b"tree_%p [label=\"\0".as_ptr().cast::<i8>(),
+        c"tree_%p [label=\"".as_ptr().cast::<i8>(),
         self_.cast::<c_void>(),
     );
     language_write_symbol_as_dot_string(language, f, symbol);
-    fprintf(f, b"\"\0".as_ptr().cast::<i8>());
+    fprintf(f, c"\"".as_ptr().cast::<i8>());
 
     if ts_subtree_child_count(tree) == 0 {
-        fprintf(f, b", shape=plaintext\0".as_ptr().cast::<i8>());
+        fprintf(f, c", shape=plaintext".as_ptr().cast::<i8>());
     }
     if ts_subtree_extra(tree) {
-        fprintf(f, b", fontcolor=gray\0".as_ptr().cast::<i8>());
+        fprintf(f, c", fontcolor=gray".as_ptr().cast::<i8>());
     }
     if ts_subtree_has_changes(tree) {
-        fprintf(f, b", color=green, penwidth=2\0".as_ptr().cast::<i8>());
+        fprintf(f, c", color=green, penwidth=2".as_ptr().cast::<i8>());
     }
 
     fprintf(
         f,
-        b", tooltip=\"range: %u - %u\nstate: %d\nerror-cost: %u\nhas-changes: %u\ndepends-on-column: %u\ndescendant-count: %u\nrepeat-depth: %u\nlookahead-bytes: %u\0".as_ptr().cast::<i8>(),
+        c", tooltip=\"range: %u - %u\nstate: %d\nerror-cost: %u\nhas-changes: %u\ndepends-on-column: %u\ndescendant-count: %u\nrepeat-depth: %u\nlookahead-bytes: %u".as_ptr().cast::<i8>(),
         start_offset,
         end_offset,
         i32::from(ts_subtree_parse_state(tree)),
@@ -2162,12 +2162,12 @@ unsafe fn ts_subtree__print_dot_graph(
     {
         fprintf(
             f,
-            b"\ncharacter: '%c'\0".as_ptr().cast::<i8>(),
+            c"\ncharacter: '%c'".as_ptr().cast::<i8>(),
             (*tree.ptr).data.lookahead_char,
         );
     }
 
-    fprintf(f, b"\"]\n\0".as_ptr().cast::<i8>());
+    fprintf(f, c"\"]\n".as_ptr().cast::<i8>());
 
     let mut child_start_offset = start_offset;
     let lang = language.cast::<TSLanguageData>();
@@ -2190,7 +2190,7 @@ unsafe fn ts_subtree__print_dot_graph(
         );
         fprintf(
             f,
-            b"tree_%p -> tree_%p [tooltip=%u]\n\0".as_ptr().cast::<i8>(),
+            c"tree_%p -> tree_%p [tooltip=%u]\n".as_ptr().cast::<i8>(),
             self_.cast::<c_void>(),
             child.cast::<c_void>(),
             i,
@@ -2204,8 +2204,8 @@ pub unsafe fn ts_subtree_print_dot_graph(
     language: *const TSLanguage,
     f: *mut c_void,
 ) {
-    fprintf(f, b"digraph tree {\n\0".as_ptr().cast::<i8>());
-    fprintf(f, b"edge [arrowhead=none]\n\0".as_ptr().cast::<i8>());
+    fprintf(f, c"digraph tree {\n".as_ptr().cast::<i8>());
+    fprintf(f, c"edge [arrowhead=none]\n".as_ptr().cast::<i8>());
     ts_subtree__print_dot_graph(std::ptr::addr_of!(self_), 0, language, 0, f);
-    fprintf(f, b"}\n\0".as_ptr().cast::<i8>());
+    fprintf(f, c"}\n".as_ptr().cast::<i8>());
 }
