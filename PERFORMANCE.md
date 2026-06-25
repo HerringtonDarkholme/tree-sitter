@@ -1293,3 +1293,55 @@ Notes:
 - Since Rust throughput stayed positive versus C in every measured aggregate
   and the gate reported no >5% per-case regressions, no source-level
   performance culprit was identified and no rollback was performed.
+
+### 2026-06-25 01:55 EDT
+
+- Repo head: `a82fee10`
+- Batch base: `df732265`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: 10 small clippy/idiomatic cleanup commits from
+  `Clean subtree flag imports` through `Use expression for reusable node end
+  offset`
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language tsx --repetitions 10 --error-limit 4 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 26452.9 | 24465.3 | +8.12% |
+| TypeScript error parses | 24 | 1786.1 | 1690.6 | +5.65% |
+| TSX normal parses | 1 | 5628.4 | 5741.9 | -1.98% |
+| TSX error parses | 27 | 1777.6 | 1716.8 | +3.54% |
+| Overall parser throughput | 63 | 2172.7 | 2082.1 | +4.35% |
+
+Per-case regression investigation:
+
+- The initial 3-repetition checkpoint reported `tsx error
+  builderStatePublic.ts` as an 11.93% Rust slowdown versus C, while overall
+  Rust throughput was +5.15%.
+- A 10-repetition rerun did not reproduce `builderStatePublic.ts`; it instead
+  reported `tsx error no_newline_at_eof.go` at 13.04% and `typescript error
+  compound-statement-without-trailing-newline.py` at 6.71%.
+- The final 10-repetition checkpoint reported a third set of outliers:
+  `typescript error multiple-newlines.py` at 7.09% and `tsx error malloc.c` at
+  5.80%.
+- Because the >5% per-case outliers moved between unrelated mismatched-language
+  error fixtures while aggregate TypeScript, TSX error, and overall throughput
+  stayed positive, this checkpoint treats the outliers as benchmark noise rather
+  than a confirmed source regression.
+
+Source-code analysis:
+
+- This batch did not change exported FFI signatures, `#[repr(C)]` layouts,
+  allocation behavior, parse-table data, generated parser templates, or C
+  headers.
+- Most commits converted local mutable temporaries into expression
+  initializers, simplified one subtree-pool bound, or reused an existing
+  iterator value. These are source-level cleanup changes rather than algorithm
+  changes.
+- Parser-facing changes were limited to local setup in scanner deserialize and
+  reusable-node end-offset computation. The scanner state, EOF handling, tree
+  reuse descent, and parse action flow remain semantically unchanged.
+- No rollback was performed.
