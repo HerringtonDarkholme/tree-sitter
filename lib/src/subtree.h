@@ -8,7 +8,6 @@ extern "C" {
 #include <limits.h>
 #include <stdbool.h>
 #include "./length.h"
-#include "./array.h"
 #include "./host.h"
 #include "tree_sitter/api.h"
 #include "./parser.h"

@@ -1,6 +1,7 @@
 #ifndef TREE_SITTER_TREE_CURSOR_H_
 #define TREE_SITTER_TREE_CURSOR_H_
 
+#include "./array.h"
 #include "./subtree.h"
 
 typedef struct {
