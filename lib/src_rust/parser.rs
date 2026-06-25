@@ -37,9 +37,9 @@ use super::lexer::{
 };
 use super::stack::{
     array_assign, array_back, array_clear, array_delete, array_erase,
-    array_get, array_init, array_new, array_pop, array_push, array_reserve,
-    array_splice, array_swap, Array, Stack, StackSlice, StackSliceArray, StackSummary,
-    StackSummaryEntry,
+    array_get, array_get_mut, array_get_ref, array_init, array_new, array_pop, array_push,
+    array_reserve, array_splice, array_swap, Array, Stack, StackSlice, StackSliceArray,
+    StackSummary, StackSummaryEntry,
     StackVersion, STACK_VERSION_NONE,
     // Stack functions (now Rust-only)
     ts_stack_can_merge, ts_stack_clear, ts_stack_copy_version, ts_stack_delete,
@@ -453,15 +453,15 @@ unsafe fn reusable_node_reset(self_: &mut ReusableNode, tree: Subtree) {
 // ---------------------------------------------------------------------------
 
 unsafe fn reduce_action_set_get(self_: &ReduceActionSet, index: u32) -> &ReduceAction {
-    &*array_get(ptr::from_ref(self_), index)
+    array_get_ref(self_, index)
 }
 
 unsafe fn stack_slice_array_get(self_: &StackSliceArray, index: u32) -> &StackSlice {
-    &*array_get(ptr::from_ref(self_), index)
+    array_get_ref(self_, index)
 }
 
 unsafe fn stack_slice_array_get_mut(self_: &mut StackSliceArray, index: u32) -> &mut StackSlice {
-    &mut *array_get(ptr::from_mut(self_), index)
+    array_get_mut(self_, index)
 }
 
 unsafe fn stack_slice_array_read(self_: &StackSliceArray, index: u32) -> StackSlice {
@@ -477,7 +477,7 @@ unsafe fn subtree_array_get(self_: &SubtreeArray, index: u32) -> Subtree {
 }
 
 unsafe fn stack_summary_array_get(self_: &StackSummary, index: u32) -> &StackSummaryEntry {
-    &*array_get(ptr::from_ref(self_), index)
+    array_get_ref(self_, index)
 }
 
 unsafe fn mutable_subtree_array_back(self_: &MutableSubtreeArray) -> MutableSubtree {

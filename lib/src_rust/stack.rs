@@ -236,6 +236,16 @@ pub unsafe fn array_get<T>(arr: *const Array<T>, index: u32) -> *mut T {
     (*arr).contents.add(index as usize)
 }
 
+#[inline]
+pub unsafe fn array_get_ref<T>(arr: &Array<T>, index: u32) -> &T {
+    &*array_get(ptr::from_ref(arr), index)
+}
+
+#[inline]
+pub unsafe fn array_get_mut<T>(arr: &mut Array<T>, index: u32) -> &mut T {
+    &mut *array_get(ptr::from_mut(arr), index)
+}
+
 pub unsafe fn array_back<T>(arr: *const Array<T>) -> *mut T {
     debug_assert!((*arr).size > 0);
     (*arr).contents.add((*arr).size as usize - 1)
