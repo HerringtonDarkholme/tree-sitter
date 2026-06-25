@@ -88,17 +88,6 @@ pub struct Lexer {
 const _: () = assert!(std::mem::size_of::<ColumnData>() == 8);
 
 // ---------------------------------------------------------------------------
-// Extern C declarations
-// ---------------------------------------------------------------------------
-
-extern "C" {
-    // libc
-    fn snprintf(s: *mut i8, n: usize, format: *const i8, ...) -> i32;
-    fn vsnprintf(s: *mut i8, n: usize, format: *const i8, args: *mut c_void) -> i32;
-    fn memcpy(dest: *mut c_void, src: *const c_void, n: usize) -> *mut c_void;
-}
-
-// ---------------------------------------------------------------------------
 // Internal (static) functions
 // ---------------------------------------------------------------------------
 
@@ -563,15 +552,12 @@ pub unsafe fn ts_lexer_set_included_ranges(
         }
     }
 
-    let size = count as usize * std::mem::size_of::<TSRange>();
+    let count = count as usize;
     self_.included_ranges =
-        ts_realloc(self_.included_ranges.cast::<c_void>(), size).cast::<TSRange>();
-    memcpy(
-        self_.included_ranges.cast::<c_void>(),
-        ranges.cast::<c_void>(),
-        size,
-    );
-    self_.included_range_count = count;
+        ts_realloc(self_.included_ranges.cast::<c_void>(), count * std::mem::size_of::<TSRange>())
+            .cast::<TSRange>();
+    std::ptr::copy_nonoverlapping(ranges, self_.included_ranges, count);
+    self_.included_range_count = count as u32;
     ts_lexer_goto(self_, self_.current_position);
     true
 }
