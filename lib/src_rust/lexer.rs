@@ -416,9 +416,8 @@ unsafe extern "C" fn ts_lexer__get_column(_self: *mut TSLexer) -> u32 {
 unsafe extern "C" fn ts_lexer__is_at_included_range_start(_self: *const TSLexer) -> bool {
     let self_ = &*(_self as *const Lexer);
     if self_.current_included_range_index < self_.included_range_count {
-        let current_range = &*self_
-            .included_ranges
-            .add(self_.current_included_range_index as usize);
+        let range_index = self_.current_included_range_index as usize;
+        let current_range = &*self_.included_ranges.add(range_index);
         self_.current_position.bytes == current_range.start_byte
     } else {
         false
