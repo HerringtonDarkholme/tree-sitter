@@ -2242,7 +2242,7 @@ unsafe fn ts_parser__advance(
     allow_node_reuse: bool,
 ) -> bool {
     let parser = ptr::from_mut(self_);
-    let stack = &*self_.stack;
+    let stack = parser_stack_ref(self_.stack);
     let mut state = ts_stack_state(stack, version);
     let position = ts_stack_position(stack, version).bytes;
     let last_external_token = ts_stack_last_external_token(stack, version);
@@ -2420,9 +2420,13 @@ unsafe fn ts_parser__advance(
         // with one of the stack versions created by a reduction, and continue
         // processing this version of the stack with the same lookahead symbol.
         if last_reduction_version != STACK_VERSION_NONE {
-            ts_stack_renumber_version(&mut *self_.stack, last_reduction_version, version);
+            ts_stack_renumber_version(
+                parser_stack_mut(self_.stack),
+                last_reduction_version,
+                version,
+            );
             LOG_STACK!(parser);
-            state = ts_stack_state(&*self_.stack, version);
+            state = ts_stack_state(parser_stack_ref(self_.stack), version);
 
             // At the end of a non-terminal extra rule, the lexer will return a
             // null subtree, because the parser needs to perform a fixed reduction
@@ -2449,7 +2453,7 @@ unsafe fn ts_parser__advance(
             if !lookahead.ptr.is_null() {
                 ts_subtree_release(&mut self_.tree_pool, lookahead);
             }
-            ts_stack_halt(&mut *self_.stack, version);
+            ts_stack_halt(parser_stack_mut(self_.stack), version);
             return true;
         }
 
@@ -2496,7 +2500,7 @@ unsafe fn ts_parser__advance(
         // reuse that previous subtree. Remove it from the stack, and in its place,
         // push each of its children. Then try again to process the current lookahead.
         if ts_parser__breakdown_top_of_stack(self_, version) {
-            state = ts_stack_state(&*self_.stack, version);
+            state = ts_stack_state(parser_stack_ref(self_.stack), version);
             ts_subtree_release(&mut self_.tree_pool, lookahead);
             needs_lex = true;
             continue;
@@ -2508,7 +2512,7 @@ unsafe fn ts_parser__advance(
         // this version can simply be removed. But if all versions end up paused,
         // then error recovery is needed.
         LOG!(parser, c"detect_error lookahead:%s".as_ptr().cast::<i8>(), TREE_NAME!(parser, lookahead));
-        ts_stack_pause(&mut *self_.stack, version, lookahead);
+        ts_stack_pause(parser_stack_mut(self_.stack), version, lookahead);
         return true;
     }
 }
