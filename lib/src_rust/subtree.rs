@@ -495,11 +495,6 @@ unsafe fn array_push_subtree(arr: &mut SubtreeArray, element: Subtree) {
     arr.size += 1;
 }
 
-#[inline]
-unsafe fn subtree_array_mut<'a>(array: *mut SubtreeArray) -> &'a mut SubtreeArray {
-    array.as_mut().unwrap_unchecked()
-}
-
 // ===========================================================================
 // SubtreeArray functions
 // ===========================================================================
@@ -536,11 +531,9 @@ pub(crate) unsafe fn ts_subtree_array_delete(pool: &mut SubtreePool, self_: &mut
 }
 
 pub(crate) unsafe fn ts_subtree_array_remove_trailing_extras(
-    self_: *mut SubtreeArray,
-    destination: *mut SubtreeArray,
+    self_: &mut SubtreeArray,
+    destination: &mut SubtreeArray,
 ) {
-    let self_ = subtree_array_mut(self_);
-    let destination = subtree_array_mut(destination);
     destination.size = 0;
     while self_.size > 0 {
         let last = *self_.contents.add(self_.size as usize - 1);
