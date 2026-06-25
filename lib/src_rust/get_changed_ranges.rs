@@ -92,17 +92,29 @@ struct VisibleState {
 
 #[inline]
 unsafe fn array_back_range(arr: &mut TSRangeArray) -> &mut TSRange {
-    &mut *arr.contents.add(arr.size as usize - 1)
+    debug_assert!(arr.size > 0);
+    let index = arr.size as usize - 1;
+    range_array_slice_mut(arr).get_unchecked_mut(index)
 }
 
 #[inline]
 unsafe fn array_get_range(arr: &TSRangeArray, index: u32) -> &TSRange {
-    &*arr.contents.add(index as usize)
+    range_array_slice(arr).get_unchecked(index as usize)
 }
 
 #[inline]
 unsafe fn array_write_range(arr: &mut TSRangeArray, index: u32, range: TSRange) {
     ptr::write(arr.contents.add(index as usize), range);
+}
+
+#[inline]
+unsafe fn range_array_slice(arr: &TSRangeArray) -> &[TSRange] {
+    std::slice::from_raw_parts(arr.contents, arr.size as usize)
+}
+
+#[inline]
+unsafe fn range_array_slice_mut(arr: &mut TSRangeArray) -> &mut [TSRange] {
+    std::slice::from_raw_parts_mut(arr.contents, arr.size as usize)
 }
 
 unsafe fn array_grow_range(arr: &mut TSRangeArray, count: u32) {
