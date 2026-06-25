@@ -681,7 +681,7 @@ unsafe fn ts_subtree_pool_free(self_: &mut SubtreePool, tree: MutableSubtree) {
 #[inline]
 pub unsafe fn ts_subtree_symbol(self_: Subtree) -> TSSymbol {
     if self_.data.is_inline() {
-        self_.data.symbol as TSSymbol
+        TSSymbol::from(self_.data.symbol)
     } else {
         (*self_.ptr).symbol
     }
@@ -788,7 +788,7 @@ pub unsafe fn ts_subtree_set_extra(self_: &mut MutableSubtree, is_extra: bool) {
 #[inline]
 pub unsafe fn ts_subtree_leaf_symbol(self_: Subtree) -> TSSymbol {
     if self_.data.is_inline() {
-        return self_.data.symbol as TSSymbol;
+        return TSSymbol::from(self_.data.symbol);
     }
     if (*self_.ptr).child_count == 0 {
         return (*self_.ptr).symbol;
