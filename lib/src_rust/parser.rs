@@ -1684,20 +1684,20 @@ unsafe fn ts_parser__do_all_potential_reductions(
     lookahead_symbol: TSSymbol,
 ) -> bool {
     let lang = self_.language.cast::<TSLanguageFull>();
-    let initial_version_count = ts_stack_version_count(&*self_.stack);
+    let initial_version_count = ts_stack_version_count(parser_stack_ref(self_.stack));
 
     let mut can_shift_lookahead_symbol = false;
     let mut version = starting_version;
     let mut i: u32 = 0;
     loop {
-        let version_count = ts_stack_version_count(&*self_.stack);
+        let version_count = ts_stack_version_count(parser_stack_ref(self_.stack));
         if version >= version_count {
             break;
         }
 
         let merged = 'merge: {
             for j in initial_version_count..version {
-                if ts_stack_merge(&mut *self_.stack, j, version) {
+                if ts_stack_merge(parser_stack_mut(self_.stack), j, version) {
                     break 'merge true;
                 }
             }
@@ -1708,7 +1708,7 @@ unsafe fn ts_parser__do_all_potential_reductions(
             continue;
         }
 
-        let state = ts_stack_state(&*self_.stack, version);
+        let state = ts_stack_state(parser_stack_ref(self_.stack), version);
         let mut has_shift_action = false;
         array_clear(&mut self_.reduce_actions);
 
@@ -1767,11 +1767,11 @@ unsafe fn ts_parser__do_all_potential_reductions(
         if has_shift_action {
             can_shift_lookahead_symbol = true;
         } else if reduction_version != STACK_VERSION_NONE && i < MAX_VERSION_COUNT {
-            ts_stack_renumber_version(&mut *self_.stack, reduction_version, version);
+            ts_stack_renumber_version(parser_stack_mut(self_.stack), reduction_version, version);
             i += 1;
             continue;
         } else if lookahead_symbol != 0 {
-            ts_stack_remove_version(&mut *self_.stack, version);
+            ts_stack_remove_version(parser_stack_mut(self_.stack), version);
         }
 
         if version == starting_version {
