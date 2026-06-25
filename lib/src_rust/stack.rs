@@ -664,15 +664,16 @@ unsafe fn stack_node_add_link(
         }
     }
 
-    if (*self_).link_count as usize == MAX_LINK_COUNT {
+    let node = &mut *self_;
+    if node.link_count as usize == MAX_LINK_COUNT {
         return;
     }
 
     stack_node_retain(link.node.as_mut());
     let mut node_count = (*link.node).node_count;
     let mut dynamic_precedence = (*link.node).dynamic_precedence;
-    (*self_).links[(*self_).link_count as usize] = link;
-    (*self_).link_count += 1;
+    node.links[node.link_count as usize] = link;
+    node.link_count += 1;
 
     if !link.subtree.ptr.is_null() {
         ts_subtree_retain(link.subtree);
@@ -680,11 +681,11 @@ unsafe fn stack_node_add_link(
         dynamic_precedence += ts_subtree_dynamic_precedence(link.subtree);
     }
 
-    if node_count > (*self_).node_count {
-        (*self_).node_count = node_count;
+    if node_count > node.node_count {
+        node.node_count = node_count;
     }
-    if dynamic_precedence > (*self_).dynamic_precedence {
-        (*self_).dynamic_precedence = dynamic_precedence;
+    if dynamic_precedence > node.dynamic_precedence {
+        node.dynamic_precedence = dynamic_precedence;
     }
 }
 
