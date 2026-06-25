@@ -217,7 +217,7 @@ pub struct TableEntry {
 
 impl TableEntry {
     #[inline]
-    pub fn empty() -> Self {
+    pub const fn empty() -> Self {
         Self {
             actions: ptr::null(),
             action_count: 0,
