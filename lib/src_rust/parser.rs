@@ -978,7 +978,7 @@ unsafe fn ts_parser__lex(
         return NULL_SUBTREE;
     }
 
-    let stack = &*self_.stack;
+    let stack = parser_stack_ref(self_.stack);
     let start_position = ts_stack_position(stack, version);
     let external_token = ts_stack_last_external_token(stack, version);
 
@@ -1032,7 +1032,10 @@ unsafe fn ts_parser__lex(
                         ts_language_next_state(self_.language, parse_state, symbol);
                     let token_is_extra = next_parse_state == parse_state;
                     if error_mode
-                        || !ts_stack_has_advanced_since_error(&*self_.stack, version)
+                        || !ts_stack_has_advanced_since_error(
+                            parser_stack_ref(self_.stack),
+                            version,
+                        )
                         || token_is_extra
                     {
                         LOG!(parser,
