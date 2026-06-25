@@ -1119,20 +1119,21 @@ pub unsafe fn ts_subtree_new_error(
 // --- #36: clone ---
 
 pub unsafe fn ts_subtree_clone(self_: Subtree) -> MutableSubtree {
-    let alloc_size = ts_subtree_alloc_size((*self_.ptr).child_count);
+    let data = &*self_.ptr;
+    let alloc_size = ts_subtree_alloc_size(data.child_count);
     let new_children = ts_malloc(alloc_size) as *mut Subtree;
     let old_children = ts_subtree_children(self_);
     ptr::copy_nonoverlapping(old_children as *const u8, new_children as *mut u8, alloc_size);
-    let result = (new_children as *mut u8).add((*self_.ptr).child_count as usize * std::mem::size_of::<Subtree>()) as *mut SubtreeHeapData;
-    if (*self_.ptr).child_count > 0 {
-        for i in 0..(*self_.ptr).child_count {
+    let result = (new_children as *mut u8)
+        .add(data.child_count as usize * std::mem::size_of::<Subtree>())
+        as *mut SubtreeHeapData;
+    if data.child_count > 0 {
+        for i in 0..data.child_count {
             ts_subtree_retain(*new_children.add(i as usize));
         }
-    } else if (*self_.ptr).has_external_tokens() {
+    } else if data.has_external_tokens() {
         (*result).data.external_scanner_state = std::mem::ManuallyDrop::new(
-            ts_external_scanner_state_copy(
-                &*(*self_.ptr).data.external_scanner_state,
-            )
+            ts_external_scanner_state_copy(&*data.data.external_scanner_state),
         );
     }
     (*result).ref_count = 1;
