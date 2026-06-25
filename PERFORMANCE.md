@@ -1747,3 +1747,57 @@ Source-code analysis:
   aggregate movement, this is most likely benchmark/C-run variance rather than
   a source regression from this batch.
 - No rollback was performed.
+
+### 2026-06-25 07:35 EDT
+
+- Repo head: `f5a30dbf`
+- Batch base: `bd0dd7f3`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: 10 small clippy/raw-pointer cleanup commits from
+  `Remove explicit deref in subtree clone` through
+  `Use pointer casts in stack insert`
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language tsx --repetitions 10 --error-limit 4 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 26440.1 | 25181.2 | +5.00% |
+| TypeScript error parses | 24 | 1736.1 | 1722.6 | +0.78% |
+| TSX normal parses | 1 | 5883.3 | 5768.1 | +2.00% |
+| TSX error parses | 27 | 1756.0 | 1728.1 | +1.61% |
+| Overall parser throughput | 63 | 2134.9 | 2108.3 | +1.26% |
+
+Prior checkpoint at `97927e34` recorded Rust overall throughput of 2128.5
+bytes/ms on the same TypeScript/TSX gate, so this batch was effectively flat
+at +0.30% absolute Rust throughput. The Rust-vs-C delta moved from +1.48% to
++1.26%, mainly because this C run was slightly faster.
+
+Per-case regression investigation:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `typescript error compound-statement-without-trailing-newline.py` | 916.8 | 973.9 | 5.86% |
+
+Source-code analysis:
+
+- This batch did not change exported FFI signatures, `#[repr(C)]` layouts,
+  allocation sizes, parse-table data, generated parser templates, C headers,
+  parser control flow, stack ownership, subtree ownership, or generated parser
+  ABI.
+- The first seven runtime edits are clippy-oriented readability cleanups:
+  removing explicit auto-derefs in `subtree.rs`, `parser.rs`, and `stack.rs`,
+  and collapsing equivalent nested conditions in subtree error-cost accounting,
+  parser language setup, parser recovery, and stack splice copying.
+- The final three runtime edits are pointer-cast spelling cleanups in generic
+  internal stack array helpers: `array_splice`, `array_erase`, and
+  `array_insert`. They keep the same byte offsets, lengths, and libc copy calls,
+  replacing equivalent `as *mut/*const` casts with `.cast::<T>()`.
+- The reported >5% case is the same TypeScript error fixture that has appeared
+  in earlier checkpoint variance. Aggregate TypeScript error throughput
+  improved slightly against the prior checkpoint, overall Rust throughput was
+  effectively flat, and the source changes do not alter parser semantics, so no
+  source regression is indicated.
+- No rollback was performed.
