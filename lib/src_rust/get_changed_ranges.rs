@@ -539,15 +539,13 @@ pub unsafe extern "C" fn ts_range_array_intersects(
     ts_range_array_intersects_ref(ranges, start_index, start_byte, end_byte)
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn ts_range_array_get_changed_ranges(
+pub(crate) unsafe fn ts_range_array_get_changed_ranges_ref(
     old_ranges: *const TSRange,
     old_range_count: u32,
     new_ranges: *const TSRange,
     new_range_count: u32,
-    differences: *mut TSRangeArray,
+    differences: &mut TSRangeArray,
 ) {
-    let differences = &mut *differences;
     let mut new_index: u32 = 0;
     let mut old_index: u32 = 0;
     let mut current_position = length_zero();
@@ -603,6 +601,23 @@ pub unsafe extern "C" fn ts_range_array_get_changed_ranges(
             }
         }
     }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn ts_range_array_get_changed_ranges(
+    old_ranges: *const TSRange,
+    old_range_count: u32,
+    new_ranges: *const TSRange,
+    new_range_count: u32,
+    differences: *mut TSRangeArray,
+) {
+    ts_range_array_get_changed_ranges_ref(
+        old_ranges,
+        old_range_count,
+        new_ranges,
+        new_range_count,
+        &mut *differences,
+    );
 }
 
 #[no_mangle]
