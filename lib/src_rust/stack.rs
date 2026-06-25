@@ -330,8 +330,8 @@ pub unsafe fn array_assign<T>(self_: &mut Array<T>, other: &Array<T>) {
     self_.size = other.size;
     if other.size > 0 {
         memcpy(
-            self_.contents as *mut c_void,
-            other.contents as *const c_void,
+            self_.contents.cast::<c_void>(),
+            other.contents.cast::<c_void>(),
             other.size as usize * elem_size,
         );
     }
