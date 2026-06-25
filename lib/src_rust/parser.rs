@@ -1872,14 +1872,13 @@ unsafe fn ts_parser__recover(
                 self_.language,
                 entry.state,
                 ts_subtree_symbol(lookahead),
-            ) {
-                if ts_parser__recover_to_state(self_, version, depth, entry.state) {
-                    did_recover = true;
-                    LOG!(parser, b"recover_to_previous state:%u, depth:%u\0".as_ptr() as *const i8,
-                        u32::from(entry.state), depth);
-                    LOG_STACK!(parser);
-                    break;
-                }
+            ) && ts_parser__recover_to_state(self_, version, depth, entry.state)
+            {
+                did_recover = true;
+                LOG!(parser, b"recover_to_previous state:%u, depth:%u\0".as_ptr() as *const i8,
+                    u32::from(entry.state), depth);
+                LOG_STACK!(parser);
+                break;
             }
         }
     }
