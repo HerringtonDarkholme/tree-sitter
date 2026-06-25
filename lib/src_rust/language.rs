@@ -433,7 +433,7 @@ pub unsafe fn ts_lookahead_iterator__next(self_: *mut LookaheadIterator) -> bool
     // either represents a list of actions or a successor state.
     if u32::from((*self_).symbol) < (*l).token_count {
         let entry = &*(*l).parse_actions.add((*self_).table_value as usize);
-        (*self_).action_count = entry.entry.count as u16;
+        (*self_).action_count = u16::from(entry.entry.count);
         (*self_).actions = (*l).parse_actions.add((*self_).table_value as usize + 1) as *const TSParseAction;
         (*self_).next_state = 0;
     } else {
