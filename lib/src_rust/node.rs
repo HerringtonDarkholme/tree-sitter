@@ -104,6 +104,39 @@ unsafe fn node_end_point(self_: TSNode) -> TSPoint {
     point_add(node_start_point(self_), ts_subtree_size(ts_node__subtree(self_)).extent)
 }
 
+#[inline]
+unsafe fn node_symbol(self_: TSNode) -> TSSymbol {
+    let mut symbol = ts_node__alias(&self_) as TSSymbol;
+    if symbol == 0 {
+        symbol = ts_subtree_symbol(ts_node__subtree(self_));
+    }
+    ts_language_public_symbol(node_language(self_), symbol)
+}
+
+#[inline]
+unsafe fn node_type(self_: TSNode) -> *const i8 {
+    let mut symbol = ts_node__alias(&self_) as TSSymbol;
+    if symbol == 0 {
+        symbol = ts_subtree_symbol(ts_node__subtree(self_));
+    }
+    ts_language_symbol_name(node_language(self_), symbol)
+}
+
+#[inline]
+unsafe fn node_grammar_symbol(self_: TSNode) -> TSSymbol {
+    ts_subtree_symbol(ts_node__subtree(self_))
+}
+
+#[inline]
+unsafe fn node_grammar_type(self_: TSNode) -> *const i8 {
+    ts_language_symbol_name(node_language(self_), node_grammar_symbol(self_))
+}
+
+#[inline]
+const unsafe fn node_is_extra(self_: TSNode) -> bool {
+    ts_subtree_extra(ts_node__subtree(self_))
+}
+
 // ---------------------------------------------------------------------------
 // Internal helpers — child iteration
 // ---------------------------------------------------------------------------
@@ -604,20 +637,12 @@ pub unsafe extern "C" fn ts_node_end_point(self_: TSNode) -> TSPoint {
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_node_symbol(self_: TSNode) -> TSSymbol {
-    let mut symbol = ts_node__alias(&self_) as TSSymbol;
-    if symbol == 0 {
-        symbol = ts_subtree_symbol(ts_node__subtree(self_));
-    }
-    ts_language_public_symbol(node_language(self_), symbol)
+    node_symbol(self_)
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_node_type(self_: TSNode) -> *const i8 {
-    let mut symbol = ts_node__alias(&self_) as TSSymbol;
-    if symbol == 0 {
-        symbol = ts_subtree_symbol(ts_node__subtree(self_));
-    }
-    ts_language_symbol_name(node_language(self_), symbol)
+    node_type(self_)
 }
 
 #[no_mangle]
@@ -627,13 +652,12 @@ pub const unsafe extern "C" fn ts_node_language(self_: TSNode) -> *const TSLangu
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_node_grammar_symbol(self_: TSNode) -> TSSymbol {
-    ts_subtree_symbol(ts_node__subtree(self_))
+    node_grammar_symbol(self_)
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_node_grammar_type(self_: TSNode) -> *const i8 {
-    let symbol = ts_subtree_symbol(ts_node__subtree(self_));
-    ts_language_symbol_name(node_language(self_), symbol)
+    node_grammar_type(self_)
 }
 
 #[no_mangle]
@@ -661,7 +685,7 @@ pub unsafe extern "C" fn ts_node_is_null(self_: TSNode) -> bool {
 
 #[no_mangle]
 pub const unsafe extern "C" fn ts_node_is_extra(self_: TSNode) -> bool {
-    ts_subtree_extra(ts_node__subtree(self_))
+    node_is_extra(self_)
 }
 
 #[no_mangle]
@@ -691,7 +715,7 @@ pub const unsafe extern "C" fn ts_node_has_error(self_: TSNode) -> bool {
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_node_is_error(self_: TSNode) -> bool {
-    ts_node_symbol(self_) == ts_builtin_sym_error
+    node_symbol(self_) == ts_builtin_sym_error
 }
 
 #[no_mangle]
@@ -710,7 +734,7 @@ pub unsafe extern "C" fn ts_node_next_parse_state(self_: TSNode) -> TSStateId {
     if state == TS_TREE_STATE_NONE {
         return TS_TREE_STATE_NONE;
     }
-    let symbol = ts_node_grammar_symbol(self_);
+    let symbol = node_grammar_symbol(self_);
     ts_language_next_state(node_language(self_), state, symbol)
 }
 
@@ -982,7 +1006,7 @@ pub unsafe extern "C" fn ts_node_field_name_for_child(
         while ts_node_child_iterator_next(&mut iterator, &mut child) {
             if ts_node__is_relevant(child, true) {
                 if index == child_index {
-                    if ts_node_is_extra(child) {
+                    if node_is_extra(child) {
                         return ptr::null();
                     }
                     let field_name = ts_node__field_name_from_language(
@@ -1039,7 +1063,7 @@ pub unsafe extern "C" fn ts_node_field_name_for_named_child(
         while ts_node_child_iterator_next(&mut iterator, &mut child) {
             if ts_node__is_relevant(child, false) {
                 if index == named_child_index {
-                    if ts_node_is_extra(child) {
+                    if node_is_extra(child) {
                         return ptr::null();
                     }
                     let field_name = ts_node__field_name_from_language(
