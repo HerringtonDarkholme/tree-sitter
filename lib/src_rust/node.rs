@@ -852,7 +852,7 @@ pub unsafe extern "C" fn ts_node_child_by_field_id(
                 } else if ts_node__is_relevant(child, true) {
                     return child;
                 } else if node_child_count(child) > 0 {
-                    return ts_node_child(child, 0);
+                    return ts_node__child(child, 0, true);
                 }
                 field_map = field_map.add(1);
                 if field_map == field_map_end {
