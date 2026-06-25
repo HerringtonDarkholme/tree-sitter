@@ -709,7 +709,7 @@ pub const unsafe extern "C" fn ts_node_named_child_count(self_: TSNode) -> u32 {
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_node_parent(self_: TSNode) -> TSNode {
-    let tree = self_.tree.cast::<TSTree>();
+    let tree = node_tree(self_);
     let mut node = ts_tree_root_node(tree);
     if node.id == self_.id { return ts_node__null(); }
 
