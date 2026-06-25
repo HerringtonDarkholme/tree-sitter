@@ -123,6 +123,55 @@ pub struct TSTree {
     pub included_range_count: u32,
 }
 
+unsafe fn ts_tree_root_node_ref(tree_ptr: *const TSTree, tree: &TSTree) -> TSNode {
+    ts_node_new(tree_ptr, &tree.root, ts_subtree_padding(tree.root), 0)
+}
+
+unsafe fn ts_tree_root_node_with_offset_ref(
+    tree_ptr: *const TSTree,
+    tree: &TSTree,
+    offset_bytes: u32,
+    offset_extent: TSPoint,
+) -> TSNode {
+    let offset = Length {
+        bytes: offset_bytes,
+        extent: offset_extent,
+    };
+    ts_node_new(
+        tree_ptr,
+        &tree.root,
+        length_add(offset, ts_subtree_padding(tree.root)),
+        0,
+    )
+}
+
+fn ts_tree_language_ref(tree: &TSTree) -> *const TSLanguage {
+    tree.language
+}
+
+unsafe fn ts_tree_included_ranges_ref(tree: &TSTree, length: &mut u32) -> *mut TSRange {
+    *length = tree.included_range_count;
+    let range_size = tree.included_range_count as usize * std::mem::size_of::<TSRange>();
+    let ranges =
+        ts_calloc(tree.included_range_count as usize, std::mem::size_of::<TSRange>())
+            as *mut TSRange;
+    memcpy(
+        ranges as *mut c_void,
+        tree.included_ranges as *const c_void,
+        range_size,
+    );
+    ranges
+}
+
+unsafe fn ts_tree_edit_ref(tree: &mut TSTree, edit: &TSInputEdit) {
+    for i in 0..tree.included_range_count {
+        ts_range_edit(tree.included_ranges.add(i as usize), edit);
+    }
+    let mut pool = ts_subtree_pool_new(0);
+    tree.root = ts_subtree_edit(tree.root, edit, &mut pool);
+    ts_subtree_pool_delete(&mut pool);
+}
+
 // ---------------------------------------------------------------------------
 // Lifecycle: ts_tree_new, ts_tree_copy, ts_tree_delete
 // ---------------------------------------------------------------------------
@@ -184,7 +233,7 @@ pub unsafe extern "C" fn ts_tree_delete(self_: *mut TSTree) {
 #[no_mangle]
 pub unsafe extern "C" fn ts_tree_root_node(self_: *const TSTree) -> TSNode {
     let tree = &*self_;
-    ts_node_new(self_, &tree.root, ts_subtree_padding(tree.root), 0)
+    ts_tree_root_node_ref(self_, tree)
 }
 
 #[no_mangle]
@@ -194,22 +243,13 @@ pub unsafe extern "C" fn ts_tree_root_node_with_offset(
     offset_extent: TSPoint,
 ) -> TSNode {
     let tree = &*self_;
-    let offset = Length {
-        bytes: offset_bytes,
-        extent: offset_extent,
-    };
-    ts_node_new(
-        self_,
-        &tree.root,
-        length_add(offset, ts_subtree_padding(tree.root)),
-        0,
-    )
+    ts_tree_root_node_with_offset_ref(self_, tree, offset_bytes, offset_extent)
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_tree_language(self_: *const TSTree) -> *const TSLanguage {
     let tree = &*self_;
-    tree.language
+    ts_tree_language_ref(tree)
 }
 
 #[no_mangle]
@@ -218,17 +258,8 @@ pub unsafe extern "C" fn ts_tree_included_ranges(
     length: *mut u32,
 ) -> *mut TSRange {
     let tree = &*self_;
-    *length = tree.included_range_count;
-    let range_size = tree.included_range_count as usize * std::mem::size_of::<TSRange>();
-    let ranges =
-        ts_calloc(tree.included_range_count as usize, std::mem::size_of::<TSRange>())
-            as *mut TSRange;
-    memcpy(
-        ranges as *mut c_void,
-        tree.included_ranges as *const c_void,
-        range_size,
-    );
-    ranges
+    let length = &mut *length;
+    ts_tree_included_ranges_ref(tree, length)
 }
 
 // ---------------------------------------------------------------------------
@@ -239,12 +270,8 @@ pub unsafe extern "C" fn ts_tree_included_ranges(
 #[no_mangle]
 pub unsafe extern "C" fn ts_tree_edit(self_: *mut TSTree, edit: *const TSInputEdit) {
     let tree = &mut *self_;
-    for i in 0..tree.included_range_count {
-        ts_range_edit(tree.included_ranges.add(i as usize), edit);
-    }
-    let mut pool = ts_subtree_pool_new(0);
-    tree.root = ts_subtree_edit(tree.root, edit, &mut pool);
-    ts_subtree_pool_delete(&mut pool);
+    let edit = &*edit;
+    ts_tree_edit_ref(tree, edit);
 }
 
 #[no_mangle]
