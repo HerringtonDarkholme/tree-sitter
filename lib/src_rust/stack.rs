@@ -1145,7 +1145,7 @@ pub unsafe fn ts_stack_pop_count(
         self_,
         version,
         pop_count_callback,
-        &count as *const u32 as *mut c_void,
+        ptr::addr_of!(count).cast_mut().cast::<c_void>(),
         count as i32,
     )
 }
@@ -1165,7 +1165,7 @@ pub unsafe fn ts_stack_pop_error(
                 self_,
                 version,
                 pop_error_callback,
-                &mut found_error as *mut bool as *mut c_void,
+                ptr::addr_of_mut!(found_error).cast::<c_void>(),
                 1,
             );
             if pop.size > 0 {
@@ -1227,7 +1227,7 @@ pub unsafe fn ts_stack_record_summary(
         self_,
         version,
         summarize_stack_callback,
-        &mut session as *mut SummarizeStackSession as *mut c_void,
+        ptr::addr_of_mut!(session).cast::<c_void>(),
         -1,
     );
     let stack = &mut *self_;
