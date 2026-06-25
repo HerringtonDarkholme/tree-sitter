@@ -270,16 +270,33 @@ const unsafe fn lang(self_: *const TSLanguage) -> *const TSLanguageFull {
 }
 
 #[inline]
+unsafe fn language_ref<'a>(language: *const TSLanguageFull) -> &'a TSLanguageFull {
+    language.as_ref().unwrap_unchecked()
+}
+
+#[inline]
+unsafe fn lookahead_iterator_mut<'a>(self_: *mut LookaheadIterator) -> &'a mut LookaheadIterator {
+    self_.as_mut().unwrap_unchecked()
+}
+
+#[inline]
 unsafe fn parse_action_entry<'a>(
     language: *const TSLanguageFull,
     index: usize,
 ) -> &'a TSParseActionEntry {
-    &*(*language).parse_actions.add(index)
+    language_ref(language)
+        .parse_actions
+        .add(index)
+        .as_ref()
+        .unwrap_unchecked()
 }
 
 #[inline]
 unsafe fn parse_action_at(language: *const TSLanguageFull, index: usize) -> *const TSParseAction {
-    (*language).parse_actions.add(index).cast::<TSParseAction>()
+    language_ref(language)
+        .parse_actions
+        .add(index)
+        .cast::<TSParseAction>()
 }
 
 // ---------------------------------------------------------------------------
@@ -983,7 +1000,7 @@ pub unsafe extern "C" fn ts_lookahead_iterator_reset(
 pub unsafe extern "C" fn ts_lookahead_iterator_next(
     self_: *mut LookaheadIterator,
 ) -> bool {
-    ts_lookahead_iterator__next(&mut *self_)
+    ts_lookahead_iterator__next(lookahead_iterator_mut(self_))
 }
 
 #[no_mangle]
