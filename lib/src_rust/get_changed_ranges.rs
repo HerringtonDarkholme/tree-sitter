@@ -245,6 +245,11 @@ unsafe fn stack_pop(arr: &mut TreeCursorEntryArray) -> TreeCursorEntry {
 }
 
 #[inline]
+unsafe fn subtree_child<'a>(parent: Subtree, index: u32) -> &'a Subtree {
+    &*ts_subtree_children(parent).add(index as usize)
+}
+
+#[inline]
 const unsafe fn tree_cursor_read_ref(cursor: &TreeCursor) -> TreeCursor {
     ptr::read(cursor)
 }
@@ -404,7 +409,7 @@ unsafe fn iterator_descend(self_: &mut Iterator, goal_position: u32) -> bool {
         let mut structural_child_index: u32 = 0;
         let n = ts_subtree_child_count(*entry.subtree);
         for i in 0..n {
-            let child = &*ts_subtree_children(*entry.subtree).add(i as usize);
+            let child = subtree_child(*entry.subtree, i);
             let child_left = length_add(position, ts_subtree_padding(*child));
             let child_right = length_add(child_left, ts_subtree_size(*child));
 
@@ -479,7 +484,7 @@ unsafe fn iterator_advance(self_: &mut Iterator) {
             if !ts_subtree_extra(*entry.subtree) {
                 structural_child_index += 1;
             }
-            let next_child = &*ts_subtree_children(*parent).add(child_index as usize);
+            let next_child = subtree_child(*parent, child_index);
 
             stack_push(&mut self_.cursor.stack, TreeCursorEntry {
                 subtree: std::ptr::from_ref::<Subtree>(next_child),
