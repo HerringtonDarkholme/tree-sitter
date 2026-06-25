@@ -638,7 +638,7 @@ unsafe fn ts_parser__breakdown_lookahead(
 // Internal helpers — version comparison
 // ---------------------------------------------------------------------------
 
-unsafe fn ts_parser__compare_versions(a: ErrorStatus, b: ErrorStatus) -> ErrorComparison {
+const unsafe fn ts_parser__compare_versions(a: ErrorStatus, b: ErrorStatus) -> ErrorComparison {
     if !a.is_in_error && b.is_in_error {
         if a.cost < b.cost {
             return ErrorComparison::TakeLeft;
