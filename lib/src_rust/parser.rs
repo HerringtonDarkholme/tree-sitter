@@ -594,12 +594,13 @@ unsafe fn ts_parser__breakdown_top_of_stack(
             ts_subtree_release(&mut self_.tree_pool, parent);
             array_delete(&mut slice.subtrees as *mut SubtreeArray as *mut Array<Subtree>);
 
+            let parser = ptr::from_mut(self_);
             LOG!(
-                self_ as *mut TSParser,
+                parser,
                 b"breakdown_top_of_stack tree:%s\0".as_ptr() as *const i8,
-                SYM_NAME!(self_ as *mut TSParser, ts_subtree_symbol(parent))
+                SYM_NAME!(parser, ts_subtree_symbol(parent))
             );
-            LOG_STACK!(self_ as *mut TSParser);
+            LOG_STACK!(parser);
         }
 
         if !pending {
@@ -615,7 +616,7 @@ unsafe fn ts_parser__breakdown_lookahead(
     lookahead: &mut Subtree,
     state: TSStateId,
 ) {
-    let parser = self_ as *mut TSParser;
+    let parser = ptr::from_mut(self_);
     let reusable_node = &mut self_.reusable_node;
     let mut did_descend = false;
     let mut tree = reusable_node_tree(reusable_node);
