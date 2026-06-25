@@ -9,7 +9,6 @@ extern "C" {
 #include <stdbool.h>
 #include "./length.h"
 #include "./host.h"
-#include "tree_sitter/api.h"
 #include "./parser.h"
 
 #define TS_TREE_STATE_NONE USHRT_MAX
