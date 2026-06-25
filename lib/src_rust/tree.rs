@@ -197,8 +197,7 @@ unsafe fn ts_tree_print_dot_graph_ref(tree: &TSTree, file_descriptor: i32) {
 // Lifecycle: ts_tree_new, ts_tree_copy, ts_tree_delete
 // ---------------------------------------------------------------------------
 
-#[no_mangle]
-pub unsafe extern "C" fn ts_tree_new(
+pub unsafe fn ts_tree_new(
     root: Subtree,
     language: *const TSLanguage,
     included_ranges: *const TSRange,
