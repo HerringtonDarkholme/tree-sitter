@@ -1164,7 +1164,7 @@ pub unsafe fn ts_stack_pop_error(
             if pop.size > 0 {
                 debug_assert!(pop.size == 1);
                 let first_pop = stack_slice_array_get(&pop, 0);
-                ts_stack_renumber_version(ptr::from_mut(self_), first_pop.version, version);
+                ts_stack_renumber_version(self_, first_pop.version, version);
                 return subtree_array_read_ref(&first_pop.subtrees);
             }
             break;
@@ -1191,7 +1191,7 @@ pub unsafe fn ts_stack_pop_pending(
     );
     if pop.size > 0 {
         let first_pop = stack_slice_array_get_mut(&mut pop, 0);
-        ts_stack_renumber_version(ptr::from_mut(self_), first_pop.version, version);
+        ts_stack_renumber_version(self_, first_pop.version, version);
         first_pop.version = version;
     }
     pop
@@ -1292,11 +1292,10 @@ pub unsafe fn ts_stack_remove_version(self_: &mut Stack, version: StackVersion) 
 
 /// Renumber version v1 to v2 (move v1 into v2's slot, removing v2).
 pub unsafe fn ts_stack_renumber_version(
-    self_: *mut Stack,
+    stack: &mut Stack,
     v1: StackVersion,
     v2: StackVersion,
 ) {
-    let stack = &mut *self_;
     if v1 == v2 {
         return;
     }

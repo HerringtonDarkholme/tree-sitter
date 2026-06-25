@@ -1720,7 +1720,7 @@ unsafe fn ts_parser__do_all_potential_reductions(
         if has_shift_action {
             can_shift_lookahead_symbol = true;
         } else if reduction_version != STACK_VERSION_NONE && i < MAX_VERSION_COUNT {
-            ts_stack_renumber_version(self_.stack, reduction_version, version);
+            ts_stack_renumber_version(&mut *self_.stack, reduction_version, version);
             i += 1;
             continue;
         } else if lookahead_symbol != 0 {
@@ -1984,7 +1984,7 @@ unsafe fn ts_parser__recover(
         }
 
         ts_stack_renumber_version(
-            self_.stack,
+            &mut *self_.stack,
             stack_slice_array_get(&pop, 0).version,
             version,
         );
@@ -2354,7 +2354,7 @@ unsafe fn ts_parser__advance(
         // with one of the stack versions created by a reduction, and continue
         // processing this version of the stack with the same lookahead symbol.
         if last_reduction_version != STACK_VERSION_NONE {
-            ts_stack_renumber_version(self_.stack, last_reduction_version, version);
+            ts_stack_renumber_version(&mut *self_.stack, last_reduction_version, version);
             LOG_STACK!(parser);
             state = ts_stack_state(&*self_.stack, version);
 
