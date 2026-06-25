@@ -251,6 +251,16 @@ pub unsafe fn array_back<T>(arr: *const Array<T>) -> *mut T {
     (*arr).contents.add((*arr).size as usize - 1)
 }
 
+#[inline]
+pub unsafe fn array_back_ref<T>(arr: &Array<T>) -> &T {
+    &*array_back(ptr::from_ref(arr))
+}
+
+#[inline]
+pub unsafe fn array_back_mut<T>(arr: &mut Array<T>) -> &mut T {
+    &mut *array_back(ptr::from_mut(arr))
+}
+
 pub unsafe fn array_erase<T>(arr: *mut Array<T>, index: u32) {
     debug_assert!(index < (*arr).size);
     let count = (*arr).size as usize - index as usize - 1;
@@ -388,12 +398,12 @@ unsafe fn stack_head_array_pair_mut(
 
 #[inline]
 unsafe fn stack_head_array_back(self_: &Array<StackHead>) -> &StackHead {
-    &*array_back(self_)
+    array_back_ref(self_)
 }
 
 #[inline]
 unsafe fn stack_head_array_back_mut(self_: &mut Array<StackHead>) -> &mut StackHead {
-    &mut *array_back(self_)
+    array_back_mut(self_)
 }
 
 #[inline]
@@ -472,7 +482,7 @@ unsafe fn stack_iterator_subtrees_read(
 
 #[inline]
 unsafe fn stack_iterator_array_back_mut(self_: &mut Array<StackIterator>) -> &mut StackIterator {
-    &mut *array_back(self_)
+    array_back_mut(self_)
 }
 
 // ---------------------------------------------------------------------------
