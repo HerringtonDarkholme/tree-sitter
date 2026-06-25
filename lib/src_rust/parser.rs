@@ -509,6 +509,12 @@ unsafe fn mutable_subtree_array_as_array(
     &*ptr::from_ref(self_).cast::<Array<MutableSubtree>>()
 }
 
+unsafe fn mutable_subtree_array_as_array_mut(
+    self_: &mut MutableSubtreeArray,
+) -> &mut Array<MutableSubtree> {
+    &mut *ptr::from_mut(self_).cast::<Array<MutableSubtree>>()
+}
+
 unsafe fn ts_range_array_as_array(self_: &TSRangeArray) -> &Array<TSRange> {
     &*ptr::from_ref(self_).cast::<Array<TSRange>>()
 }
@@ -2628,10 +2634,10 @@ unsafe fn ts_parser__balance_subtree(self_: &mut TSParser) -> bool {
     // push the initial finished tree onto it. Otherwise, if we're resuming balancing after a
     // cancellation, we don't want to clear the tree stack.
     if !self_.canceled_balancing {
-        array_clear(std::ptr::addr_of_mut!(self_.tree_pool.tree_stack).cast::<Array<MutableSubtree>>());
+        array_clear(mutable_subtree_array_as_array_mut(&mut self_.tree_pool.tree_stack));
         if ts_subtree_child_count(finished_tree) > 0 && (*finished_tree.ptr).ref_count == 1 {
             array_push(
-                std::ptr::addr_of_mut!(self_.tree_pool.tree_stack).cast::<Array<MutableSubtree>>(),
+                mutable_subtree_array_as_array_mut(&mut self_.tree_pool.tree_stack),
                 ts_subtree_to_mut_unsafe(finished_tree),
             );
         }
@@ -2675,14 +2681,14 @@ unsafe fn ts_parser__balance_subtree(self_: &mut TSParser) -> bool {
             }
         }
 
-        array_pop(std::ptr::addr_of_mut!(self_.tree_pool.tree_stack).cast::<Array<MutableSubtree>>());
+        array_pop(mutable_subtree_array_as_array_mut(&mut self_.tree_pool.tree_stack));
 
         for i in 0..(*tree.ptr).child_count {
             let tree_subtree = ts_subtree_from_mut(tree);
             let child = *parser_subtree_child(tree_subtree, i);
             if ts_subtree_child_count(child) > 0 && (*child.ptr).ref_count == 1 {
                 array_push(
-                    std::ptr::addr_of_mut!(self_.tree_pool.tree_stack).cast::<Array<MutableSubtree>>(),
+                    mutable_subtree_array_as_array_mut(&mut self_.tree_pool.tree_stack),
                     ts_subtree_to_mut_unsafe(child),
                 );
             }
