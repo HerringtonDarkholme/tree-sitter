@@ -164,7 +164,7 @@ macro_rules! LOG_STACK {
     ($self_:expr) => {
         if !(*$self_).dot_graph_file.is_null() {
             ts_stack_print_dot_graph((*$self_).stack, (*$self_).language, (*$self_).dot_graph_file);
-            fputs(b"\n\n\0".as_ptr() as *const i8, (*$self_).dot_graph_file);
+            fputs(c"\n\n".as_ptr().cast::<i8>(), (*$self_).dot_graph_file);
         }
     };
 }
@@ -173,7 +173,7 @@ macro_rules! LOG_TREE {
     ($self_:expr, $tree:expr) => {
         if !(*$self_).dot_graph_file.is_null() {
             ts_subtree_print_dot_graph($tree, (*$self_).language, (*$self_).dot_graph_file);
-            fputs(b"\n\0".as_ptr() as *const i8, (*$self_).dot_graph_file);
+            fputs(c"\n".as_ptr().cast::<i8>(), (*$self_).dot_graph_file);
         }
     };
 }
@@ -186,7 +186,7 @@ macro_rules! LOG_LOOKAHEAD {
             let mut off = snprintf(
                 buf,
                 TREE_SITTER_SERIALIZATION_BUFFER_SIZE,
-                b"lexed_lookahead sym:\0".as_ptr() as *const i8,
+                c"lexed_lookahead sym:".as_ptr().cast::<i8>(),
             ) as usize;
             let mut i = 0usize;
             while *symbol.add(i) != 0 && off < TREE_SITTER_SERIALIZATION_BUFFER_SIZE {
@@ -204,7 +204,7 @@ macro_rules! LOG_LOOKAHEAD {
             snprintf(
                 buf.add(off),
                 TREE_SITTER_SERIALIZATION_BUFFER_SIZE - off,
-                b", size:%u\0".as_ptr() as *const i8,
+                c", size:%u".as_ptr().cast::<i8>(),
                 $size,
             );
             ts_parser__log(&mut *$self_);
@@ -518,7 +518,7 @@ unsafe extern "C" fn ts_string_input_read(
     let input = &*(payload as *const TSStringInput);
     if byte >= input.length {
         *length = 0;
-        b"\0".as_ptr().cast::<i8>()
+        c"".as_ptr().cast::<i8>()
     } else {
         *length = input.length - byte;
         input.string.add(byte as usize)
@@ -539,7 +539,7 @@ unsafe fn ts_parser__log(self_: &mut TSParser) {
     }
 
     if !self_.dot_graph_file.is_null() {
-        fprintf(self_.dot_graph_file, b"graph {\nlabel=\"\0".as_ptr().cast::<i8>());
+        fprintf(self_.dot_graph_file, c"graph {\nlabel=\"".as_ptr().cast::<i8>());
         let mut chr = self_.lexer.debug_buffer.as_ptr();
         while *chr != 0 {
             if *chr == b'"' || *chr == b'\\' {
@@ -548,7 +548,7 @@ unsafe fn ts_parser__log(self_: &mut TSParser) {
             fputc(i32::from(*chr), self_.dot_graph_file);
             chr = chr.add(1);
         }
-        fprintf(self_.dot_graph_file, b"\"\n}\n\n\0".as_ptr().cast::<i8>());
+        fprintf(self_.dot_graph_file, c"\"\n}\n\n".as_ptr().cast::<i8>());
     }
 }
 
@@ -597,7 +597,7 @@ unsafe fn ts_parser__breakdown_top_of_stack(
             let parser = ptr::from_mut(self_);
             LOG!(
                 parser,
-                b"breakdown_top_of_stack tree:%s\0".as_ptr().cast::<i8>(),
+                c"breakdown_top_of_stack tree:%s".as_ptr().cast::<i8>(),
                 SYM_NAME!(parser, ts_subtree_symbol(parent))
             );
             LOG_STACK!(parser);
@@ -621,7 +621,7 @@ unsafe fn ts_parser__breakdown_lookahead(
     let mut did_descend = false;
     let mut tree = reusable_node_tree(reusable_node);
     while ts_subtree_child_count(tree) > 0 && ts_subtree_parse_state(tree) != state {
-        LOG!(parser, b"state_mismatch sym:%s\0".as_ptr().cast::<i8>(),
+        LOG!(parser, c"state_mismatch sym:%s".as_ptr().cast::<i8>(),
             SYM_NAME!(parser, ts_subtree_symbol(tree)));
         reusable_node_descend(reusable_node);
         tree = reusable_node_tree(reusable_node);
@@ -932,7 +932,7 @@ unsafe fn ts_parser__lex(
     if lex_mode.lex_state == u16::MAX {
         LOG!(
             parser,
-            b"no_lookahead_after_non_terminal_extra\0".as_ptr().cast::<i8>()
+            c"no_lookahead_after_non_terminal_extra".as_ptr().cast::<i8>()
         );
         return NULL_SUBTREE;
     }
@@ -959,7 +959,7 @@ unsafe fn ts_parser__lex(
         let column_data = self_.lexer.column_data;
 
         if lex_mode.external_lex_state != 0 {
-            LOG!(parser, b"lex_external state:%d, row:%u, column:%u\0".as_ptr().cast::<i8>(),
+            LOG!(parser, c"lex_external state:%d, row:%u, column:%u".as_ptr().cast::<i8>(),
                 i32::from(lex_mode.external_lex_state),
                 current_position.extent.row,
                 current_position.extent.column);
@@ -995,7 +995,7 @@ unsafe fn ts_parser__lex(
                         || token_is_extra
                     {
                         LOG!(parser,
-                            b"ignore_empty_external_token symbol:%s\0".as_ptr().cast::<i8>(),
+                            c"ignore_empty_external_token symbol:%s".as_ptr().cast::<i8>(),
                             SYM_NAME!(parser, *(*lang).external_scanner.symbol_map.add(
                                 self_.lexer.data.result_symbol as usize
                             )));
@@ -1014,7 +1014,7 @@ unsafe fn ts_parser__lex(
             self_.lexer.column_data = column_data;
         }
 
-        LOG!(parser, b"lex_internal state:%d, row:%u, column:%u\0".as_ptr().cast::<i8>(),
+        LOG!(parser, c"lex_internal state:%d, row:%u, column:%u".as_ptr().cast::<i8>(),
             i32::from(lex_mode.lex_state),
             current_position.extent.row,
             current_position.extent.column);
@@ -1033,7 +1033,7 @@ unsafe fn ts_parser__lex(
         }
 
         if !skipped_error {
-            LOG!(parser, b"skip_unrecognized_character\0".as_ptr().cast::<i8>());
+            LOG!(parser, c"skip_unrecognized_character".as_ptr().cast::<i8>());
             skipped_error = true;
             error_start_position = self_.lexer.token_start_position;
             error_end_position = self_.lexer.token_start_position;
@@ -1225,13 +1225,13 @@ unsafe fn ts_parser__reuse_node(
         };
 
         if byte_offset > position {
-            LOG!(parser, b"before_reusable_node symbol:%s\0".as_ptr().cast::<i8>(),
+            LOG!(parser, c"before_reusable_node symbol:%s".as_ptr().cast::<i8>(),
                 SYM_NAME!(parser, ts_subtree_symbol(result)));
             break;
         }
 
         if byte_offset < position {
-            LOG!(parser, b"past_reusable_node symbol:%s\0".as_ptr().cast::<i8>(),
+            LOG!(parser, c"past_reusable_node symbol:%s".as_ptr().cast::<i8>(),
                 SYM_NAME!(parser, ts_subtree_symbol(result)));
             if end_byte_offset <= position || !reusable_node_descend(&mut self_.reusable_node) {
                 reusable_node_advance(&mut self_.reusable_node);
@@ -1243,7 +1243,7 @@ unsafe fn ts_parser__reuse_node(
             &self_.reusable_node.last_external_token,
             &last_external_token,
         ) {
-            LOG!(parser, b"reusable_node_has_different_external_scanner_state symbol:%s\0".as_ptr().cast::<i8>(),
+            LOG!(parser, c"reusable_node_has_different_external_scanner_state symbol:%s".as_ptr().cast::<i8>(),
                 SYM_NAME!(parser, ts_subtree_symbol(result)));
             reusable_node_advance(&mut self_.reusable_node);
             continue;
@@ -1251,19 +1251,19 @@ unsafe fn ts_parser__reuse_node(
 
         let mut reason: *const i8 = ptr::null();
         if ts_subtree_has_changes(result) {
-            reason = b"has_changes\0".as_ptr().cast::<i8>();
+            reason = c"has_changes".as_ptr().cast::<i8>();
         } else if ts_subtree_is_error(result) {
-            reason = b"is_error\0".as_ptr().cast::<i8>();
+            reason = c"is_error".as_ptr().cast::<i8>();
         } else if ts_subtree_missing(result) {
-            reason = b"is_missing\0".as_ptr().cast::<i8>();
+            reason = c"is_missing".as_ptr().cast::<i8>();
         } else if ts_subtree_is_fragile(result) {
-            reason = b"is_fragile\0".as_ptr().cast::<i8>();
+            reason = c"is_fragile".as_ptr().cast::<i8>();
         } else if ts_parser__has_included_range_difference(self_, byte_offset, end_byte_offset) {
-            reason = b"contains_different_included_range\0".as_ptr().cast::<i8>();
+            reason = c"contains_different_included_range".as_ptr().cast::<i8>();
         }
 
         if !reason.is_null() {
-            LOG!(parser, b"cant_reuse_node_%s tree:%s\0".as_ptr().cast::<i8>(),
+            LOG!(parser, c"cant_reuse_node_%s tree:%s".as_ptr().cast::<i8>(),
                 reason, SYM_NAME!(parser, ts_subtree_symbol(result)));
             if !reusable_node_descend(&mut self_.reusable_node) {
                 reusable_node_advance(&mut self_.reusable_node);
@@ -1276,14 +1276,14 @@ unsafe fn ts_parser__reuse_node(
         let leaf_symbol = ts_subtree_leaf_symbol(result);
         ts_language_table_entry(self_.language, *state, leaf_symbol, table_entry);
         if !ts_parser__can_reuse_first_leaf(self_, *state, result, table_entry) {
-            LOG!(parser, b"cant_reuse_node symbol:%s, first_leaf_symbol:%s\0".as_ptr().cast::<i8>(),
+            LOG!(parser, c"cant_reuse_node symbol:%s, first_leaf_symbol:%s".as_ptr().cast::<i8>(),
                 SYM_NAME!(parser, ts_subtree_symbol(result)),
                 SYM_NAME!(parser, leaf_symbol));
             reusable_node_advance_past_leaf(&mut self_.reusable_node);
             break;
         }
 
-        LOG!(parser, b"reuse_node symbol:%s\0".as_ptr().cast::<i8>(),
+        LOG!(parser, c"reuse_node symbol:%s".as_ptr().cast::<i8>(),
             SYM_NAME!(parser, ts_subtree_symbol(result)));
         ts_subtree_retain(result);
         return result;
@@ -1310,28 +1310,28 @@ unsafe fn ts_parser__select_tree(
     }
 
     if ts_subtree_error_cost(right) < ts_subtree_error_cost(left) {
-        LOG!(parser, b"select_smaller_error symbol:%s, over_symbol:%s\0".as_ptr().cast::<i8>(),
+        LOG!(parser, c"select_smaller_error symbol:%s, over_symbol:%s".as_ptr().cast::<i8>(),
             SYM_NAME!(parser, ts_subtree_symbol(right)),
             SYM_NAME!(parser, ts_subtree_symbol(left)));
         return true;
     }
 
     if ts_subtree_error_cost(left) < ts_subtree_error_cost(right) {
-        LOG!(parser, b"select_smaller_error symbol:%s, over_symbol:%s\0".as_ptr().cast::<i8>(),
+        LOG!(parser, c"select_smaller_error symbol:%s, over_symbol:%s".as_ptr().cast::<i8>(),
             SYM_NAME!(parser, ts_subtree_symbol(left)),
             SYM_NAME!(parser, ts_subtree_symbol(right)));
         return false;
     }
 
     if ts_subtree_dynamic_precedence(right) > ts_subtree_dynamic_precedence(left) {
-        LOG!(parser, b"select_higher_precedence symbol:%s, prec:%d, over_symbol:%s, other_prec:%d\0".as_ptr().cast::<i8>(),
+        LOG!(parser, c"select_higher_precedence symbol:%s, prec:%d, over_symbol:%s, other_prec:%d".as_ptr().cast::<i8>(),
             SYM_NAME!(parser, ts_subtree_symbol(right)), ts_subtree_dynamic_precedence(right),
             SYM_NAME!(parser, ts_subtree_symbol(left)), ts_subtree_dynamic_precedence(left));
         return true;
     }
 
     if ts_subtree_dynamic_precedence(left) > ts_subtree_dynamic_precedence(right) {
-        LOG!(parser, b"select_higher_precedence symbol:%s, prec:%d, over_symbol:%s, other_prec:%d\0".as_ptr().cast::<i8>(),
+        LOG!(parser, c"select_higher_precedence symbol:%s, prec:%d, over_symbol:%s, other_prec:%d".as_ptr().cast::<i8>(),
             SYM_NAME!(parser, ts_subtree_symbol(left)), ts_subtree_dynamic_precedence(left),
             SYM_NAME!(parser, ts_subtree_symbol(right)), ts_subtree_dynamic_precedence(right));
         return false;
@@ -1344,19 +1344,19 @@ unsafe fn ts_parser__select_tree(
     let comparison = ts_subtree_compare(left, right, &mut self_.tree_pool);
     match comparison {
         -1 => {
-            LOG!(parser, b"select_earlier symbol:%s, over_symbol:%s\0".as_ptr().cast::<i8>(),
+            LOG!(parser, c"select_earlier symbol:%s, over_symbol:%s".as_ptr().cast::<i8>(),
                 SYM_NAME!(parser, ts_subtree_symbol(left)),
                 SYM_NAME!(parser, ts_subtree_symbol(right)));
             false
         }
         1 => {
-            LOG!(parser, b"select_earlier symbol:%s, over_symbol:%s\0".as_ptr().cast::<i8>(),
+            LOG!(parser, c"select_earlier symbol:%s, over_symbol:%s".as_ptr().cast::<i8>(),
                 SYM_NAME!(parser, ts_subtree_symbol(right)),
                 SYM_NAME!(parser, ts_subtree_symbol(left)));
             true
         }
         _ => {
-            LOG!(parser, b"select_existing symbol:%s, over_symbol:%s\0".as_ptr().cast::<i8>(),
+            LOG!(parser, c"select_existing symbol:%s, over_symbol:%s".as_ptr().cast::<i8>(),
                 SYM_NAME!(parser, ts_subtree_symbol(left)),
                 SYM_NAME!(parser, ts_subtree_symbol(right)));
             false
@@ -1444,7 +1444,7 @@ unsafe fn ts_parser__reduce(
             while i + 1 < pop.size {
                 LOG!(
                     parser,
-                    b"aborting reduce with too many versions\0".as_ptr().cast::<i8>()
+                    c"aborting reduce with too many versions".as_ptr().cast::<i8>()
                 );
                 let mut next_slice = stack_slice_array_read(&pop, i + 1);
                 if next_slice.version != slice.version {
@@ -1872,7 +1872,7 @@ unsafe fn ts_parser__recover(
             ) && ts_parser__recover_to_state(self_, version, depth, entry.state)
             {
                 did_recover = true;
-                LOG!(parser, b"recover_to_previous state:%u, depth:%u\0".as_ptr().cast::<i8>(),
+                LOG!(parser, c"recover_to_previous state:%u, depth:%u".as_ptr().cast::<i8>(),
                     u32::from(entry.state), depth);
                 LOG_STACK!(parser);
                 break;
@@ -1884,7 +1884,7 @@ unsafe fn ts_parser__recover(
     let mut i = previous_version_count;
     while i < ts_stack_version_count(&*self_.stack) {
         if !ts_stack_is_active(&*self_.stack, i) {
-            LOG!(parser, b"removed paused version:%u\0".as_ptr().cast::<i8>(), i);
+            LOG!(parser, c"removed paused version:%u".as_ptr().cast::<i8>(), i);
             ts_stack_remove_version(&mut *self_.stack, i);
             LOG_STACK!(parser);
         } else {
@@ -1894,7 +1894,7 @@ unsafe fn ts_parser__recover(
 
     // EOF: wrap everything and terminate
     if ts_subtree_is_eof(lookahead) {
-        LOG!(parser, b"recover_eof\0".as_ptr().cast::<i8>());
+        LOG!(parser, c"recover_eof".as_ptr().cast::<i8>());
         let mut children: SubtreeArray = SubtreeArray {
             contents: ptr::null_mut(),
             size: 0,
@@ -1947,7 +1947,7 @@ unsafe fn ts_parser__recover(
     }
 
     // Wrap the lookahead in an ERROR
-    LOG!(parser, b"skip_token symbol:%s\0".as_ptr().cast::<i8>(),
+    LOG!(parser, c"skip_token symbol:%s".as_ptr().cast::<i8>(),
         SYM_NAME!(parser, ts_subtree_symbol(lookahead)));
     let mut children: SubtreeArray = SubtreeArray {
         contents: ptr::null_mut(),
@@ -2097,7 +2097,7 @@ unsafe fn ts_parser__handle_error(
                     ) {
                         LOG!(
                             parser,
-                            b"recover_with_missing symbol:%s, state:%u\0".as_ptr().cast::<i8>(),
+                            c"recover_with_missing symbol:%s, state:%u".as_ptr().cast::<i8>(),
                             SYM_NAME!(parser, missing_symbol),
                             u32::from(ts_stack_state(&*self_.stack, version_with_missing_tree))
                         );
@@ -2268,10 +2268,10 @@ unsafe fn ts_parser__advance(
                     let next_state;
                     if action.shift.extra {
                         next_state = state;
-                        LOG!(parser, b"shift_extra\0".as_ptr().cast::<i8>());
+                        LOG!(parser, c"shift_extra".as_ptr().cast::<i8>());
                     } else {
                         next_state = action.shift.state;
-                        LOG!(parser, b"shift state:%u\0".as_ptr().cast::<i8>(), u32::from(next_state));
+                        LOG!(parser, c"shift state:%u".as_ptr().cast::<i8>(), u32::from(next_state));
                     }
 
                     if ts_subtree_child_count(lookahead) > 0 {
@@ -2308,7 +2308,7 @@ unsafe fn ts_parser__advance(
                     let end_of_non_terminal_extra = lookahead.ptr.is_null();
                     LOG!(
                         parser,
-                        b"reduce sym:%s, child_count:%u\0".as_ptr().cast::<i8>(),
+                        c"reduce sym:%s, child_count:%u".as_ptr().cast::<i8>(),
                         SYM_NAME!(parser, action.reduce.symbol),
                         u32::from(action.reduce.child_count)
                     );
@@ -2329,7 +2329,7 @@ unsafe fn ts_parser__advance(
                 }
 
                 TSPARSE_ACTION_TYPE_ACCEPT => {
-                    LOG!(parser, b"accept\0".as_ptr().cast::<i8>());
+                    LOG!(parser, c"accept".as_ptr().cast::<i8>());
                     ts_parser__accept(self_, version, lookahead);
                     return true;
                 }
@@ -2408,7 +2408,7 @@ unsafe fn ts_parser__advance(
             if table_entry.action_count > 0 {
                 LOG!(
                     parser,
-                    b"switch from_keyword:%s, to_word_token:%s\0".as_ptr().cast::<i8>(),
+                    c"switch from_keyword:%s, to_word_token:%s".as_ptr().cast::<i8>(),
                     TREE_NAME!(parser, lookahead),
                     SYM_NAME!(parser, (*language).keyword_capture_token)
                 );
@@ -2441,7 +2441,7 @@ unsafe fn ts_parser__advance(
         // versions that exist. If some other version advances successfully, then
         // this version can simply be removed. But if all versions end up paused,
         // then error recovery is needed.
-        LOG!(parser, b"detect_error lookahead:%s\0".as_ptr().cast::<i8>(), TREE_NAME!(parser, lookahead));
+        LOG!(parser, c"detect_error lookahead:%s".as_ptr().cast::<i8>(), TREE_NAME!(parser, lookahead));
         ts_stack_pause(self_.stack, version, lookahead);
         return true;
     }
@@ -2526,7 +2526,7 @@ unsafe fn ts_parser__condense_stack(self_: &mut TSParser) -> u32 {
         while i < n {
             if ts_stack_is_paused(&*self_.stack, i) {
                 if !has_unpaused_version && self_.accept_count < MAX_VERSION_COUNT {
-                    LOG!(self_, b"resume version:%u\0".as_ptr().cast::<i8>(), i);
+                    LOG!(self_, c"resume version:%u".as_ptr().cast::<i8>(), i);
                     min_error_cost = ts_stack_error_cost(&*self_.stack, i);
                     let lookahead = ts_stack_resume(self_.stack, i);
                     ts_parser__handle_error(&mut *self_, i, lookahead);
@@ -2545,7 +2545,7 @@ unsafe fn ts_parser__condense_stack(self_: &mut TSParser) -> u32 {
     }
 
     if made_changes {
-        LOG!(self_, b"condense\0".as_ptr().cast::<i8>());
+        LOG!(self_, c"condense".as_ptr().cast::<i8>());
         LOG_STACK!(self_);
     }
 
@@ -2761,11 +2761,11 @@ pub unsafe extern "C" fn ts_parser_print_dot_graphs(
             extern "C" {
                 fn _fdopen(fd: i32, mode: *const i8) -> *mut c_void;
             }
-            parser.dot_graph_file = _fdopen(fd, b"a\0".as_ptr() as *const i8);
+            parser.dot_graph_file = _fdopen(fd, c"a".as_ptr().cast::<i8>());
         }
         #[cfg(not(target_os = "windows"))]
         {
-            parser.dot_graph_file = fdopen(fd, b"a\0".as_ptr().cast::<i8>());
+            parser.dot_graph_file = fdopen(fd, c"a".as_ptr().cast::<i8>());
         }
     } else {
         parser.dot_graph_file = ptr::null_mut();
@@ -2850,7 +2850,7 @@ pub unsafe extern "C" fn ts_parser_parse(
     parser.operation_count = 0;
 
     if ts_parser_has_outstanding_parse(parser) {
-        LOG!(self_, b"resume_parsing\0".as_ptr().cast::<i8>());
+        LOG!(self_, c"resume_parsing".as_ptr().cast::<i8>());
         if parser.canceled_balancing {
             // goto balance
             debug_assert!(!parser.finished_tree.ptr.is_null());
@@ -2859,7 +2859,7 @@ pub unsafe extern "C" fn ts_parser_parse(
                 return ptr::null_mut();
             }
             parser.canceled_balancing = false;
-            LOG!(self_, b"done\0".as_ptr().cast::<i8>());
+            LOG!(self_, c"done".as_ptr().cast::<i8>());
             LOG_TREE!(self_, parser.finished_tree);
 
             result = ts_tree_new(
@@ -2894,20 +2894,20 @@ pub unsafe extern "C" fn ts_parser_parse(
                 &mut parser.included_range_differences,
             );
             reusable_node_reset(&mut parser.reusable_node, old_tree.root);
-            LOG!(self_, b"parse_after_edit\0".as_ptr().cast::<i8>());
+            LOG!(self_, c"parse_after_edit".as_ptr().cast::<i8>());
             LOG_TREE!(self_, parser.old_tree);
             for i in 0..parser.included_range_differences.size {
                 let range = ts_range_array_get(&parser.included_range_differences, i);
                 LOG!(
                     self_,
-                    b"different_included_range %u - %u\0".as_ptr().cast::<i8>(),
+                    c"different_included_range %u - %u".as_ptr().cast::<i8>(),
                     range.start_byte,
                     range.end_byte
                 );
             }
         } else {
             reusable_node_clear(&mut parser.reusable_node);
-            LOG!(self_, b"new_parse\0".as_ptr().cast::<i8>());
+            LOG!(self_, c"new_parse".as_ptr().cast::<i8>());
         }
     }
 
@@ -2926,7 +2926,7 @@ pub unsafe extern "C" fn ts_parser_parse(
             while ts_stack_is_active(&*parser.stack, version) {
                 LOG!(
                     self_,
-                    b"process version:%u, version_count:%u, state:%d, row:%u, col:%u\0".as_ptr().cast::<i8>(),
+                    c"process version:%u, version_count:%u, state:%d, row:%u, col:%u".as_ptr().cast::<i8>(),
                     version,
                     ts_stack_version_count(&*parser.stack),
                     i32::from(ts_stack_state(&*parser.stack, version)),
@@ -2994,7 +2994,7 @@ pub unsafe extern "C" fn ts_parser_parse(
         return ptr::null_mut();
     }
     parser.canceled_balancing = false;
-    LOG!(self_, b"done\0".as_ptr().cast::<i8>());
+    LOG!(self_, c"done".as_ptr().cast::<i8>());
     LOG_TREE!(self_, parser.finished_tree);
 
     result = ts_tree_new(
