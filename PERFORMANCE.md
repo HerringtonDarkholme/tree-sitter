@@ -126,6 +126,64 @@ Source-code analysis:
 - Full `cargo test --all` passed before every committed code change in this
   checkpoint.
 
+### 2026-06-25 18:45 EDT
+
+- Repo head: `9a0904a5`
+- Batch base: `e5e46384`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: 10 small parser pointer/language helper cleanups:
+  `Use language helper in token lexing` through
+  `Use parser pointer helper in const getters`.
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 24854.8 | 24064.5 | +3.28% |
+| TypeScript error parses | 32 | 1643.2 | 1591.4 | +3.26% |
+| JavaScript normal parses | 2 | 16830.1 | 15969.8 | +5.39% |
+| JavaScript error parses | 37 | 2011.2 | 1927.0 | +4.37% |
+| Overall parser throughput | 82 | 2268.0 | 2187.1 | +3.70% |
+
+Per-case regressions over 5%:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `typescript error crlf-line-endings.py` | 975.6 | 1294.2 | 24.61% |
+| `javascript error update-authors.sh` | 575.6 | 659.1 | 12.67% |
+| `typescript error weird-exprs.rs` | 954.1 | 1068.8 | 10.74% |
+| `javascript error python3-grammar.py` | 963.0 | 1038.6 | 7.28% |
+| `typescript error release.sh` | 590.7 | 637.1 | 7.27% |
+
+Prior checkpoint at `e5e46384` measured Rust overall throughput of 2307.0
+bytes/ms and a Rust-vs-C delta of +4.64%. This checkpoint measured 2268.0
+bytes/ms, so absolute Rust throughput moved by about -1.69%. C throughput moved
+from 2204.6 to 2187.1 bytes/ms, and the Rust-vs-C delta moved to +3.70%.
+
+Source-code analysis:
+
+- The batch contains no exported `#[no_mangle] extern "C"` signature changes,
+  no struct layout changes, no C header changes, and no parser table or parser
+  action semantic changes.
+- The first four commits replace repeated raw `TSLanguageFull` casts in parser
+  hot paths with the existing typed language helper. The helper already performs
+  the same cast and unchecked reference formation, so this should not alter
+  generated code materially beyond inlining decisions.
+- The remaining parser commits centralize nullable tree access and parser
+  pointer borrowing at API bodies using `as_ref`/`as_mut` helper functions. The
+  affected code preserves the same null checks and control flow.
+- The largest slowdowns are individual error fixtures, while every aggregate
+  bucket remains faster than C. Because the changed code is mechanical pointer
+  reference formation with unchanged parser decisions, these outliers do not
+  currently identify a source-level regression in this batch. If they reproduce
+  in a later checkpoint, inspect compiler output around helper inlining before
+  considering rollback.
+- Full `cargo test --all` passed before every committed code change in this
+  checkpoint.
+
 ### 2026-06-25 18:20 EDT
 
 - Repo head: `0786a35a`
