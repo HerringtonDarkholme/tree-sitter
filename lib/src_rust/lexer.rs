@@ -555,8 +555,7 @@ pub unsafe fn ts_lexer_set_included_ranges(
         count = 1;
     } else {
         let mut previous_byte: u32 = 0;
-        for i in 0..count {
-            let range = &*ranges.add(i as usize);
+        for range in std::slice::from_raw_parts(ranges, count as usize) {
             if range.start_byte < previous_byte || range.end_byte < range.start_byte {
                 return false;
             }
