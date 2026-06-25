@@ -622,16 +622,17 @@ unsafe fn stack__subtree_is_equivalent(left: Subtree, right: Subtree) -> bool {
 
 /// Add a link to a stack node, merging if possible.
 unsafe fn stack_node_add_link(
-    self_: *mut StackNode,
+    self_: &mut StackNode,
     link: StackLink,
     subtree_pool: &mut SubtreePool,
 ) {
-    if link.node == self_ {
+    let self_ptr = ptr::from_mut(self_);
+    if link.node == self_ptr {
         return;
     }
 
-    for i in 0..(*self_).link_count as usize {
-        let existing_link = &mut (*self_).links[i];
+    for i in 0..self_.link_count as usize {
+        let existing_link = &mut self_.links[i];
         if stack__subtree_is_equivalent(existing_link.subtree, link.subtree) {
             if existing_link.node == link.node {
                 if ts_subtree_dynamic_precedence(link.subtree)
@@ -640,7 +641,7 @@ unsafe fn stack_node_add_link(
                     ts_subtree_retain(link.subtree);
                     ts_subtree_release(subtree_pool, existing_link.subtree);
                     existing_link.subtree = link.subtree;
-                    (*self_).dynamic_precedence = (*link.node).dynamic_precedence
+                    self_.dynamic_precedence = (*link.node).dynamic_precedence
                         + ts_subtree_dynamic_precedence(link.subtree);
                 }
                 return;
@@ -651,30 +652,29 @@ unsafe fn stack_node_add_link(
                 && (*existing_link.node).error_cost == (*link.node).error_cost
             {
                 for j in 0..(*link.node).link_count as usize {
-                    stack_node_add_link(existing_link.node, (*link.node).links[j], subtree_pool);
+                    stack_node_add_link(&mut *existing_link.node, (*link.node).links[j], subtree_pool);
                 }
                 let mut dynamic_precedence = (*link.node).dynamic_precedence;
                 if !link.subtree.ptr.is_null() {
                     dynamic_precedence += ts_subtree_dynamic_precedence(link.subtree);
                 }
-                if dynamic_precedence > (*self_).dynamic_precedence {
-                    (*self_).dynamic_precedence = dynamic_precedence;
+                if dynamic_precedence > self_.dynamic_precedence {
+                    self_.dynamic_precedence = dynamic_precedence;
                 }
                 return;
             }
         }
     }
 
-    let node = &mut *self_;
-    if node.link_count as usize == MAX_LINK_COUNT {
+    if self_.link_count as usize == MAX_LINK_COUNT {
         return;
     }
 
     stack_node_retain(link.node.as_mut());
     let mut node_count = (*link.node).node_count;
     let mut dynamic_precedence = (*link.node).dynamic_precedence;
-    node.links[node.link_count as usize] = link;
-    node.link_count += 1;
+    self_.links[self_.link_count as usize] = link;
+    self_.link_count += 1;
 
     if !link.subtree.ptr.is_null() {
         ts_subtree_retain(link.subtree);
@@ -682,11 +682,11 @@ unsafe fn stack_node_add_link(
         dynamic_precedence += ts_subtree_dynamic_precedence(link.subtree);
     }
 
-    if node_count > node.node_count {
-        node.node_count = node_count;
+    if node_count > self_.node_count {
+        self_.node_count = node_count;
     }
-    if dynamic_precedence > node.dynamic_precedence {
-        node.dynamic_precedence = dynamic_precedence;
+    if dynamic_precedence > self_.dynamic_precedence {
+        self_.dynamic_precedence = dynamic_precedence;
     }
 }
 
@@ -1356,7 +1356,7 @@ pub unsafe fn ts_stack_merge(
         let subtree_pool = &mut *stack.subtree_pool;
         let (head1, head2) = stack_head_array_pair_mut(stack_heads, version1, version2);
         for i in 0..(*head2.node).link_count as usize {
-            stack_node_add_link(head1.node, (*head2.node).links[i], subtree_pool);
+            stack_node_add_link(&mut *head1.node, (*head2.node).links[i], subtree_pool);
         }
         if (*head1.node).state == ERROR_STATE {
             head1.node_count_at_last_error = (*head1.node).node_count;
