@@ -247,7 +247,7 @@ unsafe fn ts_tree_cursor_is_entry_visible(
         let parent_entry = tree_cursor_entry_array_get(&self_.stack, index - 1);
         return ts_language_alias_at(
             (*self_.tree).language,
-            (*(*parent_entry.subtree).ptr).data.children.production_id as u32,
+            u32::from((*(*parent_entry.subtree).ptr).data.children.production_id),
             entry.structural_child_index,
         ) != 0;
     }
@@ -272,7 +272,7 @@ unsafe fn ts_tree_cursor_iterate_children(
     }
     let alias_sequence = ts_language_alias_sequence(
         (*self_.tree).language,
-        (*(*last_entry.subtree).ptr).data.children.production_id as u32,
+        u32::from((*(*last_entry.subtree).ptr).data.children.production_id),
     );
 
     let mut descendant_index = last_entry.descendant_index;
@@ -802,7 +802,7 @@ pub unsafe extern "C" fn ts_tree_cursor_current_node(
         let parent_entry = tree_cursor_entry_array_get(&cursor.stack, cursor.stack.size - 2);
         ts_language_alias_at(
             (*cursor.tree).language,
-            (*(*parent_entry.subtree).ptr).data.children.production_id as u32,
+            u32::from((*(*parent_entry.subtree).ptr).data.children.production_id),
             last_entry.structural_child_index,
         )
     } else {
@@ -843,7 +843,7 @@ pub unsafe extern "C" fn ts_tree_cursor_current_status(
 
         let alias_sequence = ts_language_alias_sequence(
             language,
-            (*(*parent_entry.subtree).ptr).data.children.production_id as u32,
+            u32::from((*(*parent_entry.subtree).ptr).data.children.production_id),
         );
 
         // Inline subtree_symbol macro
@@ -919,7 +919,7 @@ pub unsafe extern "C" fn ts_tree_cursor_current_status(
             let mut field_map_end: *const TSFieldMapEntry = ptr::null();
             ts_language_field_map(
                 language,
-                (*(*parent_entry.subtree).ptr).data.children.production_id as u32,
+                u32::from((*(*parent_entry.subtree).ptr).data.children.production_id),
                 &mut field_map,
                 &mut field_map_end,
             );
@@ -983,7 +983,7 @@ pub unsafe extern "C" fn ts_tree_cursor_parent_node(
             let parent_entry = tree_cursor_entry_array_get(&cursor.stack, i as u32 - 1);
             alias_symbol = ts_language_alias_at(
                 (*cursor.tree).language,
-                (*(*parent_entry.subtree).ptr).data.children.production_id as u32,
+                u32::from((*(*parent_entry.subtree).ptr).data.children.production_id),
                 entry.structural_child_index,
             );
             is_visible = alias_symbol != 0 || ts_subtree_visible(*entry.subtree);
@@ -1028,7 +1028,7 @@ pub unsafe extern "C" fn ts_tree_cursor_current_field_id(
         let mut field_map_end: *const TSFieldMapEntry = ptr::null();
         ts_language_field_map(
             (*cursor.tree).language,
-            (*(*parent_entry.subtree).ptr).data.children.production_id as u32,
+            u32::from((*(*parent_entry.subtree).ptr).data.children.production_id),
             &mut field_map,
             &mut field_map_end,
         );
