@@ -120,23 +120,23 @@ const INLINE_IS_KEYWORD: u8 = 1 << 6;
 
 impl SubtreeInlineData {
     #[inline(always)]
-    pub const fn is_inline(&self) -> bool { self.flags & INLINE_IS_INLINE != 0 }
+    pub const fn is_inline(self) -> bool { self.flags & INLINE_IS_INLINE != 0 }
     #[inline(always)]
-    pub const fn visible(&self) -> bool { self.flags & INLINE_VISIBLE != 0 }
+    pub const fn visible(self) -> bool { self.flags & INLINE_VISIBLE != 0 }
     #[inline(always)]
-    pub const fn named(&self) -> bool { self.flags & INLINE_NAMED != 0 }
+    pub const fn named(self) -> bool { self.flags & INLINE_NAMED != 0 }
     #[inline(always)]
-    pub const fn extra(&self) -> bool { self.flags & INLINE_EXTRA != 0 }
+    pub const fn extra(self) -> bool { self.flags & INLINE_EXTRA != 0 }
     #[inline(always)]
-    pub const fn has_changes(&self) -> bool { self.flags & INLINE_HAS_CHANGES != 0 }
+    pub const fn has_changes(self) -> bool { self.flags & INLINE_HAS_CHANGES != 0 }
     #[inline(always)]
-    pub const fn is_missing(&self) -> bool { self.flags & INLINE_IS_MISSING != 0 }
+    pub const fn is_missing(self) -> bool { self.flags & INLINE_IS_MISSING != 0 }
     #[inline(always)]
-    pub const fn is_keyword(&self) -> bool { self.flags & INLINE_IS_KEYWORD != 0 }
+    pub const fn is_keyword(self) -> bool { self.flags & INLINE_IS_KEYWORD != 0 }
     #[inline(always)]
-    pub const fn padding_rows(&self) -> u8 { self.rows_and_lookahead & 0x0F }
+    pub const fn padding_rows(self) -> u8 { self.rows_and_lookahead & 0x0F }
     #[inline(always)]
-    pub const fn lookahead_bytes(&self) -> u8 { (self.rows_and_lookahead >> 4) & 0x0F }
+    pub const fn lookahead_bytes(self) -> u8 { (self.rows_and_lookahead >> 4) & 0x0F }
 
     #[inline(always)]
     pub fn set_is_inline(&mut self, v: bool) { if v { self.flags |= INLINE_IS_INLINE } else { self.flags &= !INLINE_IS_INLINE } }
