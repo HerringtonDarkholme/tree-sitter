@@ -275,7 +275,7 @@ pub unsafe fn array_front<T>(arr: *const Array<T>) -> *mut T {
     array_get(arr, 0)
 }
 
-pub unsafe fn array_new<T>() -> Array<T> {
+pub const unsafe fn array_new<T>() -> Array<T> {
     Array {
         contents: ptr::null_mut(),
         size: 0,
