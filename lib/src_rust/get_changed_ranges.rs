@@ -100,7 +100,7 @@ unsafe fn array_push_range(arr: &mut TSRangeArray, range: TSRange) {
     arr.size += 1;
 }
 
-fn ts_range_edit_ref(range: &mut TSRange, edit: &TSInputEdit) {
+pub(crate) fn ts_range_edit_ref(range: &mut TSRange, edit: &TSInputEdit) {
     if range.end_byte >= edit.old_end_byte {
         if range.end_byte != u32::MAX {
             range.end_byte = edit.new_end_byte + (range.end_byte - edit.old_end_byte);

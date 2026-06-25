@@ -6,6 +6,7 @@ use core::ffi::c_void;
 use crate::ffi::{TSLanguage, TSNode, TSPoint, TSRange, TSSymbol};
 
 use super::alloc::{ts_calloc, ts_free, ts_malloc};
+use super::get_changed_ranges::ts_range_edit_ref;
 use super::language::{ts_language_copy, ts_language_delete};
 use super::length::{length_add, Length};
 use super::node::ts_node_new;
@@ -19,8 +20,6 @@ use super::subtree::{
 // ---------------------------------------------------------------------------
 
 extern "C" {
-    // ABI calls kept here because this file still uses local mirror types.
-    fn ts_range_edit(range: *mut TSRange, edit: *const TSInputEdit);
     fn ts_range_array_get_changed_ranges(
         old_ranges: *const TSRange,
         old_range_count: u32,
@@ -191,7 +190,7 @@ unsafe fn ts_tree_included_ranges_ref(tree: &TSTree, length: &mut u32) -> *mut T
 
 unsafe fn ts_tree_edit_ref(tree: &mut TSTree, edit: &TSInputEdit) {
     for i in 0..tree.included_range_count {
-        ts_range_edit(tree.included_ranges.add(i as usize), edit);
+        ts_range_edit_ref(&mut *tree.included_ranges.add(i as usize), edit);
     }
     let mut pool = ts_subtree_pool_new(0);
     tree.root = ts_subtree_edit(tree.root, edit, &mut pool);
