@@ -1039,6 +1039,11 @@ fn ts_subtree_can_inline(padding: Length, size: Length, lookahead_bytes: u32) ->
         && lookahead_bytes < 16
 }
 
+#[inline]
+unsafe fn subtree_pool_mut<'a>(pool: *mut SubtreePool) -> &'a mut SubtreePool {
+    pool.as_mut().unwrap_unchecked()
+}
+
 unsafe fn ts_subtree_set_has_changes(self_: &mut MutableSubtree) {
     if self_.data.is_inline() {
         self_.data.set_has_changes(true);
@@ -1098,7 +1103,7 @@ pub unsafe fn ts_subtree_new_leaf(
             },
         }
     } else {
-        let data = ts_subtree_pool_allocate(&mut *pool);
+        let data = ts_subtree_pool_allocate(subtree_pool_mut(pool));
         *data = SubtreeHeapData {
             ref_count: 1,
             padding,
@@ -1583,7 +1588,7 @@ pub unsafe fn ts_subtree_compare(
     right: Subtree,
     pool: *mut SubtreePool,
 ) -> i32 {
-    let pool = &mut *pool;
+    let pool = subtree_pool_mut(pool);
     mutable_array_push(&mut pool.tree_stack, ts_subtree_to_mut_unsafe(left));
     mutable_array_push(&mut pool.tree_stack, ts_subtree_to_mut_unsafe(right));
 
@@ -1636,6 +1641,7 @@ pub unsafe fn ts_subtree_edit(
     }
 
     let input_edit = &*input_edit;
+    let pool = subtree_pool_mut(pool);
     let mut stack: Vec<EditEntry> = Vec::new();
     stack.push(EditEntry {
         tree: std::ptr::addr_of_mut!(self_),
@@ -1691,7 +1697,6 @@ pub unsafe fn ts_subtree_edit(
             );
         }
 
-        let pool = &mut *pool;
         let mut result = ts_subtree_make_mut(pool, *entry.tree);
 
         if result.data.is_inline() {
