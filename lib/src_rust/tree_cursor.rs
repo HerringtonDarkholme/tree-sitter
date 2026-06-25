@@ -70,7 +70,7 @@ pub struct TreeCursorEntry {
 
 impl TreeCursorEntry {
     #[inline]
-    fn empty() -> Self {
+    const fn empty() -> Self {
         Self {
             subtree: ptr::null(),
             position: length_zero(),
