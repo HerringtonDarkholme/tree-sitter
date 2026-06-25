@@ -15,10 +15,14 @@ use super::error_costs::{
     ERROR_COST_PER_SKIPPED_CHAR, ERROR_COST_PER_SKIPPED_LINE,
     ERROR_COST_PER_SKIPPED_TREE, ERROR_STATE,
 };
-use super::get_changed_ranges::TSRangeArray;
+use super::get_changed_ranges::{
+    ts_range_array_get_changed_ranges, ts_range_array_intersects, TSRangeArray,
+};
 use super::language::{
     ts_language_actions, ts_language_enabled_external_tokens,
-    ts_language_has_actions, ts_language_has_reduce_action,
+    ts_language_copy, ts_language_delete, ts_language_has_actions,
+    ts_language_has_reduce_action, ts_language_is_reserved_word, ts_language_lex_mode_for_state,
+    ts_language_next_state, ts_language_symbol_name, ts_language_table_entry,
     TableEntry, TSLanguageFull, TSLexer, TSLexerMode,
     TSParseActionTypeAccept as TSPARSE_ACTION_TYPE_ACCEPT,
     TSParseActionTypeRecover as TSPARSE_ACTION_TYPE_RECOVER,
@@ -74,67 +78,15 @@ use super::subtree::{
     ts_subtree_new_node, ts_subtree_pool_delete, ts_subtree_pool_new,
     ts_subtree_print_dot_graph, ts_subtree_release, ts_subtree_retain, ts_subtree_set_symbol,
 };
-use super::tree::TSTree;
+use super::tree::{ts_tree_new, TSTree};
 
 // ---------------------------------------------------------------------------
-// Extern C functions (exported from other Rust modules)
+// Extern C functions
 // ---------------------------------------------------------------------------
 
 extern "C" {
-    // language.rs
-    fn ts_language_next_state(
-        self_: *const TSLanguage,
-        state: TSStateId,
-        symbol: TSSymbol,
-    ) -> TSStateId;
-    fn ts_language_symbol_name(
-        self_: *const TSLanguage,
-        symbol: TSSymbol,
-    ) -> *const i8;
-    fn ts_language_version(self_: *const TSLanguage) -> u32;
-    fn ts_language_is_wasm(self_: *const TSLanguage) -> bool;
-    fn ts_language_copy(self_: *const TSLanguage) -> *const TSLanguage;
-    fn ts_language_delete(self_: *const TSLanguage);
-    fn ts_language_table_entry(
-        self_: *const TSLanguage,
-        state: TSStateId,
-        symbol: TSSymbol,
-        result: *mut TableEntry,
-    );
-    fn ts_language_lex_mode_for_state(
-        self_: *const TSLanguage,
-        state: TSStateId,
-    ) -> TSLexerMode;
-    fn ts_language_is_reserved_word(
-        self_: *const TSLanguage,
-        state: TSStateId,
-        symbol: TSSymbol,
-    ) -> bool;
-
-    // tree.rs
-    fn ts_tree_new(
-        root: Subtree,
-        language: *const TSLanguage,
-        included_ranges: *const TSRange,
-        included_range_count: u32,
-    ) -> *mut TSTree;
-
-    // get_changed_ranges.rs
-    fn ts_range_array_intersects(
-        self_: *const TSRangeArray,
-        start_index: u32,
-        start_byte: u32,
-        end_byte: u32,
-    ) -> bool;
-    fn ts_range_array_get_changed_ranges(
-        old_ranges: *const TSRange,
-        old_range_count: u32,
-        new_ranges: *const TSRange,
-        new_range_count: u32,
-        differences: *mut TSRangeArray,
-    );
-
     // wasm_store.c (still in C)
+    fn ts_language_is_wasm(self_: *const TSLanguage) -> bool;
     fn ts_wasm_store_start(
         self_: *mut TSWasmStore,
         lexer: *mut TSLexer,
