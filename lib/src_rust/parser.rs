@@ -827,34 +827,38 @@ unsafe fn ts_parser__call_keyword_lex_fn(self_: &mut TSParser) -> bool {
 // ---------------------------------------------------------------------------
 
 unsafe fn ts_parser__external_scanner_create(self_: &mut TSParser) {
-    let lang = self_.language.cast::<TSLanguageFull>();
-    if !self_.language.is_null() && !(*lang).external_scanner.states.is_null() {
+    if !self_.language.is_null() {
+        let lang = parser_language_full(self_.language);
+        if lang.external_scanner.states.is_null() {
+            return;
+        }
+
         if ts_language_is_wasm(self_.language) {
             self_.external_scanner_payload =
                 ts_wasm_store_call_scanner_create(self_.wasm_store) as usize as *mut c_void;
             if ts_wasm_store_has_error(self_.wasm_store) {
                 self_.has_scanner_error = true;
             }
-        } else if let Some(create_fn) = (*lang).external_scanner.create {
+        } else if let Some(create_fn) = lang.external_scanner.create {
             self_.external_scanner_payload = create_fn();
         }
     }
 }
 
 unsafe fn ts_parser__external_scanner_destroy(self_: &mut TSParser) {
-    let lang = self_.language.cast::<TSLanguageFull>();
     if !self_.language.is_null()
         && !self_.external_scanner_payload.is_null()
-        && (*lang).external_scanner.destroy.is_some()
         && !ts_language_is_wasm(self_.language)
     {
-        ((*lang).external_scanner.destroy.unwrap())(self_.external_scanner_payload);
+        let lang = parser_language_full(self_.language);
+        if let Some(destroy_fn) = lang.external_scanner.destroy {
+            destroy_fn(self_.external_scanner_payload);
+        }
     }
     self_.external_scanner_payload = ptr::null_mut();
 }
 
 unsafe fn ts_parser__external_scanner_serialize(self_: &mut TSParser) -> u32 {
-    let lang = self_.language.cast::<TSLanguageFull>();
     let length;
     if ts_language_is_wasm(self_.language) {
         length = ts_wasm_store_call_scanner_serialize(
@@ -866,7 +870,10 @@ unsafe fn ts_parser__external_scanner_serialize(self_: &mut TSParser) -> u32 {
             self_.has_scanner_error = true;
         }
     } else {
-        length = ((*lang).external_scanner.serialize.unwrap())(
+        length = (parser_language_full(self_.language)
+            .external_scanner
+            .serialize
+            .unwrap())(
             self_.external_scanner_payload,
             self_.lexer.debug_buffer.as_mut_ptr().cast::<i8>(),
         );
@@ -879,7 +886,6 @@ unsafe fn ts_parser__external_scanner_deserialize(
     self_: &mut TSParser,
     external_token: Subtree,
 ) {
-    let lang = self_.language.cast::<TSLanguageFull>();
     let (data, length) = if !external_token.ptr.is_null() {
         let state = ts_subtree_external_scanner_state(&external_token);
         (ts_external_scanner_state_data(state), state.length)
@@ -898,7 +904,10 @@ unsafe fn ts_parser__external_scanner_deserialize(
             self_.has_scanner_error = true;
         }
     } else {
-        ((*lang).external_scanner.deserialize.unwrap())(
+        (parser_language_full(self_.language)
+            .external_scanner
+            .deserialize
+            .unwrap())(
             self_.external_scanner_payload,
             data.cast::<i8>(),
             length,
@@ -910,12 +919,12 @@ unsafe fn ts_parser__external_scanner_scan(
     self_: &mut TSParser,
     external_lex_state: TSStateId,
 ) -> bool {
-    let lang = self_.language.cast::<TSLanguageFull>();
+    let lang = parser_language_full(self_.language);
     if ts_language_is_wasm(self_.language) {
         let result = ts_wasm_store_call_scanner_scan(
             self_.wasm_store,
             self_.external_scanner_payload as usize as u32,
-            u32::from(external_lex_state) * (*lang).external_token_count,
+            u32::from(external_lex_state) * lang.external_token_count,
         );
         if ts_wasm_store_has_error(self_.wasm_store) {
             self_.has_scanner_error = true;
@@ -926,7 +935,7 @@ unsafe fn ts_parser__external_scanner_scan(
             self_.language,
             u32::from(external_lex_state),
         );
-        ((*lang).external_scanner.scan.unwrap())(
+        (lang.external_scanner.scan.unwrap())(
             self_.external_scanner_payload,
             &mut self_.lexer.data,
             valid_external_tokens,
