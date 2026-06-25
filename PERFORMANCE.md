@@ -1254,6 +1254,78 @@ Source-code analysis:
   ownership behavior are unchanged.
 - No rollback was performed.
 
+### 2026-06-25 08:09 EDT
+
+- Repo head: `f9ed5938`
+- Batch base: `76c4401a`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: 10 small Clippy/raw-pointer cleanup commits from
+  `Use pointer cast in stack array delete` through
+  `Use usize loop in stack node release`
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language tsx --repetitions 10 --error-limit 4 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 25809.6 | 24561.8 | +5.08% |
+| TypeScript error parses | 24 | 1665.3 | 1639.5 | +1.57% |
+| TSX normal parses | 1 | 5420.3 | 5319.3 | +1.90% |
+| TSX error parses | 27 | 1681.8 | 1624.3 | +3.54% |
+| Overall parser throughput | 63 | 2043.4 | 1992.6 | +2.55% |
+
+Prior checkpoint at `f5a30dbf` recorded Rust overall throughput of 2134.9
+bytes/ms on the same TypeScript/TSX gate, so this repeat run measured -4.29%
+absolute Rust throughput. The Rust-vs-C delta moved from +1.26% to +2.55%.
+
+Per-case regression investigation:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `typescript error no_newline_at_eof.go` | 1072.1 | 1156.1 | 7.26% |
+
+The first run at this same head reported lower aggregate throughput and a
+different set of per-case outliers:
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 24628.0 | 24934.3 | -1.23% |
+| TypeScript error parses | 24 | 1653.3 | 1649.9 | +0.20% |
+| TSX normal parses | 1 | 5399.4 | 5589.5 | -3.40% |
+| TSX error parses | 27 | 1662.8 | 1623.7 | +2.41% |
+| Overall parser throughput | 63 | 2024.3 | 2002.3 | +1.10% |
+
+First-run outliers were `typescript error
+compound-statement-without-trailing-newline.py` at 11.37%,
+`typescript normal builderStatePublic.ts` at 7.63%, and `typescript error
+crlf-line-endings.py` at 6.89%. The repeat run removed those and reported only
+`no_newline_at_eof.go`, so the per-case result is not stable.
+
+Source-code analysis:
+
+- This batch did not change exported FFI signatures, `#[repr(C)]` layouts,
+  allocation sizes, parse-table data, generated parser templates, C headers,
+  parser control flow, stack ownership, subtree ownership, or generated parser
+  ABI.
+- Seven commits are direct pointer-cast spelling cleanups in internal stack
+  helpers and allocation/free paths: `array_delete`, `array_reserve`,
+  `array_assign`, stack node allocation/free, stack head summaries, stack
+  allocation/destruction, and stack summary allocation/free. They keep the same
+  allocator calls, element sizes, copy sizes, and pointer addresses.
+- Two commits replace reference-to-raw-pointer constructions with
+  `ptr::from_mut` or `ptr::addr_of!`/`ptr::addr_of_mut!` for internal callback
+  payloads. The payload lifetime and callback type are unchanged, and the
+  callbacks still cast the `void *` payload back to the same Rust type.
+- The final commit rewrites a signed reverse loop over stack node links as a
+  `usize` reverse range over `1..link_count`, preserving the separate handling
+  of link zero and the release order for nonzero links.
+- Given the repeat-run flip from TypeScript normal -1.23% to +5.08% Rust-vs-C
+  and the changed per-case outliers, the >5% cases are most consistent with
+  benchmark variance rather than a source-code regression in this batch.
+- No rollback was performed.
+
 ### 2026-06-25 01:24 EDT
 
 - Repo head: `dbf0cdb2`
