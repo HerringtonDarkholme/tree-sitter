@@ -298,18 +298,18 @@ pub unsafe fn array_splice<T>(
 
     array_reserve(arr, new_size);
 
-    let contents = (*arr).contents as *mut u8;
+    let contents = (*arr).contents.cast::<u8>();
     if (*arr).size > old_end {
         memmove(
-            contents.add(new_end as usize * elem_size) as *mut c_void,
-            contents.add(old_end as usize * elem_size) as *const c_void,
+            contents.add(new_end as usize * elem_size).cast::<c_void>(),
+            contents.add(old_end as usize * elem_size).cast::<c_void>(),
             ((*arr).size - old_end) as usize * elem_size,
         );
     }
     if new_count > 0 && !new_contents.is_null() {
         memcpy(
-            contents.add(index as usize * elem_size) as *mut c_void,
-            new_contents as *const c_void,
+            contents.add(index as usize * elem_size).cast::<c_void>(),
+            new_contents.cast::<c_void>(),
             new_count as usize * elem_size,
         );
     }
