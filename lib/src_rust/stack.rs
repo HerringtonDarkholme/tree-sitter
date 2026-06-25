@@ -247,10 +247,12 @@ pub unsafe fn array_back<T>(arr: *const Array<T>) -> *mut T {
 pub unsafe fn array_erase<T>(arr: *mut Array<T>, index: u32) {
     debug_assert!(index < (*arr).size);
     let elem_size = std::mem::size_of::<T>();
-    let contents = (*arr).contents as *mut u8;
+    let contents = (*arr).contents.cast::<u8>();
     memmove(
-        contents.add(index as usize * elem_size) as *mut c_void,
-        contents.add((index as usize + 1) * elem_size) as *const c_void,
+        contents.add(index as usize * elem_size).cast::<c_void>(),
+        contents
+            .add((index as usize + 1) * elem_size)
+            .cast::<c_void>(),
         ((*arr).size as usize - index as usize - 1) * elem_size,
     );
     (*arr).size -= 1;
