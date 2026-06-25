@@ -147,7 +147,12 @@ unsafe fn ts_tree_included_ranges_ref(tree: &TSTree, length: &mut u32) -> *mut T
 
 #[inline]
 unsafe fn tree_included_range_mut(tree: &mut TSTree, index: u32) -> &mut TSRange {
-    &mut *tree.included_ranges.add(index as usize)
+    tree_included_ranges_mut(tree).get_unchecked_mut(index as usize)
+}
+
+#[inline]
+unsafe fn tree_included_ranges_mut(tree: &mut TSTree) -> &mut [TSRange] {
+    std::slice::from_raw_parts_mut(tree.included_ranges, tree.included_range_count as usize)
 }
 
 fn tree_cursor_empty() -> TreeCursor {
