@@ -8,7 +8,7 @@
 //! - Included range tracking (for injected languages)
 //! - Column computation and logging
 //!
-//! The `TSLexer` vtable (advance, mark_end, get_column, etc.) is populated
+//! The `TSLexer` vtable (`advance`, `mark_end`, `get_column`, etc.) is populated
 //! with function pointers to static functions in this module, so generated
 //! parsers can call them without linking against this library.
 
