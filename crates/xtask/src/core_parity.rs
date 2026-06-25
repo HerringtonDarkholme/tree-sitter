@@ -1027,10 +1027,10 @@ fn write_tsx_sample() -> Result<PathBuf> {
     let path = std::env::temp_dir().join("tree-sitter-core-parity-sample.tsx");
     fs::write(
         &path,
-        r#"export function Widget({ name }: { name: string }) {
+        r"export function Widget({ name }: { name: string }) {
   return <section data-name={name}><span>{name.toUpperCase()}</span></section>;
 }
-"#,
+",
     )
     .with_context(|| format!("Failed to write {}", path.display()))?;
     Ok(path)
