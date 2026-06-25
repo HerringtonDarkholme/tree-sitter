@@ -977,20 +977,26 @@ unsafe extern "C" fn summarize_stack_callback(
 /// Create a new parse stack.
 pub unsafe fn ts_stack_new(subtree_pool: *mut SubtreePool) -> *mut Stack {
     let self_ = ts_calloc(1, std::mem::size_of::<Stack>()) as *mut Stack;
+    let stack = &mut *self_;
 
-    array_init(&mut (*self_).heads);
-    array_init(&mut (*self_).slices);
-    array_init(&mut (*self_).iterators);
-    array_init(&mut (*self_).node_pool);
-    array_reserve(&mut (*self_).heads, 4);
-    array_reserve(&mut (*self_).slices, 4);
-    array_reserve(&mut (*self_).iterators, 4);
-    array_reserve(&mut (*self_).node_pool, MAX_NODE_POOL_SIZE as u32);
+    array_init(&mut stack.heads);
+    array_init(&mut stack.slices);
+    array_init(&mut stack.iterators);
+    array_init(&mut stack.node_pool);
+    array_reserve(&mut stack.heads, 4);
+    array_reserve(&mut stack.slices, 4);
+    array_reserve(&mut stack.iterators, 4);
+    array_reserve(&mut stack.node_pool, MAX_NODE_POOL_SIZE as u32);
 
-    (*self_).subtree_pool = subtree_pool;
-    (*self_).base_node =
-        stack_node_new(ptr::null_mut(), NULL_SUBTREE, false, 1, &mut (*self_).node_pool);
-    ts_stack_clear(&mut *self_);
+    stack.subtree_pool = subtree_pool;
+    stack.base_node = stack_node_new(
+        ptr::null_mut(),
+        NULL_SUBTREE,
+        false,
+        1,
+        &mut stack.node_pool,
+    );
+    ts_stack_clear(stack);
 
     self_
 }
