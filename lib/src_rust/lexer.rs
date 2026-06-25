@@ -134,6 +134,10 @@ fn ts_lexer__clear_chunk(self_: &mut Lexer) {
     self_.chunk_start = 0;
 }
 
+unsafe fn ts_lexer__included_range(self_: &Lexer, index: usize) -> &TSRange {
+    &*self_.included_ranges.add(index)
+}
+
 /// Call the input callback to obtain a new chunk of source code.
 unsafe fn ts_lexer__get_chunk(self_: &mut Lexer) {
     self_.chunk_start = self_.current_position.bytes;
@@ -199,7 +203,7 @@ unsafe fn ts_lexer_goto(self_: &mut Lexer, position: Length) {
     // Move to the first valid position at or after the given position.
     let found_included_range = 'range_search: {
         for i in 0..self_.included_range_count {
-            let included_range = &*self_.included_ranges.add(i as usize);
+            let included_range = ts_lexer__included_range(self_, i as usize);
             if included_range.end_byte > self_.current_position.bytes
                 && included_range.end_byte > included_range.start_byte
             {
@@ -234,7 +238,7 @@ unsafe fn ts_lexer_goto(self_: &mut Lexer, position: Length) {
         // state - past the end of the included ranges.
         self_.current_included_range_index = self_.included_range_count;
         let last_range_index = self_.included_range_count as usize - 1;
-        let last_included_range = &*self_.included_ranges.add(last_range_index);
+        let last_included_range = ts_lexer__included_range(self_, last_range_index);
         self_.current_position = Length {
             bytes: last_included_range.end_byte,
             extent: last_included_range.end_point,
@@ -355,11 +359,11 @@ unsafe extern "C" fn ts_lexer__mark_end(_self: *mut TSLexer) {
         // then the token should be considered to end at the *end* of the
         // previous included range, rather than here.
         let range_index = self_.current_included_range_index as usize;
-        let current_included_range = &*self_.included_ranges.add(range_index);
+        let current_included_range = ts_lexer__included_range(self_, range_index);
         if range_index > 0
             && self_.current_position.bytes == current_included_range.start_byte
         {
-            let previous_included_range = &*self_.included_ranges.add(range_index - 1);
+            let previous_included_range = ts_lexer__included_range(self_, range_index - 1);
             self_.token_end_position = Length {
                 bytes: previous_included_range.end_byte,
                 extent: previous_included_range.end_point,
@@ -417,7 +421,7 @@ unsafe extern "C" fn ts_lexer__is_at_included_range_start(_self: *const TSLexer)
     let self_ = &*(_self as *const Lexer);
     if self_.current_included_range_index < self_.included_range_count {
         let range_index = self_.current_included_range_index as usize;
-        let current_range = &*self_.included_ranges.add(range_index);
+        let current_range = ts_lexer__included_range(self_, range_index);
         self_.current_position.bytes == current_range.start_byte
     } else {
         false
