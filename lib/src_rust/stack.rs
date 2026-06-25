@@ -199,11 +199,11 @@ pub unsafe fn array_reserve<T>(arr: *mut Array<T>, new_capacity: u32) {
     if new_capacity > (*arr).capacity {
         let elem_size = std::mem::size_of::<T>();
         if (*arr).contents.is_null() {
-            (*arr).contents = ts_malloc(new_capacity as usize * elem_size) as *mut T;
+            (*arr).contents = ts_malloc(new_capacity as usize * elem_size).cast::<T>();
         } else {
             (*arr).contents =
-                ts_realloc((*arr).contents as *mut c_void, new_capacity as usize * elem_size)
-                    as *mut T;
+                ts_realloc((*arr).contents.cast::<c_void>(), new_capacity as usize * elem_size)
+                    .cast::<T>();
         }
         (*arr).capacity = new_capacity;
     }
