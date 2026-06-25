@@ -188,7 +188,7 @@ unsafe fn tree_cursor_entry_array_write(
 }
 
 #[inline]
-unsafe fn tree_cursor_entry_array_read(arr: &TreeCursorEntryArray, index: u32) -> TreeCursorEntry {
+const unsafe fn tree_cursor_entry_array_read(arr: &TreeCursorEntryArray, index: u32) -> TreeCursorEntry {
     ptr::read(arr.contents.add(index as usize))
 }
 
