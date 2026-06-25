@@ -64,12 +64,12 @@ pub struct TSExternalScanner {
 pub struct TSLexer {
     pub lookahead: i32,
     pub result_symbol: TSSymbol,
-    pub advance: Option<unsafe extern "C" fn(*mut TSLexer, bool)>,
-    pub mark_end: Option<unsafe extern "C" fn(*mut TSLexer)>,
-    pub get_column: Option<unsafe extern "C" fn(*mut TSLexer) -> u32>,
-    pub is_at_included_range_start: Option<unsafe extern "C" fn(*const TSLexer) -> bool>,
-    pub eof: Option<unsafe extern "C" fn(*const TSLexer) -> bool>,
-    pub log: Option<unsafe extern "C" fn(*const TSLexer, *const i8, ...)>,
+    pub advance: Option<unsafe extern "C" fn(*mut Self, bool)>,
+    pub mark_end: Option<unsafe extern "C" fn(*mut Self)>,
+    pub get_column: Option<unsafe extern "C" fn(*mut Self) -> u32>,
+    pub is_at_included_range_start: Option<unsafe extern "C" fn(*const Self) -> bool>,
+    pub eof: Option<unsafe extern "C" fn(*const Self) -> bool>,
+    pub log: Option<unsafe extern "C" fn(*const Self, *const i8, ...)>,
 }
 
 /// TSLanguageMetadata (from parser.h)
