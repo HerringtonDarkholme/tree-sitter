@@ -183,13 +183,13 @@ extern "C" {
 // Array helper functions (generic, mirrors array.h)
 // ---------------------------------------------------------------------------
 
-pub unsafe fn array_init<T>(arr: *mut Array<T>) {
+pub(crate) unsafe fn array_init<T>(arr: *mut Array<T>) {
     (*arr).size = 0;
     (*arr).capacity = 0;
     (*arr).contents = ptr::null_mut();
 }
 
-pub unsafe fn array_delete<T>(arr: *mut Array<T>) {
+pub(crate) unsafe fn array_delete<T>(arr: *mut Array<T>) {
     if !(*arr).contents.is_null() {
         ts_free((*arr).contents.cast::<c_void>());
     }
@@ -198,11 +198,11 @@ pub unsafe fn array_delete<T>(arr: *mut Array<T>) {
     (*arr).capacity = 0;
 }
 
-pub unsafe fn array_clear<T>(arr: *mut Array<T>) {
+pub(crate) unsafe fn array_clear<T>(arr: *mut Array<T>) {
     (*arr).size = 0;
 }
 
-pub unsafe fn array_reserve<T>(arr: *mut Array<T>, new_capacity: u32) {
+pub(crate) unsafe fn array_reserve<T>(arr: *mut Array<T>, new_capacity: u32) {
     if new_capacity > (*arr).capacity {
         let elem_size = std::mem::size_of::<T>();
         if (*arr).contents.is_null() {
@@ -216,7 +216,7 @@ pub unsafe fn array_reserve<T>(arr: *mut Array<T>, new_capacity: u32) {
     }
 }
 
-pub unsafe fn array_grow<T>(arr: *mut Array<T>, count: u32) {
+pub(crate) unsafe fn array_grow<T>(arr: *mut Array<T>, count: u32) {
     let new_size = (*arr).size + count;
     if new_size > (*arr).capacity {
         let mut new_capacity = (*arr).capacity * 2;
@@ -230,52 +230,52 @@ pub unsafe fn array_grow<T>(arr: *mut Array<T>, count: u32) {
     }
 }
 
-pub unsafe fn array_push<T>(arr: *mut Array<T>, element: T) {
+pub(crate) unsafe fn array_push<T>(arr: *mut Array<T>, element: T) {
     array_grow(arr, 1);
     ptr::write((*arr).contents.add((*arr).size as usize), element);
     (*arr).size += 1;
 }
 
-pub unsafe fn array_pop<T>(arr: *mut Array<T>) -> T {
+pub(crate) unsafe fn array_pop<T>(arr: *mut Array<T>) -> T {
     (*arr).size -= 1;
     ptr::read((*arr).contents.add((*arr).size as usize))
 }
 
-pub unsafe fn array_get<T>(arr: *const Array<T>, index: u32) -> *mut T {
+pub(crate) unsafe fn array_get<T>(arr: *const Array<T>, index: u32) -> *mut T {
     debug_assert!(index < (*arr).size);
     (*arr).contents.add(index as usize)
 }
 
 #[inline]
-pub unsafe fn array_get_ref<T>(arr: &Array<T>, index: u32) -> &T {
+pub(crate) unsafe fn array_get_ref<T>(arr: &Array<T>, index: u32) -> &T {
     array_get(ptr::from_ref(arr), index)
         .as_ref()
         .unwrap_unchecked()
 }
 
 #[inline]
-pub unsafe fn array_get_mut<T>(arr: &mut Array<T>, index: u32) -> &mut T {
+pub(crate) unsafe fn array_get_mut<T>(arr: &mut Array<T>, index: u32) -> &mut T {
     array_get(ptr::from_mut(arr), index)
         .as_mut()
         .unwrap_unchecked()
 }
 
-pub unsafe fn array_back<T>(arr: *const Array<T>) -> *mut T {
+pub(crate) unsafe fn array_back<T>(arr: *const Array<T>) -> *mut T {
     debug_assert!((*arr).size > 0);
     (*arr).contents.add((*arr).size as usize - 1)
 }
 
 #[inline]
-pub unsafe fn array_back_ref<T>(arr: &Array<T>) -> &T {
+pub(crate) unsafe fn array_back_ref<T>(arr: &Array<T>) -> &T {
     array_back(ptr::from_ref(arr)).as_ref().unwrap_unchecked()
 }
 
 #[inline]
-pub unsafe fn array_back_mut<T>(arr: &mut Array<T>) -> &mut T {
+pub(crate) unsafe fn array_back_mut<T>(arr: &mut Array<T>) -> &mut T {
     array_back(ptr::from_mut(arr)).as_mut().unwrap_unchecked()
 }
 
-pub unsafe fn array_erase<T>(arr: *mut Array<T>, index: u32) {
+pub(crate) unsafe fn array_erase<T>(arr: *mut Array<T>, index: u32) {
     debug_assert!(index < (*arr).size);
     let count = (*arr).size as usize - index as usize - 1;
     if count > 0 {
@@ -288,7 +288,7 @@ pub unsafe fn array_erase<T>(arr: *mut Array<T>, index: u32) {
     (*arr).size -= 1;
 }
 
-pub unsafe fn array_insert<T>(arr: *mut Array<T>, index: u32, element: T) {
+pub(crate) unsafe fn array_insert<T>(arr: *mut Array<T>, index: u32, element: T) {
     array_grow(arr, 1);
     let count = (*arr).size as usize - index as usize;
     if count > 0 {
@@ -302,11 +302,11 @@ pub unsafe fn array_insert<T>(arr: *mut Array<T>, index: u32, element: T) {
     (*arr).size += 1;
 }
 
-pub unsafe fn array_front<T>(arr: *const Array<T>) -> *mut T {
+pub(crate) unsafe fn array_front<T>(arr: *const Array<T>) -> *mut T {
     array_get(arr, 0)
 }
 
-pub const unsafe fn array_new<T>() -> Array<T> {
+pub(crate) const unsafe fn array_new<T>() -> Array<T> {
     Array {
         contents: ptr::null_mut(),
         size: 0,
@@ -314,7 +314,7 @@ pub const unsafe fn array_new<T>() -> Array<T> {
     }
 }
 
-pub unsafe fn array_splice<T>(
+pub(crate) unsafe fn array_splice<T>(
     arr: *mut Array<T>,
     index: u32,
     old_count: u32,
@@ -343,11 +343,11 @@ pub unsafe fn array_splice<T>(
     (*arr).size = new_size;
 }
 
-pub unsafe fn array_swap<T>(self_: &mut Array<T>, other: &mut Array<T>) {
+pub(crate) unsafe fn array_swap<T>(self_: &mut Array<T>, other: &mut Array<T>) {
     std::mem::swap(self_, other);
 }
 
-pub unsafe fn array_assign<T>(self_: &mut Array<T>, other: &Array<T>) {
+pub(crate) unsafe fn array_assign<T>(self_: &mut Array<T>, other: &Array<T>) {
     array_reserve(ptr::from_mut(self_), other.size);
     self_.size = other.size;
     if other.size > 0 {
