@@ -1665,13 +1665,12 @@ pub unsafe fn ts_stack_print_dot_graph(
 
                 fprintf(f, b"];\n\0".as_ptr() as *const i8);
 
-                let next_iterator: &mut StackIterator;
-                if j == 0 {
-                    next_iterator = stack_iterator_array_get_mut(&mut stack.iterators, i);
+                let next_iterator = if j == 0 {
+                    stack_iterator_array_get_mut(&mut stack.iterators, i)
                 } else {
                     array_push(&mut stack.iterators, stack_iterator_read_ref(&iterator));
-                    next_iterator = stack_iterator_array_back_mut(&mut stack.iterators);
-                }
+                    stack_iterator_array_back_mut(&mut stack.iterators)
+                };
                 next_iterator.node = link.node;
             }
 
