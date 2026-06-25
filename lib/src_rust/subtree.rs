@@ -1035,7 +1035,7 @@ pub unsafe fn ts_subtree_new_leaf(
     let metadata = ts_language_symbol_metadata(language, symbol);
     let extra = symbol == ts_builtin_sym_end;
 
-    let is_inline = symbol <= u8::MAX as TSSymbol
+    let is_inline = symbol <= TSSymbol::from(u8::MAX)
         && !has_external_tokens
         && ts_subtree_can_inline(padding, size, lookahead_bytes);
 
@@ -1047,13 +1047,21 @@ pub unsafe fn ts_subtree_new_leaf(
                     | if metadata.named { INLINE_NAMED } else { 0 }
                     | if extra { INLINE_EXTRA } else { 0 }
                     | if is_keyword { INLINE_IS_KEYWORD } else { 0 },
-                symbol: symbol as u8,
+                symbol: u8::try_from(symbol).expect("inline subtree symbol fits in u8"),
                 parse_state,
-                padding_columns: padding.extent.column as u8,
-                rows_and_lookahead: (padding.extent.row as u8 & 0x0F)
-                    | ((lookahead_bytes as u8 & 0x0F) << 4),
-                padding_bytes: padding.bytes as u8,
-                size_bytes: size.bytes as u8,
+                padding_columns: u8::try_from(padding.extent.column)
+                    .expect("inline subtree padding column fits in u8"),
+                rows_and_lookahead: (u8::try_from(padding.extent.row)
+                    .expect("inline subtree padding row fits in u8")
+                    & 0x0F)
+                    | ((u8::try_from(lookahead_bytes)
+                        .expect("inline subtree lookahead byte count fits in u8")
+                        & 0x0F)
+                        << 4),
+                padding_bytes: u8::try_from(padding.bytes)
+                    .expect("inline subtree padding byte count fits in u8"),
+                size_bytes: u8::try_from(size.bytes)
+                    .expect("inline subtree size byte count fits in u8"),
             },
         }
     } else {
