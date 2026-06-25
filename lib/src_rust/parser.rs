@@ -1711,7 +1711,7 @@ unsafe fn ts_parser__do_all_potential_reductions(
     starting_version: StackVersion,
     lookahead_symbol: TSSymbol,
 ) -> bool {
-    let lang = self_.language.cast::<TSLanguageFull>();
+    let lang = parser_language_full(self_.language);
     let initial_version_count = ts_stack_version_count(parser_stack_ref(self_.stack));
 
     let mut can_shift_lookahead_symbol = false;
@@ -1743,7 +1743,7 @@ unsafe fn ts_parser__do_all_potential_reductions(
         let (first_symbol, end_symbol): (TSSymbol, TSSymbol) = if lookahead_symbol != 0 {
             (lookahead_symbol, lookahead_symbol + 1)
         } else {
-            (1, (*lang).token_count as TSSymbol)
+            (1, lang.token_count as TSSymbol)
         };
 
         let mut symbol = first_symbol;
