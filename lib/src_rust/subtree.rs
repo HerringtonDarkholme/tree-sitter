@@ -1302,12 +1302,11 @@ pub unsafe fn ts_subtree_new_missing_leaf(
 // --- #40: set_symbol ---
 
 pub unsafe fn ts_subtree_set_symbol(
-    self_: *mut MutableSubtree,
+    self_: &mut MutableSubtree,
     symbol: TSSymbol,
     language: *const TSLanguage,
 ) {
     let metadata = ts_language_symbol_metadata(language, symbol);
-    let self_ = mutable_subtree_mut(self_);
     if self_.data.is_inline() {
         debug_assert!(symbol < TSSymbol::from(u8::MAX));
         self_.data.symbol = symbol as u8;
