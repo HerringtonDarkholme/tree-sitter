@@ -2581,8 +2581,8 @@ unsafe fn ts_parser__balance_subtree(self_: &mut TSParser) -> bool {
             let child1 = *ts_subtree_children(tree_subtree).add(0);
             let child2 =
                 *ts_subtree_children(tree_subtree).add((*tree.ptr).child_count as usize - 1);
-            let repeat_delta =
-                ts_subtree_repeat_depth(child1) as i64 - ts_subtree_repeat_depth(child2) as i64;
+            let repeat_delta = i64::from(ts_subtree_repeat_depth(child1))
+                - i64::from(ts_subtree_repeat_depth(child2));
             if repeat_delta > 0 {
                 let n = repeat_delta as u32;
 
