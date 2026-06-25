@@ -151,7 +151,7 @@ macro_rules! LOG {
         let parser = &mut *$self_;
         if parser.lexer.logger.log.is_some() || !parser.dot_graph_file.is_null() {
             snprintf(
-                parser.lexer.debug_buffer.as_mut_ptr() as *mut i8,
+                parser.lexer.debug_buffer.as_mut_ptr().cast::<i8>(),
                 TREE_SITTER_SERIALIZATION_BUFFER_SIZE,
                 $($arg),+
             );
@@ -181,7 +181,7 @@ macro_rules! LOG_TREE {
 macro_rules! LOG_LOOKAHEAD {
     ($self_:expr, $symbol_name:expr, $size:expr) => {
         if (*$self_).lexer.logger.log.is_some() || !(*$self_).dot_graph_file.is_null() {
-            let buf = (*$self_).lexer.debug_buffer.as_mut_ptr() as *mut i8;
+            let buf = (*$self_).lexer.debug_buffer.as_mut_ptr().cast::<i8>();
             let symbol = $symbol_name;
             let mut off = snprintf(
                 buf,
