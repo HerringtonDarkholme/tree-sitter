@@ -85,6 +85,16 @@ const unsafe fn node_child_count(self_: TSNode) -> u32 {
 }
 
 #[inline]
+const unsafe fn node_named_child_count(self_: TSNode) -> u32 {
+    let tree = ts_node__subtree(self_);
+    if ts_subtree_child_count(tree) > 0 {
+        (*tree.ptr).data.children.named_child_count
+    } else {
+        0
+    }
+}
+
+#[inline]
 const fn node_start_byte(self_: TSNode) -> u32 {
     self_.context[0]
 }
@@ -774,12 +784,7 @@ pub const unsafe extern "C" fn ts_node_child_count(self_: TSNode) -> u32 {
 
 #[no_mangle]
 pub const unsafe extern "C" fn ts_node_named_child_count(self_: TSNode) -> u32 {
-    let tree = ts_node__subtree(self_);
-    if ts_subtree_child_count(tree) > 0 {
-        (*tree.ptr).data.children.named_child_count
-    } else {
-        0
-    }
+    node_named_child_count(self_)
 }
 
 // ---------------------------------------------------------------------------
