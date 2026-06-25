@@ -508,8 +508,7 @@ pub unsafe extern "C" fn ts_tree_cursor_reset(self_: *mut TSTreeCursor, node: TS
     ts_tree_cursor_init_ref(tree_cursor_mut(self_), node);
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn ts_tree_cursor_init(self_: *mut TreeCursor, node: TSNode) {
+pub unsafe fn ts_tree_cursor_init(self_: *mut TreeCursor, node: TSNode) {
     ts_tree_cursor_init_ref(internal_tree_cursor_mut(self_), node);
 }
 
@@ -615,8 +614,7 @@ unsafe fn tree_cursor_goto_last_child(cursor: &mut TreeCursor) -> bool {
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn ts_tree_cursor_goto_last_child_internal(
+pub unsafe fn ts_tree_cursor_goto_last_child_internal(
     self_: *mut TSTreeCursor,
 ) -> TreeCursorStep {
     tree_cursor_goto_last_child_internal(tree_cursor_mut(self_))
@@ -717,8 +715,7 @@ unsafe fn tree_cursor_goto_previous_sibling_internal(cursor: &mut TreeCursor) ->
     step
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn ts_tree_cursor_goto_previous_sibling_internal(
+pub unsafe fn ts_tree_cursor_goto_previous_sibling_internal(
     self_: *mut TSTreeCursor,
 ) -> TreeCursorStep {
     tree_cursor_goto_previous_sibling_internal(tree_cursor_mut(self_))
