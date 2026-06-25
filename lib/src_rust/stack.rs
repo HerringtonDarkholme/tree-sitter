@@ -373,7 +373,7 @@ unsafe fn stack_head_array_write(
 }
 
 #[inline]
-unsafe fn stack_head_read_ref(self_: &StackHead) -> StackHead {
+const unsafe fn stack_head_read_ref(self_: &StackHead) -> StackHead {
     ptr::read(self_)
 }
 
@@ -411,12 +411,12 @@ unsafe fn stack_slice_array_get_mut(self_: &mut StackSliceArray, index: u32) -> 
 }
 
 #[inline]
-unsafe fn stack_slice_array_read_ref(self_: &StackSliceArray) -> StackSliceArray {
+const unsafe fn stack_slice_array_read_ref(self_: &StackSliceArray) -> StackSliceArray {
     ptr::read(self_)
 }
 
 #[inline]
-unsafe fn subtree_array_read_ref(self_: &SubtreeArray) -> SubtreeArray {
+const unsafe fn subtree_array_read_ref(self_: &SubtreeArray) -> SubtreeArray {
     ptr::read(self_)
 }
 
@@ -457,12 +457,12 @@ unsafe fn stack_iterator_array_read(self_: &Array<StackIterator>, index: u32) ->
 }
 
 #[inline]
-unsafe fn stack_iterator_subtrees_read_ref(self_: &StackIterator) -> SubtreeArray {
+const unsafe fn stack_iterator_subtrees_read_ref(self_: &StackIterator) -> SubtreeArray {
     ptr::read(&self_.subtrees)
 }
 
 #[inline]
-unsafe fn stack_iterator_read_ref(self_: &StackIterator) -> StackIterator {
+const unsafe fn stack_iterator_read_ref(self_: &StackIterator) -> StackIterator {
     ptr::read(self_)
 }
 
