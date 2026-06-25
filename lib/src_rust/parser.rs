@@ -1636,7 +1636,7 @@ unsafe fn ts_parser__do_all_potential_reductions(
     starting_version: StackVersion,
     lookahead_symbol: TSSymbol,
 ) -> bool {
-    let lang = self_.language as *const TSLanguageFull;
+    let lang = self_.language.cast::<TSLanguageFull>();
     let initial_version_count = ts_stack_version_count(&*self_.stack);
 
     let mut can_shift_lookahead_symbol = false;
@@ -2053,7 +2053,7 @@ unsafe fn ts_parser__handle_error(
     while v < version_count {
         if !did_insert_missing_token {
             let state = ts_stack_state(&*self_.stack, v);
-            let language = self_.language as *const TSLanguageFull;
+            let language = self_.language.cast::<TSLanguageFull>();
             let mut missing_symbol: TSSymbol = 1;
             while u32::from(missing_symbol) < (*language).token_count {
                 let state_after_missing_symbol =
@@ -2393,7 +2393,7 @@ unsafe fn ts_parser__advance(
         // If the current lookahead token is a keyword that is not valid, but the
         // default word token *is* valid, then treat the lookahead token as the word
         // token instead.
-        let language = self_.language as *const TSLanguageFull;
+        let language = self_.language.cast::<TSLanguageFull>();
         if ts_subtree_is_keyword(lookahead)
             && ts_subtree_symbol(lookahead) != (*language).keyword_capture_token
             && !ts_language_is_reserved_word(
