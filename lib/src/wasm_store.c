@@ -10,7 +10,6 @@
 #include "./language.h"
 #include "./lexer.h"
 #include "./wasm/wasm-stdlib.h"
-#include "./wasm_store.h"
 
 #include <string.h>
 #include <wasm.h>
