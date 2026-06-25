@@ -732,7 +732,7 @@ fn parse_sample(sample: &Sample, cli: &Path, extra_args: &[&str]) -> Result<Outp
         .with_context(|| format!("Failed to run {command:?}"))
 }
 
-pub(crate) fn materialize_c_core(root: &Path, rev: &str) -> Result<PathBuf> {
+pub fn materialize_c_core(root: &Path, rev: &str) -> Result<PathBuf> {
     let cache_dir = std::env::temp_dir()
         .join("tree-sitter-core-parity-c-src")
         .join(sanitize_revision(rev));
@@ -775,7 +775,7 @@ pub(crate) fn materialize_c_core(root: &Path, rev: &str) -> Result<PathBuf> {
     Ok(src_dir)
 }
 
-pub(crate) fn preflight_c_core_revision(root: &Path, rev: &str) -> Result<()> {
+pub fn preflight_c_core_revision(root: &Path, rev: &str) -> Result<()> {
     let lib_c = git_output(root, ["show", &format!("{rev}:lib/src/lib.c")])?;
     let lib_c = String::from_utf8(lib_c)?;
     for required_include in [
