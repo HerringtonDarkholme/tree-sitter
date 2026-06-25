@@ -894,7 +894,7 @@ unsafe extern "C" fn pop_count_callback(
     }
 }
 
-unsafe extern "C" fn pop_pending_callback(
+const unsafe extern "C" fn pop_pending_callback(
     _payload: *mut c_void,
     iterator: *const StackIterator,
 ) -> StackAction {
