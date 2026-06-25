@@ -6,7 +6,6 @@ extern "C" {
 #endif
 
 #include "./length.h"
-#include "./subtree.h"
 #include "tree_sitter/api.h"
 #include "./parser.h"
 
