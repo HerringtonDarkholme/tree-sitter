@@ -6,7 +6,10 @@ use core::ffi::c_void;
 use crate::ffi::{TSLanguage, TSNode, TSPoint, TSRange, TSSymbol};
 
 use super::alloc::{ts_calloc, ts_free, ts_malloc};
-use super::get_changed_ranges::{ts_range_array_get_changed_ranges, ts_range_edit_ref, TSRangeArray};
+use super::get_changed_ranges::{
+    ts_range_array_get_changed_ranges, ts_range_edit_ref, ts_subtree_get_changed_ranges,
+    TSRangeArray,
+};
 use super::language::{ts_language_copy, ts_language_delete};
 use super::length::{length_add, Length};
 use super::node::ts_node_new;
@@ -21,15 +24,6 @@ use super::tree_cursor::{ts_tree_cursor_init, TreeCursor, TreeCursorEntryArray};
 // ---------------------------------------------------------------------------
 
 extern "C" {
-    fn ts_subtree_get_changed_ranges(
-        old_tree: *const Subtree,
-        new_tree: *const Subtree,
-        cursor1: *mut TreeCursor,
-        cursor2: *mut TreeCursor,
-        language: *const TSLanguage,
-        included_range_differences: *const TSRangeArray,
-        ranges: *mut *mut TSRange,
-    ) -> u32;
     fn memcpy(dest: *mut c_void, src: *const c_void, n: usize) -> *mut c_void;
 
     #[cfg(not(target_os = "windows"))]
