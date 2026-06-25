@@ -1470,7 +1470,8 @@ pub unsafe fn ts_stack_print_dot_graph(
     language: *const TSLanguage,
     mut f: *mut c_void,
 ) -> bool {
-    array_reserve(&mut (*self_).iterators, 32);
+    let stack = &mut *self_;
+    array_reserve(&mut stack.iterators, 32);
     if f.is_null() {
         f = stderr;
     }
@@ -1558,14 +1559,14 @@ pub unsafe fn ts_stack_print_dot_graph(
             subtree_count: 0,
             is_pending: false,
         };
-        array_push(&mut (*self_).iterators, iter);
+        array_push(&mut stack.iterators, iter);
     }
 
     loop {
         let mut all_iterators_done = true;
 
-        for i in 0..(*self_).iterators.size {
-            let iterator = stack_iterator_array_read(&(*self_).iterators, i);
+        for i in 0..stack.iterators.size {
+            let iterator = stack_iterator_array_read(&stack.iterators, i);
             let mut node = iterator.node;
 
             for j in 0..visited_nodes.size {
@@ -1655,10 +1656,10 @@ pub unsafe fn ts_stack_print_dot_graph(
 
                 let next_iterator: &mut StackIterator;
                 if j == 0 {
-                    next_iterator = stack_iterator_array_get_mut(&mut (*self_).iterators, i);
+                    next_iterator = stack_iterator_array_get_mut(&mut stack.iterators, i);
                 } else {
-                    array_push(&mut (*self_).iterators, stack_iterator_read_ref(&iterator));
-                    next_iterator = stack_iterator_array_back_mut(&(*self_).iterators);
+                    array_push(&mut stack.iterators, stack_iterator_read_ref(&iterator));
+                    next_iterator = stack_iterator_array_back_mut(&stack.iterators);
                 }
                 next_iterator.node = link.node;
             }
