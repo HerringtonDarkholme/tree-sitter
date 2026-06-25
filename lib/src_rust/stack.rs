@@ -1589,13 +1589,14 @@ pub unsafe fn ts_stack_print_dot_graph(
                 continue;
             }
             all_iterators_done = false;
+            let node_ref = &*node;
 
             fprintf(f, b"node_%p [\0".as_ptr() as *const i8, node as *const c_void);
-            if (*node).state == ERROR_STATE {
+            if node_ref.state == ERROR_STATE {
                 fprintf(f, b"label=\"?\"\0".as_ptr() as *const i8);
-            } else if (*node).link_count == 1
-                && !(*node).links[0].subtree.ptr.is_null()
-                && ts_subtree_extra((*node).links[0].subtree)
+            } else if node_ref.link_count == 1
+                && !node_ref.links[0].subtree.ptr.is_null()
+                && ts_subtree_extra(node_ref.links[0].subtree)
             {
                 fprintf(
                     f,
@@ -1605,22 +1606,22 @@ pub unsafe fn ts_stack_print_dot_graph(
                 fprintf(
                     f,
                     b"label=\"%d\"\0".as_ptr() as *const i8,
-                    (*node).state as i32,
+                    node_ref.state as i32,
                 );
             }
 
             fprintf(
                 f,
                 b" tooltip=\"position: %u,%u\nnode_count:%u\nerror_cost: %u\ndynamic_precedence: %d\"];\n\0".as_ptr() as *const i8,
-                (*node).position.extent.row + 1,
-                (*node).position.extent.column,
-                (*node).node_count,
-                (*node).error_cost,
-                (*node).dynamic_precedence,
+                node_ref.position.extent.row + 1,
+                node_ref.position.extent.column,
+                node_ref.node_count,
+                node_ref.error_cost,
+                node_ref.dynamic_precedence,
             );
 
-            for j in 0..(*node).link_count as usize {
-                let link = (*node).links[j];
+            for j in 0..node_ref.link_count as usize {
+                let link = node_ref.links[j];
                 fprintf(
                     f,
                     b"node_%p -> node_%p [\0".as_ptr() as *const i8,
