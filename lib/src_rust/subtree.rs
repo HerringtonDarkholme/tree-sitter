@@ -2139,7 +2139,7 @@ unsafe fn ts_subtree__print_dot_graph(
         b", tooltip=\"range: %u - %u\nstate: %d\nerror-cost: %u\nhas-changes: %u\ndepends-on-column: %u\ndescendant-count: %u\nrepeat-depth: %u\nlookahead-bytes: %u\0".as_ptr() as *const i8,
         start_offset,
         end_offset,
-        ts_subtree_parse_state(tree) as i32,
+        i32::from(ts_subtree_parse_state(tree)),
         ts_subtree_error_cost(tree),
         ts_subtree_has_changes(tree) as u32,
         ts_subtree_depends_on_column(tree) as u32,
