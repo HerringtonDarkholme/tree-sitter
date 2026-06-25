@@ -589,8 +589,7 @@ unsafe fn iterator_compare(
 // Exported functions — skeletons
 // ---------------------------------------------------------------------------
 
-#[no_mangle]
-pub unsafe extern "C" fn ts_range_array_intersects(
+pub unsafe fn ts_range_array_intersects(
     self_: *const TSRangeArray,
     start_index: u32,
     start_byte: u32,
@@ -664,8 +663,7 @@ pub(crate) unsafe fn ts_range_array_get_changed_ranges_ref(
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn ts_range_array_get_changed_ranges(
+pub unsafe fn ts_range_array_get_changed_ranges(
     old_ranges: *const TSRange,
     old_range_count: u32,
     new_ranges: *const TSRange,
@@ -798,8 +796,7 @@ mod tests {
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn ts_subtree_get_changed_ranges(
+pub unsafe fn ts_subtree_get_changed_ranges(
     old_tree: *const Subtree,
     new_tree: *const Subtree,
     cursor1: *mut TreeCursor,
