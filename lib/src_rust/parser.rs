@@ -642,33 +642,29 @@ unsafe fn ts_parser__compare_versions(a: ErrorStatus, b: ErrorStatus) -> ErrorCo
     if !a.is_in_error && b.is_in_error {
         if a.cost < b.cost {
             return ErrorComparison::TakeLeft;
-        } else {
-            return ErrorComparison::PreferLeft;
         }
+        return ErrorComparison::PreferLeft;
     }
 
     if a.is_in_error && !b.is_in_error {
         if b.cost < a.cost {
             return ErrorComparison::TakeRight;
-        } else {
-            return ErrorComparison::PreferRight;
         }
+        return ErrorComparison::PreferRight;
     }
 
     if a.cost < b.cost {
         if (b.cost - a.cost) * (1 + a.node_count) > MAX_COST_DIFFERENCE {
             return ErrorComparison::TakeLeft;
-        } else {
-            return ErrorComparison::PreferLeft;
         }
+        return ErrorComparison::PreferLeft;
     }
 
     if b.cost < a.cost {
         if (a.cost - b.cost) * (1 + b.node_count) > MAX_COST_DIFFERENCE {
             return ErrorComparison::TakeRight;
-        } else {
-            return ErrorComparison::PreferRight;
         }
+        return ErrorComparison::PreferRight;
     }
 
     if a.dynamic_precedence > b.dynamic_precedence {
@@ -2501,9 +2497,8 @@ unsafe fn ts_parser__condense_stack(self_: &mut TSParser) -> u32 {
                     if ts_stack_merge(self_.stack, j, i) {
                         i -= 1;
                         break;
-                    } else {
-                        ts_stack_swap_versions(self_.stack, i, j);
                     }
+                    ts_stack_swap_versions(self_.stack, i, j);
                 }
 
                 ErrorComparison::TakeRight => {
