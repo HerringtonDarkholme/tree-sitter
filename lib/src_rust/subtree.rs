@@ -1899,7 +1899,7 @@ unsafe fn ts_subtree__write_to_string(
     field_name: *const i8,
 ) -> usize {
     if self_.ptr.is_null() {
-        return snprintf(string, limit, b"(NULL)\0".as_ptr() as *const i8) as usize;
+        return snprintf(string, limit, b"(NULL)\0".as_ptr().cast::<i8>()) as usize;
     }
 
     let mut cursor = string;
@@ -1909,7 +1909,7 @@ unsafe fn ts_subtree__write_to_string(
     } else {
         &mut string_measuring
     };
-    let is_root = field_name == ROOT_FIELD.as_ptr() as *const i8;
+    let is_root = field_name == ROOT_FIELD.as_ptr().cast::<i8>();
     let is_visible = include_all
         || ts_subtree_missing(self_)
         || (if alias_symbol != 0 {
@@ -1921,11 +1921,11 @@ unsafe fn ts_subtree__write_to_string(
     if is_visible {
         if !is_root {
             cursor = cursor.add(
-                snprintf(*writer, limit, b" \0".as_ptr() as *const i8) as usize,
+                snprintf(*writer, limit, b" \0".as_ptr().cast::<i8>()) as usize,
             );
             if !field_name.is_null() {
                 cursor = cursor.add(
-                    snprintf(*writer, limit, b"%s: \0".as_ptr() as *const i8, field_name)
+                    snprintf(*writer, limit, b"%s: \0".as_ptr().cast::<i8>(), field_name)
                         as usize,
                 );
             }
@@ -1936,7 +1936,7 @@ unsafe fn ts_subtree__write_to_string(
             && (*self_.ptr).size.bytes > 0
         {
             cursor = cursor.add(
-                snprintf(*writer, limit, b"(UNEXPECTED \0".as_ptr() as *const i8) as usize,
+                snprintf(*writer, limit, b"(UNEXPECTED \0".as_ptr().cast::<i8>()) as usize,
             );
             cursor = cursor.add(ts_subtree__write_char_to_string(
                 *writer,
@@ -1952,11 +1952,11 @@ unsafe fn ts_subtree__write_to_string(
             let symbol_name = ts_language_symbol_name(language, symbol);
             if ts_subtree_missing(self_) {
                 cursor = cursor.add(
-                    snprintf(*writer, limit, b"(MISSING \0".as_ptr() as *const i8) as usize,
+                    snprintf(*writer, limit, b"(MISSING \0".as_ptr().cast::<i8>()) as usize,
                 );
                 if alias_is_named || ts_subtree_named(self_) {
                     cursor = cursor.add(
-                        snprintf(*writer, limit, b"%s\0".as_ptr() as *const i8, symbol_name)
+                        snprintf(*writer, limit, b"%s\0".as_ptr().cast::<i8>(), symbol_name)
                             as usize,
                     );
                 } else {
@@ -1964,14 +1964,14 @@ unsafe fn ts_subtree__write_to_string(
                         snprintf(
                             *writer,
                             limit,
-                            b"\"%s\"\0".as_ptr() as *const i8,
+                            b"\"%s\"\0".as_ptr().cast::<i8>(),
                             symbol_name,
                         ) as usize,
                     );
                 }
             } else {
                 cursor = cursor.add(
-                    snprintf(*writer, limit, b"(%s\0".as_ptr() as *const i8, symbol_name)
+                    snprintf(*writer, limit, b"(%s\0".as_ptr().cast::<i8>(), symbol_name)
                         as usize,
                 );
             }
@@ -1985,11 +1985,11 @@ unsafe fn ts_subtree__write_to_string(
         let symbol_name = ts_language_symbol_name(language, symbol);
         if ts_subtree_child_count(self_) > 0 {
             cursor = cursor.add(
-                snprintf(*writer, limit, b"(%s\0".as_ptr() as *const i8, symbol_name) as usize,
+                snprintf(*writer, limit, b"(%s\0".as_ptr().cast::<i8>(), symbol_name) as usize,
             );
         } else if ts_subtree_named(self_) {
             cursor = cursor.add(
-                snprintf(*writer, limit, b"(%s)\0".as_ptr() as *const i8, symbol_name)
+                snprintf(*writer, limit, b"(%s)\0".as_ptr().cast::<i8>(), symbol_name)
                     as usize,
             );
         } else {
@@ -1997,7 +1997,7 @@ unsafe fn ts_subtree__write_to_string(
                 snprintf(
                     *writer,
                     limit,
-                    b"(\"%s\")\0".as_ptr() as *const i8,
+                    b"(\"%s\")\0".as_ptr().cast::<i8>(),
                     symbol_name,
                 ) as usize,
             );
