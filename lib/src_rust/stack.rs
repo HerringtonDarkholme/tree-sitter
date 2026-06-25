@@ -713,11 +713,12 @@ unsafe fn stack_head_delete(
 unsafe fn ts_stack__add_version(
     self_: &mut Stack,
     original_version: StackVersion,
-    node: *mut StackNode,
+    node: &mut StackNode,
 ) -> StackVersion {
+    let node_ptr = ptr::from_mut(node);
     let original_head = stack_head(self_, original_version);
     let head = StackHead {
-        node,
+        node: node_ptr,
         node_count_at_last_error: original_head.node_count_at_last_error,
         last_external_token: original_head.last_external_token,
         status: StackStatus::Active,
@@ -725,7 +726,7 @@ unsafe fn ts_stack__add_version(
         summary: ptr::null_mut(),
     };
     array_push(&mut self_.heads, head);
-    stack_node_retain(&mut *node);
+    stack_node_retain(node);
     let head = stack_head_array_back(&self_.heads);
     if !head.last_external_token.ptr.is_null() {
         ts_subtree_retain(head.last_external_token);
@@ -752,7 +753,7 @@ unsafe fn ts_stack__add_slice(
         }
     }
 
-    let version = ts_stack__add_version(self_, original_version, node);
+    let version = ts_stack__add_version(self_, original_version, &mut *node);
     let slice = StackSlice {
         subtrees: subtree_array_read_ref(subtrees),
         version,
