@@ -753,7 +753,7 @@ pub unsafe fn ts_subtree_parse_state(self_: Subtree) -> TSStateId {
 #[inline]
 pub unsafe fn ts_subtree_lookahead_bytes(self_: Subtree) -> u32 {
     if self_.data.is_inline() {
-        self_.data.lookahead_bytes() as u32
+        u32::from(self_.data.lookahead_bytes())
     } else {
         (*self_.ptr).lookahead_bytes
     }
@@ -813,10 +813,10 @@ pub unsafe fn ts_subtree_leaf_parse_state(self_: Subtree) -> TSStateId {
 pub unsafe fn ts_subtree_padding(self_: Subtree) -> Length {
     if self_.data.is_inline() {
         Length {
-            bytes: self_.data.padding_bytes as u32,
+            bytes: u32::from(self_.data.padding_bytes),
             extent: TSPoint {
-                row: self_.data.padding_rows() as u32,
-                column: self_.data.padding_columns as u32,
+                row: u32::from(self_.data.padding_rows()),
+                column: u32::from(self_.data.padding_columns),
             },
         }
     } else {
@@ -828,10 +828,10 @@ pub unsafe fn ts_subtree_padding(self_: Subtree) -> Length {
 pub unsafe fn ts_subtree_size(self_: Subtree) -> Length {
     if self_.data.is_inline() {
         Length {
-            bytes: self_.data.size_bytes as u32,
+            bytes: u32::from(self_.data.size_bytes),
             extent: TSPoint {
                 row: 0,
-                column: self_.data.size_bytes as u32,
+                column: u32::from(self_.data.size_bytes),
             },
         }
     } else {
@@ -865,7 +865,7 @@ pub unsafe fn ts_subtree_repeat_depth(self_: Subtree) -> u32 {
     if self_.data.is_inline() {
         0
     } else {
-        (*self_.ptr).data.children.repeat_depth as u32
+        u32::from((*self_.ptr).data.children.repeat_depth)
     }
 }
 
@@ -874,7 +874,7 @@ pub unsafe fn ts_subtree_is_repetition(self_: Subtree) -> u32 {
     if self_.data.is_inline() {
         0
     } else {
-        (!(*self_.ptr).named() && !(*self_.ptr).visible() && (*self_.ptr).child_count != 0) as u32
+        u32::from(!(*self_.ptr).named() && !(*self_.ptr).visible() && (*self_.ptr).child_count != 0)
     }
 }
 
