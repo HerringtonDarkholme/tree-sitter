@@ -705,8 +705,9 @@ unsafe fn stack_node_add_link(
     }
 
     stack_node_retain(stack_node_mut(link.node));
-    let mut node_count = (*link.node).node_count;
-    let mut dynamic_precedence = (*link.node).dynamic_precedence;
+    let link_node = stack_node_ref(link.node);
+    let mut node_count = link_node.node_count;
+    let mut dynamic_precedence = link_node.dynamic_precedence;
     self_.links[self_.link_count as usize] = link;
     self_.link_count += 1;
 
