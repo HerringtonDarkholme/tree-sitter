@@ -2076,7 +2076,7 @@ unsafe fn ts_subtree__write_to_string(
 
     if is_visible {
         cursor = cursor.add(
-            snprintf(*writer, limit, b")\0".as_ptr() as *const i8) as usize,
+            snprintf(*writer, limit, b")\0".as_ptr().cast::<i8>()) as usize,
         );
     }
 
@@ -2099,9 +2099,9 @@ pub unsafe fn ts_subtree_string(
         include_all,
         alias_symbol,
         alias_is_named,
-        ROOT_FIELD.as_ptr() as *const i8,
+        ROOT_FIELD.as_ptr().cast::<i8>(),
     ) + 1;
-    let result = ts_malloc(size) as *mut i8;
+    let result = ts_malloc(size).cast::<i8>();
     ts_subtree__write_to_string(
         self_,
         result,
@@ -2110,7 +2110,7 @@ pub unsafe fn ts_subtree_string(
         include_all,
         alias_symbol,
         alias_is_named,
-        ROOT_FIELD.as_ptr() as *const i8,
+        ROOT_FIELD.as_ptr().cast::<i8>(),
     );
     result
 }
