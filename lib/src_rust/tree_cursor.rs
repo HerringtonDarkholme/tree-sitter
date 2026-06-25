@@ -627,19 +627,23 @@ pub unsafe extern "C" fn ts_tree_cursor_goto_first_child_for_point(
 // Navigation: siblings, parent, descendant
 // ---------------------------------------------------------------------------
 
+unsafe fn tree_cursor_goto_next_sibling_internal(cursor: &mut TreeCursor) -> TreeCursorStep {
+    ts_tree_cursor_goto_sibling_internal(cursor, ts_tree_cursor_child_iterator_next)
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn ts_tree_cursor_goto_next_sibling_internal(
     _self: *mut TSTreeCursor,
 ) -> TreeCursorStep {
-    let cursor = &mut *(_self as *mut TreeCursor);
-    ts_tree_cursor_goto_sibling_internal(cursor, ts_tree_cursor_child_iterator_next)
+    tree_cursor_goto_next_sibling_internal(&mut *(_self as *mut TreeCursor))
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_tree_cursor_goto_next_sibling(
     _self: *mut TSTreeCursor,
 ) -> bool {
-    match ts_tree_cursor_goto_next_sibling_internal(_self) {
+    let cursor = &mut *(_self as *mut TreeCursor);
+    match tree_cursor_goto_next_sibling_internal(cursor) {
         TreeCursorStep::TreeCursorStepHidden => {
             ts_tree_cursor_goto_first_child(_self);
             true
@@ -649,12 +653,7 @@ pub unsafe extern "C" fn ts_tree_cursor_goto_next_sibling(
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn ts_tree_cursor_goto_previous_sibling_internal(
-    _self: *mut TSTreeCursor,
-) -> TreeCursorStep {
-    let cursor = &mut *(_self as *mut TreeCursor);
-
+unsafe fn tree_cursor_goto_previous_sibling_internal(cursor: &mut TreeCursor) -> TreeCursorStep {
     let step = ts_tree_cursor_goto_sibling_internal(
         cursor,
         ts_tree_cursor_child_iterator_previous,
@@ -689,10 +688,18 @@ pub unsafe extern "C" fn ts_tree_cursor_goto_previous_sibling_internal(
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn ts_tree_cursor_goto_previous_sibling_internal(
+    _self: *mut TSTreeCursor,
+) -> TreeCursorStep {
+    tree_cursor_goto_previous_sibling_internal(&mut *(_self as *mut TreeCursor))
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn ts_tree_cursor_goto_previous_sibling(
     _self: *mut TSTreeCursor,
 ) -> bool {
-    match ts_tree_cursor_goto_previous_sibling_internal(_self) {
+    let cursor = &mut *(_self as *mut TreeCursor);
+    match tree_cursor_goto_previous_sibling_internal(cursor) {
         TreeCursorStep::TreeCursorStepHidden => {
             ts_tree_cursor_goto_last_child(_self);
             true
