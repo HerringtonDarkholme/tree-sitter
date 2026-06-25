@@ -36,7 +36,7 @@ use super::lexer::{
     Lexer,
 };
 use super::stack::{
-    array_assign, array_back, array_back_ref, array_clear, array_delete, array_erase,
+    array_assign, array_back_ref, array_clear, array_delete, array_erase,
     array_get, array_get_mut, array_get_ref, array_init, array_new, array_pop, array_push,
     array_reserve, array_splice, array_swap, Array, Stack, StackSlice, StackSliceArray,
     StackSummary, StackSummaryEntry,
@@ -472,8 +472,22 @@ const unsafe fn stack_slice_subtrees_read_ref(self_: &StackSlice) -> SubtreeArra
     ptr::read(&self_.subtrees)
 }
 
+unsafe fn subtree_array_as_array(self_: &SubtreeArray) -> &Array<Subtree> {
+    &*ptr::from_ref(self_).cast::<Array<Subtree>>()
+}
+
+unsafe fn subtree_array_as_array_mut(self_: &mut SubtreeArray) -> &mut Array<Subtree> {
+    &mut *ptr::from_mut(self_).cast::<Array<Subtree>>()
+}
+
+unsafe fn mutable_subtree_array_as_array(
+    self_: &MutableSubtreeArray,
+) -> &Array<MutableSubtree> {
+    &*ptr::from_ref(self_).cast::<Array<MutableSubtree>>()
+}
+
 unsafe fn subtree_array_get(self_: &SubtreeArray, index: u32) -> Subtree {
-    *array_get(std::ptr::from_ref::<SubtreeArray>(self_).cast::<Array<Subtree>>(), index)
+    *array_get_ref(subtree_array_as_array(self_), index)
 }
 
 unsafe fn stack_summary_array_get(self_: &StackSummary, index: u32) -> &StackSummaryEntry {
@@ -481,7 +495,7 @@ unsafe fn stack_summary_array_get(self_: &StackSummary, index: u32) -> &StackSum
 }
 
 unsafe fn mutable_subtree_array_back(self_: &MutableSubtreeArray) -> MutableSubtree {
-    *array_back(std::ptr::from_ref::<MutableSubtreeArray>(self_).cast::<Array<MutableSubtree>>())
+    *array_back_ref(mutable_subtree_array_as_array(self_))
 }
 
 unsafe fn ts_range_array_get(self_: &TSRangeArray, index: u32) -> &TSRange {
@@ -1369,9 +1383,8 @@ unsafe fn ts_parser__select_children(
     left: Subtree,
     children: &SubtreeArray,
 ) -> bool {
-    let scratch_trees =
-        &mut *std::ptr::addr_of_mut!(self_.scratch_trees).cast::<Array<Subtree>>();
-    let children = &*std::ptr::from_ref::<SubtreeArray>(children).cast::<Array<Subtree>>();
+    let scratch_trees = subtree_array_as_array_mut(&mut self_.scratch_trees);
+    let children = subtree_array_as_array(children);
     array_assign(scratch_trees, children);
 
     let scratch_tree = ts_subtree_new_node(
@@ -1990,7 +2003,7 @@ unsafe fn ts_parser__recover(
         );
         let slot = &mut stack_slice_array_get_mut(&mut pop, 0).subtrees;
         array_push(
-            std::ptr::from_mut::<SubtreeArray>(slot).cast::<Array<Subtree>>(),
+            subtree_array_as_array_mut(slot),
             ts_subtree_from_mut(error_repeat),
         );
         error_repeat = ts_subtree_new_node(
