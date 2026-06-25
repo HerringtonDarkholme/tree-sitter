@@ -506,8 +506,7 @@ unsafe fn stack_node_release(
             return;
         }
 
-        let mut first_predecessor: *mut StackNode = ptr::null_mut();
-        if node.link_count > 0 {
+        let first_predecessor = if node.link_count > 0 {
             let mut i = node.link_count as i32 - 1;
             while i > 0 {
                 let link = node.links[i as usize];
@@ -521,8 +520,10 @@ unsafe fn stack_node_release(
             if !link.subtree.ptr.is_null() {
                 ts_subtree_release(subtree_pool, link.subtree);
             }
-            first_predecessor = link.node;
-        }
+            link.node
+        } else {
+            ptr::null_mut()
+        };
 
         if pool.size < MAX_NODE_POOL_SIZE as u32 {
             array_push(pool, self_);
