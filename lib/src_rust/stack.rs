@@ -853,7 +853,10 @@ unsafe fn stack__iter(
                 }
 
                 next_iterator.node = link.node;
-                if !link.subtree.ptr.is_null() {
+                if link.subtree.ptr.is_null() {
+                    next_iterator.subtree_count += 1;
+                    next_iterator.is_pending = false;
+                } else {
                     if include_subtrees {
                         array_push(
                             ptr::addr_of_mut!(next_iterator.subtrees).cast::<Array<Subtree>>(),
@@ -868,9 +871,6 @@ unsafe fn stack__iter(
                             next_iterator.is_pending = false;
                         }
                     }
-                } else {
-                    next_iterator.subtree_count += 1;
-                    next_iterator.is_pending = false;
                 }
                 j += 1;
             }
