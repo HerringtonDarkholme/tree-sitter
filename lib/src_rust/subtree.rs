@@ -1754,9 +1754,13 @@ pub unsafe fn ts_subtree_last_external_token(mut tree: Subtree) -> Subtree {
     if !ts_subtree_has_external_tokens(tree) {
         return NULL_SUBTREE;
     }
-    while (*tree.ptr).child_count > 0 {
+    loop {
+        let data = &*tree.ptr;
+        if data.child_count == 0 {
+            break;
+        }
         let children = ts_subtree_children(tree);
-        let mut i = (*tree.ptr).child_count as usize;
+        let mut i = data.child_count as usize;
         while i > 0 {
             i -= 1;
             let child = *children.add(i);
