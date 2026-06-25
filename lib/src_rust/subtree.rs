@@ -980,12 +980,12 @@ pub unsafe fn ts_subtree_is_eof(self_: Subtree) -> bool {
 // --- #32: from_mut, to_mut_unsafe ---
 
 #[inline]
-pub fn ts_subtree_from_mut(self_: MutableSubtree) -> Subtree {
+pub const fn ts_subtree_from_mut(self_: MutableSubtree) -> Subtree {
     Subtree { data: unsafe { self_.data } }
 }
 
 #[inline]
-pub fn ts_subtree_to_mut_unsafe(self_: Subtree) -> MutableSubtree {
+pub const fn ts_subtree_to_mut_unsafe(self_: Subtree) -> MutableSubtree {
     MutableSubtree { data: unsafe { self_.data } }
 }
 
