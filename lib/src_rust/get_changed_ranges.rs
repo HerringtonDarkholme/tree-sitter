@@ -134,6 +134,24 @@ fn ts_range_edit_ref(range: &mut TSRange, edit: &TSInputEdit) {
     }
 }
 
+unsafe fn ts_range_array_intersects_ref(
+    ranges: &TSRangeArray,
+    start_index: u32,
+    start_byte: u32,
+    end_byte: u32,
+) -> bool {
+    for i in start_index..ranges.size {
+        let range = array_get_range(ranges, i);
+        if range.end_byte > start_byte {
+            if range.start_byte >= end_byte {
+                break;
+            }
+            return true;
+        }
+    }
+    false
+}
+
 // ---------------------------------------------------------------------------
 // Array helpers for TreeCursorEntry stack (mirrors tree_cursor.rs helpers)
 // ---------------------------------------------------------------------------
@@ -518,16 +536,7 @@ pub unsafe extern "C" fn ts_range_array_intersects(
     end_byte: u32,
 ) -> bool {
     let ranges = &*self_;
-    for i in start_index..ranges.size {
-        let range = array_get_range(ranges, i);
-        if range.end_byte > start_byte {
-            if range.start_byte >= end_byte {
-                break;
-            }
-            return true;
-        }
-    }
-    false
+    ts_range_array_intersects_ref(ranges, start_index, start_byte, end_byte)
 }
 
 #[no_mangle]
@@ -641,6 +650,14 @@ mod tests {
         assert_eq!(actual.end_point.column, expected.end_point.column);
     }
 
+    fn range_array(ranges: &mut [TSRange]) -> TSRangeArray {
+        TSRangeArray {
+            contents: ranges.as_mut_ptr(),
+            size: ranges.len() as u32,
+            capacity: ranges.len() as u32,
+        }
+    }
+
     #[test]
     fn edit_range_after_changed_range() {
         let mut edited_range = range(14, 18);
@@ -682,6 +699,22 @@ mod tests {
         ts_range_edit_ref(&mut edited_range, &edit());
 
         assert_range_eq(edited_range, range(1, 4));
+    }
+
+    #[test]
+    fn range_array_intersects_overlapping_range() {
+        let mut ranges = [range(2, 4), range(7, 9), range(12, 15)];
+        let range_array = range_array(&mut ranges);
+
+        assert!(unsafe { ts_range_array_intersects_ref(&range_array, 0, 8, 11) });
+    }
+
+    #[test]
+    fn range_array_intersects_respects_start_index() {
+        let mut ranges = [range(2, 4), range(7, 9), range(12, 15)];
+        let range_array = range_array(&mut ranges);
+
+        assert!(!unsafe { ts_range_array_intersects_ref(&range_array, 2, 8, 11) });
     }
 }
 
@@ -729,8 +762,8 @@ pub unsafe extern "C" fn ts_subtree_get_changed_ranges(
         // internally if they contain a range of text that was previously
         // excluded from the parse, and is now included, or vice-versa.
         if comparison == IteratorComparison::IteratorMatches
-            && ts_range_array_intersects(
-                included_range_differences,
+            && ts_range_array_intersects_ref(
+                included_range_differences_array,
                 included_range_difference_index,
                 position.bytes,
                 iterator_end_position(&old_iter).bytes,
