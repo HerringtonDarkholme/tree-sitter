@@ -1127,12 +1127,12 @@ pub(crate) unsafe fn ts_stack_halted_version_count(self_: &Stack) -> u32 {
 
 /// Get the state at the top of a version.
 pub(crate) unsafe fn ts_stack_state(self_: &Stack, version: StackVersion) -> TSStateId {
-    (*stack_head(self_, version).node).state
+    stack_node_ref(stack_head(self_, version).node).state
 }
 
 /// Get the position of a version.
 pub(crate) unsafe fn ts_stack_position(self_: &Stack, version: StackVersion) -> Length {
-    (*stack_head(self_, version).node).position
+    stack_node_ref(stack_head(self_, version).node).position
 }
 
 /// Get the last external token for a version.
@@ -1163,10 +1163,11 @@ pub(crate) unsafe fn ts_stack_set_last_external_token(
 /// Get the error cost for a version.
 pub(crate) unsafe fn ts_stack_error_cost(self_: &Stack, version: StackVersion) -> u32 {
     let head = stack_head(self_, version);
-    let mut result = (*head.node).error_cost;
+    let node = stack_node_ref(head.node);
+    let mut result = node.error_cost;
     if head.status == StackStatus::Paused
-        || ((*head.node).state == ERROR_STATE
-            && (*head.node).links[0].subtree.ptr.is_null())
+        || (node.state == ERROR_STATE
+            && node.links[0].subtree.ptr.is_null())
     {
         result += ERROR_COST_PER_RECOVERY;
     }
@@ -1179,10 +1180,11 @@ pub(crate) unsafe fn ts_stack_node_count_since_error(
     version: StackVersion,
 ) -> u32 {
     let head = stack_head_mut(self_, version);
-    if (*head.node).node_count < head.node_count_at_last_error {
-        head.node_count_at_last_error = (*head.node).node_count;
+    let node = stack_node_ref(head.node);
+    if node.node_count < head.node_count_at_last_error {
+        head.node_count_at_last_error = node.node_count;
     }
-    (*head.node).node_count - head.node_count_at_last_error
+    node.node_count - head.node_count_at_last_error
 }
 
 /// Push a subtree onto a version.
@@ -1319,7 +1321,7 @@ pub(crate) unsafe fn ts_stack_dynamic_precedence(
     self_: &Stack,
     version: StackVersion,
 ) -> i32 {
-    (*stack_head(self_, version).node).dynamic_precedence
+    stack_node_ref(stack_head(self_, version).node).dynamic_precedence
 }
 
 /// Check if a version has advanced since the last error.
