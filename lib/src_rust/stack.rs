@@ -981,7 +981,7 @@ unsafe extern "C" fn summarize_stack_callback(
 
 /// Create a new parse stack.
 pub unsafe fn ts_stack_new(subtree_pool: *mut SubtreePool) -> *mut Stack {
-    let self_ = ts_calloc(1, std::mem::size_of::<Stack>()) as *mut Stack;
+    let self_ = ts_calloc(1, std::mem::size_of::<Stack>()).cast::<Stack>();
     let stack = &mut *self_;
 
     array_init(&mut stack.heads);
@@ -1032,12 +1032,12 @@ pub unsafe fn ts_stack_delete(self_: &mut Stack) {
     array_clear(heads);
     if !node_pool.contents.is_null() {
         for i in 0..node_pool.size {
-            ts_free(stack_node_pool_get(node_pool, i) as *mut c_void);
+            ts_free(stack_node_pool_get(node_pool, i).cast::<c_void>());
         }
         array_delete(node_pool);
     }
     array_delete(heads);
-    ts_free(self_ as *mut Stack as *mut c_void);
+    ts_free(ptr::from_mut(self_).cast::<c_void>());
 }
 
 /// Get the number of versions in the stack.
