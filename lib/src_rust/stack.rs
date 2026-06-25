@@ -791,7 +791,7 @@ unsafe fn stack__iter(
         let reserve_count =
             ts_subtree_alloc_size(goal_subtree_count as u32) / std::mem::size_of::<Subtree>();
         array_reserve(
-            &mut new_iterator.subtrees as *mut SubtreeArray as *mut Array<Subtree>,
+            ptr::addr_of_mut!(new_iterator.subtrees).cast::<Array<Subtree>>(),
             reserve_count as u32,
         );
     }
@@ -856,7 +856,7 @@ unsafe fn stack__iter(
                 if !link.subtree.ptr.is_null() {
                     if include_subtrees {
                         array_push(
-                            &mut next_iterator.subtrees as *mut SubtreeArray as *mut Array<Subtree>,
+                            ptr::addr_of_mut!(next_iterator.subtrees).cast::<Array<Subtree>>(),
                             link.subtree,
                         );
                         ts_subtree_retain(link.subtree);
