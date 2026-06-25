@@ -121,8 +121,8 @@ fn ts_lexer__invalidate_column_data(self_: &mut Lexer) {
 }
 
 /// Check if the lexer has reached EOF.
-const unsafe extern "C" fn ts_lexer__eof(lexer: *const TSLexer) -> bool {
-    let self_ = &*lexer.cast::<Lexer>();
+unsafe extern "C" fn ts_lexer__eof(lexer: *const TSLexer) -> bool {
+    let self_ = lexer_ref(lexer);
     self_.current_included_range_index == self_.included_range_count
 }
 
