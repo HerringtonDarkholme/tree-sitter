@@ -2943,7 +2943,7 @@ pub unsafe extern "C" fn ts_parser_parse(
     old_tree: *const TSTree,
     input: TSInput,
 ) -> *mut TSTree {
-    let parser = &mut *self_;
+    let parser = parser_ptr_mut(self_);
     let mut result: *mut TSTree = ptr::null_mut();
     if parser.language.is_null() || input.read.is_none() {
         return ptr::null_mut();
@@ -3130,13 +3130,13 @@ pub unsafe extern "C" fn ts_parser_parse_with_options(
     parse_options: TSParseOptions,
 ) -> *mut TSTree {
     {
-        let parser = &mut *self_;
+        let parser = parser_ptr_mut(self_);
         parser.parse_options = parse_options;
         parser.parse_state.payload = parse_options.payload;
     }
     let result = ts_parser_parse(self_, old_tree, input);
     // Reset parser options before further parse calls.
-    let parser = &mut *self_;
+    let parser = parser_ptr_mut(self_);
     parser.parse_options = ts_parse_options_none();
     result
 }
@@ -3181,7 +3181,7 @@ pub unsafe extern "C" fn ts_parser_set_wasm_store(
     self_: *mut TSParser,
     store: *mut TSWasmStore,
 ) {
-    let parser = &*self_;
+    let parser = parser_ptr_ref(self_);
     if !parser.language.is_null() && ts_language_is_wasm(parser.language) {
         // Copy the assigned language into the new store.
         let copy = ts_language_copy(parser.language);
@@ -3189,7 +3189,7 @@ pub unsafe extern "C" fn ts_parser_set_wasm_store(
         ts_language_delete(copy);
     }
 
-    let parser = &mut *self_;
+    let parser = parser_ptr_mut(self_);
     ts_wasm_store_delete(parser.wasm_store);
     parser.wasm_store = store;
 }
@@ -3198,12 +3198,12 @@ pub unsafe extern "C" fn ts_parser_set_wasm_store(
 pub unsafe extern "C" fn ts_parser_take_wasm_store(
     self_: *mut TSParser,
 ) -> *mut TSWasmStore {
-    let parser = &*self_;
+    let parser = parser_ptr_ref(self_);
     if !parser.language.is_null() && ts_language_is_wasm(parser.language) {
         ts_parser_set_language(self_, ptr::null());
     }
 
-    let parser = &mut *self_;
+    let parser = parser_ptr_mut(self_);
     let result = parser.wasm_store;
     parser.wasm_store = ptr::null_mut();
     result
