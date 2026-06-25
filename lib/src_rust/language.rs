@@ -660,7 +660,7 @@ pub unsafe extern "C" fn ts_language_metadata(
 ) -> *const TSLanguageMetadata {
     let l = lang(self_);
     if (*l).abi_version >= LANGUAGE_VERSION_WITH_RESERVED_WORDS {
-        &(*l).metadata
+        ptr::addr_of!((*l).metadata)
     } else {
         ptr::null()
     }
