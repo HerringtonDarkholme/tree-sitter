@@ -82,9 +82,9 @@ pub unsafe extern "C" fn ts_point_edit(
     byte: *mut u32,
     edit: *const TSInputEdit,
 ) {
-    let point = &mut *point;
-    let byte = &mut *byte;
-    let edit = &*edit;
+    let point = point.as_mut().unwrap_unchecked();
+    let byte = byte.as_mut().unwrap_unchecked();
+    let edit = edit.as_ref().unwrap_unchecked();
 
     point_edit(point, byte, edit);
 }
