@@ -749,7 +749,7 @@ unsafe fn ts_parser__call_main_lex_fn(
     if ts_language_is_wasm(self_.language) {
         ts_wasm_store_call_lex_main(self_.wasm_store, lex_mode.lex_state)
     } else {
-        let lang = self_.language as *const TSLanguageFull;
+        let lang = self_.language.cast::<TSLanguageFull>();
         ((*lang).lex_fn.unwrap())(&mut self_.lexer.data, lex_mode.lex_state)
     }
 }
@@ -758,7 +758,7 @@ unsafe fn ts_parser__call_keyword_lex_fn(self_: &mut TSParser) -> bool {
     if ts_language_is_wasm(self_.language) {
         ts_wasm_store_call_lex_keyword(self_.wasm_store, 0)
     } else {
-        let lang = self_.language as *const TSLanguageFull;
+        let lang = self_.language.cast::<TSLanguageFull>();
         ((*lang).keyword_lex_fn.unwrap())(&mut self_.lexer.data, 0)
     }
 }
@@ -768,7 +768,7 @@ unsafe fn ts_parser__call_keyword_lex_fn(self_: &mut TSParser) -> bool {
 // ---------------------------------------------------------------------------
 
 unsafe fn ts_parser__external_scanner_create(self_: &mut TSParser) {
-    let lang = self_.language as *const TSLanguageFull;
+    let lang = self_.language.cast::<TSLanguageFull>();
     if !self_.language.is_null() && !(*lang).external_scanner.states.is_null() {
         if ts_language_is_wasm(self_.language) {
             self_.external_scanner_payload =
@@ -783,7 +783,7 @@ unsafe fn ts_parser__external_scanner_create(self_: &mut TSParser) {
 }
 
 unsafe fn ts_parser__external_scanner_destroy(self_: &mut TSParser) {
-    let lang = self_.language as *const TSLanguageFull;
+    let lang = self_.language.cast::<TSLanguageFull>();
     if !self_.language.is_null()
         && !self_.external_scanner_payload.is_null()
         && (*lang).external_scanner.destroy.is_some()
@@ -795,7 +795,7 @@ unsafe fn ts_parser__external_scanner_destroy(self_: &mut TSParser) {
 }
 
 unsafe fn ts_parser__external_scanner_serialize(self_: &mut TSParser) -> u32 {
-    let lang = self_.language as *const TSLanguageFull;
+    let lang = self_.language.cast::<TSLanguageFull>();
     let length;
     if ts_language_is_wasm(self_.language) {
         length = ts_wasm_store_call_scanner_serialize(
@@ -820,7 +820,7 @@ unsafe fn ts_parser__external_scanner_deserialize(
     self_: &mut TSParser,
     external_token: Subtree,
 ) {
-    let lang = self_.language as *const TSLanguageFull;
+    let lang = self_.language.cast::<TSLanguageFull>();
     let (data, length) = if !external_token.ptr.is_null() {
         let state = ts_subtree_external_scanner_state(&external_token);
         (ts_external_scanner_state_data(state), state.length)
@@ -851,7 +851,7 @@ unsafe fn ts_parser__external_scanner_scan(
     self_: &mut TSParser,
     external_lex_state: TSStateId,
 ) -> bool {
-    let lang = self_.language as *const TSLanguageFull;
+    let lang = self_.language.cast::<TSLanguageFull>();
     if ts_language_is_wasm(self_.language) {
         let result = ts_wasm_store_call_scanner_scan(
             self_.wasm_store,
@@ -885,7 +885,7 @@ unsafe fn ts_parser__can_reuse_first_leaf(
     tree: Subtree,
     table_entry: &TableEntry,
 ) -> bool {
-    let lang = self_.language as *const TSLanguageFull;
+    let lang = self_.language.cast::<TSLanguageFull>();
     let leaf_symbol = ts_subtree_leaf_symbol(tree);
     let leaf_state = ts_subtree_leaf_parse_state(tree);
     let current_lex_mode = ts_language_lex_mode_for_state(self_.language, state);
@@ -927,7 +927,7 @@ unsafe fn ts_parser__lex(
     parse_state: TSStateId,
 ) -> Subtree {
     let parser = self_ as *mut TSParser;
-    let lang = self_.language as *const TSLanguageFull;
+    let lang = self_.language.cast::<TSLanguageFull>();
     let mut lex_mode = ts_language_lex_mode_for_state(self_.language, parse_state);
     if lex_mode.lex_state == u16::MAX {
         LOG!(
