@@ -529,6 +529,16 @@ unsafe fn tree_cursor_goto_first_child_internal(cursor: &mut TreeCursor) -> Tree
     TreeCursorStep::TreeCursorStepNone
 }
 
+unsafe fn tree_cursor_goto_first_child(cursor: &mut TreeCursor) -> bool {
+    loop {
+        match tree_cursor_goto_first_child_internal(cursor) {
+            TreeCursorStep::TreeCursorStepHidden => {}
+            TreeCursorStep::TreeCursorStepVisible => return true,
+            _ => return false,
+        }
+    }
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn ts_tree_cursor_goto_first_child_internal(
     self_: *mut TSTreeCursor,
@@ -540,14 +550,7 @@ pub unsafe extern "C" fn ts_tree_cursor_goto_first_child_internal(
 pub unsafe extern "C" fn ts_tree_cursor_goto_first_child(
     self_: *mut TSTreeCursor,
 ) -> bool {
-    let cursor = tree_cursor_mut(self_);
-    loop {
-        match tree_cursor_goto_first_child_internal(cursor) {
-            TreeCursorStep::TreeCursorStepHidden => {}
-            TreeCursorStep::TreeCursorStepVisible => return true,
-            _ => return false,
-        }
-    }
+    tree_cursor_goto_first_child(tree_cursor_mut(self_))
 }
 
 unsafe fn tree_cursor_goto_last_child_internal(cursor: &mut TreeCursor) -> TreeCursorStep {
@@ -576,6 +579,16 @@ unsafe fn tree_cursor_goto_last_child_internal(cursor: &mut TreeCursor) -> TreeC
     TreeCursorStep::TreeCursorStepNone
 }
 
+unsafe fn tree_cursor_goto_last_child(cursor: &mut TreeCursor) -> bool {
+    loop {
+        match tree_cursor_goto_last_child_internal(cursor) {
+            TreeCursorStep::TreeCursorStepHidden => {}
+            TreeCursorStep::TreeCursorStepVisible => return true,
+            _ => return false,
+        }
+    }
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn ts_tree_cursor_goto_last_child_internal(
     self_: *mut TSTreeCursor,
@@ -587,14 +600,7 @@ pub unsafe extern "C" fn ts_tree_cursor_goto_last_child_internal(
 pub unsafe extern "C" fn ts_tree_cursor_goto_last_child(
     self_: *mut TSTreeCursor,
 ) -> bool {
-    let cursor = tree_cursor_mut(self_);
-    loop {
-        match tree_cursor_goto_last_child_internal(cursor) {
-            TreeCursorStep::TreeCursorStepHidden => {}
-            TreeCursorStep::TreeCursorStepVisible => return true,
-            _ => return false,
-        }
-    }
+    tree_cursor_goto_last_child(tree_cursor_mut(self_))
 }
 
 #[no_mangle]
@@ -637,7 +643,7 @@ pub unsafe extern "C" fn ts_tree_cursor_goto_next_sibling(
     let cursor = tree_cursor_mut(self_);
     match tree_cursor_goto_next_sibling_internal(cursor) {
         TreeCursorStep::TreeCursorStepHidden => {
-            ts_tree_cursor_goto_first_child(self_);
+            tree_cursor_goto_first_child(cursor);
             true
         }
         TreeCursorStep::TreeCursorStepVisible => true,
@@ -693,7 +699,7 @@ pub unsafe extern "C" fn ts_tree_cursor_goto_previous_sibling(
     let cursor = tree_cursor_mut(self_);
     match tree_cursor_goto_previous_sibling_internal(cursor) {
         TreeCursorStep::TreeCursorStepHidden => {
-            ts_tree_cursor_goto_last_child(self_);
+            tree_cursor_goto_last_child(cursor);
             true
         }
         TreeCursorStep::TreeCursorStepVisible => true,
