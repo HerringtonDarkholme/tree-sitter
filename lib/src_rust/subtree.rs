@@ -650,7 +650,7 @@ pub unsafe fn ts_subtree_pool_delete(self_: &mut SubtreePool) {
     if !self_.free_trees.contents.is_null() {
         for i in 0..self_.free_trees.size {
             let tree = *self_.free_trees.contents.add(i as usize);
-            ts_free(tree.ptr as *mut c_void);
+            ts_free(tree.ptr.cast::<c_void>());
         }
         mutable_array_delete(&mut self_.free_trees);
     }
@@ -663,7 +663,7 @@ unsafe fn ts_subtree_pool_allocate(self_: &mut SubtreePool) -> *mut SubtreeHeapD
     if self_.free_trees.size > 0 {
         mutable_array_pop(&mut self_.free_trees).ptr
     } else {
-        ts_malloc(std::mem::size_of::<SubtreeHeapData>()) as *mut SubtreeHeapData
+        ts_malloc(std::mem::size_of::<SubtreeHeapData>()).cast::<SubtreeHeapData>()
     }
 }
 
@@ -673,7 +673,7 @@ unsafe fn ts_subtree_pool_free(self_: &mut SubtreePool, tree: MutableSubtree) {
     {
         mutable_array_push(&mut self_.free_trees, tree);
     } else {
-        ts_free(tree.ptr as *mut c_void);
+        ts_free(tree.ptr.cast::<c_void>());
     }
 }
 
