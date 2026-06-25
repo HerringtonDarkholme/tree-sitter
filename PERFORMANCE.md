@@ -1429,3 +1429,51 @@ Source-code analysis:
   production id values when building subtrees; parse control flow, stack
   ownership, and tree layout are unchanged.
 - No rollback was performed.
+
+### 2026-06-25 03:25 EDT
+
+- Repo head: `97e2a0a2`
+- Batch base: `68a7fcc9`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: 10 small clippy cleanup commits from
+  `Use From for language table indexes` through
+  `Use From for visible child index`
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language tsx --repetitions 10 --error-limit 4 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 26952.3 | 25813.3 | +4.41% |
+| TypeScript error parses | 24 | 1740.3 | 1720.5 | +1.15% |
+| TSX normal parses | 1 | 5880.0 | 5747.8 | +2.30% |
+| TSX error parses | 27 | 1753.2 | 1724.3 | +1.67% |
+| Overall parser throughput | 63 | 2136.1 | 2105.1 | +1.47% |
+
+Per-case regression investigation:
+
+- The first 10-repetition run reported two TSX error outliers above 5%:
+  `builderStatePublic.ts` at 6.39% and `corePublic.ts` at 5.57%, while
+  aggregate Rust throughput stayed positive at +1.30% overall.
+- An immediate second 10-repetition run reported no per-case regressions above
+  5%, with aggregate TypeScript, TSX, and overall Rust throughput still
+  positive.
+- Because the outliers disappeared on rerun and no source changes in this
+  batch affect TSX-specific parsing logic, this checkpoint treats the first-run
+  outliers as benchmark noise rather than a confirmed source regression.
+
+Source-code analysis:
+
+- This batch did not change exported FFI signatures, `#[repr(C)]` layouts,
+  allocation behavior, parse-table data, generated parser templates, or C
+  headers.
+- The changes are clippy-oriented lossless integer widening cleanups using
+  `From` in `language.rs`, `subtree.rs`, `tree_cursor.rs`, `stack.rs`, and
+  `parser.rs`.
+- Parser-facing changes are limited to replacing existing casts with
+  equivalent lossless conversions for external lexer state, reduce child count,
+  recovery/log state values, and debug/DOT output fields. Parse control flow,
+  stack ownership, and subtree layout are unchanged.
+- No rollback was performed.
