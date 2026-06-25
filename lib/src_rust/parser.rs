@@ -453,15 +453,15 @@ unsafe fn reusable_node_reset(self_: &mut ReusableNode, tree: Subtree) {
 // ---------------------------------------------------------------------------
 
 unsafe fn reduce_action_set_get(self_: &ReduceActionSet, index: u32) -> &ReduceAction {
-    &*array_get(self_ as *const ReduceActionSet as *const Array<ReduceAction>, index)
+    &*array_get(ptr::from_ref(self_), index)
 }
 
 unsafe fn stack_slice_array_get(self_: &StackSliceArray, index: u32) -> &StackSlice {
-    &*array_get(self_ as *const StackSliceArray, index)
+    &*array_get(ptr::from_ref(self_), index)
 }
 
 unsafe fn stack_slice_array_get_mut(self_: &mut StackSliceArray, index: u32) -> &mut StackSlice {
-    &mut *array_get(self_ as *mut StackSliceArray, index)
+    &mut *array_get(ptr::from_mut(self_), index)
 }
 
 unsafe fn stack_slice_array_read(self_: &StackSliceArray, index: u32) -> StackSlice {
@@ -477,7 +477,7 @@ unsafe fn subtree_array_get(self_: &SubtreeArray, index: u32) -> Subtree {
 }
 
 unsafe fn stack_summary_array_get(self_: &StackSummary, index: u32) -> &StackSummaryEntry {
-    &*array_get(self_ as *const StackSummary, index)
+    &*array_get(ptr::from_ref(self_), index)
 }
 
 unsafe fn mutable_subtree_array_back(self_: &MutableSubtreeArray) -> MutableSubtree {
