@@ -6,7 +6,9 @@ use core::ffi::c_void;
 use crate::ffi::{TSLanguage, TSNode, TSPoint, TSRange, TSSymbol};
 
 use super::alloc::{ts_calloc, ts_free, ts_malloc};
+use super::language::{ts_language_copy, ts_language_delete};
 use super::length::{length_add, Length};
+use super::node::ts_node_new;
 use super::subtree::{
     ts_subtree_edit, ts_subtree_padding, ts_subtree_pool_delete, ts_subtree_pool_new,
     ts_subtree_print_dot_graph, ts_subtree_release, ts_subtree_retain, Subtree,
@@ -17,11 +19,7 @@ use super::subtree::{
 // ---------------------------------------------------------------------------
 
 extern "C" {
-    // language.rs
-    fn ts_language_copy(self_: *const TSLanguage) -> *const TSLanguage;
-    fn ts_language_delete(self_: *const TSLanguage);
-
-    // get_changed_ranges.c (still in C)
+    // ABI calls kept here because this file still uses local mirror types.
     fn ts_range_edit(range: *mut TSRange, edit: *const TSInputEdit);
     fn ts_range_array_get_changed_ranges(
         old_ranges: *const TSRange,
@@ -40,16 +38,7 @@ extern "C" {
         ranges: *mut *mut TSRange,
     ) -> u32;
 
-    // tree_cursor.c (still in C)
     fn ts_tree_cursor_init(self_: *mut TreeCursor, node: TSNode);
-
-    // node.c (still in C)
-    fn ts_node_new(
-        tree: *const TSTree,
-        subtree: *const Subtree,
-        position: Length,
-        alias: TSSymbol,
-    ) -> TSNode;
 
     fn memcpy(dest: *mut c_void, src: *const c_void, n: usize) -> *mut c_void;
 
