@@ -1074,7 +1074,7 @@ unsafe fn ts_subtree_set_has_changes(self_: &mut MutableSubtree) {
 // --- #34: new_leaf ---
 
 pub unsafe fn ts_subtree_new_leaf(
-    pool: *mut SubtreePool,
+    pool: &mut SubtreePool,
     symbol: TSSymbol,
     padding: Length,
     size: Length,
@@ -1118,7 +1118,7 @@ pub unsafe fn ts_subtree_new_leaf(
             },
         }
     } else {
-        let data = ts_subtree_pool_allocate(subtree_pool_mut(pool));
+        let data = ts_subtree_pool_allocate(pool);
         *data = SubtreeHeapData {
             ref_count: 1,
             padding,
@@ -1155,7 +1155,7 @@ pub unsafe fn ts_subtree_new_leaf(
 // --- #35: new_error ---
 
 pub unsafe fn ts_subtree_new_error(
-    pool: *mut SubtreePool,
+    pool: &mut SubtreePool,
     lookahead_char: i32,
     padding: Length,
     size: Length,
@@ -1278,7 +1278,7 @@ pub unsafe fn ts_subtree_new_error_node(
 // --- #39: new_missing_leaf ---
 
 pub unsafe fn ts_subtree_new_missing_leaf(
-    pool: *mut SubtreePool,
+    pool: &mut SubtreePool,
     symbol: TSSymbol,
     padding: Length,
     lookahead_bytes: u32,
