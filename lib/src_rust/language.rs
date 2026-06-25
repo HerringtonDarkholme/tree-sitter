@@ -338,7 +338,7 @@ unsafe fn c_string_prefix_cmp(
 /// For non-terminal symbols → successor state.
 /// For terminal symbols → index into actions table.
 #[inline]
-pub unsafe fn ts_language_lookup(
+pub(crate) unsafe fn ts_language_lookup(
     self_: *const TSLanguage,
     state: TSStateId,
     symbol: TSSymbol,
@@ -369,7 +369,7 @@ pub unsafe fn ts_language_lookup(
 
 /// Get the parse actions for a (state, symbol) pair.
 #[inline]
-pub unsafe fn ts_language_actions(
+pub(crate) unsafe fn ts_language_actions(
     self_: *const TSLanguage,
     state: TSStateId,
     symbol: TSSymbol,
@@ -383,7 +383,7 @@ pub unsafe fn ts_language_actions(
 
 /// Check if a (state, symbol) has a reduce action.
 #[inline]
-pub unsafe fn ts_language_has_reduce_action(
+pub(crate) unsafe fn ts_language_has_reduce_action(
     self_: *const TSLanguage,
     state: TSStateId,
     symbol: TSSymbol,
@@ -395,7 +395,7 @@ pub unsafe fn ts_language_has_reduce_action(
 
 /// Check if a (state, symbol) has any actions.
 #[inline]
-pub unsafe fn ts_language_has_actions(
+pub(crate) unsafe fn ts_language_has_actions(
     self_: *const TSLanguage,
     state: TSStateId,
     symbol: TSSymbol,
@@ -405,7 +405,7 @@ pub unsafe fn ts_language_has_actions(
 
 /// Create a lookahead iterator for a given state.
 #[inline]
-pub unsafe fn ts_language_lookaheads(
+pub(crate) unsafe fn ts_language_lookaheads(
     self_: *const TSLanguage,
     state: TSStateId,
 ) -> LookaheadIterator {
@@ -440,7 +440,7 @@ pub unsafe fn ts_language_lookaheads(
 
 /// Advance a lookahead iterator to the next valid symbol.
 #[inline]
-pub unsafe fn ts_lookahead_iterator__next(self_: &mut LookaheadIterator) -> bool {
+pub(crate) unsafe fn ts_lookahead_iterator__next(self_: &mut LookaheadIterator) -> bool {
     let l = lang(self_.language);
 
     if self_.is_small_state {
@@ -490,7 +490,7 @@ pub unsafe fn ts_lookahead_iterator__next(self_: &mut LookaheadIterator) -> bool
 
 /// Whether the state is a "primary state" (ABI >= 14).
 #[inline]
-pub const unsafe fn ts_language_state_is_primary(
+pub(crate) const unsafe fn ts_language_state_is_primary(
     self_: *const TSLanguage,
     state: TSStateId,
 ) -> bool {
@@ -504,7 +504,7 @@ pub const unsafe fn ts_language_state_is_primary(
 
 /// Get enabled external tokens for a given external scanner state.
 #[inline]
-pub const unsafe fn ts_language_enabled_external_tokens(
+pub(crate) const unsafe fn ts_language_enabled_external_tokens(
     self_: *const TSLanguage,
     external_scanner_state: u32,
 ) -> *const bool {
@@ -518,7 +518,7 @@ pub const unsafe fn ts_language_enabled_external_tokens(
 
 /// Get the alias sequence for a production ID.
 #[inline]
-pub const unsafe fn ts_language_alias_sequence(
+pub(crate) const unsafe fn ts_language_alias_sequence(
     self_: *const TSLanguage,
     production_id: u32,
 ) -> *const TSSymbol {
@@ -532,7 +532,7 @@ pub const unsafe fn ts_language_alias_sequence(
 
 /// Get the alias at a specific position in a production's alias sequence.
 #[inline]
-pub const unsafe fn ts_language_alias_at(
+pub(crate) const unsafe fn ts_language_alias_at(
     self_: *const TSLanguage,
     production_id: u32,
     child_index: u32,
@@ -547,7 +547,7 @@ pub const unsafe fn ts_language_alias_at(
 
 /// Get the field map (start, end) for a production ID.
 #[inline]
-pub unsafe fn ts_language_field_map(
+pub(crate) unsafe fn ts_language_field_map(
     self_: *const TSLanguage,
     production_id: u32,
     start: *mut *const TSFieldMapEntry,
@@ -566,7 +566,7 @@ pub unsafe fn ts_language_field_map(
 
 /// Get all aliases for a symbol.
 #[inline]
-pub unsafe fn ts_language_aliases_for_symbol(
+pub(crate) unsafe fn ts_language_aliases_for_symbol(
     self_: *const TSLanguage,
     original_symbol: TSSymbol,
     start: *mut *const TSSymbol,
@@ -596,7 +596,7 @@ pub unsafe fn ts_language_aliases_for_symbol(
 
 /// Write a symbol name with escaping to a FILE*.
 #[inline]
-pub unsafe fn ts_language_write_symbol_as_dot_string(
+pub(crate) unsafe fn ts_language_write_symbol_as_dot_string(
     self_: *const TSLanguage,
     f: *mut c_void,
     symbol: TSSymbol,
@@ -730,7 +730,7 @@ pub const unsafe extern "C" fn ts_language_field_count(
     (*lang(self_)).field_count
 }
 
-pub unsafe fn ts_language_table_entry(
+pub(crate) unsafe fn ts_language_table_entry(
     self_: *const TSLanguage,
     state: TSStateId,
     symbol: TSSymbol,
@@ -751,7 +751,7 @@ pub unsafe fn ts_language_table_entry(
     }
 }
 
-pub const unsafe fn ts_language_lex_mode_for_state(
+pub(crate) const unsafe fn ts_language_lex_mode_for_state(
     self_: *const TSLanguage,
     state: TSStateId,
 ) -> TSLexerMode {
@@ -768,7 +768,7 @@ pub const unsafe fn ts_language_lex_mode_for_state(
     }
 }
 
-pub unsafe fn ts_language_is_reserved_word(
+pub(crate) unsafe fn ts_language_is_reserved_word(
     self_: *const TSLanguage,
     state: TSStateId,
     symbol: TSSymbol,
@@ -806,7 +806,7 @@ pub const unsafe extern "C" fn ts_language_symbol_metadata(
     }
 }
 
-pub const unsafe fn ts_language_public_symbol(
+pub(crate) const unsafe fn ts_language_public_symbol(
     self_: *const TSLanguage,
     symbol: TSSymbol,
 ) -> TSSymbol {
