@@ -514,8 +514,8 @@ unsafe fn iterator_compare(
         || ts_subtree_has_changes(old_tree)
         || (old_has_external_tokens
             && !ts_subtree_external_scanner_state_eq(
-                old_iter.prev_external_token,
-                new_iter.prev_external_token,
+                &old_iter.prev_external_token,
+                &new_iter.prev_external_token,
             ))
     {
         return IteratorComparison::IteratorMayDiffer;

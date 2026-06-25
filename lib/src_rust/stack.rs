@@ -615,7 +615,7 @@ unsafe fn stack__subtree_is_equivalent(left: Subtree, right: Subtree) -> bool {
         && ts_subtree_size(left).bytes == ts_subtree_size(right).bytes
         && ts_subtree_child_count(left) == ts_subtree_child_count(right)
         && ts_subtree_extra(left) == ts_subtree_extra(right)
-        && ts_subtree_external_scanner_state_eq(left, right)
+        && ts_subtree_external_scanner_state_eq(&left, &right)
 }
 
 /// Add a link to a stack node, merging if possible.
@@ -1377,8 +1377,8 @@ pub unsafe fn ts_stack_can_merge(
         && (*head1.node).position.bytes == (*head2.node).position.bytes
         && (*head1.node).error_cost == (*head2.node).error_cost
         && ts_subtree_external_scanner_state_eq(
-            head1.last_external_token,
-            head2.last_external_token,
+            &head1.last_external_token,
+            &head2.last_external_token,
         )
 }
 

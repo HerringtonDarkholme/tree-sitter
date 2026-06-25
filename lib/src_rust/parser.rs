@@ -1196,7 +1196,7 @@ unsafe fn ts_parser__get_cached_token(
     let cache = &self_.token_cache;
     if !cache.token.ptr.is_null()
         && cache.byte_index == position as u32
-        && ts_subtree_external_scanner_state_eq(cache.last_external_token, last_external_token)
+        && ts_subtree_external_scanner_state_eq(&cache.last_external_token, &last_external_token)
     {
         let mut table_entry = TableEntry::empty();
         ts_language_table_entry(
@@ -1290,8 +1290,8 @@ unsafe fn ts_parser__reuse_node(
         }
 
         if !ts_subtree_external_scanner_state_eq(
-            self_.reusable_node.last_external_token,
-            last_external_token,
+            &self_.reusable_node.last_external_token,
+            &last_external_token,
         ) {
             LOG!(parser, b"reusable_node_has_different_external_scanner_state symbol:%s\0".as_ptr() as *const i8,
                 SYM_NAME!(parser, ts_subtree_symbol(result)));

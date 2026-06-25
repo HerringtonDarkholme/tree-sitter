@@ -1779,9 +1779,9 @@ pub unsafe fn ts_subtree_external_scanner_state(
     }
 }
 
-pub unsafe fn ts_subtree_external_scanner_state_eq(self_: Subtree, other: Subtree) -> bool {
-    let state_self = ts_subtree_external_scanner_state(&self_);
-    let state_other = ts_subtree_external_scanner_state(&other);
+pub unsafe fn ts_subtree_external_scanner_state_eq(self_: &Subtree, other: &Subtree) -> bool {
+    let state_self = ts_subtree_external_scanner_state(self_);
+    let state_other = ts_subtree_external_scanner_state(other);
     ts_external_scanner_state_eq(
         state_self,
         ts_external_scanner_state_data(state_other),
