@@ -1,10 +1,6 @@
 #ifndef TREE_SITTER_LEXER_H_
 #define TREE_SITTER_LEXER_H_
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 #include "./length.h"
 #include "./subtree.h"
 #include "tree_sitter/api.h"
@@ -36,19 +32,5 @@ typedef struct {
 
   char debug_buffer[TREE_SITTER_SERIALIZATION_BUFFER_SIZE];
 } Lexer;
-
-void ts_lexer_init(Lexer *self);
-void ts_lexer_delete(Lexer *self);
-void ts_lexer_set_input(Lexer *self, TSInput input);
-void ts_lexer_reset(Lexer *self, Length position);
-void ts_lexer_start(Lexer *self);
-void ts_lexer_finish(Lexer *self, uint32_t *lookahead_end_byte);
-void ts_lexer_mark_end(Lexer *self);
-bool ts_lexer_set_included_ranges(Lexer *self, const TSRange *ranges, uint32_t count);
-TSRange *ts_lexer_included_ranges(const Lexer *self, uint32_t *count);
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif  // TREE_SITTER_LEXER_H_
