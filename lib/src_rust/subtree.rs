@@ -1253,7 +1253,7 @@ pub unsafe fn ts_subtree_set_symbol(
     let metadata = ts_language_symbol_metadata(language, symbol);
     let self_ = &mut *self_;
     if self_.data.is_inline() {
-        debug_assert!(symbol < u8::MAX as TSSymbol);
+        debug_assert!(symbol < TSSymbol::from(u8::MAX));
         self_.data.symbol = symbol as u8;
         self_.data.set_named(metadata.named);
         self_.data.set_visible(metadata.visible);
@@ -1683,7 +1683,7 @@ pub unsafe fn ts_subtree_edit(
                     lookahead_bytes,
                     error_cost: 0,
                     child_count: 0,
-                    symbol: result.data.symbol as TSSymbol,
+                    symbol: TSSymbol::from(result.data.symbol),
                     parse_state: result.data.parse_state,
                     flags: SubtreeHeapData::make_flags(
                         result.data.visible(), result.data.named(), result.data.extra(),
