@@ -2174,16 +2174,15 @@ unsafe fn ts_subtree__print_dot_graph(
     let lang = language.cast::<TSLanguageData>();
     let mut child_info_offset =
         u32::from((*lang).max_alias_sequence_length) * u32::from(ts_subtree_production_id(tree));
-    let n = ts_subtree_child_count(tree);
-    for i in 0..n {
-        let child = ts_subtree_children(tree).add(i as usize).cast_const();
+    for (i, child) in subtree_children(tree).iter().enumerate() {
+        let child_ptr = ptr::from_ref(child);
         let mut subtree_alias_symbol: TSSymbol = 0;
         if !ts_subtree_extra(*child) && child_info_offset != 0 {
             subtree_alias_symbol = *(*lang).alias_sequences.add(child_info_offset as usize);
             child_info_offset += 1;
         }
         ts_subtree__print_dot_graph(
-            child,
+            child_ptr,
             child_start_offset,
             language,
             subtree_alias_symbol,
@@ -2193,7 +2192,7 @@ unsafe fn ts_subtree__print_dot_graph(
             f,
             c"tree_%p -> tree_%p [tooltip=%u]\n".as_ptr().cast::<i8>(),
             self_.cast::<c_void>(),
-            child.cast::<c_void>(),
+            child_ptr.cast::<c_void>(),
             i,
         );
         child_start_offset += ts_subtree_total_bytes(*child);
