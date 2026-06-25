@@ -1237,15 +1237,17 @@ pub unsafe fn ts_subtree_set_symbol(
     language: *const TSLanguage,
 ) {
     let metadata = ts_language_symbol_metadata(language, symbol);
-    if (*self_).data.is_inline() {
+    let self_ = &mut *self_;
+    if self_.data.is_inline() {
         debug_assert!(symbol < u8::MAX as TSSymbol);
-        (*self_).data.symbol = symbol as u8;
-        (*self_).data.set_named(metadata.named);
-        (*self_).data.set_visible(metadata.visible);
+        self_.data.symbol = symbol as u8;
+        self_.data.set_named(metadata.named);
+        self_.data.set_visible(metadata.visible);
     } else {
-        (*(*self_).ptr).symbol = symbol;
-        (*(*self_).ptr).set_named(metadata.named);
-        (*(*self_).ptr).set_visible(metadata.visible);
+        let data = &mut *self_.ptr;
+        data.symbol = symbol;
+        data.set_named(metadata.named);
+        data.set_visible(metadata.visible);
     }
 }
 
