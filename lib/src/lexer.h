@@ -1,6 +1,10 @@
 #ifndef TREE_SITTER_LEXER_H_
 #define TREE_SITTER_LEXER_H_
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include "./length.h"
 #include "./subtree.h"
 #include "tree_sitter/api.h"
@@ -32,5 +36,9 @@ typedef struct {
 
   char debug_buffer[TREE_SITTER_SERIALIZATION_BUFFER_SIZE];
 } Lexer;
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif  // TREE_SITTER_LEXER_H_

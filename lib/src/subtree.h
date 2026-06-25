@@ -1,6 +1,10 @@
 #ifndef TREE_SITTER_SUBTREE_H_
 #define TREE_SITTER_SUBTREE_H_
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <limits.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -331,5 +335,9 @@ static inline MutableSubtree ts_subtree_to_mut_unsafe(Subtree self) {
   result.data = self.data;
   return result;
 }
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif  // TREE_SITTER_SUBTREE_H_
