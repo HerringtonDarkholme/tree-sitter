@@ -12,8 +12,6 @@ extern "C" {
 #define U_EXPORT2
 #include "unicode/utf8.h"
 
-static const int32_t TS_DECODE_ERROR = U_SENTINEL;
-
 static inline uint32_t ts_decode_utf8(
   const uint8_t *string,
   uint32_t length,
