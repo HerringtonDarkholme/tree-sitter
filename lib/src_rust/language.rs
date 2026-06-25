@@ -366,17 +366,17 @@ pub unsafe fn ts_language_lookaheads(
 ) -> LookaheadIterator {
     let l = lang(self_);
     let is_small_state = (state as u32) >= (*l).large_state_count;
-    let data;
-    let mut group_end: *const u16 = ptr::null();
-    let mut group_count: u16 = 0;
-    if is_small_state {
+    let (data, group_end, group_count): (*const u16, *const u16, u16) = if is_small_state {
         let index = *(*l).small_parse_table_map.add(state as usize - (*l).large_state_count as usize);
-        data = (*l).small_parse_table.add(index as usize);
-        group_end = data.add(1);
-        group_count = *data;
+        let data = (*l).small_parse_table.add(index as usize);
+        (data, data.add(1), *data)
     } else {
-        data = (*l).parse_table.add(state as usize * (*l).symbol_count as usize).sub(1);
-    }
+        (
+            (*l).parse_table.add(state as usize * (*l).symbol_count as usize).sub(1),
+            ptr::null(),
+            0,
+        )
+    };
     LookaheadIterator {
         language: self_,
         data,
