@@ -402,7 +402,7 @@ unsafe fn ts_tree_cursor_goto_first_child_for_byte_and_point(
             if at_goal {
                 if child.visible {
                     array_push(&mut cursor.stack, entry);
-                    return visible_child_index as i64;
+                    return i64::from(visible_child_index);
                 }
                 if visible_child_count > 0 {
                     array_push(&mut cursor.stack, entry);
