@@ -1690,7 +1690,9 @@ unsafe fn ts_parser__do_all_potential_reductions(
                                 ReduceAction {
                                     symbol: action.reduce.symbol,
                                     count: u32::from(action.reduce.child_count),
-                                    dynamic_precedence: action.reduce.dynamic_precedence as i32,
+                                    dynamic_precedence: i32::from(
+                                        action.reduce.dynamic_precedence,
+                                    ),
                                     production_id: action.reduce.production_id,
                                 },
                             );
@@ -2318,7 +2320,7 @@ unsafe fn ts_parser__advance(
                         version,
                         action.reduce.symbol,
                         u32::from(action.reduce.child_count),
-                        action.reduce.dynamic_precedence as i32,
+                        i32::from(action.reduce.dynamic_precedence),
                         action.reduce.production_id,
                         is_fragile,
                         end_of_non_terminal_extra,
