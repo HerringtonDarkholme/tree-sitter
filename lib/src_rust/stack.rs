@@ -1294,23 +1294,24 @@ pub unsafe fn ts_stack_renumber_version(
     v1: StackVersion,
     v2: StackVersion,
 ) {
+    let stack = &mut *self_;
     if v1 == v2 {
         return;
     }
     debug_assert!(v2 < v1);
-    debug_assert!(v1 < (*self_).heads.size);
-    let (source_head, target_head) = stack_head_array_pair_mut(&mut (*self_).heads, v1, v2);
+    debug_assert!(v1 < stack.heads.size);
+
+    let heads = &mut stack.heads;
+    let node_pool = &mut stack.node_pool;
+    let subtree_pool = &mut *stack.subtree_pool;
+    let (source_head, target_head) = stack_head_array_pair_mut(heads, v1, v2);
     if !target_head.summary.is_null() && source_head.summary.is_null() {
         source_head.summary = target_head.summary;
         target_head.summary = ptr::null_mut();
     }
-    stack_head_delete(
-        target_head,
-        &mut (*self_).node_pool,
-        &mut *(*self_).subtree_pool,
-    );
+    stack_head_delete(target_head, node_pool, subtree_pool);
     *target_head = stack_head_read_ref(source_head);
-    array_erase(&mut (*self_).heads, v1);
+    array_erase(heads, v1);
 }
 
 /// Swap two versions.
@@ -1319,13 +1320,11 @@ pub unsafe fn ts_stack_swap_versions(
     v1: StackVersion,
     v2: StackVersion,
 ) {
-    let temp = stack_head_array_read(&(*self_).heads, v1);
-    stack_head_array_write(
-        &mut (*self_).heads,
-        v1,
-        stack_head_array_read(&(*self_).heads, v2),
-    );
-    stack_head_array_write(&mut (*self_).heads, v2, temp);
+    let stack = &mut *self_;
+    let temp = stack_head_array_read(&stack.heads, v1);
+    let other = stack_head_array_read(&stack.heads, v2);
+    stack_head_array_write(&mut stack.heads, v1, other);
+    stack_head_array_write(&mut stack.heads, v2, temp);
 }
 
 /// Copy a version, creating a new one.
@@ -1333,16 +1332,17 @@ pub unsafe fn ts_stack_copy_version(
     self_: *mut Stack,
     version: StackVersion,
 ) -> StackVersion {
-    debug_assert!(version < (*self_).heads.size);
-    let version_head = stack_head_array_read(&(*self_).heads, version);
-    array_push(&mut (*self_).heads, version_head);
-    let head = stack_head_array_back_mut(&(*self_).heads);
+    let stack = &mut *self_;
+    debug_assert!(version < stack.heads.size);
+    let version_head = stack_head_array_read(&stack.heads, version);
+    array_push(&mut stack.heads, version_head);
+    let head = stack_head_array_back_mut(&stack.heads);
     stack_node_retain(head.node.as_mut());
     if !head.last_external_token.ptr.is_null() {
         ts_subtree_retain(head.last_external_token);
     }
     head.summary = ptr::null_mut();
-    (*self_).heads.size - 1
+    stack.heads.size - 1
 }
 
 /// Merge two versions if possible.
