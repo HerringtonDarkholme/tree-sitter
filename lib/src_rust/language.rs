@@ -266,7 +266,7 @@ const _: () = assert!(std::mem::size_of::<LookaheadIterator>() == 56);
 
 #[inline(always)]
 const unsafe fn lang(self_: *const TSLanguage) -> *const TSLanguageFull {
-    self_ as *const TSLanguageFull
+    self_.cast::<TSLanguageFull>()
 }
 
 // ---------------------------------------------------------------------------
@@ -434,7 +434,10 @@ pub unsafe fn ts_lookahead_iterator__next(self_: *mut LookaheadIterator) -> bool
     if u32::from((*self_).symbol) < (*l).token_count {
         let entry = &*(*l).parse_actions.add((*self_).table_value as usize);
         (*self_).action_count = u16::from(entry.entry.count);
-        (*self_).actions = (*l).parse_actions.add((*self_).table_value as usize + 1) as *const TSParseAction;
+        (*self_).actions = (*l)
+            .parse_actions
+            .add((*self_).table_value as usize + 1)
+            .cast::<TSParseAction>();
         (*self_).next_state = 0;
     } else {
         (*self_).action_count = 0;
