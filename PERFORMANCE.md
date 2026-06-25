@@ -2231,3 +2231,84 @@ Source-code analysis:
 - The per-case slowdown report was not stable across two runs, while aggregate
   Rust throughput stayed within a small band and remained ahead of C overall.
   No rollback was performed.
+
+### 2026-06-25 13:27 EDT
+
+- Repo head: `be4cc0fc`
+- Batch base: `d553eab6`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: 10 small cleanup commits from
+  `Use stack references for debug helpers` through
+  `Remove stale subtree header types`
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+First run:
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 24931.2 | 24865.2 | +0.27% |
+| TypeScript error parses | 32 | 1657.7 | 1643.1 | +0.89% |
+| JavaScript normal parses | 2 | 17330.2 | 15932.3 | +8.77% |
+| JavaScript error parses | 37 | 2048.4 | 1972.3 | +3.86% |
+| Overall parser throughput | 82 | 2296.7 | 2249.5 | +2.09% |
+
+Per-case regressions over 5% in the first run:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `typescript normal corePublic.ts` | 21593.8 | 27376.8 | 21.12% |
+| `javascript error performance.ts` | 2838.5 | 3092.5 | 8.21% |
+| `typescript normal packageJsonCache.ts` | 16875.5 | 17831.3 | 5.36% |
+
+Because the per-case list did not match the previous checkpoint and the changed
+source did not touch language-specific parsing behavior, the same command was
+repeated before recording the batch:
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 25806.2 | 24897.9 | +3.65% |
+| TypeScript error parses | 32 | 1633.6 | 1660.7 | -1.63% |
+| JavaScript normal parses | 2 | 17704.9 | 16394.1 | +8.00% |
+| JavaScript error parses | 37 | 2090.5 | 2006.3 | +4.20% |
+| Overall parser throughput | 82 | 2294.7 | 2279.5 | +0.66% |
+
+Per-case regressions over 5% in the repeat run:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `typescript error crlf-line-endings.py` | 1190.1 | 1309.2 | 9.10% |
+| `typescript error compound-statement-without-trailing-newline.py` | 886.9 | 961.4 | 7.75% |
+
+Prior checkpoint at `d553eab6` recorded Rust overall throughput of 2267.9
+bytes/ms and C throughput of 2222.0 bytes/ms. This checkpoint measured Rust
+overall throughput of 2296.7 bytes/ms in the first run and 2294.7 bytes/ms in
+the repeat, so absolute Rust throughput moved by about +1.18% to +1.27% versus
+that checkpoint. The Rust-vs-C delta moved from +2.07% to +2.09% in the first
+run and +0.66% in the repeat.
+
+Source-code analysis:
+
+- Five commits convert internal stack-node helper signatures from raw
+  `*mut StackNode` parameters to `&mut StackNode` parameters. These changes keep
+  raw graph links as raw pointers, preserve allocation/layout, and convert back
+  to raw pointers only where the graph stores identity. They do not change stack
+  ownership, link traversal order, parser control flow, parse tables, or subtree
+  retain/release order.
+- Two commits convert internal stack debug/summary helpers and `ts_node_edit`'s
+  point-edit call away from internal calls through FFI-shaped raw pointers. The
+  exported FFI functions and signatures remain unchanged.
+- Three commits remove unused C-header constants/types from `length.h`,
+  `unicode.h`, and `subtree.h`. The active C query path still uses
+  `ts_subtree_symbol`, `ts_subtree_is_repetition`, and `ts_decode_utf8`; those
+  definitions were not changed. Generated parser templates
+  (`crates/generate/src/templates/alloc.h`,
+  `crates/generate/src/templates/array.h`, and
+  `crates/generate/src/parser.h.inc`) were not edited.
+- Full `cargo test --all` passed after every commit in this checkpoint.
+- The >5% per-case slowdown sets changed completely between the first run and
+  the repeat, while aggregate Rust throughput was stable and remained above the
+  previous checkpoint. No rollback was performed.
