@@ -856,7 +856,7 @@ unsafe fn ts_parser__external_scanner_scan(
         let result = ts_wasm_store_call_scanner_scan(
             self_.wasm_store,
             self_.external_scanner_payload as usize as u32,
-            external_lex_state as u32 * (*lang).external_token_count,
+            u32::from(external_lex_state) * (*lang).external_token_count,
         );
         if ts_wasm_store_has_error(self_.wasm_store) {
             self_.has_scanner_error = true;
@@ -865,7 +865,7 @@ unsafe fn ts_parser__external_scanner_scan(
     } else {
         let valid_external_tokens = ts_language_enabled_external_tokens(
             self_.language,
-            external_lex_state as u32,
+            u32::from(external_lex_state),
         );
         ((*lang).external_scanner.scan.unwrap())(
             self_.external_scanner_payload,
