@@ -773,7 +773,11 @@ pub unsafe fn ts_subtree_children(self_: Subtree) -> *mut Subtree {
     if self_.data.is_inline() {
         ptr::null_mut()
     } else {
-        (self_.ptr as *mut Subtree).sub((*self_.ptr).child_count as usize)
+        self_
+            .ptr
+            .cast_mut()
+            .cast::<Subtree>()
+            .sub((*self_.ptr).child_count as usize)
     }
 }
 
