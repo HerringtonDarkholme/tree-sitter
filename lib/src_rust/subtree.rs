@@ -1316,9 +1316,9 @@ pub unsafe fn ts_subtree_release(pool: &mut SubtreePool, self_: Subtree) {
     while pool.tree_stack.size > 0 {
         let tree = mutable_array_pop(&mut pool.tree_stack);
         if (*tree.ptr).child_count > 0 {
-            let children = ts_subtree_children(ts_subtree_from_mut(tree));
-            for i in 0..(*tree.ptr).child_count {
-                let child = *children.add(i as usize);
+            let children = subtree_children(ts_subtree_from_mut(tree));
+            for child in children {
+                let child = *child;
                 if child.data.is_inline() {
                     continue;
                 }
@@ -1328,7 +1328,7 @@ pub unsafe fn ts_subtree_release(pool: &mut SubtreePool, self_: Subtree) {
                     mutable_array_push(&mut pool.tree_stack, ts_subtree_to_mut_unsafe(child));
                 }
             }
-            ts_free(children.cast::<c_void>());
+            ts_free(children.as_ptr().cast_mut().cast::<c_void>());
         } else {
             if (*tree.ptr).has_external_tokens() {
                 let external_scanner_state =
