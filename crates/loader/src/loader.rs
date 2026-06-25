@@ -1683,7 +1683,7 @@ impl Loader {
     ) -> Option<&'a HighlightConfiguration> {
         match self.language_configuration_for_injection_string(string) {
             Err(e) => {
-                error!("Failed to load language for injection string '{string}': {e}",);
+                error!("Failed to load language for injection string '{string}': {e}");
                 None
             }
             Ok(None) => None,
