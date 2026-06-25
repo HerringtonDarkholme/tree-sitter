@@ -200,7 +200,7 @@ unsafe fn ts_tree_edit_ref(tree: &mut TSTree, edit: &TSInputEdit) {
 
 #[cfg(not(target_family = "wasm"))]
 unsafe fn ts_tree_print_dot_graph_ref(tree: &TSTree, file_descriptor: i32) {
-    let file = fdopen(_ts_dup(file_descriptor), b"a\0".as_ptr().cast::<i8>());
+    let file = fdopen(_ts_dup(file_descriptor), c"a".as_ptr().cast::<i8>());
     ts_subtree_print_dot_graph(tree.root, tree.language, file);
     fclose(file);
 }
