@@ -1560,7 +1560,7 @@ unsafe fn ts_parser__reduce(
             }
         }
 
-        let state = ts_stack_state(&*self_.stack, slice_version);
+        let state = ts_stack_state(stack, slice_version);
         let next_state = ts_language_next_state(self_.language, state, symbol);
         if end_of_non_terminal_extra && next_state == state {
             (*parent.ptr).set_extra(true);
@@ -1576,7 +1576,7 @@ unsafe fn ts_parser__reduce(
 
         // Push the parent node and trailing extras
         ts_stack_push(
-            &mut *self_.stack,
+            stack,
             slice_version,
             ts_subtree_from_mut(parent),
             false,
@@ -1584,7 +1584,7 @@ unsafe fn ts_parser__reduce(
         );
         for j in 0..self_.trailing_extras.size {
             ts_stack_push(
-                &mut *self_.stack,
+                stack,
                 slice_version,
                 subtree_array_get(&self_.trailing_extras, j),
                 false,
@@ -1596,7 +1596,7 @@ unsafe fn ts_parser__reduce(
             if j == version {
                 continue;
             }
-            if ts_stack_merge(&mut *self_.stack, j, slice_version) {
+            if ts_stack_merge(stack, j, slice_version) {
                 removed_version_count += 1;
                 break;
             }
@@ -1605,7 +1605,7 @@ unsafe fn ts_parser__reduce(
         i += 1;
     }
 
-    if ts_stack_version_count(&*self_.stack) > initial_version_count {
+    if ts_stack_version_count(stack) > initial_version_count {
         initial_version_count
     } else {
         STACK_VERSION_NONE
