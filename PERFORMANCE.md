@@ -2367,3 +2367,59 @@ Source-code analysis:
   source delta and stable aggregate throughput, no rollback was performed.
 - Full `cargo test --all` passed after every committed code/header change in
   this checkpoint.
+
+### 2026-06-25 14:16 EDT
+
+- Repo head: `6c0bc71e`
+- Batch base: `9e28b120`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: internal Rust helper/import cleanup commits from
+  `Use range edit helper internally` through
+  `Use subtree changed range helper internally`
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 25806.5 | 24903.3 | +3.63% |
+| TypeScript error parses | 32 | 1656.8 | 1655.9 | +0.06% |
+| JavaScript normal parses | 2 | 17399.3 | 15770.9 | +10.33% |
+| JavaScript error parses | 37 | 2059.0 | 1980.9 | +3.94% |
+| Overall parser throughput | 82 | 2301.2 | 2263.4 | +1.67% |
+
+Per-case regressions over 5%:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `typescript normal builderStatePublic.ts` | 18082.8 | 19556.6 | 7.54% |
+
+Prior checkpoint at `26a7cc28` recorded Rust overall throughput of 2293.6
+bytes/ms and a Rust-vs-C delta of +2.05%. This checkpoint measured 2301.2
+bytes/ms, so absolute Rust throughput increased by about 0.33%; the Rust-vs-C
+delta moved to +1.67%.
+
+Source-code analysis:
+
+- Four commits remove Rust-side `extern "C"` declarations for functions already
+  implemented in Rust or consolidate duplicate local type mirrors in favor of
+  the canonical Rust definitions. These do not change the exported
+  `#[no_mangle] extern "C"` symbols, C ABI, struct layout, or parser control
+  flow.
+- Three commits route internal Rust callers through crate-local helpers
+  (`ts_range_edit_ref`, `ts_range_array_get_changed_ranges_ref`, and
+  `ts_subtree_get_changed_ranges_ref`) while preserving the public C wrappers.
+  The only changed runtime paths are tree editing and changed-range
+  calculation, not fresh parser throughput.
+- One commit changes the internal lookahead iterator step helper from a raw
+  pointer parameter to `&mut LookaheadIterator`; the exported iterator API is
+  unchanged.
+- The only >5% outlier is a normal fresh-parse TypeScript case. This batch does
+  not alter parsing tables, lexer/parser hot loops, stack/subtree ownership, or
+  the TypeScript grammar inputs used by the benchmark. Given the higher
+  aggregate Rust throughput and the mismatch between touched code paths and the
+  outlier workload, no rollback was performed.
+- Full `cargo test --all` passed after every committed code change in this
+  checkpoint.
