@@ -279,10 +279,25 @@ extern "C" {
     fn ts_wasm_language_retain(self_: *const TSLanguage);
     fn ts_wasm_language_release(self_: *const TSLanguage);
 
-    // libc
-    fn strncmp(s1: *const i8, s2: *const i8, n: usize) -> i32;
     fn fputc(c: i32, stream: *mut c_void) -> i32;
     fn fputs(s: *const i8, stream: *mut c_void) -> i32;
+}
+
+unsafe fn c_string_prefix_cmp(
+    left: *const i8,
+    right: *const i8,
+    len: usize,
+) -> std::cmp::Ordering {
+    for i in 0..len {
+        let left_byte = *left.add(i) as u8;
+        let right_byte = *right.add(i) as u8;
+        match left_byte.cmp(&right_byte) {
+            std::cmp::Ordering::Equal if left_byte == 0 => return std::cmp::Ordering::Equal,
+            std::cmp::Ordering::Equal => {}
+            ordering => return ordering,
+        }
+    }
+    std::cmp::Ordering::Equal
 }
 
 // ===========================================================================
@@ -826,7 +841,9 @@ pub unsafe extern "C" fn ts_language_symbol_for_name(
     length: u32,
     is_named: bool,
 ) -> TSSymbol {
-    if is_named && strncmp(string, c"ERROR".as_ptr().cast::<i8>(), length as usize) == 0 {
+    if is_named
+        && c_string_prefix_cmp(string, c"ERROR".as_ptr().cast::<i8>(), length as usize).is_eq()
+    {
         return ts_builtin_sym_error;
     }
     let count = ts_language_symbol_count(self_) as u16;
@@ -837,7 +854,7 @@ pub unsafe extern "C" fn ts_language_symbol_for_name(
             continue;
         }
         let symbol_name = *(*l).symbol_names.add(i as usize);
-        if strncmp(symbol_name, string, length as usize) == 0
+        if c_string_prefix_cmp(symbol_name, string, length as usize).is_eq()
             && *symbol_name.add(length as usize) == 0
         {
             return *(*l).public_symbol_map.add(i as usize);
@@ -885,12 +902,10 @@ pub unsafe extern "C" fn ts_language_field_id_for_name(
     let l = lang(self_);
     let count = ts_language_field_count(self_) as u16;
     for i in 1..=count {
-        match strncmp(name, *(*l).field_names.add(i as usize), name_length as usize) {
-            0
-                if *(*(*l).field_names.add(i as usize)).add(name_length as usize) == 0 => {
-                    return i;
-                }
-            n if n < 0 => return 0,
+        let field_name = *(*l).field_names.add(i as usize);
+        match c_string_prefix_cmp(name, field_name, name_length as usize) {
+            std::cmp::Ordering::Equal if *field_name.add(name_length as usize) == 0 => return i,
+            std::cmp::Ordering::Less => return 0,
             _ => {}
         }
     }
