@@ -950,3 +950,83 @@ Source-code analysis:
 - Overall Rust throughput improved slightly versus the previous checkpoint and
   the gate reported no per-case Rust-vs-C slowdowns above 5%, so no regression
   investigation or rollback was needed for this batch.
+
+### 2026-06-24 20:42 EDT
+
+- Repo head: `52b81b76`
+- Batch base: `d90d18ba`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: 9 small Rust-core parser, lexer, and tree-cursor cleanups
+  through `Use cursor refs for sibling navigation`
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+Repeat run used for checkpoint recording:
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 25669.6 | 24511.9 | +4.72% |
+| TypeScript error parses | 32 | 1670.1 | 1600.3 | +4.36% |
+| JavaScript normal parses | 2 | 16972.2 | 16312.5 | +4.04% |
+| JavaScript error parses | 37 | 2043.0 | 1917.6 | +6.54% |
+| Overall parser throughput | 82 | 2304.8 | 2191.6 | +5.16% |
+
+The first current-head run reported similar aggregate Rust throughput:
+2300.2 bytes/ms Rust, 2191.5 bytes/ms C, +4.96% overall.
+
+The previous logged checkpoint at `d90d18ba` recorded Rust overall throughput
+of 2440.3 bytes/ms on the same TypeScript/JavaScript gate, which would imply a
+5.55% regression versus this repeat run. Because that crossed the investigation
+threshold, the prior checkpoint was rerun in a separate comparison worktree at
+`d90d18ba`, using the current fetched grammar fixtures and explicit TypeScript
+repository path. That fresh prior-checkpoint comparison measured 2273.3
+bytes/ms Rust and 2197.5 bytes/ms C overall. Current HEAD is therefore +1.39%
+versus the fresh prior-checkpoint Rust result, so the old 2440.3 bytes/ms log
+entry was not treated as a reproducible baseline for rollback.
+
+Per-case Rust-vs-C regressions above the 5% threshold on the repeat run:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `typescript error malloc.c` | 686.3 | 757.6 | 9.41% |
+| `javascript error update-authors.sh` | 591.9 | 633.8 | 6.61% |
+
+Investigation:
+
+- The first current-head run reported a different per-case slowdown
+  (`javascript error atom.sh` at 26.77%) while the repeat run reported
+  `malloc.c` and `update-authors.sh`. The changing affected cases point to
+  per-case benchmark noise rather than one stable source-code culprit.
+- The fresh `d90d18ba` comparison worktree reported different Rust-vs-C
+  slowdowns again (`corePublic.ts`, shell-script error fixtures, `cluster.c`,
+  `no_newline_at_eof.go`, `utilities.ts`, and `crlf-line-endings.py`). That
+  confirms the per-case Rust-vs-C list is unstable across runs/checkouts.
+
+Source-code analysis:
+
+- This batch changed Rust-internal bodies in `parser.rs`, `lexer.rs`, and
+  `tree_cursor.rs`. It did not change any exported function signatures,
+  `#[no_mangle] extern "C"` ABI, `#[repr(C)]` layouts, allocation sizes, parse
+  tables, generated parser templates, or FFI struct field order.
+- The live generated header inputs `templates/alloc.h`, `templates/array.h`,
+  and `parser.h.inc` were not edited.
+- The parser change only binds the `TSStringInput` payload as `&TSStringInput`
+  inside the existing callback and preserves the same byte bounds check,
+  `length` update, null return, and `string.add(byte)` return.
+- Lexer changes replace repeated included-range pointer arithmetic with a
+  private indexed helper, an index/boolean loop state, and slice iteration for
+  validation. They preserve the same included-range ordering checks,
+  range-index advancement, EOF transition, chunk refresh decision, token-end
+  boundary behavior, and TSLexer callback signatures. These are hot-path-adjacent
+  changes, but the fresh prior-checkpoint comparison did not reproduce a Rust
+  throughput regression.
+- Tree-cursor changes move child and sibling navigation bodies behind private
+  `&mut TreeCursor` helpers while preserving the exported wrappers used by the
+  C header/query code. Parser throughput benchmarks do not exercise tree cursor
+  traversal as their parse hot loop, so these are not plausible explanations
+  for an aggregate parser regression.
+- No reproducible >5% Rust checkpoint regression was observed after rerunning
+  the prior checkpoint in the same environment. No rollback was performed.
