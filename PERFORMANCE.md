@@ -2019,3 +2019,46 @@ Source-code analysis:
   batch. Keep `builderStatePublic.ts` and the JavaScript error-corpus outliers
   on the watchlist for the next same-gate checkpoint.
 - No rollback was performed.
+
+### 2026-06-25 10:56 EDT
+
+- Repo head: `4f83c221`
+- Batch base: `c46e668b`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: one broad mechanical Clippy-fix commit,
+  `Apply tree-sitter library clippy fixes`
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 25702.6 | 24199.2 | +6.21% |
+| TypeScript error parses | 32 | 1715.9 | 1621.9 | +5.79% |
+| JavaScript normal parses | 2 | 17288.6 | 16486.1 | +4.87% |
+| JavaScript error parses | 37 | 2052.4 | 1958.4 | +4.80% |
+| Overall parser throughput | 82 | 2347.3 | 2226.8 | +5.41% |
+
+Prior checkpoint at `c46e668b` recorded Rust overall throughput of 2154.1
+bytes/ms on the same TypeScript/JavaScript gate, so this batch improved
+absolute Rust throughput by 8.97%. The Rust-vs-C delta moved from +5.63% to
++5.41%, with no per-case regressions above the 5% threshold.
+
+Source-code analysis:
+
+- `cargo clippy --fix --lib -p tree-sitter --` was run, then rerun with
+  `--allow-dirty` because the existing subtree formatting cleanup was already
+  in the working tree.
+- The generated patch was kept as one broad Clippy-fix commit for review. It
+  mainly replaces equivalent raw pointer casts with `.cast()`/`addr_of!`/
+  `from_ref`, removes redundant casts and trailing punctuation, adds constness
+  to Rust-internal helpers, applies match guards, and converts selected
+  nul-terminated byte literals to `c"..."` literals.
+- Exported `extern "C"` function constness changes suggested by Clippy were
+  reverted before testing, so exported FFI signatures, C headers, `#[repr(C)]`
+  layouts, allocation sizes, generated parser templates, parse-table data,
+  parser control flow, stack ownership, subtree ownership, and query execution
+  semantics remain unchanged.
+- The perf run shows no source regression signal. No rollback was performed.
