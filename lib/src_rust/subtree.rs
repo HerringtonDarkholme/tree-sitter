@@ -1463,17 +1463,15 @@ pub unsafe fn ts_subtree_summarize_children(
         }
 
         let grandchild_count = ts_subtree_child_count(child);
-        if data.symbol == ts_builtin_sym_error || data.symbol == ts_builtin_sym_error_repeat
+        if (data.symbol == ts_builtin_sym_error || data.symbol == ts_builtin_sym_error_repeat)
+            && !ts_subtree_extra(child)
+            && !(ts_subtree_is_error(child) && grandchild_count == 0)
         {
-            if !ts_subtree_extra(child)
-                && !(ts_subtree_is_error(child) && grandchild_count == 0)
-            {
-                if ts_subtree_visible(child) {
-                    data.error_cost += ERROR_COST_PER_SKIPPED_TREE;
-                } else if grandchild_count > 0 {
-                    data.error_cost += ERROR_COST_PER_SKIPPED_TREE
-                        * (*child.ptr).data.children.visible_child_count;
-                }
+            if ts_subtree_visible(child) {
+                data.error_cost += ERROR_COST_PER_SKIPPED_TREE;
+            } else if grandchild_count > 0 {
+                data.error_cost += ERROR_COST_PER_SKIPPED_TREE
+                    * (*child.ptr).data.children.visible_child_count;
             }
         }
 
