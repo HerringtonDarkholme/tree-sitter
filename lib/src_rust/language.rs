@@ -4,10 +4,10 @@
 //!
 //! This module provides:
 //! - `TableEntry` / `LookaheadIterator` internal types (from language.h)
-//! - Exported functions that access TSLanguage fields (from language.c)
+//! - Exported functions that access `TSLanguage` fields (from language.c)
 //! - Static-inline helper functions re-implemented from language.h
 //!
-//! TSLanguage itself is defined in parser.h and created by generated parsers.
+//! `TSLanguage` itself is defined in parser.h and created by generated parsers.
 //! We access it as an opaque `repr(C)` struct via raw pointers.
 
 use std::ffi::c_void;
@@ -47,7 +47,7 @@ pub const TSSymbolTypeAuxiliary: TSSymbolType = 3;
 // This replaces the partial `TSLanguageData` in subtree.rs.
 // ---------------------------------------------------------------------------
 
-/// Mirrors the `external_scanner` sub-struct inside TSLanguage.
+/// Mirrors the `external_scanner` sub-struct inside `TSLanguage`.
 #[repr(C)]
 pub struct TSExternalScanner {
     pub states: *const bool,
@@ -59,7 +59,7 @@ pub struct TSExternalScanner {
     pub deserialize: Option<unsafe extern "C" fn(*mut c_void, *const i8, u32)>,
 }
 
-/// TSLexer struct (from parser.h). Needed for function pointer types.
+/// `TSLexer` struct (from parser.h). Needed for function pointer types.
 #[repr(C)]
 pub struct TSLexer {
     pub lookahead: i32,
@@ -72,7 +72,7 @@ pub struct TSLexer {
     pub log: Option<unsafe extern "C" fn(*const Self, *const i8, ...)>,
 }
 
-/// TSLanguageMetadata (from parser.h)
+/// `TSLanguageMetadata` (from parser.h)
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct TSLanguageMetadata {
@@ -899,7 +899,7 @@ pub unsafe extern "C" fn ts_language_field_id_for_name(
 // Lookahead iterator public API
 // ---------------------------------------------------------------------------
 
-/// TSLookaheadIterator is an opaque handle = LookaheadIterator allocated on heap.
+/// `TSLookaheadIterator` is an opaque handle = `LookaheadIterator` allocated on heap.
 #[no_mangle]
 pub unsafe extern "C" fn ts_lookahead_iterator_new(
     self_: *const TSLanguage,
