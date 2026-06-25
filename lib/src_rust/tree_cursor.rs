@@ -941,7 +941,7 @@ pub unsafe extern "C" fn ts_tree_cursor_current_status(
                 let mut map = field_map;
                 while map < field_map_end {
                     if (*map).field_id == *field_id
-                        && (*map).child_index as u32 > entry.structural_child_index
+                        && u32::from((*map).child_index) > entry.structural_child_index
                     {
                         *can_have_later_siblings_with_this_field = true;
                         break;
