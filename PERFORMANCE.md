@@ -1253,3 +1253,43 @@ Source-code analysis:
   sizes, heap layout, scanner-state copying, tree edit traversal, and subtree
   ownership behavior are unchanged.
 - No rollback was performed.
+
+### 2026-06-25 01:24 EDT
+
+- Repo head: `dbf0cdb2`
+- Batch base: `3d53c44b`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: 10 small header/import/clippy cleanups from
+  `Use Rust imports for parser core functions` through `Clean unicode helper
+  docs`
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language tsx --repetitions 3 --error-limit 4 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 24977.9 | 24292.7 | +2.82% |
+| TypeScript error parses | 24 | 1735.4 | 1722.1 | +0.77% |
+| TSX normal parses | 1 | 5639.5 | 5584.3 | +0.99% |
+| TSX error parses | 27 | 1734.6 | 1726.5 | +0.47% |
+| Overall parser throughput | 63 | 2117.4 | 2103.6 | +0.66% |
+
+No per-case regressions above the 5% threshold.
+
+Notes:
+
+- This checkpoint used 3 repetitions and a smaller TypeScript/TSX-only gate to
+  keep the ten-commit checkpoint fast after non-performance-focused cleanup.
+  Treat it as a smoke perf record, not a release-quality benchmark.
+- The batch did not touch exported FFI signatures, `#[repr(C)]` layouts,
+  allocation behavior, parse-table data, or parser ownership rules.
+- The parser-facing code changes are limited to replacing Rust declarations of
+  Rust-implemented symbols with normal imports and removing redundant control
+  flow in error comparison. The remaining changes are header trimming for stale
+  transitional prototypes, internal helper mutability clarity, `const fn`
+  helper annotations, and documentation/literal cleanup.
+- Since Rust throughput stayed positive versus C in every measured aggregate
+  and the gate reported no >5% per-case regressions, no source-level
+  performance culprit was identified and no rollback was performed.
