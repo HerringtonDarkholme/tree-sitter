@@ -1689,7 +1689,7 @@ unsafe fn ts_parser__do_all_potential_reductions(
                                 &mut self_.reduce_actions,
                                 ReduceAction {
                                     symbol: action.reduce.symbol,
-                                    count: action.reduce.child_count as u32,
+                                    count: u32::from(action.reduce.child_count),
                                     dynamic_precedence: action.reduce.dynamic_precedence as i32,
                                     production_id: action.reduce.production_id,
                                 },
