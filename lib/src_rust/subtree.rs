@@ -852,7 +852,7 @@ pub unsafe fn ts_subtree_total_bytes(self_: Subtree) -> u32 {
 // --- #27: child_count, repeat_depth, is_repetition ---
 
 #[inline]
-pub unsafe fn ts_subtree_child_count(self_: Subtree) -> u32 {
+pub const unsafe fn ts_subtree_child_count(self_: Subtree) -> u32 {
     if self_.data.is_inline() {
         0
     } else {
