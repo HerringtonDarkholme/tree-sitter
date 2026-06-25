@@ -2164,7 +2164,7 @@ unsafe fn ts_subtree__print_dot_graph(
     let mut child_start_offset = start_offset;
     let lang = language as *const TSLanguageData;
     let mut child_info_offset =
-        (*lang).max_alias_sequence_length as u32 * ts_subtree_production_id(tree) as u32;
+        u32::from((*lang).max_alias_sequence_length) * u32::from(ts_subtree_production_id(tree));
     let n = ts_subtree_child_count(tree);
     for i in 0..n {
         let child = ts_subtree_children(tree).add(i as usize) as *const Subtree;
