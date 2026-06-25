@@ -5,13 +5,10 @@
 extern "C" {
 #endif
 
-#include <limits.h>
 #include <stdbool.h>
 #include "./length.h"
 #include "./host.h"
 #include "./parser.h"
-
-#define TS_TREE_STATE_NONE USHRT_MAX
 
 // The serialized state of an external scanner.
 //
