@@ -240,6 +240,60 @@ Source-code analysis:
 - Full `cargo test --all` passed before every committed code change in this
   checkpoint.
 
+### 2026-06-25 19:40 EDT
+
+- Repo head: `9cec2e70`
+- Batch base: `e36d8f13`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: 10 small Rust-core helper/reference cleanups:
+  `Restrict language helper visibility` through
+  `Use stack node reference for link precedence`.
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 25159.5 | 23793.8 | +5.74% |
+| TypeScript error parses | 32 | 1649.8 | 1547.5 | +6.61% |
+| JavaScript normal parses | 2 | 17228.1 | 16057.6 | +7.29% |
+| JavaScript error parses | 37 | 2034.2 | 1966.7 | +3.44% |
+| Overall parser throughput | 82 | 2284.2 | 2166.3 | +5.44% |
+
+Per-case regressions over 5%:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `javascript error compound-statement-without-trailing-newline.py` | 2756.2 | 3029.1 | 9.01% |
+
+Prior checkpoint at `e36d8f13` measured Rust overall throughput of 2362.1
+bytes/ms and a Rust-vs-C delta of +6.88%. This checkpoint measured 2284.2
+bytes/ms, so absolute Rust throughput moved by about -3.30%. C throughput moved
+from 2210.0 to 2166.3 bytes/ms, and the Rust-vs-C delta moved to +5.44%.
+
+Source-code analysis:
+
+- The batch contains no exported `#[no_mangle] extern "C"` signature changes,
+  no struct layout changes, no C header changes, and no parser table or parser
+  action semantic changes.
+- The language and lexer commits only restrict Rust visibility or replace a
+  callback-local raw reference with the existing typed lexer helper.
+- The stack commits replace raw `StackIterator`, callback payload, and
+  `StackNode` dereferences with existing typed reference helpers in callbacks,
+  accessors, merge paths, and link handling. They preserve the same calls,
+  refcount operations, comparison order, and dynamic-precedence arithmetic.
+- The previous checkpoint's TypeScript normal-case regressions did not
+  reproduce. This run has one JavaScript error fixture above the 5% threshold,
+  while every aggregate bucket remains faster than C. Because C throughput also
+  dropped materially versus the prior run and the changed code is mechanical
+  reference formation, this does not currently prove a source-level regression.
+  If this fixture repeats in the next checkpoint, inspect codegen around
+  `stack_node_ref` in `stack_node_add_link` before considering rollback.
+- Full `cargo test --all` passed before every committed code change in this
+  checkpoint.
+
 ### 2026-06-25 18:20 EDT
 
 - Repo head: `0786a35a`
