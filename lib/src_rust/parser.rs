@@ -354,7 +354,7 @@ unsafe fn parser_ptr_mut<'a>(parser: *mut TSParser) -> &'a mut TSParser {
 }
 
 #[inline]
-unsafe fn parser_ptr_ref<'a>(parser: *const TSParser) -> &'a TSParser {
+const unsafe fn parser_ptr_ref<'a>(parser: *const TSParser) -> &'a TSParser {
     parser.as_ref().unwrap_unchecked()
 }
 
@@ -2809,7 +2809,7 @@ pub unsafe extern "C" fn ts_parser_delete(self_: *mut TSParser) {
 
 #[no_mangle]
 pub const unsafe extern "C" fn ts_parser_language(self_: *const TSParser) -> *const TSLanguage {
-    let parser = &*self_;
+    let parser = parser_ptr_ref(self_);
     parser.language
 }
 
@@ -2845,7 +2845,7 @@ pub unsafe extern "C" fn ts_parser_set_language(
 
 #[no_mangle]
 pub const unsafe extern "C" fn ts_parser_logger(self_: *const TSParser) -> TSLogger {
-    let parser = &*self_;
+    let parser = parser_ptr_ref(self_);
     ts_logger_read_ref(&parser.lexer.logger)
 }
 
