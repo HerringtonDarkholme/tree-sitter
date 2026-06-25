@@ -492,9 +492,10 @@ unsafe fn array_grow(arr: &mut SubtreeArray, count: u32) {
             new_capacity = new_size;
         }
         arr.contents = ts_realloc(
-            arr.contents as *mut c_void,
+            arr.contents.cast::<c_void>(),
             new_capacity as usize * std::mem::size_of::<Subtree>(),
-        ) as *mut Subtree;
+        )
+        .cast::<Subtree>();
         arr.capacity = new_capacity;
     }
 }
@@ -516,7 +517,7 @@ pub unsafe fn ts_subtree_array_copy(self_: SubtreeArray, dest: &mut SubtreeArray
     dest.contents = self_.contents;
     if self_.capacity > 0 {
         dest.contents =
-            ts_calloc(self_.capacity as usize, std::mem::size_of::<Subtree>()) as *mut Subtree;
+            ts_calloc(self_.capacity as usize, std::mem::size_of::<Subtree>()).cast::<Subtree>();
         ptr::copy_nonoverlapping(self_.contents, dest.contents, self_.size as usize);
         for i in 0..self_.size {
             ts_subtree_retain(*dest.contents.add(i as usize));
@@ -534,7 +535,7 @@ pub unsafe fn ts_subtree_array_clear(pool: &mut SubtreePool, self_: &mut Subtree
 pub unsafe fn ts_subtree_array_delete(pool: &mut SubtreePool, self_: &mut SubtreeArray) {
     ts_subtree_array_clear(pool, self_);
     if !self_.contents.is_null() {
-        ts_free(self_.contents as *mut c_void);
+        ts_free(self_.contents.cast::<c_void>());
     }
     self_.contents = ptr::null_mut();
     self_.size = 0;
@@ -585,9 +586,10 @@ unsafe fn mutable_array_grow(arr: &mut MutableSubtreeArray, count: u32) {
             new_capacity = new_size;
         }
         arr.contents = ts_realloc(
-            arr.contents as *mut c_void,
+            arr.contents.cast::<c_void>(),
             new_capacity as usize * std::mem::size_of::<MutableSubtree>(),
-        ) as *mut MutableSubtree;
+        )
+        .cast::<MutableSubtree>();
         arr.capacity = new_capacity;
     }
 }
@@ -605,7 +607,7 @@ unsafe fn mutable_array_pop(arr: &mut MutableSubtreeArray) -> MutableSubtree {
 
 unsafe fn mutable_array_delete(arr: &mut MutableSubtreeArray) {
     if !arr.contents.is_null() {
-        ts_free(arr.contents as *mut c_void);
+        ts_free(arr.contents.cast::<c_void>());
     }
     arr.contents = ptr::null_mut();
     arr.size = 0;
@@ -623,9 +625,10 @@ const fn mutable_array_new() -> MutableSubtreeArray {
 unsafe fn mutable_array_reserve(arr: &mut MutableSubtreeArray, new_capacity: u32) {
     if new_capacity > arr.capacity {
         arr.contents = ts_realloc(
-            arr.contents as *mut c_void,
+            arr.contents.cast::<c_void>(),
             new_capacity as usize * std::mem::size_of::<MutableSubtree>(),
-        ) as *mut MutableSubtree;
+        )
+        .cast::<MutableSubtree>();
         arr.capacity = new_capacity;
     }
 }
