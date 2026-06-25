@@ -163,7 +163,7 @@ macro_rules! LOG {
 macro_rules! LOG_STACK {
     ($self_:expr) => {
         if !(*$self_).dot_graph_file.is_null() {
-            ts_stack_print_dot_graph((*$self_).stack, (*$self_).language, (*$self_).dot_graph_file);
+            ts_stack_print_dot_graph(&mut *(*$self_).stack, (*$self_).language, (*$self_).dot_graph_file);
             fputs(c"\n\n".as_ptr().cast::<i8>(), (*$self_).dot_graph_file);
         }
     };
@@ -1822,7 +1822,7 @@ unsafe fn ts_parser__recover(
     let stack = &mut *self_.stack;
     let previous_version_count = ts_stack_version_count(stack);
     let position = ts_stack_position(stack, version);
-    let summary = ts_stack_get_summary(self_.stack, version);
+    let summary = ts_stack_get_summary(stack, version);
     let node_count_since_error = ts_stack_node_count_since_error(stack, version);
     let current_error_cost = ts_stack_error_cost(stack, version);
 

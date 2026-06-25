@@ -1232,10 +1232,9 @@ pub unsafe fn ts_stack_record_summary(
 
 /// Get the recorded summary for a version.
 pub unsafe fn ts_stack_get_summary(
-    self_: *mut Stack,
+    stack: &Stack,
     version: StackVersion,
 ) -> *mut StackSummary {
-    let stack = &*self_;
     stack_head(stack, version).summary
 }
 
@@ -1460,11 +1459,10 @@ pub unsafe fn ts_stack_clear(self_: &mut Stack) {
 
 /// Print the stack as a DOT graph for debugging.
 pub unsafe fn ts_stack_print_dot_graph(
-    self_: *mut Stack,
+    stack: &mut Stack,
     language: *const TSLanguage,
     mut f: *mut c_void,
 ) -> bool {
-    let stack = &mut *self_;
     array_reserve(&mut stack.iterators, 32);
     if f.is_null() {
         f = stderr;
