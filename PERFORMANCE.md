@@ -1598,3 +1598,46 @@ Source-code analysis:
   control flow, stack ownership, allocation, subtree layout, and raw pointer
   operations are unchanged.
 - No rollback was performed.
+
+### 2026-06-25 05:48 EDT
+
+- Repo head: `07716c87`
+- Batch base: `d25d89b0`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: 10 small clippy cleanup commits from
+  `Make language alias helper const` through `Backtick language docs`
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language tsx --repetitions 10 --error-limit 4 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 26817.1 | 25851.8 | +3.73% |
+| TypeScript error parses | 24 | 1752.0 | 1717.5 | +2.01% |
+| TSX normal parses | 1 | 5791.7 | 5653.3 | +2.45% |
+| TSX error parses | 27 | 1752.0 | 1730.2 | +1.26% |
+| Overall parser throughput | 63 | 2140.8 | 2105.3 | +1.69% |
+
+Per-case regression investigation:
+
+- The 10-repetition checkpoint reported no per-case regressions above the 5%
+  threshold, so no rerun or rollback was needed.
+
+Source-code analysis:
+
+- This batch did not change exported FFI signatures, `#[repr(C)]` layouts,
+  allocation behavior, parse-table data, generated parser templates, or C
+  headers.
+- The runtime changes are clippy-oriented `const fn` annotations for private
+  helpers in `subtree.rs`, `language.rs`, `tree.rs`, `tree_cursor.rs`,
+  `parser.rs`, and `node.rs`.
+- The remaining changes are documentation-only clippy cleanups in `lexer.rs`
+  and `language.rs`.
+- Parser-facing runtime changes are limited to making existing pure
+  construction, pointer-cast, read-copy, length arithmetic, and comparison
+  helpers callable in const contexts. Runtime parse control flow, stack
+  ownership, allocation, subtree layout, and raw pointer operations are
+  unchanged.
+- No rollback was performed.
