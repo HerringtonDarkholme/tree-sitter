@@ -50,6 +50,82 @@ broader baseline replaces it.
 
 ## Checkpoints
 
+### 2026-06-25 16:17 EDT
+
+- Repo head: `3d976f95`
+- Batch base: `5951068a`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: 10 small Rust-core raw-pointer containment cleanups:
+  `Avoid transmute for range array init` through
+  `Use slice for subtree external token scan`.
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+Primary run:
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 25238.1 | 24058.5 | +4.90% |
+| TypeScript error parses | 32 | 1653.6 | 1605.7 | +2.98% |
+| JavaScript normal parses | 2 | 17241.2 | 16042.2 | +7.47% |
+| JavaScript error parses | 37 | 2024.3 | 1933.9 | +4.67% |
+| Overall parser throughput | 82 | 2283.3 | 2201.9 | +3.70% |
+
+Per-case regressions over 5% in the primary run:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `typescript error crlf-line-endings.py` | 1012.7 | 1160.0 | 12.70% |
+
+Rerun to check whether the per-case regression was stable:
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 24971.7 | 24000.1 | +4.05% |
+| TypeScript error parses | 32 | 1667.9 | 1582.1 | +5.42% |
+| JavaScript normal parses | 2 | 17158.7 | 15867.8 | +8.14% |
+| JavaScript error parses | 37 | 2042.5 | 1971.1 | +3.62% |
+| Overall parser throughput | 82 | 2302.4 | 2197.2 | +4.79% |
+
+Per-case regressions over 5% in the rerun:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `javascript error compound-statement-without-trailing-newline.py` | 2934.4 | 3179.9 | 7.72% |
+
+Prior checkpoint at `5951068a` recorded Rust overall throughput of 2316.9
+bytes/ms and a Rust-vs-C delta of +4.10% in its primary rerun. This checkpoint
+measured 2283.3 bytes/ms in the first run and 2302.4 bytes/ms in the rerun, so
+absolute Rust throughput moved by about -1.45% and -0.63%, respectively. The
+Rust-vs-C delta remained positive at +3.70% and +4.79%.
+
+Source-code analysis:
+
+- The batch contains no exported `#[no_mangle] extern "C"` signature changes,
+  no struct layout changes, and no parsing table or parser action semantic
+  changes.
+- The first commit replaces a `transmute` between same-layout range arrays with
+  explicit field movement.
+- The tree/node/cursor/changed-range/parser/subtree commits move direct
+  `ts_subtree_children(...).add(...)` and included-range indexing behind local
+  slice helpers. Bounds are still established by the existing surrounding
+  control flow; the changes reduce scattered raw pointer dereferences.
+- `subtree_children` explicitly returns `&[]` for zero-child subtrees to avoid
+  constructing a slice from the null pointer returned by `ts_subtree_children`
+  for inline/leaf subtrees.
+- The only per-case regression above 5% changed between the two runs
+  (`typescript error crlf-line-endings.py` in the first run,
+  `javascript error compound-statement-without-trailing-newline.py` in the
+  rerun). The touched code is general child-array access rather than
+  language-specific or file-specific logic, and both runs remain positive
+  overall, so the per-case outliers are treated as measurement noise for this
+  checkpoint.
+- Full `cargo test --all` passed before every committed code change in this
+  checkpoint.
+
 ### 2026-06-24 13:33 EDT
 
 - Repo head: `51ab1851`
