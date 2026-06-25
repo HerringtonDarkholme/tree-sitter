@@ -79,7 +79,7 @@ unsafe fn ts_node_iterate_children(node: &TSNode) -> NodeChildIterator {
     let tree = node.tree as *const TSTree;
     let alias_sequence = ts_language_alias_sequence(
         (*tree).language,
-        (*subtree.ptr).data.children.production_id as u32,
+        u32::from((*subtree.ptr).data.children.production_id),
     );
     NodeChildIterator {
         parent: subtree,
@@ -499,7 +499,7 @@ unsafe fn ts_node__field_name_from_language(
     let mut field_map_end: *const TSFieldMapEntry = ptr::null();
     ts_language_field_map(
         (*tree).language,
-        (*ts_node__subtree(self_).ptr).data.children.production_id as u32,
+        u32::from((*ts_node__subtree(self_).ptr).data.children.production_id),
         &mut field_map,
         &mut field_map_end,
     );
@@ -789,7 +789,7 @@ pub unsafe extern "C" fn ts_node_child_by_field_id(
         let mut field_map_end: *const TSFieldMapEntry = ptr::null();
         ts_language_field_map(
             (*tree).language,
-            (*ts_node__subtree(self_).ptr).data.children.production_id as u32,
+            u32::from((*ts_node__subtree(self_).ptr).data.children.production_id),
             &mut field_map,
             &mut field_map_end,
         );
