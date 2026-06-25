@@ -960,7 +960,7 @@ unsafe fn ts_parser__lex(
 
         if lex_mode.external_lex_state != 0 {
             LOG!(parser, b"lex_external state:%d, row:%u, column:%u\0".as_ptr() as *const i8,
-                lex_mode.external_lex_state as i32,
+                i32::from(lex_mode.external_lex_state),
                 current_position.extent.row,
                 current_position.extent.column);
             ts_lexer_start(&mut self_.lexer);
@@ -1015,7 +1015,7 @@ unsafe fn ts_parser__lex(
         }
 
         LOG!(parser, b"lex_internal state:%d, row:%u, column:%u\0".as_ptr() as *const i8,
-            lex_mode.lex_state as i32,
+            i32::from(lex_mode.lex_state),
             current_position.extent.row,
             current_position.extent.column);
         ts_lexer_start(&mut self_.lexer);
@@ -2931,7 +2931,7 @@ pub unsafe extern "C" fn ts_parser_parse(
                     b"process version:%u, version_count:%u, state:%d, row:%u, col:%u\0".as_ptr() as *const i8,
                     version,
                     ts_stack_version_count(&*parser.stack),
-                    ts_stack_state(&*parser.stack, version) as i32,
+                    i32::from(ts_stack_state(&*parser.stack, version)),
                     ts_stack_position(&*parser.stack, version).extent.row,
                     ts_stack_position(&*parser.stack, version).extent.column
                 );
