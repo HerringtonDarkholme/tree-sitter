@@ -120,23 +120,23 @@ const INLINE_IS_KEYWORD: u8 = 1 << 6;
 
 impl SubtreeInlineData {
     #[inline(always)]
-    pub fn is_inline(&self) -> bool { self.flags & INLINE_IS_INLINE != 0 }
+    pub const fn is_inline(&self) -> bool { self.flags & INLINE_IS_INLINE != 0 }
     #[inline(always)]
-    pub fn visible(&self) -> bool { self.flags & INLINE_VISIBLE != 0 }
+    pub const fn visible(&self) -> bool { self.flags & INLINE_VISIBLE != 0 }
     #[inline(always)]
-    pub fn named(&self) -> bool { self.flags & INLINE_NAMED != 0 }
+    pub const fn named(&self) -> bool { self.flags & INLINE_NAMED != 0 }
     #[inline(always)]
-    pub fn extra(&self) -> bool { self.flags & INLINE_EXTRA != 0 }
+    pub const fn extra(&self) -> bool { self.flags & INLINE_EXTRA != 0 }
     #[inline(always)]
-    pub fn has_changes(&self) -> bool { self.flags & INLINE_HAS_CHANGES != 0 }
+    pub const fn has_changes(&self) -> bool { self.flags & INLINE_HAS_CHANGES != 0 }
     #[inline(always)]
-    pub fn is_missing(&self) -> bool { self.flags & INLINE_IS_MISSING != 0 }
+    pub const fn is_missing(&self) -> bool { self.flags & INLINE_IS_MISSING != 0 }
     #[inline(always)]
-    pub fn is_keyword(&self) -> bool { self.flags & INLINE_IS_KEYWORD != 0 }
+    pub const fn is_keyword(&self) -> bool { self.flags & INLINE_IS_KEYWORD != 0 }
     #[inline(always)]
-    pub fn padding_rows(&self) -> u8 { self.rows_and_lookahead & 0x0F }
+    pub const fn padding_rows(&self) -> u8 { self.rows_and_lookahead & 0x0F }
     #[inline(always)]
-    pub fn lookahead_bytes(&self) -> u8 { (self.rows_and_lookahead >> 4) & 0x0F }
+    pub const fn lookahead_bytes(&self) -> u8 { (self.rows_and_lookahead >> 4) & 0x0F }
 
     #[inline(always)]
     pub fn set_is_inline(&mut self, v: bool) { if v { self.flags |= INLINE_IS_INLINE } else { self.flags &= !INLINE_IS_INLINE } }
@@ -199,17 +199,17 @@ const HEAP_IS_MISSING: u16 = 1 << 9;
 const HEAP_IS_KEYWORD: u16 = 1 << 10;
 
 impl SubtreeHeapData {
-    #[inline(always)] pub fn visible(&self) -> bool { self.flags & HEAP_VISIBLE != 0 }
-    #[inline(always)] pub fn named(&self) -> bool { self.flags & HEAP_NAMED != 0 }
-    #[inline(always)] pub fn extra(&self) -> bool { self.flags & HEAP_EXTRA != 0 }
-    #[inline(always)] pub fn fragile_left(&self) -> bool { self.flags & HEAP_FRAGILE_LEFT != 0 }
-    #[inline(always)] pub fn fragile_right(&self) -> bool { self.flags & HEAP_FRAGILE_RIGHT != 0 }
-    #[inline(always)] pub fn has_changes(&self) -> bool { self.flags & HEAP_HAS_CHANGES != 0 }
-    #[inline(always)] pub fn has_external_tokens(&self) -> bool { self.flags & HEAP_HAS_EXTERNAL_TOKENS != 0 }
-    #[inline(always)] pub fn has_external_scanner_state_change(&self) -> bool { self.flags & HEAP_HAS_EXTERNAL_SCANNER_STATE_CHANGE != 0 }
-    #[inline(always)] pub fn depends_on_column(&self) -> bool { self.flags & HEAP_DEPENDS_ON_COLUMN != 0 }
-    #[inline(always)] pub fn is_missing(&self) -> bool { self.flags & HEAP_IS_MISSING != 0 }
-    #[inline(always)] pub fn is_keyword(&self) -> bool { self.flags & HEAP_IS_KEYWORD != 0 }
+    #[inline(always)] pub const fn visible(&self) -> bool { self.flags & HEAP_VISIBLE != 0 }
+    #[inline(always)] pub const fn named(&self) -> bool { self.flags & HEAP_NAMED != 0 }
+    #[inline(always)] pub const fn extra(&self) -> bool { self.flags & HEAP_EXTRA != 0 }
+    #[inline(always)] pub const fn fragile_left(&self) -> bool { self.flags & HEAP_FRAGILE_LEFT != 0 }
+    #[inline(always)] pub const fn fragile_right(&self) -> bool { self.flags & HEAP_FRAGILE_RIGHT != 0 }
+    #[inline(always)] pub const fn has_changes(&self) -> bool { self.flags & HEAP_HAS_CHANGES != 0 }
+    #[inline(always)] pub const fn has_external_tokens(&self) -> bool { self.flags & HEAP_HAS_EXTERNAL_TOKENS != 0 }
+    #[inline(always)] pub const fn has_external_scanner_state_change(&self) -> bool { self.flags & HEAP_HAS_EXTERNAL_SCANNER_STATE_CHANGE != 0 }
+    #[inline(always)] pub const fn depends_on_column(&self) -> bool { self.flags & HEAP_DEPENDS_ON_COLUMN != 0 }
+    #[inline(always)] pub const fn is_missing(&self) -> bool { self.flags & HEAP_IS_MISSING != 0 }
+    #[inline(always)] pub const fn is_keyword(&self) -> bool { self.flags & HEAP_IS_KEYWORD != 0 }
 
     #[inline(always)] pub fn set_visible(&mut self, v: bool) { if v { self.flags |= HEAP_VISIBLE } else { self.flags &= !HEAP_VISIBLE } }
     #[inline(always)] pub fn set_named(&mut self, v: bool) { if v { self.flags |= HEAP_NAMED } else { self.flags &= !HEAP_NAMED } }
