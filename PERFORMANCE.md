@@ -2312,3 +2312,58 @@ Source-code analysis:
 - The >5% per-case slowdown sets changed completely between the first run and
   the repeat, while aggregate Rust throughput was stable and remained above the
   previous checkpoint. No rollback was performed.
+
+### 2026-06-25 13:52 EDT
+
+- Repo head: `26a7cc28`
+- Batch base: `b1ba2d86`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: header cleanup commits from `Remove stale wasm store header`
+  through `Restore array swap helper`
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 25054.9 | 24627.3 | +1.74% |
+| TypeScript error parses | 32 | 1644.0 | 1644.3 | -0.02% |
+| JavaScript normal parses | 2 | 17278.0 | 15820.8 | +9.21% |
+| JavaScript error parses | 37 | 2069.4 | 1966.6 | +5.22% |
+| Overall parser throughput | 82 | 2293.6 | 2247.6 | +2.05% |
+
+Per-case regressions over 5%:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `typescript error compound-statement-without-trailing-newline.py` | 935.1 | 1006.1 | 7.06% |
+| `typescript normal transform.ts` | 23211.6 | 24438.5 | 5.02% |
+
+Prior checkpoint at `be4cc0fc` recorded Rust overall throughput of 2296.7
+bytes/ms in the first run and 2294.7 bytes/ms in the repeat. This checkpoint
+measured 2293.6 bytes/ms, so absolute Rust throughput stayed within about 0.1%
+of the prior repeated measurement. The Rust-vs-C delta moved from +0.66% in the
+prior repeat to +2.05%.
+
+Source-code analysis:
+
+- This batch is C-header cleanup only in net effect: it removes unused includes,
+  stale runtime-only array macros, a stale runtime-only subtree macro, and the
+  unused `wasm_store.h` declaration header. It does not touch Rust parser
+  control flow, parse tables, stack/subtree ownership, or exported FFI
+  signatures.
+- A temporary removal of two `LookaheadIterator` fields was reverted in
+  `Restore lookahead iterator fields`. The private `array_swap` helper and its
+  `struct Swap` backing type were also restored in `Restore array swap helper`.
+  The final net diff for this checkpoint removes no struct/union/enum fields.
+- Generated parser templates (`crates/generate/src/templates/alloc.h`,
+  `crates/generate/src/templates/array.h`, and
+  `crates/generate/src/parser.h.inc`) were not edited.
+- `typescript error compound-statement-without-trailing-newline.py` has appeared
+  repeatedly as a >5% per-case outlier in earlier checkpoint logs, and
+  `typescript normal transform.ts` is a borderline 5.02% outlier. Given the
+  source delta and stable aggregate throughput, no rollback was performed.
+- Full `cargo test --all` passed after every committed code/header change in
+  this checkpoint.
