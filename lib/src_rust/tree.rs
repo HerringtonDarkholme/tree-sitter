@@ -6,7 +6,7 @@ use core::ffi::c_void;
 use crate::ffi::{TSLanguage, TSNode, TSPoint, TSRange, TSSymbol};
 
 use super::alloc::{ts_calloc, ts_free, ts_malloc};
-use super::get_changed_ranges::ts_range_edit_ref;
+use super::get_changed_ranges::{ts_range_array_get_changed_ranges, ts_range_edit_ref, TSRangeArray};
 use super::language::{ts_language_copy, ts_language_delete};
 use super::length::{length_add, Length};
 use super::node::ts_node_new;
@@ -20,13 +20,6 @@ use super::subtree::{
 // ---------------------------------------------------------------------------
 
 extern "C" {
-    fn ts_range_array_get_changed_ranges(
-        old_ranges: *const TSRange,
-        old_range_count: u32,
-        new_ranges: *const TSRange,
-        new_range_count: u32,
-        differences: *mut TSRangeArray,
-    );
     fn ts_subtree_get_changed_ranges(
         old_tree: *const Subtree,
         new_tree: *const Subtree,
@@ -79,14 +72,6 @@ pub struct TreeCursor {
     pub tree: *const TSTree,
     pub stack: TreeCursorEntryArray,
     pub root_alias_symbol: TSSymbol,
-}
-
-/// `TSRangeArray` — Array(TSRange), mirrors `get_changed_ranges.h`
-#[repr(C)]
-pub struct TSRangeArray {
-    pub contents: *mut TSRange,
-    pub size: u32,
-    pub capacity: u32,
 }
 
 // ---------------------------------------------------------------------------
