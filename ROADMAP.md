@@ -202,10 +202,10 @@ execution for this milestone. Query behavior remains protected by leaving
 
 ## Current Idiomatic Rust Cleanup Order
 
-1. Fix Clippy warnings first in the active Rust core, prioritizing warnings that
-   improve readability or remove C-port artifacts without changing exported
-   FFI signatures, generated parser ABI, `#[repr(C)]` layouts, allocation
-   behavior, or parser semantics.
+1. Fixing Clippy warnings comes first in the active Rust core, prioritizing
+   warnings that improve readability or remove C-port artifacts without changing
+   exported FFI signatures, generated parser ABI, `#[repr(C)]` layouts,
+   allocation behavior, or parser semantics.
 2. Then clean up raw pointer and type-cast usage, starting with internal helper
    bodies and internal Rust-only function signatures. Keep public C ABI
    signatures and layout-sensitive structures unchanged.
