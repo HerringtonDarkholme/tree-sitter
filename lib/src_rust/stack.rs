@@ -444,6 +444,16 @@ const unsafe fn subtree_array_read_ref(self_: &SubtreeArray) -> SubtreeArray {
 }
 
 #[inline]
+unsafe fn subtree_array_get(self_: &SubtreeArray, index: u32) -> Subtree {
+    *array_get_ref(subtree_array_as_array(self_), index)
+}
+
+#[inline]
+unsafe fn subtree_array_as_array(self_: &SubtreeArray) -> &Array<Subtree> {
+    &*ptr::from_ref(self_).cast::<Array<Subtree>>()
+}
+
+#[inline]
 unsafe fn stack_node_pool_get(self_: &Array<*mut StackNode>, index: u32) -> *mut StackNode {
     *array_get_ref(self_, index)
 }
@@ -960,7 +970,7 @@ unsafe extern "C" fn pop_error_callback(
     if iterator.subtrees.size > 0 {
         let found_error = bool_payload_mut(payload);
         if !*found_error
-            && ts_subtree_is_error(*iterator.subtrees.contents.add(0))
+            && ts_subtree_is_error(subtree_array_get(&iterator.subtrees, 0))
         {
             *found_error = true;
             StackActionPop | StackActionStop
