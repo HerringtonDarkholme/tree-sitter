@@ -1857,10 +1857,10 @@ unsafe fn language_write_symbol_as_dot_string(
                 fputc(i32::from(*chr), f);
             }
             b'\n' => {
-                fputs(b"\\n\0".as_ptr() as *const i8, f);
+                fputs(b"\\n\0".as_ptr().cast::<i8>(), f);
             }
             b'\t' => {
-                fputs(b"\\t\0".as_ptr() as *const i8, f);
+                fputs(b"\\t\0".as_ptr().cast::<i8>(), f);
             }
             _ => {
                 fputc(i32::from(*chr), f);
@@ -1872,19 +1872,19 @@ unsafe fn language_write_symbol_as_dot_string(
 
 unsafe fn ts_subtree__write_char_to_string(s: *mut i8, n: usize, chr: i32) -> usize {
     if chr == -1 {
-        snprintf(s, n, b"INVALID\0".as_ptr() as *const i8) as usize
+        snprintf(s, n, b"INVALID\0".as_ptr().cast::<i8>()) as usize
     } else if chr == 0 {
-        snprintf(s, n, b"'\\0'\0".as_ptr() as *const i8) as usize
+        snprintf(s, n, b"'\\0'\0".as_ptr().cast::<i8>()) as usize
     } else if chr == i32::from(b'\n') {
-        snprintf(s, n, b"'\\n'\0".as_ptr() as *const i8) as usize
+        snprintf(s, n, b"'\\n'\0".as_ptr().cast::<i8>()) as usize
     } else if chr == i32::from(b'\t') {
-        snprintf(s, n, b"'\\t'\0".as_ptr() as *const i8) as usize
+        snprintf(s, n, b"'\\t'\0".as_ptr().cast::<i8>()) as usize
     } else if chr == i32::from(b'\r') {
-        snprintf(s, n, b"'\\r'\0".as_ptr() as *const i8) as usize
+        snprintf(s, n, b"'\\r'\0".as_ptr().cast::<i8>()) as usize
     } else if chr >= 0x20 && chr < 0x7F {
-        snprintf(s, n, b"'%c'\0".as_ptr() as *const i8, chr) as usize
+        snprintf(s, n, b"'%c'\0".as_ptr().cast::<i8>(), chr) as usize
     } else {
-        snprintf(s, n, b"%d\0".as_ptr() as *const i8, chr) as usize
+        snprintf(s, n, b"%d\0".as_ptr().cast::<i8>(), chr) as usize
     }
 }
 
