@@ -925,7 +925,7 @@ unsafe extern "C" fn pop_error_callback(
     iterator: *const StackIterator,
 ) -> StackAction {
     if (*iterator).subtrees.size > 0 {
-        let found_error = &mut *payload.cast::<bool>();
+        let found_error = bool_payload_mut(payload);
         if !*found_error
             && ts_subtree_is_error(*(*iterator).subtrees.contents.add(0))
         {
@@ -937,6 +937,26 @@ unsafe extern "C" fn pop_error_callback(
     } else {
         StackActionNone
     }
+}
+
+#[inline]
+unsafe fn bool_payload_mut<'a>(payload: *mut c_void) -> &'a mut bool {
+    payload.cast::<bool>().as_mut().unwrap_unchecked()
+}
+
+#[inline]
+unsafe fn summarize_stack_session_mut<'a>(
+    payload: *mut c_void,
+) -> &'a mut SummarizeStackSession {
+    payload
+        .cast::<SummarizeStackSession>()
+        .as_mut()
+        .unwrap_unchecked()
+}
+
+#[inline]
+unsafe fn stack_summary_ref<'a>(summary: *const StackSummary) -> &'a StackSummary {
+    summary.as_ref().unwrap_unchecked()
 }
 
 unsafe extern "C" fn pop_all_callback(
@@ -954,14 +974,14 @@ unsafe extern "C" fn summarize_stack_callback(
     payload: *mut c_void,
     iterator: *const StackIterator,
 ) -> StackAction {
-    let session = &mut *payload.cast::<SummarizeStackSession>();
+    let session = summarize_stack_session_mut(payload);
     let state = (*(*iterator).node).state;
     let depth = (*iterator).subtree_count;
     if depth > session.max_depth {
         return StackActionStop;
     }
     for i in (0..(*session.summary).size).rev() {
-        let entry = stack_summary_array_get(&*session.summary, i);
+        let entry = stack_summary_array_get(stack_summary_ref(session.summary), i);
         if entry.depth < depth {
             break;
         }
