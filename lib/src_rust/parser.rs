@@ -36,7 +36,7 @@ use super::lexer::{
     Lexer,
 };
 use super::stack::{
-    array_assign, array_back, array_clear, array_delete, array_erase,
+    array_assign, array_back, array_back_ref, array_clear, array_delete, array_erase,
     array_get, array_get_mut, array_get_ref, array_init, array_new, array_pop, array_push,
     array_reserve, array_splice, array_swap, Array, Stack, StackSlice, StackSliceArray,
     StackSummary, StackSummaryEntry,
@@ -355,7 +355,7 @@ unsafe fn reusable_node_clear(self_: &mut ReusableNode) {
 }
 
 unsafe fn stack_entry_array_back(self_: &Array<StackEntry>) -> &StackEntry {
-    &*array_back(self_)
+    array_back_ref(self_)
 }
 
 unsafe fn reusable_node_last_entry(self_: &ReusableNode) -> Option<&StackEntry> {
