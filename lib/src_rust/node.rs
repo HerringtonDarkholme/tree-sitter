@@ -137,6 +137,31 @@ const unsafe fn node_is_extra(self_: TSNode) -> bool {
     ts_subtree_extra(ts_node__subtree(self_))
 }
 
+#[inline]
+const unsafe fn node_is_missing(self_: TSNode) -> bool {
+    ts_subtree_missing(ts_node__subtree(self_))
+}
+
+#[inline]
+const unsafe fn node_has_changes(self_: TSNode) -> bool {
+    ts_subtree_has_changes(ts_node__subtree(self_))
+}
+
+#[inline]
+const unsafe fn node_has_error(self_: TSNode) -> bool {
+    ts_subtree_error_cost(ts_node__subtree(self_)) > 0
+}
+
+#[inline]
+const unsafe fn node_descendant_count(self_: TSNode) -> u32 {
+    ts_subtree_visible_descendant_count(ts_node__subtree(self_)) + 1
+}
+
+#[inline]
+const unsafe fn node_parse_state(self_: TSNode) -> TSStateId {
+    ts_subtree_parse_state(ts_node__subtree(self_))
+}
+
 // ---------------------------------------------------------------------------
 // Internal helpers — child iteration
 // ---------------------------------------------------------------------------
@@ -700,17 +725,17 @@ pub unsafe extern "C" fn ts_node_is_named(self_: TSNode) -> bool {
 
 #[no_mangle]
 pub const unsafe extern "C" fn ts_node_is_missing(self_: TSNode) -> bool {
-    ts_subtree_missing(ts_node__subtree(self_))
+    node_is_missing(self_)
 }
 
 #[no_mangle]
 pub const unsafe extern "C" fn ts_node_has_changes(self_: TSNode) -> bool {
-    ts_subtree_has_changes(ts_node__subtree(self_))
+    node_has_changes(self_)
 }
 
 #[no_mangle]
 pub const unsafe extern "C" fn ts_node_has_error(self_: TSNode) -> bool {
-    ts_subtree_error_cost(ts_node__subtree(self_)) > 0
+    node_has_error(self_)
 }
 
 #[no_mangle]
@@ -720,17 +745,17 @@ pub unsafe extern "C" fn ts_node_is_error(self_: TSNode) -> bool {
 
 #[no_mangle]
 pub const unsafe extern "C" fn ts_node_descendant_count(self_: TSNode) -> u32 {
-    ts_subtree_visible_descendant_count(ts_node__subtree(self_)) + 1
+    node_descendant_count(self_)
 }
 
 #[no_mangle]
 pub const unsafe extern "C" fn ts_node_parse_state(self_: TSNode) -> TSStateId {
-    ts_subtree_parse_state(ts_node__subtree(self_))
+    node_parse_state(self_)
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_node_next_parse_state(self_: TSNode) -> TSStateId {
-    let state = ts_node_parse_state(self_);
+    let state = node_parse_state(self_);
     if state == TS_TREE_STATE_NONE {
         return TS_TREE_STATE_NONE;
     }
