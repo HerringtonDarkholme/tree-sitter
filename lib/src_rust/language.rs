@@ -730,8 +730,7 @@ pub const unsafe extern "C" fn ts_language_field_count(
     (*lang(self_)).field_count
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn ts_language_table_entry(
+pub unsafe fn ts_language_table_entry(
     self_: *const TSLanguage,
     state: TSStateId,
     symbol: TSSymbol,
@@ -752,8 +751,7 @@ pub unsafe extern "C" fn ts_language_table_entry(
     }
 }
 
-#[no_mangle]
-pub const unsafe extern "C" fn ts_language_lex_mode_for_state(
+pub const unsafe fn ts_language_lex_mode_for_state(
     self_: *const TSLanguage,
     state: TSStateId,
 ) -> TSLexerMode {
@@ -770,8 +768,7 @@ pub const unsafe extern "C" fn ts_language_lex_mode_for_state(
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn ts_language_is_reserved_word(
+pub unsafe fn ts_language_is_reserved_word(
     self_: *const TSLanguage,
     state: TSStateId,
     symbol: TSSymbol,
@@ -809,8 +806,7 @@ pub const unsafe extern "C" fn ts_language_symbol_metadata(
     }
 }
 
-#[no_mangle]
-pub const unsafe extern "C" fn ts_language_public_symbol(
+pub const unsafe fn ts_language_public_symbol(
     self_: *const TSLanguage,
     symbol: TSSymbol,
 ) -> TSSymbol {
