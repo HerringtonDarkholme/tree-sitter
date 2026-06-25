@@ -21,8 +21,8 @@ use super::subtree::{
     ts_subtree_external_scanner_state_eq, ts_subtree_extra, ts_subtree_is_error,
     ts_subtree_named, ts_subtree_padding, ts_subtree_release, ts_subtree_retain,
     ts_subtree_size, ts_subtree_symbol, ts_subtree_total_bytes, ts_subtree_total_size,
-    ts_subtree_visible, ts_subtree_visible_descendant_count, ExternalScannerState,
-    Subtree, SubtreeArray, SubtreePool, NULL_SUBTREE,
+    ts_subtree_visible, ts_subtree_visible_descendant_count, Subtree, SubtreeArray, SubtreePool,
+    NULL_SUBTREE,
 };
 use super::subtree::{ts_subtree_array_copy, ts_subtree_array_delete, ts_subtree_array_reverse};
 use super::language::ts_language_write_symbol_as_dot_string;
@@ -1521,7 +1521,7 @@ pub unsafe fn ts_stack_print_dot_graph(
         }
 
         if !head.last_external_token.ptr.is_null() {
-            let state = &*(*head.last_external_token.ptr).data.external_scanner_state as *const ExternalScannerState;
+            let state = &*(*head.last_external_token.ptr).data.external_scanner_state;
             let data = ts_external_scanner_state_data(state);
             fprintf(
                 f,

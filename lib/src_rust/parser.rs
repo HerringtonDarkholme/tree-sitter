@@ -876,8 +876,9 @@ unsafe fn ts_parser__external_scanner_deserialize(
     let mut length: u32 = 0;
     if !external_token.ptr.is_null() {
         let state = ts_subtree_external_scanner_state(external_token);
+        let state = &*state;
         data = ts_external_scanner_state_data(state);
-        length = (*state).length;
+        length = state.length;
     }
 
     if ts_language_is_wasm(self_.language) {
@@ -1024,8 +1025,10 @@ unsafe fn ts_parser__lex(
 
             if found_token {
                 external_scanner_state_len = ts_parser__external_scanner_serialize(self_);
+                let external_scanner_state =
+                    &*ts_subtree_external_scanner_state(external_token);
                 external_scanner_state_changed = !ts_external_scanner_state_eq(
-                    ts_subtree_external_scanner_state(external_token),
+                    external_scanner_state,
                     self_.lexer.debug_buffer.as_ptr(),
                     external_scanner_state_len,
                 );

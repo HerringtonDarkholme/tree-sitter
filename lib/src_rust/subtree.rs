@@ -424,10 +424,7 @@ pub unsafe fn ts_external_scanner_state_init(
     }
 }
 
-pub unsafe fn ts_external_scanner_state_copy(
-    self_: *const ExternalScannerState,
-) -> ExternalScannerState {
-    let self_ = &*self_;
+pub unsafe fn ts_external_scanner_state_copy(self_: &ExternalScannerState) -> ExternalScannerState {
     let mut result = ExternalScannerState {
         data: ExternalScannerStateData {
             short_data: self_.data.short_data,
@@ -451,10 +448,7 @@ pub unsafe fn ts_external_scanner_state_delete(self_: &mut ExternalScannerState)
     }
 }
 
-pub unsafe fn ts_external_scanner_state_data(
-    self_: *const ExternalScannerState,
-) -> *const u8 {
-    let self_ = &*self_;
+pub unsafe fn ts_external_scanner_state_data(self_: &ExternalScannerState) -> *const u8 {
     if self_.length > EXTERNAL_SCANNER_STATE_INLINE_SIZE as u32 {
         self_.data.long_data
     } else {
@@ -463,12 +457,11 @@ pub unsafe fn ts_external_scanner_state_data(
 }
 
 pub unsafe fn ts_external_scanner_state_eq(
-    self_: *const ExternalScannerState,
+    self_: &ExternalScannerState,
     buffer: *const u8,
     length: u32,
 ) -> bool {
-    let self_ref = &*self_;
-    self_ref.length == length
+    self_.length == length
         && libc_memcmp(
             ts_external_scanner_state_data(self_) as *const c_void,
             buffer as *const c_void,
@@ -1790,10 +1783,12 @@ pub unsafe fn ts_subtree_external_scanner_state(
 pub unsafe fn ts_subtree_external_scanner_state_eq(self_: Subtree, other: Subtree) -> bool {
     let state_self = ts_subtree_external_scanner_state(self_);
     let state_other = ts_subtree_external_scanner_state(other);
+    let state_self = &*state_self;
+    let state_other = &*state_other;
     ts_external_scanner_state_eq(
         state_self,
         ts_external_scanner_state_data(state_other),
-        (*state_other).length,
+        state_other.length,
     )
 }
 
