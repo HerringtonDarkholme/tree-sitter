@@ -84,6 +84,26 @@ const unsafe fn node_child_count(self_: TSNode) -> u32 {
     }
 }
 
+#[inline]
+const fn node_start_byte(self_: TSNode) -> u32 {
+    self_.context[0]
+}
+
+#[inline]
+const fn node_start_point(self_: TSNode) -> TSPoint {
+    TSPoint { row: self_.context[1], column: self_.context[2] }
+}
+
+#[inline]
+unsafe fn node_end_byte(self_: TSNode) -> u32 {
+    node_start_byte(self_) + ts_subtree_size(ts_node__subtree(self_)).bytes
+}
+
+#[inline]
+unsafe fn node_end_point(self_: TSNode) -> TSPoint {
+    point_add(node_start_point(self_), ts_subtree_size(ts_node__subtree(self_)).extent)
+}
+
 // ---------------------------------------------------------------------------
 // Internal helpers — child iteration
 // ---------------------------------------------------------------------------
@@ -109,8 +129,8 @@ unsafe fn ts_node_iterate_children(node: &TSNode) -> NodeChildIterator {
         parent: subtree,
         tree: node_tree(*node),
         position: Length {
-            bytes: ts_node_start_byte(*node),
-            extent: ts_node_start_point(*node),
+            bytes: node_start_byte(*node),
+            extent: node_start_point(*node),
         },
         child_index: 0,
         structural_child_index: 0,
@@ -253,7 +273,7 @@ unsafe fn ts_subtree_has_trailing_empty_descendant(
 unsafe fn ts_node__prev_sibling(self_: TSNode, include_anonymous: bool) -> TSNode {
     let self_subtree = ts_node__subtree(self_);
     let self_is_empty = ts_subtree_total_bytes(self_subtree) == 0;
-    let target_end_byte = ts_node_end_byte(self_);
+    let target_end_byte = node_end_byte(self_);
 
     let mut node = ts_node_parent(self_);
     let mut earlier_node = ts_node__null();
@@ -316,7 +336,7 @@ unsafe fn ts_node__prev_sibling(self_: TSNode, include_anonymous: bool) -> TSNod
 }
 
 unsafe fn ts_node__next_sibling(self_: TSNode, include_anonymous: bool) -> TSNode {
-    let target_end_byte = ts_node_end_byte(self_);
+    let target_end_byte = node_end_byte(self_);
 
     let mut node = ts_node_parent(self_);
     let mut later_node = ts_node__null();
@@ -331,8 +351,8 @@ unsafe fn ts_node__next_sibling(self_: TSNode, include_anonymous: bool) -> TSNod
         let mut iterator = ts_node_iterate_children(&node);
         while ts_node_child_iterator_next(&mut iterator, &mut child) {
             if iterator.position.bytes <= target_end_byte { continue; }
-            let start_byte = ts_node_start_byte(self_);
-            let child_start_byte = ts_node_start_byte(child);
+            let start_byte = node_start_byte(self_);
+            let child_start_byte = node_start_byte(child);
 
             let is_empty = start_byte == target_end_byte;
             let contains_target = if is_empty {
@@ -393,7 +413,7 @@ unsafe fn ts_node__first_child_for_byte(
         // labeled loop replaces C's "goto loop"
         'outer: loop {
             while ts_node_child_iterator_next(&mut iterator, &mut child) {
-                if ts_node_end_byte(child) > goal {
+                if node_end_byte(child) > goal {
                     if ts_node__is_relevant(child, include_anonymous) {
                         return child;
                     } else if node_child_count(child) > 0 {
@@ -447,12 +467,12 @@ unsafe fn ts_node__descendant_for_byte_range(
 
             if node_end < range_end { continue; }
 
-            let is_empty = ts_node_start_byte(child) == node_end;
+            let is_empty = node_start_byte(child) == node_end;
             if if is_empty { node_end < range_start } else { node_end <= range_start } {
                 continue;
             }
 
-            if range_start < ts_node_start_byte(child) { break; }
+            if range_start < node_start_byte(child) { break; }
 
             node = child;
             if ts_node__is_relevant(node, include_anonymous) {
@@ -491,7 +511,7 @@ unsafe fn ts_node__descendant_for_point_range(
 
             if point_lt(node_end, range_end) { continue; }
 
-            let is_empty = point_eq(ts_node_start_point(child), node_end);
+            let is_empty = point_eq(node_start_point(child), node_end);
             if if is_empty {
                 point_lt(node_end, range_start)
             } else {
@@ -500,7 +520,7 @@ unsafe fn ts_node__descendant_for_point_range(
                 continue;
             }
 
-            if point_lt(range_start, ts_node_start_point(child)) { break; }
+            if point_lt(range_start, node_start_point(child)) { break; }
 
             node = child;
             if ts_node__is_relevant(node, include_anonymous) {
@@ -564,22 +584,22 @@ pub unsafe extern "C" fn ts_node_new(
 
 #[no_mangle]
 pub const unsafe extern "C" fn ts_node_start_byte(self_: TSNode) -> u32 {
-    self_.context[0]
+    node_start_byte(self_)
 }
 
 #[no_mangle]
 pub const unsafe extern "C" fn ts_node_start_point(self_: TSNode) -> TSPoint {
-    TSPoint { row: self_.context[1], column: self_.context[2] }
+    node_start_point(self_)
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_node_end_byte(self_: TSNode) -> u32 {
-    ts_node_start_byte(self_) + ts_subtree_size(ts_node__subtree(self_)).bytes
+    node_end_byte(self_)
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_node_end_point(self_: TSNode) -> TSPoint {
-    point_add(ts_node_start_point(self_), ts_subtree_size(ts_node__subtree(self_)).extent)
+    node_end_point(self_)
 }
 
 #[no_mangle]
@@ -737,15 +757,15 @@ pub unsafe extern "C" fn ts_node_child_with_descendant(
     mut self_: TSNode,
     descendant: TSNode,
 ) -> TSNode {
-    let start_byte = ts_node_start_byte(descendant);
-    let end_byte = ts_node_end_byte(descendant);
+    let start_byte = node_start_byte(descendant);
+    let end_byte = node_end_byte(descendant);
     let is_empty = start_byte == end_byte;
 
     loop {
         let mut iter = ts_node_iterate_children(&self_);
         loop {
             if !ts_node_child_iterator_next(&mut iter, &mut self_)
-                || ts_node_start_byte(self_) > start_byte
+                || node_start_byte(self_) > start_byte
             {
                 return ts_node__null();
             }
@@ -1068,8 +1088,8 @@ pub unsafe extern "C" fn ts_node_edit(
     self_: *mut TSNode,
     edit: *const TSInputEdit,
 ) {
-    let mut start_byte = ts_node_start_byte(*self_);
-    let mut start_point = ts_node_start_point(*self_);
+    let mut start_byte = node_start_byte(*self_);
+    let mut start_point = node_start_point(*self_);
 
     point_edit(&mut start_point, &mut start_byte, &*edit);
 
