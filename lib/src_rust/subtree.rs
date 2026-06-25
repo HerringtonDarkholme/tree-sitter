@@ -1431,9 +1431,9 @@ pub unsafe fn ts_subtree_summarize_children(
     let alias_sequence = language_alias_sequence(language, u32::from(data.data.children.production_id));
     let mut lookahead_end_byte: u32 = 0;
 
-    let children = ts_subtree_children(ts_subtree_from_mut(self_));
-    for i in 0..data.child_count {
-        let child = *children.add(i as usize);
+    let children = subtree_children(ts_subtree_from_mut(self_));
+    for (i, child) in children.iter().copied().enumerate() {
+        let i = i as u32;
 
         if data.size.extent.row == 0 && ts_subtree_depends_on_column(child) {
             data.set_depends_on_column(true);
@@ -1528,8 +1528,8 @@ pub unsafe fn ts_subtree_summarize_children(
     }
 
     if data.child_count > 0 {
-        let first_child = *children.add(0);
-        let last_child = *children.add(data.child_count as usize - 1);
+        let first_child = *children.get_unchecked(0);
+        let last_child = *children.get_unchecked(data.child_count as usize - 1);
 
         data.data.children.first_leaf.symbol = ts_subtree_leaf_symbol(first_child);
         data.data.children.first_leaf.parse_state = ts_subtree_leaf_parse_state(first_child);
