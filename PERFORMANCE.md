@@ -1955,3 +1955,67 @@ Source-code analysis:
   effectively flat, and the source changes do not alter parser semantics, so no
   source regression is indicated.
 - No rollback was performed.
+
+### 2026-06-25 10:39 EDT
+
+- Repo head: `445e9dac`
+- Batch base: `63f93959`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: 10 small Clippy/readability cleanup commits from
+  `Make private callbacks const` through
+  `Use C-string literals in subtree formatting`
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 25232.6 | 23617.1 | +6.84% |
+| TypeScript error parses | 32 | 1635.9 | 1583.7 | +3.30% |
+| JavaScript normal parses | 2 | 13703.9 | 13049.9 | +5.01% |
+| JavaScript error parses | 37 | 1785.0 | 1637.0 | +9.04% |
+| Overall parser throughput | 82 | 2154.1 | 2039.3 | +5.63% |
+
+The most recent same-language TypeScript/JavaScript checkpoint at `4f4904c9`
+used 30 repetitions and recorded Rust overall throughput of 2385.5 bytes/ms
+and C overall throughput of 2322.1 bytes/ms. This 10-repetition run is -9.70%
+absolute Rust throughput against that checkpoint, while the C run is -12.18%.
+Because both implementations slowed substantially and the Rust-vs-C delta
+improved from +2.73% to +5.63%, this checkpoint is treated as run/environment
+variance rather than a confirmed Rust-source regression.
+
+Per-case regression investigation:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `javascript error weird-exprs.rs` | 736.6 | 1120.6 | 34.27% |
+| `javascript error malloc.c` | 866.7 | 1177.6 | 26.41% |
+| `javascript error install.sh` | 375.9 | 432.5 | 13.10% |
+| `typescript error relocate.sh` | 479.0 | 550.4 | 12.96% |
+| `typescript normal builderStatePublic.ts` | 16203.6 | 18387.5 | 11.88% |
+| `javascript error value.go` | 1101.7 | 1225.2 | 10.08% |
+| `javascript error crlf-line-endings.py` | 1220.0 | 1336.7 | 8.73% |
+| `javascript error performance.ts` | 2767.9 | 2982.0 | 7.18% |
+| `javascript error atom.sh` | 576.4 | 616.1 | 6.44% |
+| `javascript normal text-editor-component.js` | 13483.8 | 14217.3 | 5.16% |
+
+Source-code analysis:
+
+- This batch did not change exported FFI signatures, public C headers,
+  `#[repr(C)]` layouts, allocation sizes, generated parser templates,
+  parse-table data, parser control flow, stack ownership, subtree ownership, or
+  query execution semantics.
+- Runtime edits were low-level spelling/readability changes: private lexer
+  callbacks marked `const`, equivalent raw pointer `as *const/*mut T` casts
+  replaced with `.cast()` in lexer and language helpers, range checks rewritten
+  to `Range::contains`, and nul-terminated byte literals replaced with
+  `c"..."` literals while preserving the `*const i8` call shape.
+- Documentation-only Clippy cleanups in `lexer.rs` and `language.rs` cannot
+  affect generated code outside comments.
+- The large absolute-throughput drop is not isolated to Rust and is larger for
+  the C comparison run, so the data does not indicate a culprit commit in this
+  batch. Keep `builderStatePublic.ts` and the JavaScript error-corpus outliers
+  on the watchlist for the next same-gate checkpoint.
+- No rollback was performed.
