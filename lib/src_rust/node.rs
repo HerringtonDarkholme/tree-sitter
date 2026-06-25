@@ -69,6 +69,11 @@ const unsafe fn node_language(self_: TSNode) -> *const TSLanguage {
     (*node_tree(self_)).language
 }
 
+#[inline]
+const fn node_is_null(self_: TSNode) -> bool {
+    self_.id.is_null()
+}
+
 // ---------------------------------------------------------------------------
 // Internal helpers — child iteration
 // ---------------------------------------------------------------------------
@@ -244,7 +249,7 @@ unsafe fn ts_node__prev_sibling(self_: TSNode, include_anonymous: bool) -> TSNod
     let mut earlier_node = ts_node__null();
     let mut earlier_node_is_relevant = false;
 
-    while !ts_node_is_null(node) {
+    while !node_is_null(node) {
         let mut earlier_child = ts_node__null();
         let mut earlier_child_is_relevant = false;
         let mut found_child_containing_target = false;
@@ -279,14 +284,14 @@ unsafe fn ts_node__prev_sibling(self_: TSNode, include_anonymous: bool) -> TSNod
         }
 
         if found_child_containing_target {
-            if !ts_node_is_null(earlier_child) {
+            if !node_is_null(earlier_child) {
                 earlier_node = earlier_child;
                 earlier_node_is_relevant = earlier_child_is_relevant;
             }
             node = child;
         } else if earlier_child_is_relevant {
             return earlier_child;
-        } else if !ts_node_is_null(earlier_child) {
+        } else if !node_is_null(earlier_child) {
             node = earlier_child;
         } else if earlier_node_is_relevant {
             return earlier_node;
@@ -307,7 +312,7 @@ unsafe fn ts_node__next_sibling(self_: TSNode, include_anonymous: bool) -> TSNod
     let mut later_node = ts_node__null();
     let mut later_node_is_relevant = false;
 
-    while !ts_node_is_null(node) {
+    while !node_is_null(node) {
         let mut later_child = ts_node__null();
         let mut later_child_is_relevant = false;
         let mut child_containing_target = ts_node__null();
@@ -341,15 +346,15 @@ unsafe fn ts_node__next_sibling(self_: TSNode, include_anonymous: bool) -> TSNod
             }
         }
 
-        if !ts_node_is_null(child_containing_target) {
-            if !ts_node_is_null(later_child) {
+        if !node_is_null(child_containing_target) {
+            if !node_is_null(later_child) {
                 later_node = later_child;
                 later_node_is_relevant = later_child_is_relevant;
             }
             node = child_containing_target;
         } else if later_child_is_relevant {
             return later_child;
-        } else if !ts_node_is_null(later_child) {
+        } else if !node_is_null(later_child) {
             node = later_child;
         } else if later_node_is_relevant {
             return later_node;
@@ -621,7 +626,7 @@ pub unsafe extern "C" fn ts_node_eq(self_: TSNode, other: TSNode) -> bool {
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_node_is_null(self_: TSNode) -> bool {
-    self_.id.is_null()
+    node_is_null(self_)
 }
 
 #[no_mangle]
@@ -715,7 +720,7 @@ pub unsafe extern "C" fn ts_node_parent(self_: TSNode) -> TSNode {
 
     loop {
         let next_node = ts_node_child_with_descendant(node, self_);
-        if next_node.id == self_.id || ts_node_is_null(next_node) { break; }
+        if next_node.id == self_.id || node_is_null(next_node) { break; }
         node = next_node;
     }
 
@@ -747,7 +752,7 @@ pub unsafe extern "C" fn ts_node_child_with_descendant(
             // we check whether `self` contains it or not.
             if is_empty && iter.position.bytes >= end_byte && ts_node_child_count(self_) > 0 {
                 let child = ts_node_child_with_descendant(self_, descendant);
-                if !ts_node_is_null(child) {
+                if !node_is_null(child) {
                     return if ts_node__is_relevant(self_, true) { self_ } else { child };
                 }
             }
