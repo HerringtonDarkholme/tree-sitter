@@ -525,7 +525,7 @@ pub unsafe extern "C" fn ts_node_new(
     alias: TSSymbol,
 ) -> TSNode {
     TSNode {
-        context: [position.bytes, position.extent.row, position.extent.column, alias as u32],
+        context: [position.bytes, position.extent.row, position.extent.column, u32::from(alias)],
         id: subtree as *const core::ffi::c_void,
         tree: tree as *const crate::ffi::TSTree,
     }
