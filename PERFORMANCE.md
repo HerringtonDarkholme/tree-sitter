@@ -2424,6 +2424,60 @@ Source-code analysis:
 - Full `cargo test --all` passed after every committed code change in this
   checkpoint.
 
+### 2026-06-25 15:21 EDT
+
+- Repo head: `e6779351`
+- Batch base: `66cf1224`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: internal node/tree accessor cleanup
+  commits from `Use cursor helpers for child navigation` through
+  `Use node named child count helper`
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 25205.1 | 24594.4 | +2.48% |
+| TypeScript error parses | 32 | 1714.2 | 1635.7 | +4.80% |
+| JavaScript normal parses | 2 | 17499.0 | 16364.2 | +6.93% |
+| JavaScript error parses | 37 | 2080.2 | 1962.7 | +5.99% |
+| Overall parser throughput | 82 | 2357.7 | 2240.1 | +5.25% |
+
+Per-case regressions over 5% in the full run:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `javascript error compound-statement-without-trailing-newline.py` | 2752.8 | 2965.0 | 7.16% |
+
+Prior checkpoint at `66cf1224` recorded Rust overall throughput of 2155.8
+bytes/ms and a Rust-vs-C delta of +1.87%. This checkpoint measured 2357.7
+bytes/ms, so absolute Rust throughput moved by about +9.36%; C throughput also
+moved from 2116.2 to 2240.1 bytes/ms in the same run series, and the Rust-vs-C
+delta moved to +5.25%.
+
+Source-code analysis:
+
+- This batch only adds private Rust helpers and rewires internal callers to
+  them. The exported `#[no_mangle] extern "C"` symbols, C ABI, struct layout,
+  parser tables, and parser control flow are unchanged.
+- The touched code is centered on `TSNode`/`TSTree` accessor paths: root lookup,
+  null checks, child counts, position accessors, symbol/type metadata, state
+  flags, and named-child counts.
+- The single per-case JavaScript error slowdown is not explained by a parser
+  algorithm change in this batch. The same run shows JavaScript normal and error
+  aggregate throughput faster than C, and overall Rust throughput improved
+  versus both C and the prior checkpoint.
+- No rollback was performed because the regression is isolated to one error
+  fixture, the batch is accessor-only, and the aggregate parser result is
+  positive. If this same fixture stays over 5% in a later repeated run, inspect
+  generated code around error recovery/node metadata access before changing
+  parser control flow.
+- Full `cargo test --all` passed after every committed code change in this
+  checkpoint.
+
 ### 2026-06-25 14:38 EDT
 
 - Repo head: `f89eaef3`
