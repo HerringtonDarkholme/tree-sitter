@@ -760,7 +760,7 @@ pub unsafe fn ts_subtree_lookahead_bytes(self_: Subtree) -> u32 {
 }
 
 #[inline]
-pub fn ts_subtree_alloc_size(child_count: u32) -> usize {
+pub const fn ts_subtree_alloc_size(child_count: u32) -> usize {
     child_count as usize * std::mem::size_of::<Subtree>()
         + std::mem::size_of::<SubtreeHeapData>()
 }
