@@ -2824,9 +2824,9 @@ pub unsafe extern "C" fn ts_parser_set_language(
     parser.language = ptr::null();
 
     if !language.is_null() {
-        let lang_full = language.cast::<TSLanguageFull>();
-        if (*lang_full).abi_version > TREE_SITTER_LANGUAGE_VERSION
-            || (*lang_full).abi_version < TREE_SITTER_MIN_COMPATIBLE_LANGUAGE_VERSION
+        let language_full = parser_language_full(language);
+        if language_full.abi_version > TREE_SITTER_LANGUAGE_VERSION
+            || language_full.abi_version < TREE_SITTER_MIN_COMPATIBLE_LANGUAGE_VERSION
         {
             return false;
         }
