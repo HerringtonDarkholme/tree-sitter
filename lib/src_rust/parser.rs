@@ -1886,8 +1886,9 @@ unsafe fn ts_parser__recover(
 
     // Strategy 1: Find a previous state where the lookahead is valid.
     if !summary.is_null() && !ts_subtree_is_error(lookahead) {
-        for i in 0..(*summary).size {
-            let entry = *stack_summary_array_get(&*summary, i);
+        let summary = summary.as_ref().unwrap_unchecked();
+        for i in 0..summary.size {
+            let entry = *stack_summary_array_get(summary, i);
 
             if entry.state == ERROR_STATE {
                 continue;
