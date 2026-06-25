@@ -9,12 +9,12 @@ pub const POINT_MAX: TSPoint = TSPoint {
 };
 
 #[inline]
-pub fn point_new(row: u32, column: u32) -> TSPoint {
+pub const fn point_new(row: u32, column: u32) -> TSPoint {
     TSPoint { row, column }
 }
 
 #[inline]
-pub fn point_add(a: TSPoint, b: TSPoint) -> TSPoint {
+pub const fn point_add(a: TSPoint, b: TSPoint) -> TSPoint {
     if b.row > 0 {
         point_new(a.row + b.row, b.column)
     } else {
@@ -23,43 +23,36 @@ pub fn point_add(a: TSPoint, b: TSPoint) -> TSPoint {
 }
 
 #[inline]
-pub fn point_sub(a: TSPoint, b: TSPoint) -> TSPoint {
+pub const fn point_sub(a: TSPoint, b: TSPoint) -> TSPoint {
     if a.row > b.row {
         point_new(a.row - b.row, a.column)
     } else {
-        point_new(
-            0,
-            if a.column >= b.column {
-                a.column - b.column
-            } else {
-                0
-            },
-        )
+        point_new(0, a.column.saturating_sub(b.column))
     }
 }
 
 #[inline]
-pub fn point_lte(a: TSPoint, b: TSPoint) -> bool {
+pub const fn point_lte(a: TSPoint, b: TSPoint) -> bool {
     (a.row < b.row) || (a.row == b.row && a.column <= b.column)
 }
 
 #[inline]
-pub fn point_lt(a: TSPoint, b: TSPoint) -> bool {
+pub const fn point_lt(a: TSPoint, b: TSPoint) -> bool {
     (a.row < b.row) || (a.row == b.row && a.column < b.column)
 }
 
 #[inline]
-pub fn point_gt(a: TSPoint, b: TSPoint) -> bool {
+pub const fn point_gt(a: TSPoint, b: TSPoint) -> bool {
     (a.row > b.row) || (a.row == b.row && a.column > b.column)
 }
 
 #[inline]
-pub fn point_gte(a: TSPoint, b: TSPoint) -> bool {
+pub const fn point_gte(a: TSPoint, b: TSPoint) -> bool {
     (a.row > b.row) || (a.row == b.row && a.column >= b.column)
 }
 
 #[inline]
-pub fn point_eq(a: TSPoint, b: TSPoint) -> bool {
+pub const fn point_eq(a: TSPoint, b: TSPoint) -> bool {
     a.row == b.row && a.column == b.column
 }
 
