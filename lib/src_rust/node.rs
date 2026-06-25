@@ -94,6 +94,11 @@ unsafe fn ts_node_iterate_children(node: &TSNode) -> NodeChildIterator {
     }
 }
 
+#[inline]
+unsafe fn node_child<'a>(parent: Subtree, index: u32) -> &'a Subtree {
+    &*ts_subtree_children(parent).add(index as usize)
+}
+
 unsafe fn ts_node_child_iterator_next(
     self_: &mut NodeChildIterator,
     result: &mut TSNode,
@@ -101,7 +106,7 @@ unsafe fn ts_node_child_iterator_next(
     if self_.parent.ptr.is_null() || self_.child_index == (*self_.parent.ptr).child_count {
         return false;
     }
-    let child = &*ts_subtree_children(self_.parent).add(self_.child_index as usize);
+    let child = node_child(self_.parent, self_.child_index);
     let mut alias_symbol: TSSymbol = 0;
     if !ts_subtree_extra(*child) {
         if !self_.alias_sequence.is_null() {
