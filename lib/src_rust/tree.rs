@@ -150,6 +150,18 @@ unsafe fn tree_included_range_mut(tree: &mut TSTree, index: u32) -> &mut TSRange
     &mut *tree.included_ranges.add(index as usize)
 }
 
+fn tree_cursor_empty() -> TreeCursor {
+    TreeCursor {
+        tree: std::ptr::null(),
+        stack: TreeCursorEntryArray {
+            contents: std::ptr::null_mut(),
+            size: 0,
+            capacity: 0,
+        },
+        root_alias_symbol: 0,
+    }
+}
+
 unsafe fn ts_tree_edit_ref(tree: &mut TSTree, edit: &TSInputEdit) {
     for i in 0..tree.included_range_count {
         ts_range_edit_ref(tree_included_range_mut(tree, i), edit);
@@ -256,24 +268,8 @@ pub unsafe extern "C" fn ts_tree_get_changed_ranges(
 ) -> *mut TSRange {
     let old_tree_ref = tree_ref(old_tree);
     let new_tree_ref = tree_ref(new_tree);
-    let mut cursor1 = TreeCursor {
-        tree: std::ptr::null(),
-        stack: TreeCursorEntryArray {
-            contents: std::ptr::null_mut(),
-            size: 0,
-            capacity: 0,
-        },
-        root_alias_symbol: 0,
-    };
-    let mut cursor2 = TreeCursor {
-        tree: std::ptr::null(),
-        stack: TreeCursorEntryArray {
-            contents: std::ptr::null_mut(),
-            size: 0,
-            capacity: 0,
-        },
-        root_alias_symbol: 0,
-    };
+    let mut cursor1 = tree_cursor_empty();
+    let mut cursor2 = tree_cursor_empty();
     ts_tree_cursor_init_ref(&mut cursor1, ts_tree_root_node(old_tree));
     ts_tree_cursor_init_ref(&mut cursor2, ts_tree_root_node(new_tree));
 
