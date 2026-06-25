@@ -797,7 +797,7 @@ pub unsafe fn ts_subtree_leaf_symbol(self_: Subtree) -> TSSymbol {
 }
 
 #[inline]
-pub unsafe fn ts_subtree_leaf_parse_state(self_: Subtree) -> TSStateId {
+pub const unsafe fn ts_subtree_leaf_parse_state(self_: Subtree) -> TSStateId {
     if self_.data.is_inline() {
         return self_.data.parse_state;
     }
