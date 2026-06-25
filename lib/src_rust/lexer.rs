@@ -310,7 +310,7 @@ unsafe fn ts_lexer__do_advance(self_: &mut Lexer, skip: bool) {
     }
 }
 
-/// Advance to the next character (with logging). TSLexer vtable callback.
+/// Advance to the next character (with logging). `TSLexer` vtable callback.
 unsafe extern "C" fn ts_lexer__advance(lexer: *mut TSLexer, skip: bool) {
     let self_ = &mut *lexer.cast::<Lexer>();
     if self_.chunk.is_null() {
@@ -351,7 +351,7 @@ unsafe extern "C" fn ts_lexer__advance(lexer: *mut TSLexer, skip: bool) {
     ts_lexer__do_advance(self_, skip);
 }
 
-/// Mark that a token match has completed. TSLexer vtable callback.
+/// Mark that a token match has completed. `TSLexer` vtable callback.
 unsafe extern "C" fn ts_lexer__mark_end(lexer: *mut TSLexer) {
     let self_ = &mut *lexer.cast::<Lexer>();
     if !ts_lexer__eof(&self_.data) {
@@ -374,7 +374,7 @@ unsafe extern "C" fn ts_lexer__mark_end(lexer: *mut TSLexer) {
     self_.token_end_position = self_.current_position;
 }
 
-/// Get the current column number. TSLexer vtable callback.
+/// Get the current column number. `TSLexer` vtable callback.
 unsafe extern "C" fn ts_lexer__get_column(lexer: *mut TSLexer) -> u32 {
     let self_ = &mut *lexer.cast::<Lexer>();
 
@@ -416,7 +416,7 @@ unsafe extern "C" fn ts_lexer__get_column(lexer: *mut TSLexer) -> u32 {
 }
 
 /// Is the lexer at a boundary between two disjoint included ranges?
-/// TSLexer vtable callback.
+/// `TSLexer` vtable callback.
 unsafe extern "C" fn ts_lexer__is_at_included_range_start(lexer: *const TSLexer) -> bool {
     let self_ = &*lexer.cast::<Lexer>();
     if self_.current_included_range_index < self_.included_range_count {
@@ -439,7 +439,7 @@ extern "C" {
 // Exported functions from lexer.h (called by parser.c)
 // ===========================================================================
 
-/// Initialize a Lexer, setting up the TSLexer vtable and default state.
+/// Initialize a Lexer, setting up the `TSLexer` vtable and default state.
 pub unsafe fn ts_lexer_init(self_: &mut Lexer) {
     let s = self_;
     s.data.advance = Some(ts_lexer__advance);
@@ -472,7 +472,7 @@ pub unsafe fn ts_lexer_init(self_: &mut Lexer) {
     ts_lexer_set_included_ranges(s, ptr::null(), 0);
 }
 
-/// Free the lexer's included_ranges allocation.
+/// Free the lexer's `included_ranges` allocation.
 pub unsafe fn ts_lexer_delete(self_: &mut Lexer) {
     ts_free(self_.included_ranges as *mut c_void);
 }
