@@ -1390,3 +1390,42 @@ Source-code analysis:
 - The remaining changes are clippy cleanups for documentation, local binding
   names, and lossless integer/boolean widening with `From`.
 - No rollback was performed.
+
+### 2026-06-25 02:53 EDT
+
+- Repo head: `eb5b6bae`
+- Batch base: `316f5ff2`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: 10 small clippy cleanup commits from
+  `Use From for inline length limit` through `Use From for node alias context`
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language tsx --repetitions 10 --error-limit 4 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 26554.0 | 25561.3 | +3.88% |
+| TypeScript error parses | 24 | 1749.8 | 1715.2 | +2.02% |
+| TSX normal parses | 1 | 5697.7 | 5736.9 | -0.68% |
+| TSX error parses | 27 | 1750.1 | 1712.5 | +2.20% |
+| Overall parser throughput | 63 | 2136.9 | 2094.7 | +2.01% |
+
+Per-case regression investigation:
+
+- The 10-repetition checkpoint reported no per-case regressions above the 5%
+  threshold, so no rerun or rollback was needed.
+
+Source-code analysis:
+
+- This batch did not change exported FFI signatures, `#[repr(C)]` layouts,
+  allocation behavior, parse-table data, generated parser templates, or C
+  headers.
+- The changes are clippy-oriented idiomatic cleanups: explicit auto-deref
+  removal, documentation formatting, checked inline leaf byte narrowing, and
+  lossless integer widening via `From`.
+- Parser-facing changes are limited to lossless widening of existing
+  production id values when building subtrees; parse control flow, stack
+  ownership, and tree layout are unchanged.
+- No rollback was performed.
