@@ -323,26 +323,26 @@ unsafe extern "C" fn ts_lexer__advance(lexer: *mut TSLexer, skip: bool) {
             if (32..127).contains(&character) {
                 ts_lexer__log_shim(
                     lexer,
-                    b"skip character:'%c'\0".as_ptr().cast::<i8>(),
+                    c"skip character:'%c'".as_ptr().cast::<i8>(),
                     character,
                 );
             } else {
                 ts_lexer__log_shim(
                     lexer,
-                    b"skip character:%d\0".as_ptr().cast::<i8>(),
+                    c"skip character:%d".as_ptr().cast::<i8>(),
                     character,
                 );
             }
         } else if (32..127).contains(&character) {
             ts_lexer__log_shim(
                 lexer,
-                b"consume character:'%c'\0".as_ptr().cast::<i8>(),
+                c"consume character:'%c'".as_ptr().cast::<i8>(),
                 character,
             );
         } else {
             ts_lexer__log_shim(
                 lexer,
-                b"consume character:%d\0".as_ptr().cast::<i8>(),
+                c"consume character:%d".as_ptr().cast::<i8>(),
                 character,
             );
         }
