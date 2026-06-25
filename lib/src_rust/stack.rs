@@ -1219,7 +1219,7 @@ pub unsafe fn ts_stack_record_summary(
     max_depth: u32,
 ) {
     let mut session = SummarizeStackSession {
-        summary: ts_malloc(std::mem::size_of::<StackSummary>()) as *mut StackSummary,
+        summary: ts_malloc(std::mem::size_of::<StackSummary>()).cast::<StackSummary>(),
         max_depth,
     };
     array_init(session.summary);
@@ -1234,7 +1234,7 @@ pub unsafe fn ts_stack_record_summary(
     let head = stack_head_mut(stack, version);
     if !head.summary.is_null() {
         array_delete(head.summary);
-        ts_free(head.summary as *mut c_void);
+        ts_free(head.summary.cast::<c_void>());
     }
     head.summary = session.summary;
 }
