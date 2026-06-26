@@ -352,6 +352,128 @@ Acceptance gate:
   C++, and Java, with no average or meaningful worst-file regression.
 - Kept library code must pass `cargo test --all` outside the sandbox.
 
+## Algorithm Notes: What A Real Parser Revamp Must Change
+
+The failed reduce trials show that the current bottleneck is not one branch or
+one allocation call. The algorithmic cost is the shape of the pipeline:
+
+```text
+stack links -> retained child list -> final child list -> parent summary
+            -> parent subtree -> stack links
+```
+
+The current successful builder only removed part of the temporary child-list
+allocation. The remaining cost is still phase-oriented:
+
+- Walk the stack to collect children.
+- Retain each child.
+- Reverse children into parser order.
+- Trim trailing extras into a side array.
+- Copy selected children into arena-backed parent storage.
+- Walk selected children again to summarize the parent.
+- Push the parent and trailing extras as new stack nodes.
+
+### Algorithmic Constraints
+
+- Parent layout requires child storage to be immediately before
+  `SubtreeHeapData`, and the parent data pointer depends on the final child
+  count after trailing extras are removed.
+- Stack traversal discovers children from right to left. Parser-order children
+  are left to right.
+- Trailing extras are discovered at the right edge of the parser-order child
+  list, but they still need to be pushed after the parent.
+- Merged candidates are rare in normal fresh parsing, but correctness still
+  requires preserving their ordering and selection behavior.
+- Reparses remain more sensitive because changed-range behavior already broke
+  when the builder path was used too broadly.
+
+### Why Recent Designs Failed
+
+- Single-group branching did not remove a phase. It only skipped the generic
+  merged-candidate loop.
+- Direct arena finalization removed the builder-to-arena copy but added a
+  second stack walk to learn the allocation size. JavaScript lost more from the
+  extra traversal and control flow than it gained from avoiding the copy.
+- Direct graph collection removed a conversion detour for a rare path, but the
+  normal workload did not spend enough time there.
+
+### Viable Algorithm Families
+
+1. One-pass final-storage reduce collection.
+   - Required change: collect stack children directly into their final parent
+     storage in one traversal.
+   - Hard part: the current arena layout needs final child count before the
+     parent data pointer is known.
+   - Possible design: an arena reservation API that can append child slots,
+     reverse the collected range in place, save trailing extras, then place
+     `SubtreeHeapData` immediately after the non-extra prefix. This wastes the
+     reserved trailing-extra slot space but avoids the second stack walk and the
+     builder-to-arena copy.
+   - Risk: placing parent data before the originally reserved end of the block
+     creates internal holes in arena pages. This is acceptable only if the holes
+     are bounded by trailing-extra counts, which are small in the measured
+     normal cases.
+
+2. Incremental parent summary during collection.
+   - Required change: compute the parent summary while collecting children so
+     `ts_subtree_summarize_children` is not a separate full traversal.
+   - Hard part: collection is right-to-left, while summary logic is
+     left-to-right and alias-sequence indexing depends on structural child
+     order.
+   - Possible design: maintain a reverse/prepend summary for layout-independent
+     fields, and fall back to the existing summarizer for productions with alias
+     sequences or error symbols. This is only worth trying if counters show the
+     fallback rate is low across the seven target languages.
+   - Risk: earlier summary-loop rewrites regressed. This must be a different
+     algorithm that removes a traversal after ownership changes, not another
+     hand-written variant of the same loop.
+
+3. Lazy reduction nodes on the parse stack.
+   - Required change: stack links hold a compact pending-node descriptor plus
+     summary metadata instead of immediately materialized `Subtree` parents.
+   - Benefit: chains of reductions could avoid copying children into intermediate
+     parents until the tree is accepted or until a real subtree is needed for
+     comparison, error recovery, or reuse.
+   - Hard part: many parser operations expect `Subtree` identity and metadata:
+     stack merging, error costs, dynamic precedence, external-token tracking,
+     tree comparison, balancing, and public tree lifetime.
+   - Risk: this is the only design that might change the asymptotic amount of
+     intermediate tree construction, but it is also the highest correctness
+     risk and would need a compatibility layer for every subtree query used by
+     parsing.
+
+4. Batched stack push for reduce finalization.
+   - Required change: push parent plus trailing extras as a batch, creating a
+     chain of stack nodes with one metadata walk/update instead of repeated
+     `ts_stack_push` calls.
+   - Benefit: targets visible stack-push/node-creation cost without changing
+     child ownership.
+   - Hard part: each pushed subtree affects position, error cost, node count,
+     dynamic precedence, and last-error bookkeeping.
+   - Risk: broad stack push/helper inlining and node-pool sizing already failed;
+     batching must reduce repeated metadata work, not just reorganize the same
+     calls.
+
+### Next Algorithmic Triage
+
+The next code experiment should not start from the existing failed patches.
+Collect two measurements first:
+
+- Alias/error fallback rate for incremental summary:
+  count reductions by production id where `language_alias_sequence` is null,
+  symbol is not an error symbol, and child count is 1-3.
+- Trailing-extra distribution for final-storage reservation:
+  count total collected children versus non-extra prefix length per reduction.
+
+Use those counters to choose:
+
+- If alias/error fallback is low, try incremental summary after the builder
+  ownership protocol, because it removes a full child traversal.
+- If trailing extras are rare/small, try one-pass arena reservation with holes,
+  because it removes the builder-to-arena copy without a second stack walk.
+- If neither has broad coverage, stop reduce construction and investigate
+  lexer/runtime boundary or batched stack push.
+
 ## Performance Trial Decision Process
 
 Use this workflow for every performance attempt, independent of the current
