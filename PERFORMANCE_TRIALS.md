@@ -154,6 +154,7 @@ Same-session canary result for `329f8b08`:
 | Guard zero dynamic-precedence writes in reduce | Reduce path | Retested after `329f8b08`; warm JavaScript benchmark remained below current baseline |
 | Pointer-equality fast path in `ts_subtree_external_scanner_state_eq` | External scanner state comparison | Retested after `329f8b08`; warm JavaScript benchmark remained below current baseline |
 | Hoist reduce nonterminal check out of pop-slice loop | Reduce path | Retested after `329f8b08`; warm JavaScript benchmark remained below current baseline |
+| Specialized no-alias non-error subtree summarizer | Subtree summarize | Retested after `329f8b08`; warm JavaScript benchmark remained below current baseline |
 
 ## Non-Library Trial Removed
 
