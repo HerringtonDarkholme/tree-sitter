@@ -165,6 +165,7 @@ Same-session canary result for `329f8b08`:
 | Pool-backed zero-child `ts_subtree_new_node` plus zero-count stack-pop reserve skip | Childless subtree allocation | Allocator counts were unchanged and JS/TS/Go canaries regressed, so zero-child reductions are not the dominant 80-byte allocation source |
 | Raw-pointer child loop in `ts_subtree_summarize_children` | Subtree summarize | JS/TS/Go/Python canaries regressed; the existing slice iterator appears to optimize better |
 | Use `ts_malloc` instead of `ts_realloc(NULL, size)` in subtree array allocation | Subtree allocation | JS/TS/Go/Python canaries regressed; allocator-call simplification did not overcome codegen/layout effects |
+| Parser `SubtreePool` free lists for 1-4 child node blocks | Subtree block allocation | Allocation calls dropped by ~1.8k/parse on JS, but harness and JS/TS/Go canaries regressed; per-release pool bookkeeping outweighed reuse |
 
 ## Non-Library Trial Removed
 
