@@ -26,6 +26,20 @@ The common pattern is repeated allocation, copying, refcount traffic, and cache
 unfriendly pointer chasing during tree construction. A 20% target should attack
 that data model, not just individual branches.
 
+Allocator instrumentation with a temporary `ts_set_allocator` harness confirmed
+that this is a cross-language issue:
+
+| File | Allocation calls / parse | Requested bytes / parse | Dominant sizes |
+| --- | ---: | ---: | --- |
+| `javascript/examples/jquery.js` | ~68k | ~6.4 MB | 88, 96, 104, 112 byte blocks |
+| `go/examples/proc.go` | ~42k | ~4.0 MB | mostly <=128 byte blocks |
+| `typescript/examples/parser.ts` | ~62k | ~5.8 MB | mostly <=128 byte blocks |
+
+For `jquery.js`, exact-size sampling showed about 38k 88-byte allocations, 11k
+96-byte allocations, 13k 104-byte allocations, and 3.4k 112-byte allocations per
+parse. These match `SubtreeHeapData` alone and `SubtreeHeapData` plus small child
+arrays. This makes subtree block allocation the first architectural target.
+
 ## Primary Revamp: Parser-Owned Tree Builder Arena
 
 Introduce a parser-owned tree builder for normal parses. Reductions should build
