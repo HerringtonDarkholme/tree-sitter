@@ -121,42 +121,106 @@ const INLINE_IS_KEYWORD: u8 = 1 << 6;
 
 impl SubtreeInlineData {
     #[inline(always)]
-    pub const fn is_inline(self) -> bool { self.flags & INLINE_IS_INLINE != 0 }
+    pub const fn is_inline(self) -> bool {
+        self.flags & INLINE_IS_INLINE != 0
+    }
     #[inline(always)]
-    pub const fn visible(self) -> bool { self.flags & INLINE_VISIBLE != 0 }
+    pub const fn visible(self) -> bool {
+        self.flags & INLINE_VISIBLE != 0
+    }
     #[inline(always)]
-    pub const fn named(self) -> bool { self.flags & INLINE_NAMED != 0 }
+    pub const fn named(self) -> bool {
+        self.flags & INLINE_NAMED != 0
+    }
     #[inline(always)]
-    pub const fn extra(self) -> bool { self.flags & INLINE_EXTRA != 0 }
+    pub const fn extra(self) -> bool {
+        self.flags & INLINE_EXTRA != 0
+    }
     #[inline(always)]
-    pub const fn has_changes(self) -> bool { self.flags & INLINE_HAS_CHANGES != 0 }
+    pub const fn has_changes(self) -> bool {
+        self.flags & INLINE_HAS_CHANGES != 0
+    }
     #[inline(always)]
-    pub const fn is_missing(self) -> bool { self.flags & INLINE_IS_MISSING != 0 }
+    pub const fn is_missing(self) -> bool {
+        self.flags & INLINE_IS_MISSING != 0
+    }
     #[inline(always)]
-    pub const fn is_keyword(self) -> bool { self.flags & INLINE_IS_KEYWORD != 0 }
+    pub const fn is_keyword(self) -> bool {
+        self.flags & INLINE_IS_KEYWORD != 0
+    }
     #[inline(always)]
-    pub const fn padding_rows(self) -> u8 { self.rows_and_lookahead & 0x0F }
+    pub const fn padding_rows(self) -> u8 {
+        self.rows_and_lookahead & 0x0F
+    }
     #[inline(always)]
-    pub const fn lookahead_bytes(self) -> u8 { (self.rows_and_lookahead >> 4) & 0x0F }
+    pub const fn lookahead_bytes(self) -> u8 {
+        (self.rows_and_lookahead >> 4) & 0x0F
+    }
 
     #[inline(always)]
-    pub fn set_is_inline(&mut self, v: bool) { if v { self.flags |= INLINE_IS_INLINE } else { self.flags &= !INLINE_IS_INLINE } }
+    pub fn set_is_inline(&mut self, v: bool) {
+        if v {
+            self.flags |= INLINE_IS_INLINE
+        } else {
+            self.flags &= !INLINE_IS_INLINE
+        }
+    }
     #[inline(always)]
-    pub fn set_visible(&mut self, v: bool) { if v { self.flags |= INLINE_VISIBLE } else { self.flags &= !INLINE_VISIBLE } }
+    pub fn set_visible(&mut self, v: bool) {
+        if v {
+            self.flags |= INLINE_VISIBLE
+        } else {
+            self.flags &= !INLINE_VISIBLE
+        }
+    }
     #[inline(always)]
-    pub fn set_named(&mut self, v: bool) { if v { self.flags |= INLINE_NAMED } else { self.flags &= !INLINE_NAMED } }
+    pub fn set_named(&mut self, v: bool) {
+        if v {
+            self.flags |= INLINE_NAMED
+        } else {
+            self.flags &= !INLINE_NAMED
+        }
+    }
     #[inline(always)]
-    pub fn set_extra(&mut self, v: bool) { if v { self.flags |= INLINE_EXTRA } else { self.flags &= !INLINE_EXTRA } }
+    pub fn set_extra(&mut self, v: bool) {
+        if v {
+            self.flags |= INLINE_EXTRA
+        } else {
+            self.flags &= !INLINE_EXTRA
+        }
+    }
     #[inline(always)]
-    pub fn set_has_changes(&mut self, v: bool) { if v { self.flags |= INLINE_HAS_CHANGES } else { self.flags &= !INLINE_HAS_CHANGES } }
+    pub fn set_has_changes(&mut self, v: bool) {
+        if v {
+            self.flags |= INLINE_HAS_CHANGES
+        } else {
+            self.flags &= !INLINE_HAS_CHANGES
+        }
+    }
     #[inline(always)]
-    pub fn set_is_missing(&mut self, v: bool) { if v { self.flags |= INLINE_IS_MISSING } else { self.flags &= !INLINE_IS_MISSING } }
+    pub fn set_is_missing(&mut self, v: bool) {
+        if v {
+            self.flags |= INLINE_IS_MISSING
+        } else {
+            self.flags &= !INLINE_IS_MISSING
+        }
+    }
     #[inline(always)]
-    pub fn set_is_keyword(&mut self, v: bool) { if v { self.flags |= INLINE_IS_KEYWORD } else { self.flags &= !INLINE_IS_KEYWORD } }
+    pub fn set_is_keyword(&mut self, v: bool) {
+        if v {
+            self.flags |= INLINE_IS_KEYWORD
+        } else {
+            self.flags &= !INLINE_IS_KEYWORD
+        }
+    }
     #[inline(always)]
-    pub fn set_padding_rows(&mut self, v: u8) { self.rows_and_lookahead = (self.rows_and_lookahead & 0xF0) | (v & 0x0F) }
+    pub fn set_padding_rows(&mut self, v: u8) {
+        self.rows_and_lookahead = (self.rows_and_lookahead & 0xF0) | (v & 0x0F)
+    }
     #[inline(always)]
-    pub fn set_lookahead_bytes(&mut self, v: u8) { self.rows_and_lookahead = (self.rows_and_lookahead & 0x0F) | ((v & 0x0F) << 4) }
+    pub fn set_lookahead_bytes(&mut self, v: u8) {
+        self.rows_and_lookahead = (self.rows_and_lookahead & 0x0F) | ((v & 0x0F) << 4)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -200,51 +264,167 @@ const HEAP_IS_MISSING: u16 = 1 << 9;
 const HEAP_IS_KEYWORD: u16 = 1 << 10;
 
 impl SubtreeHeapData {
-    #[inline(always)] pub const fn visible(&self) -> bool { self.flags & HEAP_VISIBLE != 0 }
-    #[inline(always)] pub const fn named(&self) -> bool { self.flags & HEAP_NAMED != 0 }
-    #[inline(always)] pub const fn extra(&self) -> bool { self.flags & HEAP_EXTRA != 0 }
-    #[inline(always)] pub const fn fragile_left(&self) -> bool { self.flags & HEAP_FRAGILE_LEFT != 0 }
-    #[inline(always)] pub const fn fragile_right(&self) -> bool { self.flags & HEAP_FRAGILE_RIGHT != 0 }
-    #[inline(always)] pub const fn has_changes(&self) -> bool { self.flags & HEAP_HAS_CHANGES != 0 }
-    #[inline(always)] pub const fn has_external_tokens(&self) -> bool { self.flags & HEAP_HAS_EXTERNAL_TOKENS != 0 }
-    #[inline(always)] pub const fn has_external_scanner_state_change(&self) -> bool { self.flags & HEAP_HAS_EXTERNAL_SCANNER_STATE_CHANGE != 0 }
-    #[inline(always)] pub const fn depends_on_column(&self) -> bool { self.flags & HEAP_DEPENDS_ON_COLUMN != 0 }
-    #[inline(always)] pub const fn is_missing(&self) -> bool { self.flags & HEAP_IS_MISSING != 0 }
-    #[inline(always)] pub const fn is_keyword(&self) -> bool { self.flags & HEAP_IS_KEYWORD != 0 }
+    #[inline(always)]
+    pub const fn visible(&self) -> bool {
+        self.flags & HEAP_VISIBLE != 0
+    }
+    #[inline(always)]
+    pub const fn named(&self) -> bool {
+        self.flags & HEAP_NAMED != 0
+    }
+    #[inline(always)]
+    pub const fn extra(&self) -> bool {
+        self.flags & HEAP_EXTRA != 0
+    }
+    #[inline(always)]
+    pub const fn fragile_left(&self) -> bool {
+        self.flags & HEAP_FRAGILE_LEFT != 0
+    }
+    #[inline(always)]
+    pub const fn fragile_right(&self) -> bool {
+        self.flags & HEAP_FRAGILE_RIGHT != 0
+    }
+    #[inline(always)]
+    pub const fn has_changes(&self) -> bool {
+        self.flags & HEAP_HAS_CHANGES != 0
+    }
+    #[inline(always)]
+    pub const fn has_external_tokens(&self) -> bool {
+        self.flags & HEAP_HAS_EXTERNAL_TOKENS != 0
+    }
+    #[inline(always)]
+    pub const fn has_external_scanner_state_change(&self) -> bool {
+        self.flags & HEAP_HAS_EXTERNAL_SCANNER_STATE_CHANGE != 0
+    }
+    #[inline(always)]
+    pub const fn depends_on_column(&self) -> bool {
+        self.flags & HEAP_DEPENDS_ON_COLUMN != 0
+    }
+    #[inline(always)]
+    pub const fn is_missing(&self) -> bool {
+        self.flags & HEAP_IS_MISSING != 0
+    }
+    #[inline(always)]
+    pub const fn is_keyword(&self) -> bool {
+        self.flags & HEAP_IS_KEYWORD != 0
+    }
 
-    #[inline(always)] pub fn set_visible(&mut self, v: bool) { if v { self.flags |= HEAP_VISIBLE } else { self.flags &= !HEAP_VISIBLE } }
-    #[inline(always)] pub fn set_named(&mut self, v: bool) { if v { self.flags |= HEAP_NAMED } else { self.flags &= !HEAP_NAMED } }
-    #[inline(always)] pub fn set_extra(&mut self, v: bool) { if v { self.flags |= HEAP_EXTRA } else { self.flags &= !HEAP_EXTRA } }
-    #[inline(always)] pub fn set_fragile_left(&mut self, v: bool) { if v { self.flags |= HEAP_FRAGILE_LEFT } else { self.flags &= !HEAP_FRAGILE_LEFT } }
-    #[inline(always)] pub fn set_fragile_right(&mut self, v: bool) { if v { self.flags |= HEAP_FRAGILE_RIGHT } else { self.flags &= !HEAP_FRAGILE_RIGHT } }
-    #[inline(always)] pub fn set_has_changes(&mut self, v: bool) { if v { self.flags |= HEAP_HAS_CHANGES } else { self.flags &= !HEAP_HAS_CHANGES } }
-    #[inline(always)] pub fn set_has_external_tokens(&mut self, v: bool) { if v { self.flags |= HEAP_HAS_EXTERNAL_TOKENS } else { self.flags &= !HEAP_HAS_EXTERNAL_TOKENS } }
-    #[inline(always)] pub fn set_has_external_scanner_state_change(&mut self, v: bool) { if v { self.flags |= HEAP_HAS_EXTERNAL_SCANNER_STATE_CHANGE } else { self.flags &= !HEAP_HAS_EXTERNAL_SCANNER_STATE_CHANGE } }
-    #[inline(always)] pub fn set_depends_on_column(&mut self, v: bool) { if v { self.flags |= HEAP_DEPENDS_ON_COLUMN } else { self.flags &= !HEAP_DEPENDS_ON_COLUMN } }
-    #[inline(always)] pub fn set_is_missing(&mut self, v: bool) { if v { self.flags |= HEAP_IS_MISSING } else { self.flags &= !HEAP_IS_MISSING } }
-    #[inline(always)] pub fn set_is_keyword(&mut self, v: bool) { if v { self.flags |= HEAP_IS_KEYWORD } else { self.flags &= !HEAP_IS_KEYWORD } }
+    #[inline(always)]
+    pub fn set_visible(&mut self, v: bool) {
+        if v {
+            self.flags |= HEAP_VISIBLE
+        } else {
+            self.flags &= !HEAP_VISIBLE
+        }
+    }
+    #[inline(always)]
+    pub fn set_named(&mut self, v: bool) {
+        if v {
+            self.flags |= HEAP_NAMED
+        } else {
+            self.flags &= !HEAP_NAMED
+        }
+    }
+    #[inline(always)]
+    pub fn set_extra(&mut self, v: bool) {
+        if v {
+            self.flags |= HEAP_EXTRA
+        } else {
+            self.flags &= !HEAP_EXTRA
+        }
+    }
+    #[inline(always)]
+    pub fn set_fragile_left(&mut self, v: bool) {
+        if v {
+            self.flags |= HEAP_FRAGILE_LEFT
+        } else {
+            self.flags &= !HEAP_FRAGILE_LEFT
+        }
+    }
+    #[inline(always)]
+    pub fn set_fragile_right(&mut self, v: bool) {
+        if v {
+            self.flags |= HEAP_FRAGILE_RIGHT
+        } else {
+            self.flags &= !HEAP_FRAGILE_RIGHT
+        }
+    }
+    #[inline(always)]
+    pub fn set_has_changes(&mut self, v: bool) {
+        if v {
+            self.flags |= HEAP_HAS_CHANGES
+        } else {
+            self.flags &= !HEAP_HAS_CHANGES
+        }
+    }
+    #[inline(always)]
+    pub fn set_has_external_tokens(&mut self, v: bool) {
+        if v {
+            self.flags |= HEAP_HAS_EXTERNAL_TOKENS
+        } else {
+            self.flags &= !HEAP_HAS_EXTERNAL_TOKENS
+        }
+    }
+    #[inline(always)]
+    pub fn set_has_external_scanner_state_change(&mut self, v: bool) {
+        if v {
+            self.flags |= HEAP_HAS_EXTERNAL_SCANNER_STATE_CHANGE
+        } else {
+            self.flags &= !HEAP_HAS_EXTERNAL_SCANNER_STATE_CHANGE
+        }
+    }
+    #[inline(always)]
+    pub fn set_depends_on_column(&mut self, v: bool) {
+        if v {
+            self.flags |= HEAP_DEPENDS_ON_COLUMN
+        } else {
+            self.flags &= !HEAP_DEPENDS_ON_COLUMN
+        }
+    }
+    #[inline(always)]
+    pub fn set_is_missing(&mut self, v: bool) {
+        if v {
+            self.flags |= HEAP_IS_MISSING
+        } else {
+            self.flags &= !HEAP_IS_MISSING
+        }
+    }
+    #[inline(always)]
+    pub fn set_is_keyword(&mut self, v: bool) {
+        if v {
+            self.flags |= HEAP_IS_KEYWORD
+        } else {
+            self.flags &= !HEAP_IS_KEYWORD
+        }
+    }
 
     /// Build flags from individual booleans (for struct initialization)
     #[allow(clippy::too_many_arguments)]
     #[inline]
     pub fn make_flags(
-        visible: bool, named: bool, extra: bool,
-        fragile_left: bool, fragile_right: bool,
-        has_changes: bool, has_external_tokens: bool,
+        visible: bool,
+        named: bool,
+        extra: bool,
+        fragile_left: bool,
+        fragile_right: bool,
+        has_changes: bool,
+        has_external_tokens: bool,
         has_external_scanner_state_change: bool,
-        depends_on_column: bool, is_missing: bool, is_keyword: bool,
+        depends_on_column: bool,
+        is_missing: bool,
+        is_keyword: bool,
     ) -> u16 {
         u16::from(visible)
-        | u16::from(named) << 1
-        | u16::from(extra) << 2
-        | u16::from(fragile_left) << 3
-        | u16::from(fragile_right) << 4
-        | u16::from(has_changes) << 5
-        | u16::from(has_external_tokens) << 6
-        | u16::from(has_external_scanner_state_change) << 7
-        | u16::from(depends_on_column) << 8
-        | u16::from(is_missing) << 9
-        | u16::from(is_keyword) << 10
+            | u16::from(named) << 1
+            | u16::from(extra) << 2
+            | u16::from(fragile_left) << 3
+            | u16::from(fragile_right) << 4
+            | u16::from(has_changes) << 5
+            | u16::from(has_external_tokens) << 6
+            | u16::from(has_external_scanner_state_change) << 7
+            | u16::from(depends_on_column) << 8
+            | u16::from(is_missing) << 9
+            | u16::from(is_keyword) << 10
     }
 }
 
@@ -292,9 +472,7 @@ pub union MutableSubtree {
     pub ptr: *mut SubtreeHeapData,
 }
 
-pub const NULL_SUBTREE: Subtree = Subtree {
-    ptr: ptr::null(),
-};
+pub const NULL_SUBTREE: Subtree = Subtree { ptr: ptr::null() };
 
 // Compile-time layout assertions — catch ABI mismatches immediately
 const _: () = assert!(std::mem::size_of::<SubtreeInlineData>() == 8);
@@ -655,9 +833,7 @@ unsafe fn ts_subtree_pool_allocate(self_: &mut SubtreePool) -> *mut SubtreeHeapD
 }
 
 unsafe fn ts_subtree_pool_free(self_: &mut SubtreePool, tree: MutableSubtree) {
-    if self_.free_trees.capacity > 0
-        && self_.free_trees.size < TS_MAX_TREE_POOL_SIZE
-    {
+    if self_.free_trees.capacity > 0 && self_.free_trees.size < TS_MAX_TREE_POOL_SIZE {
         mutable_array_push(&mut self_.free_trees, tree);
     } else {
         ts_free(tree.ptr.cast::<c_void>());
@@ -751,8 +927,7 @@ pub unsafe fn ts_subtree_lookahead_bytes(self_: Subtree) -> u32 {
 
 #[inline]
 pub const fn ts_subtree_alloc_size(child_count: u32) -> usize {
-    child_count as usize * std::mem::size_of::<Subtree>()
-        + std::mem::size_of::<SubtreeHeapData>()
+    child_count as usize * std::mem::size_of::<Subtree>() + std::mem::size_of::<SubtreeHeapData>()
 }
 
 #[inline]
@@ -811,10 +986,7 @@ unsafe fn mutable_subtree_child(self_: MutableSubtree, index: usize) -> Subtree 
 }
 
 #[inline]
-unsafe fn mutable_subtree_child_mut<'a>(
-    self_: MutableSubtree,
-    index: usize,
-) -> &'a mut Subtree {
+unsafe fn mutable_subtree_child_mut<'a>(self_: MutableSubtree, index: usize) -> &'a mut Subtree {
     mutable_subtree_children(self_).get_unchecked_mut(index)
 }
 
@@ -979,27 +1151,47 @@ pub const unsafe fn ts_subtree_production_id(self_: Subtree) -> u16 {
 
 #[inline]
 pub const unsafe fn ts_subtree_fragile_left(self_: Subtree) -> bool {
-    if self_.data.is_inline() { false } else { (*self_.ptr).fragile_left() }
+    if self_.data.is_inline() {
+        false
+    } else {
+        (*self_.ptr).fragile_left()
+    }
 }
 
 #[inline]
 pub const unsafe fn ts_subtree_fragile_right(self_: Subtree) -> bool {
-    if self_.data.is_inline() { false } else { (*self_.ptr).fragile_right() }
+    if self_.data.is_inline() {
+        false
+    } else {
+        (*self_.ptr).fragile_right()
+    }
 }
 
 #[inline]
 pub const unsafe fn ts_subtree_has_external_tokens(self_: Subtree) -> bool {
-    if self_.data.is_inline() { false } else { (*self_.ptr).has_external_tokens() }
+    if self_.data.is_inline() {
+        false
+    } else {
+        (*self_.ptr).has_external_tokens()
+    }
 }
 
 #[inline]
 pub const unsafe fn ts_subtree_has_external_scanner_state_change(self_: Subtree) -> bool {
-    if self_.data.is_inline() { false } else { (*self_.ptr).has_external_scanner_state_change() }
+    if self_.data.is_inline() {
+        false
+    } else {
+        (*self_.ptr).has_external_scanner_state_change()
+    }
 }
 
 #[inline]
 pub const unsafe fn ts_subtree_depends_on_column(self_: Subtree) -> bool {
-    if self_.data.is_inline() { false } else { (*self_.ptr).depends_on_column() }
+    if self_.data.is_inline() {
+        false
+    } else {
+        (*self_.ptr).depends_on_column()
+    }
 }
 
 #[inline]
@@ -1025,12 +1217,16 @@ pub unsafe fn ts_subtree_is_eof(self_: Subtree) -> bool {
 
 #[inline]
 pub const fn ts_subtree_from_mut(self_: MutableSubtree) -> Subtree {
-    Subtree { data: unsafe { self_.data } }
+    Subtree {
+        data: unsafe { self_.data },
+    }
 }
 
 #[inline]
 pub const fn ts_subtree_to_mut_unsafe(self_: Subtree) -> MutableSubtree {
-    MutableSubtree { data: unsafe { self_.data } }
+    MutableSubtree {
+        data: unsafe { self_.data },
+    }
 }
 
 // ===========================================================================
@@ -1121,9 +1317,17 @@ pub unsafe fn ts_subtree_new_leaf(
             symbol,
             parse_state,
             flags: SubtreeHeapData::make_flags(
-                metadata.visible, metadata.named, extra,
-                false, false, false, has_external_tokens,
-                false, depends_on_column, false, is_keyword,
+                metadata.visible,
+                metadata.named,
+                extra,
+                false,
+                false,
+                false,
+                has_external_tokens,
+                false,
+                depends_on_column,
+                false,
+                is_keyword,
             ),
             data: SubtreeHeapDataContent {
                 children: SubtreeChildrenData {
@@ -1181,7 +1385,11 @@ pub unsafe fn ts_subtree_clone(self_: Subtree) -> MutableSubtree {
     let alloc_size = ts_subtree_alloc_size(data.child_count);
     let new_children = ts_malloc(alloc_size).cast::<Subtree>();
     let old_children = ts_subtree_children(self_);
-    ptr::copy_nonoverlapping(old_children.cast::<u8>(), new_children.cast::<u8>(), alloc_size);
+    ptr::copy_nonoverlapping(
+        old_children.cast::<u8>(),
+        new_children.cast::<u8>(),
+        alloc_size,
+    );
     let result = new_children
         .add(data.child_count as usize)
         .cast::<SubtreeHeapData>();
@@ -1231,9 +1439,17 @@ pub unsafe fn ts_subtree_new_node(
         symbol,
         parse_state: 0,
         flags: SubtreeHeapData::make_flags(
-            metadata.visible, metadata.named, false,
-            fragile, fragile, false, false,
-            false, false, false, false,
+            metadata.visible,
+            metadata.named,
+            false,
+            fragile,
+            fragile,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
         ),
         data: SubtreeHeapDataContent {
             children: SubtreeChildrenData {
@@ -1277,7 +1493,16 @@ pub unsafe fn ts_subtree_new_missing_leaf(
     language: *const TSLanguage,
 ) -> Subtree {
     let mut result = ts_subtree_new_leaf(
-        pool, symbol, padding, length_zero(), lookahead_bytes, 0, false, false, false, language,
+        pool,
+        symbol,
+        padding,
+        length_zero(),
+        lookahead_bytes,
+        0,
+        false,
+        false,
+        false,
+        language,
     );
     if result.data.is_inline() {
         result.data.set_is_missing(true);
@@ -1373,7 +1598,9 @@ pub unsafe fn ts_subtree_release(pool: &mut SubtreePool, self_: Subtree) {
                 let external_scanner_state =
                     ptr::addr_of_mut!((*tree.ptr).data.external_scanner_state)
                         .cast::<ExternalScannerState>();
-                ts_external_scanner_state_delete(external_scanner_state_mut(external_scanner_state));
+                ts_external_scanner_state_delete(external_scanner_state_mut(
+                    external_scanner_state,
+                ));
             }
             ts_subtree_pool_free(pool, tree);
         }
@@ -1439,10 +1666,7 @@ pub unsafe fn ts_subtree_compress(
     }
 }
 
-pub unsafe fn ts_subtree_summarize_children(
-    self_: MutableSubtree,
-    language: *const TSLanguage,
-) {
+pub unsafe fn ts_subtree_summarize_children(self_: MutableSubtree, language: *const TSLanguage) {
     debug_assert!(!self_.data.is_inline());
 
     let data = mutable_subtree_data_mut(self_);
@@ -1457,7 +1681,8 @@ pub unsafe fn ts_subtree_summarize_children(
     data.data.children.dynamic_precedence = 0;
 
     let mut structural_index: u32 = 0;
-    let alias_sequence = language_alias_sequence(language, u32::from(data.data.children.production_id));
+    let alias_sequence =
+        language_alias_sequence(language, u32::from(data.data.children.production_id));
     let mut lookahead_end_byte: u32 = 0;
 
     let children = subtree_children(ts_subtree_from_mut(self_));
@@ -1497,8 +1722,8 @@ pub unsafe fn ts_subtree_summarize_children(
             if ts_subtree_visible(child) {
                 data.error_cost += ERROR_COST_PER_SKIPPED_TREE;
             } else if grandchild_count > 0 {
-                data.error_cost += ERROR_COST_PER_SKIPPED_TREE
-                    * (*child.ptr).data.children.visible_child_count;
+                data.error_cost +=
+                    ERROR_COST_PER_SKIPPED_TREE * (*child.ptr).data.children.visible_child_count;
             }
         }
 
@@ -1512,11 +1737,8 @@ pub unsafe fn ts_subtree_summarize_children(
         {
             data.data.children.visible_descendant_count += 1;
             data.data.children.visible_child_count += 1;
-            if ts_language_symbol_metadata(
-                language,
-                *alias_sequence.add(structural_index as usize),
-            )
-            .named
+            if ts_language_symbol_metadata(language, *alias_sequence.add(structural_index as usize))
+                .named
             {
                 data.data.children.named_child_count += 1;
             }
@@ -1549,8 +1771,7 @@ pub unsafe fn ts_subtree_summarize_children(
 
     data.lookahead_bytes = lookahead_end_byte - data.size.bytes - data.padding.bytes;
 
-    if data.symbol == ts_builtin_sym_error || data.symbol == ts_builtin_sym_error_repeat
-    {
+    if data.symbol == ts_builtin_sym_error || data.symbol == ts_builtin_sym_error_repeat {
         data.error_cost += ERROR_COST_PER_RECOVERY
             + ERROR_COST_PER_SKIPPED_CHAR * data.size.bytes
             + ERROR_COST_PER_SKIPPED_LINE * data.size.extent.row;
@@ -1588,11 +1809,7 @@ pub unsafe fn ts_subtree_summarize_children(
 // Subtree comparison / query
 // ===========================================================================
 
-pub unsafe fn ts_subtree_compare(
-    left: Subtree,
-    right: Subtree,
-    pool: &mut SubtreePool,
-) -> i32 {
+pub unsafe fn ts_subtree_compare(left: Subtree, right: Subtree, pool: &mut SubtreePool) -> i32 {
     mutable_array_push(&mut pool.tree_stack, ts_subtree_to_mut_unsafe(left));
     mutable_array_push(&mut pool.tree_stack, ts_subtree_to_mut_unsafe(right));
 
@@ -1624,10 +1841,7 @@ pub unsafe fn ts_subtree_compare(
             let left_child = *left_children.get_unchecked(i as usize);
             let right_child = *right_children.get_unchecked(i as usize);
             mutable_array_push(&mut pool.tree_stack, ts_subtree_to_mut_unsafe(left_child));
-            mutable_array_push(
-                &mut pool.tree_stack,
-                ts_subtree_to_mut_unsafe(right_child),
-            );
+            mutable_array_push(&mut pool.tree_stack, ts_subtree_to_mut_unsafe(right_child));
         }
     }
 
@@ -1720,9 +1934,17 @@ pub unsafe fn ts_subtree_edit(
                     symbol: TSSymbol::from(result.data.symbol),
                     parse_state: result.data.parse_state,
                     flags: SubtreeHeapData::make_flags(
-                        result.data.visible(), result.data.named(), result.data.extra(),
-                        false, false, false, false,
-                        false, false, result.data.is_missing(), result.data.is_keyword(),
+                        result.data.visible(),
+                        result.data.named(),
+                        result.data.extra(),
+                        false,
+                        false,
+                        false,
+                        false,
+                        false,
+                        false,
+                        result.data.is_missing(),
+                        result.data.is_keyword(),
                     ),
                     data: SubtreeHeapDataContent { lookahead_char: 0 },
                 };
@@ -1811,9 +2033,7 @@ pub unsafe fn ts_subtree_last_external_token(mut tree: Subtree) -> Subtree {
     tree
 }
 
-pub unsafe fn ts_subtree_external_scanner_state(
-    self_: &Subtree,
-) -> &ExternalScannerState {
+pub unsafe fn ts_subtree_external_scanner_state(self_: &Subtree) -> &ExternalScannerState {
     if self_.ptr.is_null() || self_.data.is_inline() {
         return &EMPTY_EXTERNAL_SCANNER_STATE;
     }
@@ -1864,7 +2084,9 @@ unsafe fn language_field_map(
     }
     let slice = *(*lang).field_map_slices.add(production_id as usize);
     *start = (*lang).field_map_entries.add(slice.index as usize);
-    *end = (*lang).field_map_entries.add(slice.index as usize + slice.length as usize);
+    *end = (*lang)
+        .field_map_entries
+        .add(slice.index as usize + slice.length as usize);
 }
 
 /// Rust re-implementation of the static inline `ts_language_write_symbol_as_dot_string`.
@@ -1946,14 +2168,13 @@ unsafe fn ts_subtree__write_to_string(
 
     if is_visible {
         if !is_root {
-            cursor = cursor.add(
-                snprintf(*writer, limit, c" ".as_ptr().cast::<i8>()) as usize,
-            );
+            cursor = cursor.add(snprintf(*writer, limit, c" ".as_ptr().cast::<i8>()) as usize);
             if !field_name.is_null() {
-                cursor = cursor.add(
-                    snprintf(*writer, limit, c"%s: ".as_ptr().cast::<i8>(), field_name)
-                        as usize,
-                );
+                cursor =
+                    cursor.add(
+                        snprintf(*writer, limit, c"%s: ".as_ptr().cast::<i8>(), field_name)
+                            as usize,
+                    );
             }
         }
 
@@ -1961,9 +2182,8 @@ unsafe fn ts_subtree__write_to_string(
             && ts_subtree_child_count(self_) == 0
             && (*self_.ptr).size.bytes > 0
         {
-            cursor = cursor.add(
-                snprintf(*writer, limit, c"(UNEXPECTED ".as_ptr().cast::<i8>()) as usize,
-            );
+            cursor = cursor
+                .add(snprintf(*writer, limit, c"(UNEXPECTED ".as_ptr().cast::<i8>()) as usize);
             cursor = cursor.add(ts_subtree__write_char_to_string(
                 *writer,
                 limit,
@@ -1977,29 +2197,29 @@ unsafe fn ts_subtree__write_to_string(
             };
             let symbol_name = ts_language_symbol_name(language, symbol);
             if ts_subtree_missing(self_) {
-                cursor = cursor.add(
-                    snprintf(*writer, limit, c"(MISSING ".as_ptr().cast::<i8>()) as usize,
-                );
+                cursor = cursor
+                    .add(snprintf(*writer, limit, c"(MISSING ".as_ptr().cast::<i8>()) as usize);
                 if alias_is_named || ts_subtree_named(self_) {
-                    cursor = cursor.add(
-                        snprintf(*writer, limit, c"%s".as_ptr().cast::<i8>(), symbol_name)
-                            as usize,
-                    );
+                    cursor = cursor.add(snprintf(
+                        *writer,
+                        limit,
+                        c"%s".as_ptr().cast::<i8>(),
+                        symbol_name,
+                    ) as usize);
                 } else {
-                    cursor = cursor.add(
-                        snprintf(
-                            *writer,
-                            limit,
-                            c"\"%s\"".as_ptr().cast::<i8>(),
-                            symbol_name,
-                        ) as usize,
-                    );
+                    cursor = cursor.add(snprintf(
+                        *writer,
+                        limit,
+                        c"\"%s\"".as_ptr().cast::<i8>(),
+                        symbol_name,
+                    ) as usize);
                 }
             } else {
-                cursor = cursor.add(
-                    snprintf(*writer, limit, c"(%s".as_ptr().cast::<i8>(), symbol_name)
-                        as usize,
-                );
+                cursor =
+                    cursor.add(
+                        snprintf(*writer, limit, c"(%s".as_ptr().cast::<i8>(), symbol_name)
+                            as usize,
+                    );
             }
         }
     } else if is_root {
@@ -2010,23 +2230,18 @@ unsafe fn ts_subtree__write_to_string(
         };
         let symbol_name = ts_language_symbol_name(language, symbol);
         if ts_subtree_child_count(self_) > 0 {
-            cursor = cursor.add(
-                snprintf(*writer, limit, c"(%s".as_ptr().cast::<i8>(), symbol_name) as usize,
-            );
+            cursor = cursor
+                .add(snprintf(*writer, limit, c"(%s".as_ptr().cast::<i8>(), symbol_name) as usize);
         } else if ts_subtree_named(self_) {
-            cursor = cursor.add(
-                snprintf(*writer, limit, c"(%s)".as_ptr().cast::<i8>(), symbol_name)
-                    as usize,
-            );
+            cursor = cursor
+                .add(snprintf(*writer, limit, c"(%s)".as_ptr().cast::<i8>(), symbol_name) as usize);
         } else {
-            cursor = cursor.add(
-                snprintf(
-                    *writer,
-                    limit,
-                    c"(\"%s\")".as_ptr().cast::<i8>(),
-                    symbol_name,
-                ) as usize,
-            );
+            cursor = cursor.add(snprintf(
+                *writer,
+                limit,
+                c"(\"%s\")".as_ptr().cast::<i8>(),
+                symbol_name,
+            ) as usize);
         }
     }
 
@@ -2074,12 +2289,9 @@ unsafe fn ts_subtree__write_to_string(
                     if is_visible { ptr::null() } else { field_name };
                 let mut map = field_map;
                 while map < field_map_end {
-                    if !(*map).inherited
-                        && (*map).child_index == structural_child_index as u8
-                    {
+                    if !(*map).inherited && (*map).child_index == structural_child_index as u8 {
                         let lang = language.cast::<TSLanguageData>();
-                        child_field_name =
-                            *(*lang).field_names.add((*map).field_id as usize);
+                        child_field_name = *(*lang).field_names.add((*map).field_id as usize);
                         break;
                     }
                     map = map.add(1);
@@ -2101,9 +2313,7 @@ unsafe fn ts_subtree__write_to_string(
     }
 
     if is_visible {
-        cursor = cursor.add(
-            snprintf(*writer, limit, c")".as_ptr().cast::<i8>()) as usize,
-        );
+        cursor = cursor.add(snprintf(*writer, limit, c")".as_ptr().cast::<i8>()) as usize);
     }
 
     cursor as usize - string as usize
@@ -2150,7 +2360,11 @@ unsafe fn ts_subtree__print_dot_graph(
 ) {
     let tree = *self_;
     let subtree_symbol = ts_subtree_symbol(tree);
-    let symbol = if alias_symbol != 0 { alias_symbol } else { subtree_symbol };
+    let symbol = if alias_symbol != 0 {
+        alias_symbol
+    } else {
+        subtree_symbol
+    };
     let end_offset = start_offset + ts_subtree_total_bytes(tree);
     fprintf(
         f,

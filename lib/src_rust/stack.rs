@@ -15,15 +15,15 @@ use crate::ffi::{TSLanguage, TSStateId};
 use super::alloc::{ts_calloc, ts_free, ts_malloc, ts_realloc};
 use super::error_costs::{ERROR_COST_PER_RECOVERY, ERROR_STATE};
 use super::language::ts_language_write_symbol_as_dot_string;
-use super::length::{Length, length_add, length_zero};
+use super::length::{length_add, length_zero, Length};
 use super::subtree::{
-    NULL_SUBTREE, Subtree, SubtreeArray, SubtreePool, ts_builtin_sym_error_repeat,
-    ts_external_scanner_state_data, ts_subtree_alloc_size, ts_subtree_child_count,
-    ts_subtree_dynamic_precedence, ts_subtree_error_cost, ts_subtree_external_scanner_state,
-    ts_subtree_external_scanner_state_eq, ts_subtree_extra, ts_subtree_is_error, ts_subtree_named,
-    ts_subtree_padding, ts_subtree_release, ts_subtree_retain, ts_subtree_size, ts_subtree_symbol,
-    ts_subtree_total_bytes, ts_subtree_total_size, ts_subtree_visible,
-    ts_subtree_visible_descendant_count,
+    ts_builtin_sym_error_repeat, ts_external_scanner_state_data, ts_subtree_alloc_size,
+    ts_subtree_child_count, ts_subtree_dynamic_precedence, ts_subtree_error_cost,
+    ts_subtree_external_scanner_state, ts_subtree_external_scanner_state_eq, ts_subtree_extra,
+    ts_subtree_is_error, ts_subtree_named, ts_subtree_padding, ts_subtree_release,
+    ts_subtree_retain, ts_subtree_size, ts_subtree_symbol, ts_subtree_total_bytes,
+    ts_subtree_total_size, ts_subtree_visible, ts_subtree_visible_descendant_count, Subtree,
+    SubtreeArray, SubtreePool, NULL_SUBTREE,
 };
 use super::subtree::{ts_subtree_array_copy, ts_subtree_array_delete, ts_subtree_array_reverse};
 

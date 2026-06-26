@@ -8,17 +8,17 @@ use crate::ffi::{TSFieldId, TSNode, TSPoint, TSSymbol, TSTreeCursor};
 
 use super::alloc::{ts_calloc, ts_free, ts_realloc};
 use super::language::{
-    TSLanguageFull, ts_language_alias_at, ts_language_alias_sequence, ts_language_field_map,
-    ts_language_symbol_metadata,
+    ts_language_alias_at, ts_language_alias_sequence, ts_language_field_map,
+    ts_language_symbol_metadata, TSLanguageFull,
 };
-use super::length::{LENGTH_UNDEFINED, Length, length_add, length_is_undefined, length_zero};
+use super::length::{length_add, length_is_undefined, length_zero, Length, LENGTH_UNDEFINED};
 use super::node::{ts_node_new, ts_node_start_byte, ts_node_start_point};
 use super::point::point_gt;
 use super::subtree::{
-    NULL_SUBTREE, Subtree, TSFieldMapEntry, ts_subtree_child_count, ts_subtree_children,
-    ts_subtree_extra, ts_subtree_padding, ts_subtree_size, ts_subtree_symbol,
-    ts_subtree_total_size, ts_subtree_visible, ts_subtree_visible_child_count,
-    ts_subtree_visible_descendant_count,
+    ts_subtree_child_count, ts_subtree_children, ts_subtree_extra, ts_subtree_padding,
+    ts_subtree_size, ts_subtree_symbol, ts_subtree_total_size, ts_subtree_visible,
+    ts_subtree_visible_child_count, ts_subtree_visible_descendant_count, Subtree, TSFieldMapEntry,
+    NULL_SUBTREE,
 };
 use super::tree::TSTree;
 

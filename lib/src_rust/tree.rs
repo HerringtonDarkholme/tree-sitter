@@ -7,17 +7,17 @@ use crate::ffi::{TSLanguage, TSNode, TSPoint, TSRange, TSSymbol};
 
 use super::alloc::{ts_calloc, ts_free, ts_malloc};
 use super::get_changed_ranges::{
-    TSRangeArray, ts_range_array_get_changed_ranges_ref, ts_range_edit_ref, ts_range_slice,
-    ts_subtree_get_changed_ranges_ref,
+    ts_range_array_get_changed_ranges_ref, ts_range_edit_ref, ts_range_slice,
+    ts_subtree_get_changed_ranges_ref, TSRangeArray,
 };
 use super::language::{ts_language_copy, ts_language_delete};
-use super::length::{Length, length_add};
+use super::length::{length_add, Length};
 use super::node::ts_node_new;
 use super::subtree::{
-    Subtree, ts_subtree_edit, ts_subtree_padding, ts_subtree_pool_delete, ts_subtree_pool_new,
-    ts_subtree_print_dot_graph, ts_subtree_release, ts_subtree_retain,
+    ts_subtree_edit, ts_subtree_padding, ts_subtree_pool_delete, ts_subtree_pool_new,
+    ts_subtree_print_dot_graph, ts_subtree_release, ts_subtree_retain, Subtree,
 };
-use super::tree_cursor::{TreeCursor, TreeCursorEntryArray, ts_tree_cursor_init_ref};
+use super::tree_cursor::{ts_tree_cursor_init_ref, TreeCursor, TreeCursorEntryArray};
 
 // ---------------------------------------------------------------------------
 // Extern C functions (still in C or other Rust modules)

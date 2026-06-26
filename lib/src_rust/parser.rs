@@ -15,35 +15,30 @@ use super::error_costs::{
     ERROR_STATE,
 };
 use super::get_changed_ranges::{
-    TSRangeArray, ts_range_array_get_changed_ranges_ref, ts_range_array_intersects_ref,
-    ts_range_slice,
+    ts_range_array_get_changed_ranges_ref, ts_range_array_intersects_ref, ts_range_slice,
+    TSRangeArray,
 };
 use super::language::{
-    TSLanguageFull, TSLexer, TSLexerMode, TSParseActionTypeAccept as TSPARSE_ACTION_TYPE_ACCEPT,
-    TSParseActionTypeRecover as TSPARSE_ACTION_TYPE_RECOVER,
-    TSParseActionTypeReduce as TSPARSE_ACTION_TYPE_REDUCE,
-    TSParseActionTypeShift as TSPARSE_ACTION_TYPE_SHIFT, TableEntry, ts_language_actions,
-    ts_language_copy, ts_language_delete, ts_language_enabled_external_tokens,
+    ts_language_actions, ts_language_copy, ts_language_delete, ts_language_enabled_external_tokens,
     ts_language_has_actions, ts_language_has_reduce_action, ts_language_is_reserved_word,
     ts_language_lex_mode_for_state, ts_language_next_state, ts_language_symbol_name,
-    ts_language_table_entry,
+    ts_language_table_entry, TSLanguageFull, TSLexer, TSLexerMode,
+    TSParseActionTypeAccept as TSPARSE_ACTION_TYPE_ACCEPT,
+    TSParseActionTypeRecover as TSPARSE_ACTION_TYPE_RECOVER,
+    TSParseActionTypeReduce as TSPARSE_ACTION_TYPE_REDUCE,
+    TSParseActionTypeShift as TSPARSE_ACTION_TYPE_SHIFT, TableEntry,
 };
 use super::length::{length_sub, length_zero};
 use super::lexer::{
-    Lexer, ts_lexer_delete, ts_lexer_finish, ts_lexer_included_ranges, ts_lexer_init,
-    ts_lexer_mark_end, ts_lexer_reset, ts_lexer_set_included_ranges, ts_lexer_set_input,
-    ts_lexer_start,
+    ts_lexer_delete, ts_lexer_finish, ts_lexer_included_ranges, ts_lexer_init, ts_lexer_mark_end,
+    ts_lexer_reset, ts_lexer_set_included_ranges, ts_lexer_set_input, ts_lexer_start, Lexer,
 };
 use super::reusable_node::{
-    ReusableNode, reusable_node_advance, reusable_node_advance_past_leaf,
-    reusable_node_byte_offset, reusable_node_clear, reusable_node_delete, reusable_node_descend,
-    reusable_node_new, reusable_node_reset, reusable_node_tree,
+    reusable_node_advance, reusable_node_advance_past_leaf, reusable_node_byte_offset,
+    reusable_node_clear, reusable_node_delete, reusable_node_descend, reusable_node_new,
+    reusable_node_reset, reusable_node_tree, ReusableNode,
 };
 use super::stack::{
-    Array,
-    STACK_VERSION_NONE,
-    Stack,
-    StackVersion,
     array_assign,
     array_back_ref,
     array_clear,
@@ -92,16 +87,12 @@ use super::stack::{
     ts_stack_state,
     ts_stack_swap_versions,
     ts_stack_version_count,
+    Array,
+    Stack,
+    StackVersion,
+    STACK_VERSION_NONE,
 };
 use super::subtree::{
-    ExternalScannerState,
-    MutableSubtree,
-    MutableSubtreeArray,
-    NULL_SUBTREE,
-    Subtree,
-    SubtreeArray,
-    SubtreePool,
-    TS_TREE_STATE_NONE,
     ts_builtin_sym_end,
     ts_builtin_sym_error,
     ts_builtin_sym_error_repeat,
@@ -154,8 +145,16 @@ use super::subtree::{
     ts_subtree_to_mut_unsafe,
     ts_subtree_total_bytes,
     ts_subtree_total_size,
+    ExternalScannerState,
+    MutableSubtree,
+    MutableSubtreeArray,
+    Subtree,
+    SubtreeArray,
+    SubtreePool,
+    NULL_SUBTREE,
+    TS_TREE_STATE_NONE,
 };
-use super::tree::{TSTree, ts_tree_new};
+use super::tree::{ts_tree_new, TSTree};
 
 // ---------------------------------------------------------------------------
 // Extern C functions

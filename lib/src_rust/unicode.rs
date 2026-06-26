@@ -84,8 +84,7 @@ pub fn utf16le_next(string: &[u8], offset: usize) -> (u32, i32) {
         }
         let c2 = u16::from_le_bytes([string[offset + 2], string[offset + 3]]);
         if (0xDC00..=0xDFFF).contains(&c2) {
-            let code_point =
-                0x10000 + ((i32::from(c) - 0xD800) << 10) + (i32::from(c2) - 0xDC00);
+            let code_point = 0x10000 + ((i32::from(c) - 0xD800) << 10) + (i32::from(c2) - 0xDC00);
             return (4, code_point);
         }
     }
@@ -113,8 +112,7 @@ pub fn utf16be_next(string: &[u8], offset: usize) -> (u32, i32) {
         }
         let c2 = u16::from_be_bytes([string[offset + 2], string[offset + 3]]);
         if (0xDC00..=0xDFFF).contains(&c2) {
-            let code_point =
-                0x10000 + ((i32::from(c) - 0xD800) << 10) + (i32::from(c2) - 0xDC00);
+            let code_point = 0x10000 + ((i32::from(c) - 0xD800) << 10) + (i32::from(c2) - 0xDC00);
             return (4, code_point);
         }
     }

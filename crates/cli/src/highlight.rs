@@ -190,18 +190,15 @@ fn parse_style(style: &mut Style, json: Value) {
     if let Value::Object(entries) = json {
         for (property_name, value) in entries {
             match property_name.as_str() {
-                "bold"
-                    if value == Value::Bool(true) => {
-                        style.ansi = style.ansi.bold();
-                    }
-                "italic"
-                    if value == Value::Bool(true) => {
-                        style.ansi = style.ansi.italic();
-                    }
-                "underline"
-                    if value == Value::Bool(true) => {
-                        style.ansi = style.ansi.underline();
-                    }
+                "bold" if value == Value::Bool(true) => {
+                    style.ansi = style.ansi.bold();
+                }
+                "italic" if value == Value::Bool(true) => {
+                    style.ansi = style.ansi.italic();
+                }
+                "underline" if value == Value::Bool(true) => {
+                    style.ansi = style.ansi.underline();
+                }
                 "color" => {
                     if let Some(color) = parse_color(value) {
                         style.ansi = style.ansi.fg_color(Some(color));

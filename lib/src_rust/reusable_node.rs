@@ -1,11 +1,11 @@
 #![allow(dead_code)]
 
 use super::stack::{
-    Array, array_back_ref, array_clear, array_delete, array_new, array_pop, array_push,
+    array_back_ref, array_clear, array_delete, array_new, array_pop, array_push, Array,
 };
 use super::subtree::{
-    NULL_SUBTREE, Subtree, ts_subtree_child_count, ts_subtree_children,
-    ts_subtree_has_external_tokens, ts_subtree_last_external_token, ts_subtree_total_bytes,
+    ts_subtree_child_count, ts_subtree_children, ts_subtree_has_external_tokens,
+    ts_subtree_last_external_token, ts_subtree_total_bytes, Subtree, NULL_SUBTREE,
 };
 
 /// `StackEntry` — for `ReusableNode` (from `reusable_node.h`)

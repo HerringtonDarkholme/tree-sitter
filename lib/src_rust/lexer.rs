@@ -16,14 +16,14 @@ use std::ffi::c_void;
 use std::ptr;
 
 use crate::ffi::{
-    TSInput, TSInputEncodingUTF8, TSInputEncodingUTF16BE, TSInputEncodingUTF16LE, TSLogger,
+    TSInput, TSInputEncodingUTF16BE, TSInputEncodingUTF16LE, TSInputEncodingUTF8, TSLogger,
     TSPoint, TSRange,
 };
 
 use super::alloc::{ts_free, ts_realloc};
 use super::language::TSLexer;
-use super::length::{LENGTH_UNDEFINED, Length, length_is_undefined};
-use super::unicode::{TS_DECODE_ERROR, ts_decode_utf8, ts_decode_utf16_be, ts_decode_utf16_le};
+use super::length::{length_is_undefined, Length, LENGTH_UNDEFINED};
+use super::unicode::{ts_decode_utf16_be, ts_decode_utf16_le, ts_decode_utf8, TS_DECODE_ERROR};
 
 // ---------------------------------------------------------------------------
 // Constants
