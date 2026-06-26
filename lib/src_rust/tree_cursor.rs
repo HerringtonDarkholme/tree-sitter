@@ -594,12 +594,6 @@ unsafe fn tree_cursor_goto_last_child(cursor: &mut TreeCursor) -> bool {
     }
 }
 
-pub unsafe fn ts_tree_cursor_goto_last_child_internal(
-    self_: *mut TSTreeCursor,
-) -> TreeCursorStep {
-    tree_cursor_goto_last_child_internal(tree_cursor_mut(self_))
-}
-
 #[no_mangle]
 pub unsafe extern "C" fn ts_tree_cursor_goto_last_child(
     self_: *mut TSTreeCursor,
@@ -693,12 +687,6 @@ unsafe fn tree_cursor_goto_previous_sibling_internal(cursor: &mut TreeCursor) ->
     tree_cursor_entry_array_back_mut(&mut cursor.stack).position = position;
 
     step
-}
-
-pub unsafe fn ts_tree_cursor_goto_previous_sibling_internal(
-    self_: *mut TSTreeCursor,
-) -> TreeCursorStep {
-    tree_cursor_goto_previous_sibling_internal(tree_cursor_mut(self_))
 }
 
 #[no_mangle]
