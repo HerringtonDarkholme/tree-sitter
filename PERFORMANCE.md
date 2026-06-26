@@ -3607,3 +3607,91 @@ Source-code analysis:
 - Full `cargo test --all` passed before every committed code change in this
   checkpoint, and the current pushed HEAD `12ef4dcd` also passed a final full
   `cargo test --all` after the clippy-fix commit landed.
+
+## 2026-06-25 raw-pointer and clippy cleanup checkpoint
+
+- Head: `e698a87c` (`Remove raw array back helper`)
+- Base checkpoint: `1767d637` (`Record tier three cleanup perf checkpoint`)
+- Change batch: 10 small internal cleanup commits:
+  `Rename tree cursor step variants` through
+  `Remove raw array back helper`.
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+Initial run:
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 27263.8 | 25783.1 | +5.74% |
+| TypeScript error parses | 32 | 1804.4 | 1706.5 | +5.74% |
+| JavaScript normal parses | 2 | 18278.7 | 16642.4 | +9.83% |
+| JavaScript error parses | 37 | 2156.1 | 2062.0 | +4.56% |
+| Overall parser throughput | 82 | 2467.9 | 2342.3 | +5.36% |
+
+Initial per-case regressions over 5%:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `javascript error compound-statement-without-trailing-newline.py` | 3067.7 | 3287.8 | 6.69% |
+
+Rerun:
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 27206.2 | 22167.5 | +22.73% |
+| TypeScript error parses | 32 | 1666.9 | 1598.0 | +4.31% |
+| JavaScript normal parses | 2 | 18402.2 | 16959.7 | +8.51% |
+| JavaScript error parses | 37 | 2155.0 | 2020.4 | +6.66% |
+| Overall parser throughput | 82 | 2351.5 | 2231.0 | +5.40% |
+
+Rerun per-case regressions over 5%:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `typescript error multiple-newlines.py` | 333.7 | 375.5 | 11.15% |
+| `typescript error compound-statement-without-trailing-newline.py` | 884.9 | 983.2 | 10.00% |
+| `typescript error python2-grammar.py` | 1032.2 | 1138.4 | 9.33% |
+| `typescript error python2-grammar-crlf.py` | 1067.4 | 1168.8 | 8.67% |
+| `typescript error python3-grammar-crlf.py` | 2301.1 | 2514.4 | 8.48% |
+| `typescript error python3-grammar.py` | 2246.2 | 2451.4 | 8.37% |
+| `typescript error ast.rs` | 1534.3 | 1673.9 | 8.34% |
+| `typescript error weird-exprs.rs` | 1117.9 | 1204.7 | 7.21% |
+| `typescript error mixed-spaces-tabs.py` | 301.0 | 323.1 | 6.84% |
+| `typescript error parser.ts` | 24619.3 | 26303.3 | 6.40% |
+
+Prior checkpoint rerun measured Rust overall throughput of 2365.5 bytes/ms,
+C throughput of 2303.9 bytes/ms, and a Rust-vs-C delta of +2.67%. This
+checkpoint's rerun measured 2351.5 bytes/ms for Rust, so absolute Rust
+throughput moved by about -0.59% versus the prior checkpoint rerun. C
+throughput moved by about -3.16%, and the Rust-vs-C delta moved to +5.40%.
+
+Source-code analysis:
+
+- The batch contains no struct layout changes, no header changes, no parser
+  table/action changes, and no exported FFI signature changes. Several
+  exported implementation functions had Rust `const` removed to preserve the
+  crate's `rust-version = 1.77` compatibility; their symbol names, calling
+  convention, argument lists, and return types are unchanged.
+- The tree cursor and changed-range enum commits are internal renames only.
+  They preserve discriminants or replace forwarding wrappers with direct calls
+  to the existing reference-based helpers.
+- The subtree-array copy change replaces a by-value array-header parameter
+  with a borrowed source header while keeping the same explicit source
+  temporaries at call sites that overwrite the destination header.
+- The changed-range wrapper removals delete uncalled or forwarding
+  transitional APIs and route the parser to `ts_range_array_intersects_ref`
+  directly. They do not change included-range diff logic.
+- The only broadly hot helper touched in the batch is `array_back_ref` /
+  `array_back_mut`, where the unused raw-pointer-returning `array_back` helper
+  was inlined into the reference helpers with the same pointer arithmetic and
+  debug assertion.
+- The initial and rerun per-case regression lists do not overlap. The rerun's
+  TypeScript normal C throughput also moved sharply relative to the initial
+  run, while Rust remained faster overall in both runs. This pattern is
+  consistent with benchmark noise rather than a source-level parser
+  regression.
+- Full `cargo test --all` passed before every committed code change in this
+  checkpoint.
