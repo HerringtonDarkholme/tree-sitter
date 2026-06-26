@@ -130,6 +130,7 @@ may refer to these rows, but should not duplicate them as separate attempts.
 | Add arena-backed tree storage foundation | Tree storage | Positive foundation, kept |
 | Allocate parser reduction nodes in tree arena | Reduce/node allocation | Positive architecture slice, `+5.3%` mean of seven language averages |
 | Parser-owned stack-pop builder for fresh-parse reductions | Reduce/stack pop | Positive architecture slice, `+7.3%` mean of seven language averages on top of arena slice; reparses use the original slice path after `test_get_changed_ranges` exposed changed-range sensitivity; `cargo test --all` passed outside sandbox |
+| Stack-link payload abstraction | Stack/reduce foundation | Kept as behavior-preserving foundation for pending reductions. It routes stack link retain/release and metadata queries through a concrete `Subtree` payload layer. Same-session normal benchmarks were broadly neutral/noisy: JavaScript `20387/18912` vs baseline `19925/18640`, TypeScript `26598/23246` and rerun `26412/22980` vs baseline `26709/23187`, Python `10322/440` vs `10082/507`, Go `17779/16198` vs `16842/15652`, Rust `17656/13473` vs `15865/13760`, C++ `7427/5846` plus noisy warm rerun `13202/12616` vs `7380/5984`, Java `13065/9937` vs `12093/10067`. `cargo test --all` passed outside sandbox. |
 
 ### Measurement And Design Trials
 
