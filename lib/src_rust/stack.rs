@@ -193,8 +193,8 @@ pub(crate) unsafe fn array_delete<T>(arr: *mut Array<T>) {
     (*arr).capacity = 0;
 }
 
-pub(crate) unsafe fn array_clear<T>(arr: *mut Array<T>) {
-    (*arr).size = 0;
+pub(crate) unsafe fn array_clear<T>(arr: &mut Array<T>) {
+    arr.size = 0;
 }
 
 pub(crate) unsafe fn array_reserve<T>(arr: *mut Array<T>, new_capacity: u32) {
