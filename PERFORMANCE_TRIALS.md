@@ -168,6 +168,10 @@ Same-session canary result for `329f8b08`:
 | Parser `SubtreePool` free lists for 1-4 child node blocks | Subtree block allocation | Allocation calls dropped by ~1.8k/parse on JS, but harness and JS/TS/Go canaries regressed; per-release pool bookkeeping outweighed reuse |
 | Arena-backed heap leaves during lexing | Subtree allocation | JavaScript/TypeScript/Python improved, but Go regressed to 14165 avg bytes/ms and Rust regressed to 13219 avg bytes/ms; not viable as a universal normal-parse optimization |
 | Increase `TREE_ARENA_PAGE_SIZE` from 16 KiB to 64 KiB | Tree arena page layout | JavaScript canary regressed to 17256 avg bytes/ms from 18072, so fewer page allocations did not offset worse locality/cache behavior |
+| Adopt stack-pop child arrays into `TreeArena` instead of copying into arena pages | Reduce/node construction | JavaScript was roughly flat at 18123 avg bytes/ms, but TypeScript regressed to 22639 avg bytes/ms from 23024; consuming malloc blocks also complicates arena release order |
+| Embedded adopted-block headers in stack-pop arrays | Reduce/node construction | Removed metadata allocation from the adopted-block idea, but JavaScript still slipped to 18051 avg / 16438 worst bytes/ms while TypeScript improved; not universal enough to keep |
+| Relax subtree/tree-arena refcount ordering from `SeqCst` to relaxed/release-acquire | Refcount/lifetime | JavaScript canary regressed to 17604 avg bytes/ms from 18072; weaker ordering did not improve the hot parse path on this target |
+| Skip post-parse subtree balancing entirely | Balance/compress upper bound | JavaScript improved to 18728 avg bytes/ms, but TypeScript regressed to 22339 avg / 17610 worst; balancing is not a standalone 20% universal opportunity |
 
 ## Non-Library Trial Removed
 
