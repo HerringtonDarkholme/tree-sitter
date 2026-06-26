@@ -583,6 +583,56 @@ ts_parser__reduce
   clears builder scratch state
 ```
 
+Equivalence map for the next code slice:
+
+- Collection equivalence:
+  - A collected candidate must contain the same retained subtrees, in the same
+    parser-order child sequence, as the current `StackSlice`.
+  - The candidate destination version must be the version created for the same
+    revealed stack node that `ts_stack__add_slice` would use.
+  - Linear and graph paths must produce identical candidate ordering within each
+    destination version; merged-candidate selection depends on that ordering for
+    stable ties.
+  - Reparses remain on `ts_parser__reduce_with_slices` until the new protocol is
+    proven against changed-range tests.
+
+- Trailing-extra equivalence:
+  - Candidate children are the prefix remaining after removing trailing extras.
+  - Trailing extras are the removed suffix, pushed after the parent in the same
+    order as the current `trailing_extras` arrays.
+  - Losing candidates release the entire retained collected span, including
+    trailing extras. Winning candidates transfer ownership of the child prefix to
+    the final parent and transfer ownership of trailing extras to the stack.
+
+- Selection equivalence:
+  - For a destination version with one candidate, allocate exactly one parent.
+  - For merged candidates, do not allocate the final parent until the winner is
+    known.
+  - Candidate comparison must preserve `ts_parser__select_tree`: lower
+    `error_cost`, higher `dynamic_precedence`, error-cost tie behavior, and then
+    recursive tree-shape comparison.
+  - A descriptor comparator is only valid if it compares the same synthetic
+    parent shape that `ts_parser__select_children` currently constructs. The
+    earlier standalone descriptor-comparison trial is closed because it regressed
+    the TypeScript aggregate.
+
+- Finalization equivalence:
+  - The final parent uses the same symbol, production id, child sequence,
+    summary metadata, dynamic-precedence adjustment, `extra` marking for
+    `end_of_non_terminal_extra`, fragility flags, and parse state.
+  - The stack push order remains parent first, then trailing extras, followed by
+    the existing version-merge loop.
+  - Builder cleanup must not release children after ownership has transferred to
+    the final parent or stack.
+
+Consequence of the direct graph-builder trial:
+
+- Do not implement graph fallback collection as an isolated patch. It regressed
+  Go even though Go had the highest graph fallback rate.
+- Graph collection should only change as part of a broader protocol that also
+  removes candidate parent construction, child-span conversion, or finalization
+  work.
+
 Implementation slices if this design survives review:
 
 1. Add the builder data types behind parser-private APIs with no behavior
