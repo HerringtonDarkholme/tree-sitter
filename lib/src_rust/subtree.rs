@@ -492,7 +492,7 @@ unsafe fn array_grow(arr: &mut SubtreeArray, count: u32) {
 /// Push a subtree onto the end of the array.
 unsafe fn array_push_subtree(arr: &mut SubtreeArray, element: Subtree) {
     array_grow(arr, 1);
-    *arr.contents.add(arr.size as usize) = element;
+    ptr::write(arr.contents.add(arr.size as usize), element);
     arr.size += 1;
 }
 
@@ -583,13 +583,13 @@ unsafe fn mutable_array_grow(arr: &mut MutableSubtreeArray, count: u32) {
 
 pub unsafe fn mutable_array_push(arr: &mut MutableSubtreeArray, element: MutableSubtree) {
     mutable_array_grow(arr, 1);
-    *arr.contents.add(arr.size as usize) = element;
+    ptr::write(arr.contents.add(arr.size as usize), element);
     arr.size += 1;
 }
 
 unsafe fn mutable_array_pop(arr: &mut MutableSubtreeArray) -> MutableSubtree {
     arr.size -= 1;
-    *arr.contents.add(arr.size as usize)
+    ptr::read(arr.contents.add(arr.size as usize))
 }
 
 unsafe fn mutable_array_delete(arr: &mut MutableSubtreeArray) {
