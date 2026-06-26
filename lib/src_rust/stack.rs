@@ -870,7 +870,8 @@ unsafe fn stack__iter(
             if should_pop {
                 let mut subtrees = stack_iterator_subtrees_read(&stack.iterators, i);
                 if !should_stop {
-                    ts_subtree_array_copy(subtree_array_read_ref(&subtrees), &mut subtrees);
+                    let source_subtrees = subtree_array_read_ref(&subtrees);
+                    ts_subtree_array_copy(&source_subtrees, &mut subtrees);
                 }
                 ts_subtree_array_reverse(&mut subtrees);
                 ts_stack__add_slice(stack, version, stack_node_mut(node), &subtrees);
@@ -907,8 +908,9 @@ unsafe fn stack__iter(
                     let current_iterator = stack_iterator_array_read(&stack.iterators, i);
                     array_push(&mut stack.iterators, current_iterator);
                     next_iterator = stack_iterator_array_back_mut(&mut stack.iterators);
+                    let source_subtrees = stack_iterator_subtrees_read_ref(next_iterator);
                     ts_subtree_array_copy(
-                        stack_iterator_subtrees_read_ref(next_iterator),
+                        &source_subtrees,
                         &mut next_iterator.subtrees,
                     );
                 }

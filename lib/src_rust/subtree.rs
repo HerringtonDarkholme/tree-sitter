@@ -499,7 +499,7 @@ unsafe fn array_push_subtree(arr: &mut SubtreeArray, element: Subtree) {
 // SubtreeArray functions
 // ===========================================================================
 
-pub unsafe fn ts_subtree_array_copy(self_: SubtreeArray, dest: &mut SubtreeArray) {
+pub unsafe fn ts_subtree_array_copy(self_: &SubtreeArray, dest: &mut SubtreeArray) {
     dest.size = self_.size;
     dest.capacity = self_.capacity;
     dest.contents = self_.contents;
