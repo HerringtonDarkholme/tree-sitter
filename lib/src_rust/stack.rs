@@ -153,11 +153,6 @@ struct SummarizeStackSession {
     max_depth: u32,
 }
 
-#[inline]
-unsafe fn subtree_pool_mut<'a>(pool: *mut SubtreePool) -> &'a mut SubtreePool {
-    pool.as_mut().unwrap_unchecked()
-}
-
 // ---------------------------------------------------------------------------
 // Extern C declarations
 // ---------------------------------------------------------------------------
@@ -756,7 +751,7 @@ unsafe fn stack__iter(
                 if !should_pop {
                     let iter = array_get_mut(&mut stack.iterators, i);
                     ts_subtree_array_delete(
-                        subtree_pool_mut(stack.subtree_pool),
+                        stack.subtree_pool.as_mut().unwrap_unchecked(),
                         &mut iter.subtrees,
                     );
                 }
@@ -938,14 +933,14 @@ pub unsafe fn ts_stack_delete(self_: &mut Stack) {
     if !self_.iterators.contents.is_null() {
         array_delete(&mut self_.iterators);
     }
+    let subtree_pool = self_.subtree_pool.as_mut().unwrap_unchecked();
     stack_node_release(
         stack_node_mut(self_.base_node),
         &mut self_.node_pool,
-        subtree_pool_mut(self_.subtree_pool),
+        subtree_pool,
     );
     let heads = &mut self_.heads;
     let node_pool = &mut self_.node_pool;
-    let subtree_pool = subtree_pool_mut(self_.subtree_pool);
     for i in 0..heads.size {
         stack_head_delete(array_get_mut(heads, i), node_pool, subtree_pool);
     }
@@ -997,7 +992,7 @@ pub unsafe fn ts_stack_set_last_external_token(
     version: StackVersion,
     token: Subtree,
 ) {
-    let subtree_pool = subtree_pool_mut(self_.subtree_pool);
+    let subtree_pool = self_.subtree_pool.as_mut().unwrap_unchecked();
     let head = array_get_mut(&mut self_.heads, version);
     if !token.ptr.is_null() {
         ts_subtree_retain(token);
@@ -1178,7 +1173,7 @@ pub unsafe fn ts_stack_has_advanced_since_error(self_: &Stack, version: StackVer
 pub unsafe fn ts_stack_remove_version(self_: &mut Stack, version: StackVersion) {
     let heads = &mut self_.heads;
     let node_pool = &mut self_.node_pool;
-    let subtree_pool = subtree_pool_mut(self_.subtree_pool);
+    let subtree_pool = self_.subtree_pool.as_mut().unwrap_unchecked();
     stack_head_delete(array_get_mut(heads, version), node_pool, subtree_pool);
     array_erase(heads, version);
 }
@@ -1193,7 +1188,7 @@ pub unsafe fn ts_stack_renumber_version(stack: &mut Stack, v1: StackVersion, v2:
 
     let heads = &mut stack.heads;
     let node_pool = &mut stack.node_pool;
-    let subtree_pool = subtree_pool_mut(stack.subtree_pool);
+    let subtree_pool = stack.subtree_pool.as_mut().unwrap_unchecked();
     let (source_head, target_head) = stack_head_array_pair_mut(heads, v1, v2);
     if !target_head.summary.is_null() && source_head.summary.is_null() {
         source_head.summary = target_head.summary;
@@ -1237,7 +1232,7 @@ pub unsafe fn ts_stack_merge(
     }
     {
         let stack_heads = &mut stack.heads;
-        let subtree_pool = subtree_pool_mut(stack.subtree_pool);
+        let subtree_pool = stack.subtree_pool.as_mut().unwrap_unchecked();
         let (head1, head2) = stack_head_array_pair_mut(stack_heads, version1, version2);
         let head2_node = stack_node_ref(head2.node);
         for i in 0..head2_node.link_count as usize {
@@ -1320,7 +1315,7 @@ pub unsafe fn ts_stack_clear(self_: &mut Stack) {
     stack_node_retain(stack_node_mut(self_.base_node));
     let heads = &mut self_.heads;
     let node_pool = &mut self_.node_pool;
-    let subtree_pool = subtree_pool_mut(self_.subtree_pool);
+    let subtree_pool = self_.subtree_pool.as_mut().unwrap_unchecked();
     for i in 0..heads.size {
         stack_head_delete(array_get_mut(heads, i), node_pool, subtree_pool);
     }
