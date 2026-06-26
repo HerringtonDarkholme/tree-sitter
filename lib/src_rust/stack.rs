@@ -638,7 +638,7 @@ unsafe fn stack_head_delete(
             ts_subtree_release(subtree_pool, self_.lookahead_when_paused);
         }
         if !self_.summary.is_null() {
-            array_delete(stack_summary_mut(self_.summary));
+            array_delete(self_.summary.as_mut().unwrap_unchecked());
             ts_free(self_.summary.cast::<c_void>());
         }
         stack_node_release(stack_node_mut(self_.node), pool, subtree_pool);
@@ -816,7 +816,7 @@ unsafe fn stack__iter(
 
 // Callbacks for stack__iter
 unsafe fn pop_count_callback(payload: *mut c_void, iterator: &StackIterator) -> StackAction {
-    let goal_subtree_count = *u32_payload_ref(payload);
+    let goal_subtree_count = *payload.cast::<u32>().as_ref().unwrap_unchecked();
     if iterator.subtree_count == goal_subtree_count {
         StackActionPop | StackActionStop
     } else {
@@ -841,7 +841,7 @@ const unsafe fn pop_pending_callback(
 
 unsafe fn pop_error_callback(payload: *mut c_void, iterator: &StackIterator) -> StackAction {
     if iterator.subtrees.size > 0 {
-        let found_error = bool_payload_mut(payload);
+        let found_error = payload.cast::<bool>().as_mut().unwrap_unchecked();
         if !*found_error
             && ts_subtree_is_error(*array_get_ref(
                 subtree_array_as_array(&iterator.subtrees),
@@ -858,34 +858,6 @@ unsafe fn pop_error_callback(payload: *mut c_void, iterator: &StackIterator) -> 
     }
 }
 
-#[inline]
-unsafe fn bool_payload_mut<'a>(payload: *mut c_void) -> &'a mut bool {
-    payload.cast::<bool>().as_mut().unwrap_unchecked()
-}
-
-#[inline]
-unsafe fn u32_payload_ref<'a>(payload: *const c_void) -> &'a u32 {
-    payload.cast::<u32>().as_ref().unwrap_unchecked()
-}
-
-#[inline]
-unsafe fn summarize_stack_session_mut<'a>(payload: *mut c_void) -> &'a mut SummarizeStackSession {
-    payload
-        .cast::<SummarizeStackSession>()
-        .as_mut()
-        .unwrap_unchecked()
-}
-
-#[inline]
-unsafe fn stack_summary_ref<'a>(summary: *const StackSummary) -> &'a StackSummary {
-    summary.as_ref().unwrap_unchecked()
-}
-
-#[inline]
-unsafe fn stack_summary_mut<'a>(summary: *mut StackSummary) -> &'a mut StackSummary {
-    summary.as_mut().unwrap_unchecked()
-}
-
 unsafe fn pop_all_callback(_payload: *mut c_void, iterator: &StackIterator) -> StackAction {
     let node = stack_node_ref(iterator.node);
     if node.link_count == 0 {
@@ -897,13 +869,16 @@ unsafe fn pop_all_callback(_payload: *mut c_void, iterator: &StackIterator) -> S
 
 unsafe fn summarize_stack_callback(payload: *mut c_void, iterator: &StackIterator) -> StackAction {
     let node = stack_node_ref(iterator.node);
-    let session = summarize_stack_session_mut(payload);
+    let session = payload
+        .cast::<SummarizeStackSession>()
+        .as_mut()
+        .unwrap_unchecked();
     let state = node.state;
     let depth = iterator.subtree_count;
     if depth > session.max_depth {
         return StackActionStop;
     }
-    let summary = stack_summary_ref(session.summary);
+    let summary = session.summary.as_ref().unwrap_unchecked();
     for i in (0..summary.size).rev() {
         let entry = array_get_ref(summary, i);
         if entry.depth < depth {
@@ -914,7 +889,7 @@ unsafe fn summarize_stack_callback(payload: *mut c_void, iterator: &StackIterato
         }
     }
     array_push(
-        stack_summary_mut(session.summary),
+        session.summary.as_mut().unwrap_unchecked(),
         StackSummaryEntry {
             position: node.position,
             depth,
@@ -1147,7 +1122,7 @@ pub unsafe fn ts_stack_record_summary(self_: &mut Stack, version: StackVersion, 
         summary: ts_malloc(std::mem::size_of::<StackSummary>()).cast::<StackSummary>(),
         max_depth,
     };
-    array_init(stack_summary_mut(session.summary));
+    array_init(session.summary.as_mut().unwrap_unchecked());
     stack__iter(
         self_,
         version,
@@ -1157,7 +1132,7 @@ pub unsafe fn ts_stack_record_summary(self_: &mut Stack, version: StackVersion, 
     );
     let head = stack_head_mut(self_, version);
     if !head.summary.is_null() {
-        array_delete(stack_summary_mut(head.summary));
+        array_delete(head.summary.as_mut().unwrap_unchecked());
         ts_free(head.summary.cast::<c_void>());
     }
     head.summary = session.summary;
@@ -1420,7 +1395,7 @@ pub unsafe fn ts_stack_print_dot_graph(
 
         if !head.summary.is_null() {
             fprintf(f, c"\nsummary:".as_ptr().cast::<i8>());
-            let summary = stack_summary_ref(head.summary);
+            let summary = head.summary.as_ref().unwrap_unchecked();
             for j in 0..summary.size {
                 let entry = array_get_ref(summary, j);
                 fprintf(f, c" %u".as_ptr().cast::<i8>(), u32::from(entry.state));
