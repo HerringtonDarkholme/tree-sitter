@@ -112,6 +112,15 @@ inside the core library to vectorize without grammar-level changes.
 | `836c303b` | Fast path single lexer range reset | Positive, kept |
 | `f17c0325` | Use direct lexer EOF checks internally | Positive, pushed |
 | `459741ff` | Fast path linear stack pops | Positive, local |
+| `329f8b08` | Direct nonterminal next-state lookup in reduce | Positive on same-session JS/Go/TS canaries |
+
+Same-session canary result for `329f8b08`:
+
+| Language | Clean baseline bytes/ms | Candidate bytes/ms | Delta |
+| --- | ---: | ---: | ---: |
+| JavaScript | 17959 | 19140 | +6.58% |
+| Go | 15406 | 16929 | +9.89% |
+| TypeScript | 22520 | 23785 | +5.62% |
 
 ## Negative Trials Reverted
 
@@ -138,7 +147,6 @@ inside the core library to vectorize without grammar-level changes.
 | Broad `ts_parser__check_progress` inlining | Parser progress check | Negative |
 | Early no-callback return in `ts_parser__check_progress` | Parser progress check | Clean JavaScript benchmark regressed |
 | Guard halted-version scans in `ts_parser__reduce` | Reduce path version limiting | Clean JavaScript benchmark regressed |
-| Direct nonterminal table lookup in `ts_parser__reduce` | Reduce path next-state lookup | Warm JavaScript benchmark remained below current baseline |
 | Pointer-equality fast path for `ts_stack_can_merge` last external tokens | Stack merge | Warm Go benchmark remained below current baseline |
 | Guard no-op subtree-array reversals in stack pops | Stack pop | Warm JavaScript benchmark remained below current baseline |
 | Same-token fast path in `ts_stack_set_last_external_token` | External token tracking | Warm JavaScript benchmark remained below current baseline |
