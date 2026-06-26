@@ -302,21 +302,21 @@ pub(crate) const unsafe fn array_new<T>() -> Array<T> {
 }
 
 pub(crate) unsafe fn array_splice<T>(
-    arr: *mut Array<T>,
+    arr: &mut Array<T>,
     index: u32,
     old_count: u32,
     new_count: u32,
     new_contents: *const T,
 ) {
-    let new_size = (*arr).size + new_count - old_count;
+    let new_size = arr.size + new_count - old_count;
     let old_end = index + old_count;
     let new_end = index + new_count;
-    debug_assert!(old_end <= (*arr).size);
+    debug_assert!(old_end <= arr.size);
 
-    array_reserve(arr.as_mut().unwrap_unchecked(), new_size);
+    array_reserve(arr, new_size);
 
-    let contents = (*arr).contents;
-    let count = ((*arr).size - old_end) as usize;
+    let contents = arr.contents;
+    let count = (arr.size - old_end) as usize;
     if count > 0 {
         ptr::copy(
             contents.add(old_end as usize),
@@ -327,7 +327,7 @@ pub(crate) unsafe fn array_splice<T>(
     if new_count > 0 && !new_contents.is_null() {
         ptr::copy(new_contents, contents.add(index as usize), new_count as usize);
     }
-    (*arr).size = new_size;
+    arr.size = new_size;
 }
 
 pub(crate) unsafe fn array_swap<T>(self_: &mut Array<T>, other: &mut Array<T>) {
