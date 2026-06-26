@@ -283,18 +283,18 @@ pub(crate) unsafe fn array_erase<T>(arr: &mut Array<T>, index: u32) {
     arr.size -= 1;
 }
 
-pub(crate) unsafe fn array_insert<T>(arr: *mut Array<T>, index: u32, element: T) {
-    array_grow(arr.as_mut().unwrap_unchecked(), 1);
-    let count = (*arr).size as usize - index as usize;
+pub(crate) unsafe fn array_insert<T>(arr: &mut Array<T>, index: u32, element: T) {
+    array_grow(arr, 1);
+    let count = arr.size as usize - index as usize;
     if count > 0 {
         ptr::copy(
-            (*arr).contents.add(index as usize),
-            (*arr).contents.add(index as usize + 1),
+            arr.contents.add(index as usize),
+            arr.contents.add(index as usize + 1),
             count,
         );
     }
-    *(*arr).contents.add(index as usize) = element;
-    (*arr).size += 1;
+    *arr.contents.add(index as usize) = element;
+    arr.size += 1;
 }
 
 pub(crate) unsafe fn array_front<T>(arr: *const Array<T>) -> *mut T {
