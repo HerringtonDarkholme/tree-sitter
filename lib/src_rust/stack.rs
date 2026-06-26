@@ -331,9 +331,8 @@ pub unsafe fn array_swap<T>(self_: &mut Array<T>, other: &mut Array<T>) {
 pub unsafe fn array_assign<T>(self_: &mut Array<T>, other: &Array<T>) {
     array_reserve(self_, other.size);
     self_.size = other.size;
-    let other_contents = std::slice::from_raw_parts(other.contents, other.size as usize);
-    if !other_contents.is_empty() {
-        ptr::copy(other_contents.as_ptr(), self_.contents, other_contents.len());
+    if other.size > 0 {
+        ptr::copy(other.contents, self_.contents, other.size as usize);
     }
 }
 
