@@ -2783,7 +2783,7 @@ pub unsafe extern "C" fn ts_parser_delete(self_: *mut TSParser) {
     let parser = parser_ptr_mut(self_);
     ts_stack_delete(parser_stack_mut(parser.stack));
     if !parser.reduce_actions.contents.is_null() {
-        array_delete(std::ptr::addr_of_mut!(parser.reduce_actions));
+        array_delete(&mut parser.reduce_actions);
     }
     if !parser.included_range_differences.contents.is_null() {
         array_delete(ts_range_array_as_array_mut(&mut parser.included_range_differences));

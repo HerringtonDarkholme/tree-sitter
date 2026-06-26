@@ -184,13 +184,13 @@ pub(crate) unsafe fn array_init<T>(arr: &mut Array<T>) {
     arr.contents = ptr::null_mut();
 }
 
-pub(crate) unsafe fn array_delete<T>(arr: *mut Array<T>) {
-    if !(*arr).contents.is_null() {
-        ts_free((*arr).contents.cast::<c_void>());
+pub(crate) unsafe fn array_delete<T>(arr: &mut Array<T>) {
+    if !arr.contents.is_null() {
+        ts_free(arr.contents.cast::<c_void>());
     }
-    (*arr).contents = ptr::null_mut();
-    (*arr).size = 0;
-    (*arr).capacity = 0;
+    arr.contents = ptr::null_mut();
+    arr.size = 0;
+    arr.capacity = 0;
 }
 
 pub(crate) unsafe fn array_clear<T>(arr: &mut Array<T>) {
@@ -746,7 +746,7 @@ unsafe fn stack_head_delete(
             ts_subtree_release(subtree_pool, self_.lookahead_when_paused);
         }
         if !self_.summary.is_null() {
-            array_delete(self_.summary);
+            array_delete(self_.summary.as_mut().unwrap_unchecked());
             ts_free(self_.summary.cast::<c_void>());
         }
         stack_node_release(stack_node_mut(self_.node), pool, subtree_pool);
@@ -1301,7 +1301,7 @@ pub(crate) unsafe fn ts_stack_record_summary(
     );
     let head = stack_head_mut(self_, version);
     if !head.summary.is_null() {
-        array_delete(head.summary);
+        array_delete(head.summary.as_mut().unwrap_unchecked());
         ts_free(head.summary.cast::<c_void>());
     }
     head.summary = session.summary;
