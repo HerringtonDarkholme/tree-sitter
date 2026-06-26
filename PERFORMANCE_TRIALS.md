@@ -113,6 +113,7 @@ may refer to these rows, but should not duplicate them as separate attempts.
 | Trial | Area | Result |
 | --- | --- | --- |
 | Cross-language reduce-construction profiling | Profiling/design | `cargo flamegraph` plus temporary reduce-shape counters across all seven target languages. Supports investigating a full reduce-construction redesign, but shows lexer and balancing are too large for reduce-only work to guarantee 20%. |
+| Refreshed C++ raw parse flamegraph | Profiling/design | `cargo flamegraph` on C++ `rule.cc` with `/tmp/ts-raw-profile-harness-plain` produced `/tmp/tree-sitter-current-cpp.svg`: reduce `30.37%`, new node `10.59%`, summarize `7.94%`, stack pop `7.01%`, balance `4.05%`, `ts_lex` `22.90%`, keyword lex `6.07%`. Confirms reduce construction remains the largest library-owned target even on a lexer-heavy language. |
 
 ### Rejected Or Closed
 
@@ -167,7 +168,9 @@ may refer to these rows, but should not duplicate them as separate attempts.
 | Adopt stack-pop child arrays into `TreeArena` instead of copying into arena pages | Reduce/node construction | JavaScript roughly flat; TypeScript regressed |
 | Embedded adopted-block headers in stack-pop arrays | Reduce/node construction | TypeScript improved, but JavaScript slipped; not universal |
 | Direct linear reduce pop into parser scratch storage | Reduce/stack pop | Abandoned before benchmarking after history triage; too close to prior linear stack-pop and stack-pop adoption attempts |
+| Stack-pop trailing-extra split before parent construction | Reduce/stack pop | Abandoned before coding. A useful version either becomes a linear-only scratch-buffer variant, or adds per-candidate trailing-extra arrays and ownership pressure before selection. |
 | Skip post-parse subtree balancing entirely | Balance/compress upper bound | JavaScript improved, TypeScript regressed badly |
+| Single-pass repeat compression schedule | Balance/compress | Mixed/rejected on Rust same-session canary: patched `13097` avg / `11222` worst bytes/ms vs reverted baseline `13199` avg / `11159` worst. Reducing the halving schedule did not improve the language with the largest balance share. |
 | Reset benchmark allocator for raw parsing | Benchmark harness | Removed because benchmark source changes are out of scope |
 
 ## Closed Directions
@@ -182,8 +185,10 @@ result.
 | Arena-backed lexer leaves | Helped JavaScript/TypeScript/Python but regressed Go to `14165` and Rust to `13219` avg bytes/ms. Not universal. |
 | Stack-pop malloc-buffer adoption into `TreeArena` | Both metadata and embedded-header versions were mixed. JavaScript was flat/regressed while TypeScript moved differently. This is not a real builder path. |
 | Direct linear reduce-pop scratch buffer | Closed before benchmarking. It is not identical to stack-pop buffer adoption, but it is still an incremental linear stack-pop fast path, not the requested architecture change. |
+| Stack-pop trailing-extra split before selection | Rejected before implementation. It either repeats the linear scratch-buffer path or adds per-candidate trailing arrays that fight the builder ownership goal. |
 | Skipping/deferring all balancing | JavaScript improved to `18728`, but TypeScript regressed to `22339` avg and `17610` worst bytes/ms. |
 | Contains-repetition summary bit for balance pruning | Regressed Rust in same-session A/B. Do not retry branch-pruning balance metadata unless profiles show traversal overhead exceeds the metadata propagation cost. |
+| Single-pass repeat compression schedule | Did not improve Rust, where balance/compress is largest. Do not retry compression-schedule tuning without a tree-shape proof and cross-language profile evidence. |
 | Subtree allocation pools/slabs | Reduced some allocator counts, but bookkeeping, locking, or locality costs regressed benchmarks. |
 | `TS_MAX_TREE_POOL_SIZE` tuning | Allocation counts were unchanged and benchmarks got noisier/slower. |
 | Refcount-one release fast path | Regressed JavaScript. |
@@ -361,6 +366,13 @@ raw-parse harness under `/tmp/ts-raw-profile-harness-plain`:
 | C++ `rule.cc` | 25.84% | 8.24% | 5.76% | 6.00% | 3.92% | `ts_lex` 25.84% |
 | Java `types.java` | 34.66% | 11.97% | 8.80% | 7.02% | 1.65% | `ts_lex` 15.82% |
 
+Refreshed C++ `rule.cc` sample after later rejected trials still points at
+the same priority order: `ts_parser__reduce` `30.37%`,
+`ts_subtree_new_node_in_arena` `10.59%`,
+`ts_subtree_summarize_children` `7.94%`, `ts_stack_pop_count` `7.01%`,
+`ts_parser__balance_subtree` `4.05%`, `ts_lex` `22.90%`, and
+`ts_lex_keywords` `6.07%`.
+
 Temporary reduce-shape instrumentation, removed before committing:
 
 | Language sample | Linear pop-count calls | Graph fallback calls | Dominant reduce child counts |
@@ -391,7 +403,7 @@ Per-parse reduce-shape summary:
 | ---: | --- | --- |
 | 1 | Full reduce-construction redesign | Still the top parser-core candidate. It targets `ts_parser__reduce`, node construction, child-array allocation/copying, summarization, and stack push as one pipeline. It must not be a linear-pop fast path, buffer-adoption variant, or standalone merged-candidate selection rewrite. |
 | 2 | Lexer/external scanner work | Now co-equal for C++ and material for all languages. Needs separate direction triage because generated grammar lexers may limit core-library leverage. |
-| 3 | Balancing/compress redesign | Important for Rust and moderate for JS/TS/Go/Python. Do not remove balancing; contains-repetition pruning regressed; only consider a correctness-preserving redesign that reduces compression cost without adding per-node metadata overhead. |
+| 3 | Balancing/compress redesign | Important for Rust and moderate for JS/TS/Go/Python. Do not remove balancing; contains-repetition pruning and single-pass compression both regressed or failed to improve Rust. Only consider a correctness-preserving redesign with tree-shape evidence, not schedule tuning. |
 | 4 | Summarization during reduce construction | Only after a real builder changes selection/ownership. A direct arena copy-plus-summary loop regressed and is closed. |
 
 ### Next Parser Trial
