@@ -1030,8 +1030,9 @@ unsafe fn summarize_stack_callback(
     if depth > session.max_depth {
         return StackActionStop;
     }
-    for i in (0..(*session.summary).size).rev() {
-        let entry = stack_summary_array_get(stack_summary_ref(session.summary), i);
+    let summary = stack_summary_ref(session.summary);
+    for i in (0..summary.size).rev() {
+        let entry = stack_summary_array_get(summary, i);
         if entry.depth < depth {
             break;
         }
