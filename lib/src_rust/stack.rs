@@ -187,10 +187,12 @@ pub unsafe fn array_delete<T>(arr: &mut Array<T>) {
     arr.capacity = 0;
 }
 
+#[inline]
 pub unsafe fn array_clear<T>(arr: &mut Array<T>) {
     arr.size = 0;
 }
 
+#[inline]
 pub unsafe fn array_reserve<T>(arr: &mut Array<T>, new_capacity: u32) {
     if new_capacity > arr.capacity {
         let elem_size = std::mem::size_of::<T>();
@@ -207,6 +209,7 @@ pub unsafe fn array_reserve<T>(arr: &mut Array<T>, new_capacity: u32) {
     }
 }
 
+#[inline]
 pub unsafe fn array_grow<T>(arr: &mut Array<T>, count: u32) {
     let new_size = arr.size + count;
     if new_size > arr.capacity {
@@ -221,12 +224,14 @@ pub unsafe fn array_grow<T>(arr: &mut Array<T>, count: u32) {
     }
 }
 
+#[inline]
 pub unsafe fn array_push<T>(arr: &mut Array<T>, element: T) {
     array_grow(arr, 1);
     ptr::write(arr.contents.add(arr.size as usize), element);
     arr.size += 1;
 }
 
+#[inline]
 pub unsafe fn array_pop<T>(arr: &mut Array<T>) -> T {
     arr.size -= 1;
     ptr::read(arr.contents.add(arr.size as usize))
