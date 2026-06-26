@@ -237,14 +237,17 @@ reduce path:
 
 Interpretation: this does not satisfy the performance target by itself. Its
 purpose is to close the correctness gap that made broad descriptor wiring
-unsafe: stack graph traversal can now collect retained `StackLinkPayload`s
-without pretending pending descriptors are concrete subtrees.
+unsafe: counted stack graph traversal can now collect retained
+`StackLinkPayload`s without pretending pending descriptors are concrete
+subtrees.
 
 Follow-up accept/finalization wiring through the reduce builder was rejected.
 `cargo test --all` outside the sandbox aborted in the HTML corpus with an array
 bounds assertion in stack version bookkeeping. This shows payload-aware accept
 cannot reuse counted-reduce builder slice semantics as-is; it needs a dedicated
-pop-all payload result or stack-version removal model.
+pop-all payload result or stack-version removal model. The unsafe pop-all
+payload API was removed; keep only counted payload traversal until that model is
+designed.
 
 Payload-child foundation versus `origin/master`, normal `-r 10` average speed:
 

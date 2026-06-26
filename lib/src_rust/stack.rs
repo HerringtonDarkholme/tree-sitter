@@ -1278,7 +1278,7 @@ pub unsafe fn ts_stack_pop_count_payloads_into(
         return true;
     }
 
-    stack_pop_payloads_into(self_, version, builder, Some(count))
+    stack_pop_payloads_into(self_, version, builder, count)
 }
 
 unsafe fn stack_pop_count_payloads_linear_into(
@@ -1332,20 +1332,11 @@ unsafe fn stack_pop_count_payloads_linear_into(
     true
 }
 
-pub unsafe fn ts_stack_pop_all_payloads_into(
-    self_: &mut Stack,
-    version: StackVersion,
-    builder: &mut StackPopBuilder,
-) {
-    ts_stack_pop_builder_clear(builder);
-    stack_pop_payloads_into(self_, version, builder, None);
-}
-
 unsafe fn stack_pop_payloads_into(
     stack: &mut Stack,
     version: StackVersion,
     builder: &mut StackPopBuilder,
-    goal_subtree_count: Option<u32>,
+    goal_subtree_count: u32,
 ) -> bool {
     let mut iterators = Array::<StackPayloadIterator> {
         contents: ptr::null_mut(),
@@ -1364,14 +1355,12 @@ unsafe fn stack_pop_payloads_into(
         subtree_count: 0,
     };
 
-    if let Some(goal_subtree_count) = goal_subtree_count {
-        let reserve_count =
-            ts_subtree_alloc_size(goal_subtree_count) / std::mem::size_of::<StackLinkPayload>();
-        array_reserve(
-            &mut new_iterator.payloads,
-            u32::try_from(reserve_count).unwrap(),
-        );
-    }
+    let reserve_count =
+        ts_subtree_alloc_size(goal_subtree_count) / std::mem::size_of::<StackLinkPayload>();
+    array_reserve(
+        &mut new_iterator.payloads,
+        u32::try_from(reserve_count).unwrap(),
+    );
 
     array_push(&mut iterators, new_iterator);
 
@@ -1382,10 +1371,7 @@ unsafe fn stack_pop_payloads_into(
         while i < size {
             let iterator = array_get_ref(&iterators, i);
             let node = iterator.node;
-            let should_pop = match goal_subtree_count {
-                Some(goal) => iterator.subtree_count == goal,
-                None => (*node).link_count == 0,
-            };
+            let should_pop = iterator.subtree_count == goal_subtree_count;
             let should_stop = should_pop || (*node).link_count == 0;
 
             if should_pop {
