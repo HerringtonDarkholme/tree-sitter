@@ -3695,3 +3695,59 @@ Source-code analysis:
   regression.
 - Full `cargo test --all` passed before every committed code change in this
   checkpoint.
+
+## 2026-06-25 helper cleanup checkpoint
+
+- Head: `73aeef0c` (`Inline simple tree helpers`)
+- Base checkpoint: `02205948` (`Record raw pointer cleanup perf checkpoint`)
+- Change batch: 10 internal helper cleanup commits:
+  `Remove raw array get helper` through `Inline simple tree helpers`.
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 25473.8 | 25727.0 | -0.98% |
+| TypeScript error parses | 32 | 1789.4 | 1681.7 | +6.40% |
+| JavaScript normal parses | 2 | 18188.6 | 17046.7 | +6.70% |
+| JavaScript error parses | 37 | 2147.8 | 2050.1 | +4.77% |
+| Overall parser throughput | 82 | 2450.0 | 2317.6 | +5.71% |
+
+Per-case regressions over 5%:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `typescript error update-authors.sh` | 510.6 | 546.2 | 6.51% |
+
+Prior checkpoint rerun measured Rust overall throughput of 2351.5 bytes/ms,
+C throughput of 2231.0 bytes/ms, and a Rust-vs-C delta of +5.40%. This
+checkpoint measured 2450.0 bytes/ms for Rust, so absolute Rust throughput
+moved by about +4.19% versus the prior checkpoint rerun. C throughput moved by
+about +3.88%, and the Rust-vs-C delta moved to +5.71%.
+
+Source-code analysis:
+
+- The batch contains no exported `#[no_mangle] extern "C"` signature changes,
+  no struct layout changes, no C header changes, and no parser table/action
+  changes.
+- The array and subtree commits remove redundant raw pointer helper wrappers or
+  avoid temporary slice construction in assignment/copy paths. Destination
+  writes into reserved array storage remain explicit raw pointer writes where
+  the array size has not yet been advanced.
+- The parser, stack, and tree-cursor commits inline transitional typed wrappers
+  that only forwarded to raw array views or direct fields. The underlying
+  `Array<T>`, stack, tree cursor, and subtree array layouts are unchanged.
+- The language, node, and tree commits remove single-purpose accessor helpers
+  or move raw pointer reference formation to API boundaries. Exported symbols
+  keep the same signatures, and internal call sites preserve their previous
+  null/zero-count handling.
+- The only >5% per-case slowdown is one TypeScript error fixture. The same
+  `update-authors.sh` fixture has appeared as a small outlier in earlier
+  checkpoints, while this checkpoint improves both Rust and C aggregate
+  throughput and keeps Rust faster overall. No source-level parser regression
+  was identified, so no rollback was performed.
+- Full `cargo test --all` passed before every committed code change in this
+  checkpoint.
