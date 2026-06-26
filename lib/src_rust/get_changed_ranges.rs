@@ -39,11 +39,6 @@ unsafe fn range_array_ref<'a>(ranges: *const TSRangeArray) -> &'a TSRangeArray {
 }
 
 #[inline]
-unsafe fn range_array_mut<'a>(ranges: *mut TSRangeArray) -> &'a mut TSRangeArray {
-    ranges.as_mut().unwrap_unchecked()
-}
-
-#[inline]
 unsafe fn range_mut<'a>(range: *mut TSRange) -> &'a mut TSRange {
     range.as_mut().unwrap_unchecked()
 }
