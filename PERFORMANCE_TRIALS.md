@@ -811,6 +811,38 @@ Implications:
   fields, external scanner metadata, child-span ownership, and a forced
   materialization path.
 
+### Pending Reduction Implementation Slice
+
+Do not start by changing final tree storage. The next production-code slice, if
+attempted, should be a behavior-preserving stack-link payload abstraction:
+
+1. Introduce a parser-private payload type equivalent to the current
+   `StackLink { subtree: Subtree, is_pending: bool }` behavior.
+2. Route stack metadata queries through payload helper functions:
+   error cost, total size, total bytes, visible node count, dynamic precedence,
+   symbol, child count, extra flag, external scanner state equality, retain, and
+   release.
+3. Keep the only concrete payload variant as `Subtree` for the first commit.
+   This commit must be benchmark-neutral before adding lazy reductions.
+4. Add a second payload variant only after the compatibility layer is proven:
+   `PendingReductionSummary` containing parent summary metadata, production id,
+   dynamic precedence, external scanner metadata, child-span ownership, and a
+   forced materialization pointer/path.
+5. Materialize before child iteration, public tree output, tree comparison,
+   mutable subtree access, or any operation not covered by the payload metadata
+   API.
+
+Kill criteria:
+
+- If the `Subtree`-only payload abstraction regresses the seven-language normal
+  benchmark, reject the pending-reduction direction before adding lazy payloads.
+- If the lazy payload needs to materialize in `stack_node_new`, ordinary stack
+  merging, or non-ambiguous reduce pop, reject it; those are the hot paths it is
+  meant to avoid.
+- If external scanner metadata cannot be copied/compared without materializing
+  children, reject it for the universal target because JavaScript, TypeScript,
+  Python, and Rust all exercise that metadata.
+
 ### Candidate Ranking
 
 | Rank | Direction | Decision |
