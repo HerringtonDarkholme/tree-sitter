@@ -118,7 +118,7 @@ unsafe fn range_array_slice_mut(arr: &mut TSRangeArray) -> &mut [TSRange] {
 }
 
 #[inline]
-pub(crate) unsafe fn ts_range_slice<'a>(ranges: *const TSRange, count: u32) -> &'a [TSRange] {
+pub unsafe fn ts_range_slice<'a>(ranges: *const TSRange, count: u32) -> &'a [TSRange] {
     if count == 0 {
         &[]
     } else {
@@ -598,7 +598,7 @@ unsafe fn iterator_compare(
 // Exported functions — skeletons
 // ---------------------------------------------------------------------------
 
-pub(crate) unsafe fn ts_range_array_intersects(
+pub unsafe fn ts_range_array_intersects(
     ranges: &TSRangeArray,
     start_index: u32,
     start_byte: u32,
