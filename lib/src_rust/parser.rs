@@ -34,6 +34,11 @@ use super::lexer::{
     ts_lexer_mark_end, ts_lexer_reset, ts_lexer_set_included_ranges, ts_lexer_set_input,
     ts_lexer_start,
 };
+use super::reusable_node::{
+    ReusableNode, reusable_node_advance, reusable_node_advance_past_leaf,
+    reusable_node_byte_offset, reusable_node_clear, reusable_node_delete, reusable_node_descend,
+    reusable_node_new, reusable_node_reset, reusable_node_tree,
+};
 use super::stack::{
     Array,
     STACK_VERSION_NONE,
@@ -350,22 +355,6 @@ struct ReduceAction {
 /// `ReduceActionSet` — Array(ReduceAction)
 type ReduceActionSet = Array<ReduceAction>;
 
-/// `StackEntry` — for `ReusableNode` (from `reusable_node.h`)
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct StackEntry {
-    tree: Subtree,
-    child_index: u32,
-    byte_offset: u32,
-}
-
-/// `ReusableNode` — for incremental reparsing (from `reusable_node.h`)
-#[repr(C)]
-struct ReusableNode {
-    stack: Array<StackEntry>,
-    last_external_token: Subtree,
-}
-
 /// `TokenCache` — cached lookahead token
 #[repr(C)]
 struct TokenCache {
@@ -463,118 +452,6 @@ unsafe fn parser_language_full<'a>(language: *const TSLanguage) -> &'a TSLanguag
         .cast::<TSLanguageFull>()
         .as_ref()
         .unwrap_unchecked()
-}
-
-// ---------------------------------------------------------------------------
-// ReusableNode inline helpers (from reusable_node.h)
-// ---------------------------------------------------------------------------
-
-const unsafe fn reusable_node_new() -> ReusableNode {
-    ReusableNode {
-        stack: array_new(),
-        last_external_token: NULL_SUBTREE,
-    }
-}
-
-unsafe fn reusable_node_clear(self_: &mut ReusableNode) {
-    array_clear(&mut self_.stack);
-    self_.last_external_token = NULL_SUBTREE;
-}
-
-unsafe fn reusable_node_last_entry(self_: &ReusableNode) -> Option<&StackEntry> {
-    if self_.stack.size > 0 {
-        Some(array_back_ref(&self_.stack))
-    } else {
-        None
-    }
-}
-
-unsafe fn reusable_node_tree(self_: &ReusableNode) -> Subtree {
-    reusable_node_last_entry(self_).map_or(NULL_SUBTREE, |entry| entry.tree)
-}
-
-unsafe fn reusable_node_byte_offset(self_: &ReusableNode) -> u32 {
-    reusable_node_last_entry(self_).map_or(u32::MAX, |entry| entry.byte_offset)
-}
-
-unsafe fn reusable_node_delete(self_: &mut ReusableNode) {
-    array_delete(&mut self_.stack);
-}
-
-unsafe fn reusable_node_advance(self_: &mut ReusableNode) {
-    let Some(last_entry) = reusable_node_last_entry(self_).copied() else {
-        return;
-    };
-    let byte_offset = last_entry.byte_offset + ts_subtree_total_bytes(last_entry.tree);
-    if ts_subtree_has_external_tokens(last_entry.tree) {
-        self_.last_external_token = ts_subtree_last_external_token(last_entry.tree);
-    }
-
-    let mut tree;
-    let mut next_index;
-    loop {
-        let popped_entry = array_pop(&mut self_.stack);
-        next_index = popped_entry.child_index + 1;
-        if self_.stack.size == 0 {
-            return;
-        }
-        tree = reusable_node_last_entry(self_).map_or(NULL_SUBTREE, |entry| entry.tree);
-        if ts_subtree_child_count(tree) > next_index {
-            break;
-        }
-    }
-
-    array_push(
-        &mut self_.stack,
-        StackEntry {
-            tree: *parser_subtree_child(tree, next_index),
-            child_index: next_index,
-            byte_offset,
-        },
-    );
-}
-
-unsafe fn reusable_node_descend(self_: &mut ReusableNode) -> bool {
-    let Some(last_entry) = reusable_node_last_entry(self_).copied() else {
-        return false;
-    };
-    if ts_subtree_child_count(last_entry.tree) > 0 {
-        array_push(
-            &mut self_.stack,
-            StackEntry {
-                tree: *parser_subtree_child(last_entry.tree, 0),
-                child_index: 0,
-                byte_offset: last_entry.byte_offset,
-            },
-        );
-        true
-    } else {
-        false
-    }
-}
-
-unsafe fn reusable_node_advance_past_leaf(self_: &mut ReusableNode) {
-    while reusable_node_descend(self_) {}
-    reusable_node_advance(self_);
-}
-
-unsafe fn reusable_node_reset(self_: &mut ReusableNode, tree: Subtree) {
-    reusable_node_clear(self_);
-    array_push(
-        &mut self_.stack,
-        StackEntry {
-            tree,
-            child_index: 0,
-            byte_offset: 0,
-        },
-    );
-
-    // Never reuse the root node, because it has a non-standard internal structure
-    // due to transformations that are applied when it is accepted: adding the EOF
-    // child and any extra children.
-    if !reusable_node_descend(self_) {
-        reusable_node_clear(self_);
-    }
 }
 
 // ---------------------------------------------------------------------------

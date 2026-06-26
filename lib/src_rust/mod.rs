@@ -38,4 +38,4 @@ pub mod parser;
 
 // Internal helpers (no corresponding .c file)
 pub mod reduce_action;
-pub mod reusable_node;
+mod reusable_node;
