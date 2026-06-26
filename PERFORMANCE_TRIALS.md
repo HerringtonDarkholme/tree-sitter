@@ -155,6 +155,9 @@ Same-session canary result for `329f8b08`:
 | Pointer-equality fast path in `ts_subtree_external_scanner_state_eq` | External scanner state comparison | Retested after `329f8b08`; warm JavaScript benchmark remained below current baseline |
 | Hoist reduce nonterminal check out of pop-slice loop | Reduce path | Retested after `329f8b08`; warm JavaScript benchmark remained below current baseline |
 | Specialized no-alias non-error subtree summarizer | Subtree summarize | Retested after `329f8b08`; warm JavaScript benchmark remained below current baseline |
+| Zero-count fast path in linear stack pops | Stack pop | Warm JavaScript benchmark was below current baseline |
+| Refcount-one direct release fast path | Subtree release | Regressed JavaScript canary |
+| Terminal-only table-entry helper in advance loop | Parse table lookup | Warm JavaScript benchmark remained below current baseline |
 
 ## Non-Library Trial Removed
 
