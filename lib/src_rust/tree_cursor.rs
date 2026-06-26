@@ -7,21 +7,19 @@ use std::ptr;
 use crate::ffi::{TSFieldId, TSNode, TSPoint, TSSymbol, TSTreeCursor};
 
 use super::alloc::{ts_calloc, ts_free, ts_realloc};
-use super::length::{
-    length_add, length_is_undefined, length_zero, Length, LENGTH_UNDEFINED,
+use super::language::{
+    TSLanguageFull, ts_language_alias_at, ts_language_alias_sequence, ts_language_field_map,
+    ts_language_symbol_metadata,
 };
+use super::length::{LENGTH_UNDEFINED, Length, length_add, length_is_undefined, length_zero};
+use super::node::{ts_node_new, ts_node_start_byte, ts_node_start_point};
 use super::point::point_gt;
 use super::subtree::{
-    ts_subtree_children, ts_subtree_child_count, ts_subtree_extra,
-    ts_subtree_padding, ts_subtree_size, ts_subtree_symbol,
+    NULL_SUBTREE, Subtree, TSFieldMapEntry, ts_subtree_child_count, ts_subtree_children,
+    ts_subtree_extra, ts_subtree_padding, ts_subtree_size, ts_subtree_symbol,
     ts_subtree_total_size, ts_subtree_visible, ts_subtree_visible_child_count,
-    ts_subtree_visible_descendant_count, Subtree, TSFieldMapEntry, NULL_SUBTREE,
+    ts_subtree_visible_descendant_count,
 };
-use super::language::{
-    ts_language_alias_at, ts_language_alias_sequence, ts_language_field_map,
-    ts_language_symbol_metadata, TSLanguageFull,
-};
-use super::node::{ts_node_new, ts_node_start_byte, ts_node_start_point};
 use super::tree::TSTree;
 
 use crate::ffi::TSPoint as POINT_ZERO_TYPE;
@@ -112,34 +110,8 @@ struct CursorChild {
 // ---------------------------------------------------------------------------
 
 #[inline]
-unsafe fn tree_cursor_entry_array_get(
-    arr: &TreeCursorEntryArray,
-    index: u32,
-) -> &TreeCursorEntry {
-    tree_cursor_entry_slice(arr).get_unchecked(index as usize)
-}
-
-#[inline]
-unsafe fn tree_cursor_entry_array_back(arr: &TreeCursorEntryArray) -> &TreeCursorEntry {
-    debug_assert!(arr.size > 0);
-    tree_cursor_entry_slice(arr).get_unchecked(arr.size as usize - 1)
-}
-
-#[inline]
-unsafe fn tree_cursor_entry_array_back_mut(arr: &mut TreeCursorEntryArray) -> &mut TreeCursorEntry {
-    debug_assert!(arr.size > 0);
-    let index = arr.size as usize - 1;
-    tree_cursor_entry_slice_mut(arr).get_unchecked_mut(index)
-}
-
-#[inline]
 const unsafe fn tree_cursor_entry_slice(arr: &TreeCursorEntryArray) -> &[TreeCursorEntry] {
     std::slice::from_raw_parts(arr.contents, arr.size as usize)
-}
-
-#[inline]
-unsafe fn tree_cursor_entry_slice_mut(arr: &mut TreeCursorEntryArray) -> &mut [TreeCursorEntry] {
-    std::slice::from_raw_parts_mut(arr.contents, arr.size as usize)
 }
 
 #[inline]
@@ -153,12 +125,14 @@ unsafe fn array_reserve(arr: &mut TreeCursorEntryArray, new_capacity: u32) {
             arr.contents = ts_calloc(
                 new_capacity as usize,
                 std::mem::size_of::<TreeCursorEntry>(),
-            ).cast::<TreeCursorEntry>();
+            )
+            .cast::<TreeCursorEntry>();
         } else {
             arr.contents = ts_realloc(
                 arr.contents.cast::<c_void>(),
                 new_capacity as usize * std::mem::size_of::<TreeCursorEntry>(),
-            ).cast::<TreeCursorEntry>();
+            )
+            .cast::<TreeCursorEntry>();
         }
         arr.capacity = new_capacity;
     }
@@ -218,16 +192,14 @@ unsafe fn array_push_all(dst: &mut TreeCursorEntryArray, src: &TreeCursorEntryAr
 // ---------------------------------------------------------------------------
 
 #[inline]
-unsafe fn ts_tree_cursor_is_entry_visible(
-    self_: &TreeCursor,
-    index: u32,
-) -> bool {
-    let entry = tree_cursor_entry_array_get(&self_.stack, index);
+unsafe fn ts_tree_cursor_is_entry_visible(self_: &TreeCursor, index: u32) -> bool {
+    let entries = tree_cursor_entry_slice(&self_.stack);
+    let entry = entries.get_unchecked(index as usize);
     if index == 0 || ts_subtree_visible(*entry.subtree) {
         return true;
     }
     if !ts_subtree_extra(*entry.subtree) {
-        let parent_entry = tree_cursor_entry_array_get(&self_.stack, index - 1);
+        let parent_entry = entries.get_unchecked((index - 1) as usize);
         return ts_language_alias_at(
             (*self_.tree).language,
             u32::from((*(*parent_entry.subtree).ptr).data.children.production_id),
@@ -238,10 +210,10 @@ unsafe fn ts_tree_cursor_is_entry_visible(
 }
 
 #[inline]
-unsafe fn ts_tree_cursor_iterate_children(
-    self_: &TreeCursor,
-) -> CursorChildIterator {
-    let last_entry = tree_cursor_entry_array_back(&self_.stack);
+unsafe fn ts_tree_cursor_iterate_children(self_: &TreeCursor) -> CursorChildIterator {
+    let last_entry = tree_cursor_entry_slice(&self_.stack)
+        .last()
+        .unwrap_unchecked();
     if ts_subtree_child_count(*last_entry.subtree) == 0 {
         return CursorChildIterator {
             parent: NULL_SUBTREE,
@@ -305,7 +277,10 @@ unsafe fn ts_tree_cursor_child_iterator_next(
     let extra = ts_subtree_extra(*child);
     if !extra {
         if !self_.alias_sequence.is_null() {
-            visible |= *self_.alias_sequence.add(self_.structural_child_index as usize) != 0;
+            visible |= *self_
+                .alias_sequence
+                .add(self_.structural_child_index as usize)
+                != 0;
         }
         self_.structural_child_index += 1;
     }
@@ -361,7 +336,10 @@ unsafe fn ts_tree_cursor_child_iterator_previous(
     self_.child_index = self_.child_index.wrapping_sub(1);
 
     if !extra && !self_.alias_sequence.is_null() {
-        visible |= *self_.alias_sequence.add(self_.structural_child_index as usize) != 0;
+        visible |= *self_
+            .alias_sequence
+            .add(self_.structural_child_index as usize)
+            != 0;
         if self_.structural_child_index > 0 {
             self_.structural_child_index -= 1;
         }
@@ -482,16 +460,19 @@ pub unsafe fn ts_tree_cursor_init_ref(cursor: &mut TreeCursor, node: TSNode) {
     cursor.tree = node.tree.cast::<TSTree>();
     cursor.root_alias_symbol = node.context[3] as TSSymbol;
     array_clear(&mut cursor.stack);
-    array_push(&mut cursor.stack, TreeCursorEntry {
-        subtree: node.id.cast::<Subtree>(),
-        position: Length {
-            bytes: ts_node_start_byte(node),
-            extent: ts_node_start_point(node),
+    array_push(
+        &mut cursor.stack,
+        TreeCursorEntry {
+            subtree: node.id.cast::<Subtree>(),
+            position: Length {
+                bytes: ts_node_start_byte(node),
+                extent: ts_node_start_point(node),
+            },
+            child_index: 0,
+            structural_child_index: 0,
+            descendant_index: 0,
         },
-        child_index: 0,
-        structural_child_index: 0,
-        descendant_index: 0,
-    });
+    );
 }
 
 #[no_mangle]
@@ -538,9 +519,7 @@ pub unsafe extern "C" fn ts_tree_cursor_goto_first_child_internal(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn ts_tree_cursor_goto_first_child(
-    self_: *mut TSTreeCursor,
-) -> bool {
+pub unsafe extern "C" fn ts_tree_cursor_goto_first_child(self_: *mut TSTreeCursor) -> bool {
     tree_cursor_goto_first_child(tree_cursor_mut(self_))
 }
 
@@ -581,9 +560,7 @@ unsafe fn tree_cursor_goto_last_child(cursor: &mut TreeCursor) -> bool {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn ts_tree_cursor_goto_last_child(
-    self_: *mut TSTreeCursor,
-) -> bool {
+pub unsafe extern "C" fn ts_tree_cursor_goto_last_child(self_: *mut TSTreeCursor) -> bool {
     tree_cursor_goto_last_child(tree_cursor_mut(self_))
 }
 
@@ -621,9 +598,7 @@ pub unsafe extern "C" fn ts_tree_cursor_goto_next_sibling_internal(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn ts_tree_cursor_goto_next_sibling(
-    self_: *mut TSTreeCursor,
-) -> bool {
+pub unsafe extern "C" fn ts_tree_cursor_goto_next_sibling(self_: *mut TSTreeCursor) -> bool {
     let cursor = tree_cursor_mut(self_);
     match tree_cursor_goto_next_sibling_internal(cursor) {
         TreeCursorStep::Hidden => {
@@ -636,23 +611,22 @@ pub unsafe extern "C" fn ts_tree_cursor_goto_next_sibling(
 }
 
 unsafe fn tree_cursor_goto_previous_sibling_internal(cursor: &mut TreeCursor) -> TreeCursorStep {
-    let step = ts_tree_cursor_goto_sibling_internal(
-        cursor,
-        ts_tree_cursor_child_iterator_previous,
-    );
+    let step = ts_tree_cursor_goto_sibling_internal(cursor, ts_tree_cursor_child_iterator_previous);
     if step == TreeCursorStep::None {
         return step;
     }
 
     // if length is already valid, there's no need to recompute it
-    if !length_is_undefined(tree_cursor_entry_array_back(&cursor.stack).position) {
+    let entries = tree_cursor_entry_slice(&cursor.stack);
+    let last_entry = entries.last().unwrap_unchecked();
+    if !length_is_undefined(last_entry.position) {
         return step;
     }
 
     // restore position from the parent node
-    let parent = tree_cursor_entry_array_get(&cursor.stack, cursor.stack.size - 2);
+    let parent = entries.get_unchecked(cursor.stack.size as usize - 2);
     let mut position = parent.position;
-    let child_index = tree_cursor_entry_array_back(&cursor.stack).child_index;
+    let child_index = last_entry.child_index;
     let children = cursor_children(*parent.subtree);
 
     if child_index > 0 {
@@ -670,15 +644,19 @@ unsafe fn tree_cursor_goto_previous_sibling_internal(cursor: &mut TreeCursor) ->
         );
     }
 
-    tree_cursor_entry_array_back_mut(&mut cursor.stack).position = position;
+    cursor
+        .stack
+        .contents
+        .add(cursor.stack.size as usize - 1)
+        .as_mut()
+        .unwrap_unchecked()
+        .position = position;
 
     step
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn ts_tree_cursor_goto_previous_sibling(
-    self_: *mut TSTreeCursor,
-) -> bool {
+pub unsafe extern "C" fn ts_tree_cursor_goto_previous_sibling(self_: *mut TSTreeCursor) -> bool {
     let cursor = tree_cursor_mut(self_);
     match tree_cursor_goto_previous_sibling_internal(cursor) {
         TreeCursorStep::Hidden => {
@@ -691,9 +669,7 @@ pub unsafe extern "C" fn ts_tree_cursor_goto_previous_sibling(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn ts_tree_cursor_goto_parent(
-    self_: *mut TSTreeCursor,
-) -> bool {
+pub unsafe extern "C" fn ts_tree_cursor_goto_parent(self_: *mut TSTreeCursor) -> bool {
     let cursor = tree_cursor_mut(self_);
     let mut i = cursor.stack.size as i32 - 2;
     while i + 1 > 0 {
@@ -716,9 +692,8 @@ pub unsafe extern "C" fn ts_tree_cursor_goto_descendant(
     // Ascend to the lowest ancestor that contains the goal node.
     loop {
         let i = cursor.stack.size - 1;
-        let entry = tree_cursor_entry_array_get(&cursor.stack, i);
-        let next_descendant_index =
-            entry.descendant_index
+        let entry = tree_cursor_entry_slice(&cursor.stack).get_unchecked(i as usize);
+        let next_descendant_index = entry.descendant_index
             + u32::from(ts_tree_cursor_is_entry_visible(cursor, i))
             + ts_subtree_visible_descendant_count(*entry.subtree);
         if entry.descendant_index <= goal_descendant_index
@@ -762,7 +737,9 @@ pub unsafe extern "C" fn ts_tree_cursor_current_descendant_index(
     self_: *const TSTreeCursor,
 ) -> u32 {
     let cursor = tree_cursor_ref(self_);
-    let last_entry = tree_cursor_entry_array_back(&cursor.stack);
+    let last_entry = tree_cursor_entry_slice(&cursor.stack)
+        .last()
+        .unwrap_unchecked();
     last_entry.descendant_index
 }
 
@@ -771,16 +748,15 @@ pub unsafe extern "C" fn ts_tree_cursor_current_descendant_index(
 // ---------------------------------------------------------------------------
 
 #[no_mangle]
-pub unsafe extern "C" fn ts_tree_cursor_current_node(
-    self_: *const TSTreeCursor,
-) -> TSNode {
+pub unsafe extern "C" fn ts_tree_cursor_current_node(self_: *const TSTreeCursor) -> TSNode {
     let cursor = tree_cursor_ref(self_);
-    let last_entry = tree_cursor_entry_array_back(&cursor.stack);
+    let entries = tree_cursor_entry_slice(&cursor.stack);
+    let last_entry = entries.last().unwrap_unchecked();
     let is_extra = ts_subtree_extra(*last_entry.subtree);
     let alias_symbol = if is_extra {
         0
     } else if cursor.stack.size > 1 {
-        let parent_entry = tree_cursor_entry_array_get(&cursor.stack, cursor.stack.size - 2);
+        let parent_entry = entries.get_unchecked(cursor.stack.size as usize - 2);
         ts_language_alias_at(
             (*cursor.tree).language,
             u32::from((*(*parent_entry.subtree).ptr).data.children.production_id),
@@ -812,8 +788,9 @@ pub unsafe extern "C" fn ts_tree_cursor_current_status(
     let field_id = field_id.as_mut().unwrap_unchecked();
     let has_later_siblings = has_later_siblings.as_mut().unwrap_unchecked();
     let has_later_named_siblings = has_later_named_siblings.as_mut().unwrap_unchecked();
-    let can_have_later_siblings_with_this_field =
-        can_have_later_siblings_with_this_field.as_mut().unwrap_unchecked();
+    let can_have_later_siblings_with_this_field = can_have_later_siblings_with_this_field
+        .as_mut()
+        .unwrap_unchecked();
     let supertype_count = supertype_count.as_mut().unwrap_unchecked();
     let max_supertypes = *supertype_count;
     *field_id = 0;
@@ -823,10 +800,11 @@ pub unsafe extern "C" fn ts_tree_cursor_current_status(
     *can_have_later_siblings_with_this_field = false;
 
     // Walk up the tree, visiting the current node and its invisible ancestors
+    let entries = tree_cursor_entry_slice(&cursor.stack);
     let mut i = cursor.stack.size - 1;
     while i > 0 {
-        let entry = tree_cursor_entry_array_get(&cursor.stack, i);
-        let parent_entry = tree_cursor_entry_array_get(&cursor.stack, i - 1);
+        let entry = entries.get_unchecked(i as usize);
+        let parent_entry = entries.get_unchecked((i - 1) as usize);
 
         let alias_sequence = ts_language_alias_sequence(
             language,
@@ -847,10 +825,7 @@ pub unsafe extern "C" fn ts_tree_cursor_current_status(
 
         // Stop walking up when a visible ancestor is found.
         let entry_symbol = subtree_symbol_fn(*entry.subtree, entry.structural_child_index);
-        let entry_metadata = ts_language_symbol_metadata(
-            language,
-            entry_symbol,
-        );
+        let entry_metadata = ts_language_symbol_metadata(language, entry_symbol);
         if i != cursor.stack.size - 1 && entry_metadata.visible {
             break;
         }
@@ -915,7 +890,8 @@ pub unsafe extern "C" fn ts_tree_cursor_current_status(
             if *field_id == 0 {
                 let mut map = field_map;
                 while map < field_map_end {
-                    if !(*map).inherited && (*map).child_index == entry.structural_child_index as u8 {
+                    if !(*map).inherited && (*map).child_index == entry.structural_child_index as u8
+                    {
                         *field_id = (*map).field_id;
                         break;
                     }
@@ -943,9 +919,7 @@ pub unsafe extern "C" fn ts_tree_cursor_current_status(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn ts_tree_cursor_current_depth(
-    self_: *const TSTreeCursor,
-) -> u32 {
+pub unsafe extern "C" fn ts_tree_cursor_current_depth(self_: *const TSTreeCursor) -> u32 {
     let cursor = tree_cursor_ref(self_);
     let mut depth: u32 = 0;
     for i in 1..cursor.stack.size {
@@ -957,17 +931,16 @@ pub unsafe extern "C" fn ts_tree_cursor_current_depth(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn ts_tree_cursor_parent_node(
-    self_: *const TSTreeCursor,
-) -> TSNode {
+pub unsafe extern "C" fn ts_tree_cursor_parent_node(self_: *const TSTreeCursor) -> TSNode {
     let cursor = tree_cursor_ref(self_);
+    let entries = tree_cursor_entry_slice(&cursor.stack);
     let mut i = cursor.stack.size as i32 - 2;
     while i >= 0 {
-        let entry = tree_cursor_entry_array_get(&cursor.stack, i as u32);
+        let entry = entries.get_unchecked(i as usize);
         let mut is_visible = true;
         let mut alias_symbol: TSSymbol = 0;
         if i > 0 {
-            let parent_entry = tree_cursor_entry_array_get(&cursor.stack, i as u32 - 1);
+            let parent_entry = entries.get_unchecked(i as usize - 1);
             alias_symbol = ts_language_alias_at(
                 (*cursor.tree).language,
                 u32::from((*(*parent_entry.subtree).ptr).data.children.production_id),
@@ -976,12 +949,7 @@ pub unsafe extern "C" fn ts_tree_cursor_parent_node(
             is_visible = alias_symbol != 0 || ts_subtree_visible(*entry.subtree);
         }
         if is_visible {
-            return ts_node_new(
-                cursor.tree,
-                entry.subtree,
-                entry.position,
-                alias_symbol,
-            );
+            return ts_node_new(cursor.tree, entry.subtree, entry.position, alias_symbol);
         }
         i -= 1;
     }
@@ -989,21 +957,18 @@ pub unsafe extern "C" fn ts_tree_cursor_parent_node(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn ts_tree_cursor_current_field_id(
-    self_: *const TSTreeCursor,
-) -> TSFieldId {
+pub unsafe extern "C" fn ts_tree_cursor_current_field_id(self_: *const TSTreeCursor) -> TSFieldId {
     let cursor = tree_cursor_ref(self_);
 
     // Walk up the tree, visiting the current node and its invisible ancestors.
+    let entries = tree_cursor_entry_slice(&cursor.stack);
     let mut i = cursor.stack.size - 1;
     while i > 0 {
-        let entry = tree_cursor_entry_array_get(&cursor.stack, i);
-        let parent_entry = tree_cursor_entry_array_get(&cursor.stack, i - 1);
+        let entry = entries.get_unchecked(i as usize);
+        let parent_entry = entries.get_unchecked((i - 1) as usize);
 
         // Stop walking up when another visible node is found.
-        if i != cursor.stack.size - 1
-            && ts_tree_cursor_is_entry_visible(cursor, i)
-        {
+        if i != cursor.stack.size - 1 && ts_tree_cursor_is_entry_visible(cursor, i) {
             break;
         }
 
@@ -1046,9 +1011,7 @@ pub unsafe extern "C" fn ts_tree_cursor_current_field_name(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn ts_tree_cursor_copy(
-    cursor_ptr: *const TSTreeCursor,
-) -> TSTreeCursor {
+pub unsafe extern "C" fn ts_tree_cursor_copy(cursor_ptr: *const TSTreeCursor) -> TSTreeCursor {
     let cursor = tree_cursor_ref(cursor_ptr);
     let mut res = TSTreeCursor {
         tree: ptr::null(),
@@ -1064,10 +1027,7 @@ pub unsafe extern "C" fn ts_tree_cursor_copy(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn ts_tree_cursor_reset_to(
-    dst: *mut TSTreeCursor,
-    src: *const TSTreeCursor,
-) {
+pub unsafe extern "C" fn ts_tree_cursor_reset_to(dst: *mut TSTreeCursor, src: *const TSTreeCursor) {
     let cursor = tree_cursor_ref(src);
     let copy = tree_cursor_mut(dst);
     copy.tree = cursor.tree;
