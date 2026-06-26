@@ -410,11 +410,6 @@ unsafe fn stack_node_mut<'a>(node: *mut StackNode) -> &'a mut StackNode {
     node.as_mut().unwrap_unchecked()
 }
 
-#[inline]
-unsafe fn stack_node_ref<'a>(node: *const StackNode) -> &'a StackNode {
-    node.as_ref().unwrap_unchecked()
-}
-
 /// Release (decrement ref count) a stack node, freeing if zero.
 unsafe fn stack_node_release(
     self_: &mut StackNode,
@@ -563,14 +558,15 @@ unsafe fn stack_node_add_link(
                     ts_subtree_retain(link.subtree);
                     ts_subtree_release(subtree_pool, existing_link.subtree);
                     existing_link.subtree = link.subtree;
-                    self_.dynamic_precedence = stack_node_ref(link.node).dynamic_precedence
-                        + ts_subtree_dynamic_precedence(link.subtree);
+                    self_.dynamic_precedence =
+                        link.node.as_ref().unwrap_unchecked().dynamic_precedence
+                            + ts_subtree_dynamic_precedence(link.subtree);
                 }
                 return;
             }
 
-            let existing_node = stack_node_ref(existing_link.node);
-            let link_node = stack_node_ref(link.node);
+            let existing_node = existing_link.node.as_ref().unwrap_unchecked();
+            let link_node = link.node.as_ref().unwrap_unchecked();
             if existing_node.state == link_node.state
                 && existing_node.position.bytes == link_node.position.bytes
                 && existing_node.error_cost == link_node.error_cost
@@ -599,7 +595,7 @@ unsafe fn stack_node_add_link(
     }
 
     stack_node_retain(stack_node_mut(link.node));
-    let link_node = stack_node_ref(link.node);
+    let link_node = link.node.as_ref().unwrap_unchecked();
     let mut node_count = link_node.node_count;
     let mut dynamic_precedence = link_node.dynamic_precedence;
     self_.links[self_.link_count as usize] = link;
@@ -854,7 +850,7 @@ unsafe fn pop_error_callback(payload: *mut c_void, iterator: &StackIterator) -> 
 }
 
 unsafe fn pop_all_callback(_payload: *mut c_void, iterator: &StackIterator) -> StackAction {
-    let node = stack_node_ref(iterator.node);
+    let node = iterator.node.as_ref().unwrap_unchecked();
     if node.link_count == 0 {
         StackActionPop
     } else {
@@ -863,7 +859,7 @@ unsafe fn pop_all_callback(_payload: *mut c_void, iterator: &StackIterator) -> S
 }
 
 unsafe fn summarize_stack_callback(payload: *mut c_void, iterator: &StackIterator) -> StackAction {
-    let node = stack_node_ref(iterator.node);
+    let node = iterator.node.as_ref().unwrap_unchecked();
     let session = payload
         .cast::<SummarizeStackSession>()
         .as_mut()
@@ -973,12 +969,20 @@ pub unsafe fn ts_stack_halted_version_count(self_: &Stack) -> u32 {
 
 /// Get the state at the top of a version.
 pub unsafe fn ts_stack_state(self_: &Stack, version: StackVersion) -> TSStateId {
-    stack_node_ref(stack_head(self_, version).node).state
+    stack_head(self_, version)
+        .node
+        .as_ref()
+        .unwrap_unchecked()
+        .state
 }
 
 /// Get the position of a version.
 pub unsafe fn ts_stack_position(self_: &Stack, version: StackVersion) -> Length {
-    stack_node_ref(stack_head(self_, version).node).position
+    stack_head(self_, version)
+        .node
+        .as_ref()
+        .unwrap_unchecked()
+        .position
 }
 
 /// Get the last external token for a version.
@@ -1006,7 +1010,7 @@ pub unsafe fn ts_stack_set_last_external_token(
 /// Get the error cost for a version.
 pub unsafe fn ts_stack_error_cost(self_: &Stack, version: StackVersion) -> u32 {
     let head = stack_head(self_, version);
-    let node = stack_node_ref(head.node);
+    let node = head.node.as_ref().unwrap_unchecked();
     let mut result = node.error_cost;
     if head.status == StackStatus::Paused
         || (node.state == ERROR_STATE && node.links[0].subtree.ptr.is_null())
@@ -1019,7 +1023,7 @@ pub unsafe fn ts_stack_error_cost(self_: &Stack, version: StackVersion) -> u32 {
 /// Get the node count since last error for a version.
 pub unsafe fn ts_stack_node_count_since_error(self_: &mut Stack, version: StackVersion) -> u32 {
     let head = stack_head_mut(self_, version);
-    let node = stack_node_ref(head.node);
+    let node = head.node.as_ref().unwrap_unchecked();
     if node.node_count < head.node_count_at_last_error {
         head.node_count_at_last_error = node.node_count;
     }
@@ -1140,7 +1144,11 @@ pub unsafe fn ts_stack_get_summary(stack: &Stack, version: StackVersion) -> *mut
 
 /// Get the dynamic precedence of a version.
 pub unsafe fn ts_stack_dynamic_precedence(self_: &Stack, version: StackVersion) -> i32 {
-    stack_node_ref(stack_head(self_, version).node).dynamic_precedence
+    stack_head(self_, version)
+        .node
+        .as_ref()
+        .unwrap_unchecked()
+        .dynamic_precedence
 }
 
 /// Check if a version has advanced since the last error.
@@ -1234,7 +1242,7 @@ pub unsafe fn ts_stack_merge(
         let stack_heads = &mut stack.heads;
         let subtree_pool = stack.subtree_pool.as_mut().unwrap_unchecked();
         let (head1, head2) = stack_head_array_pair_mut(stack_heads, version1, version2);
-        let head2_node = stack_node_ref(head2.node);
+        let head2_node = head2.node.as_ref().unwrap_unchecked();
         for i in 0..head2_node.link_count as usize {
             stack_node_add_link(
                 stack_node_mut(head1.node),
@@ -1242,7 +1250,7 @@ pub unsafe fn ts_stack_merge(
                 subtree_pool,
             );
         }
-        let head1_node = stack_node_ref(head1.node);
+        let head1_node = head1.node.as_ref().unwrap_unchecked();
         if head1_node.state == ERROR_STATE {
             head1.node_count_at_last_error = head1_node.node_count;
         }
@@ -1259,8 +1267,8 @@ pub unsafe fn ts_stack_can_merge(
 ) -> bool {
     let head1 = stack_head(stack, version1);
     let head2 = stack_head(stack, version2);
-    let node1 = stack_node_ref(head1.node);
-    let node2 = stack_node_ref(head2.node);
+    let node1 = head1.node.as_ref().unwrap_unchecked();
+    let node2 = head2.node.as_ref().unwrap_unchecked();
     head1.status == StackStatus::Active
         && head2.status == StackStatus::Active
         && node1.state == node2.state
@@ -1282,7 +1290,7 @@ pub unsafe fn ts_stack_pause(stack: &mut Stack, version: StackVersion, lookahead
     let head = stack_head_mut(stack, version);
     head.status = StackStatus::Paused;
     head.lookahead_when_paused = lookahead;
-    head.node_count_at_last_error = stack_node_ref(head.node).node_count;
+    head.node_count_at_last_error = head.node.as_ref().unwrap_unchecked().node_count;
 }
 
 /// Check if a version is active.
@@ -1443,7 +1451,7 @@ pub unsafe fn ts_stack_print_dot_graph(
                 continue;
             }
             all_iterators_done = false;
-            let node_ref = stack_node_ref(node);
+            let node_ref = node.as_ref().unwrap_unchecked();
 
             fprintf(f, c"node_%p [".as_ptr().cast::<i8>(), node as *const c_void);
             if node_ref.state == ERROR_STATE {
