@@ -358,7 +358,7 @@ const unsafe fn length_backtrack(a: Length, b: Length) -> Length {
 unsafe fn ts_tree_cursor_child_iterator_previous(
     self_: &mut CursorChildIterator,
 ) -> Option<CursorChild> {
-    if self_.parent.ptr.is_null() || self_.child_index as i8 == -1 {
+    if self_.parent.ptr.is_null() || self_.child_index == u32::MAX {
         return None;
     }
     let child = cursor_child(self_.parent, self_.child_index);
