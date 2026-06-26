@@ -165,7 +165,10 @@ unsafe fn tree_included_ranges_mut(tree: &mut TSTree) -> &mut [TSRange] {
 }
 
 #[inline]
-unsafe fn included_range_slice<'a>(included_ranges: *const TSRange, count: u32) -> &'a [TSRange] {
+const unsafe fn included_range_slice<'a>(
+    included_ranges: *const TSRange,
+    count: u32,
+) -> &'a [TSRange] {
     if count == 0 {
         &[]
     } else {
@@ -173,7 +176,7 @@ unsafe fn included_range_slice<'a>(included_ranges: *const TSRange, count: u32) 
     }
 }
 
-fn tree_cursor_empty() -> TreeCursor {
+const fn tree_cursor_empty() -> TreeCursor {
     TreeCursor {
         tree: std::ptr::null(),
         stack: TreeCursorEntryArray {
