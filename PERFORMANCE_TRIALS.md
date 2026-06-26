@@ -137,6 +137,7 @@ may refer to these rows, but should not duplicate them as separate attempts.
 | --- | --- | --- |
 | Cross-language reduce-construction profiling | Profiling/design | `cargo flamegraph` plus temporary reduce-shape counters across all seven target languages. Supports investigating a full reduce-construction redesign, but shows lexer and balancing are too large for reduce-only work to guarantee 20%. |
 | Refreshed C++ raw parse flamegraph | Profiling/design | `cargo flamegraph` on C++ `rule.cc` with `/tmp/ts-raw-profile-harness-plain` produced `/tmp/tree-sitter-current-cpp.svg`: reduce `30.37%`, new node `10.59%`, summarize `7.94%`, stack pop `7.01%`, balance `4.05%`, `ts_lex` `22.90%`, keyword lex `6.07%`. Confirms reduce construction remains the largest library-owned target even on a lexer-heavy language. |
+| Fresh-reduce candidate shape instrumentation | Profiling/design | Temporary parser-local counters across the seven target languages showed normal fresh parsing is almost entirely single-candidate. TypeScript, JavaScript, Python, Rust, and Java had zero merged groups; Go had `12 / 64540` merged groups; C++ had `5 / 4592` merged groups. This closes merged-candidate selection as a primary normal-case direction and shifts reduce work toward single-candidate collection/finalization. |
 
 ### Rejected Or Closed
 
@@ -432,11 +433,28 @@ Per-parse reduce-shape summary:
 | C++ `rule.cc` | 2,895 | 273,328 | 9 | 0.2% |
 | Java `types.java` | 85 | 8,160 | 26 | 0.0% |
 
+Temporary fresh-reduce candidate instrumentation, removed before committing:
+
+| Language | Groups | Single groups | Merged groups | Candidates | Children | Trailing extras |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| TypeScript | 65,903 | 65,903 | 0 | 65,903 | 114,347 | 3,086 |
+| JavaScript | 102,012 | 102,012 | 0 | 102,012 | 180,897 | 3,180 |
+| Python | 59,977 | 59,977 | 0 | 59,977 | 102,447 | 659 |
+| Go | 64,540 | 64,528 | 12 | 64,552 | 116,676 | 2,528 |
+| Rust | 21,182 | 21,182 | 0 | 21,182 | 35,947 | 849 |
+| C++ | 4,592 | 4,587 | 5 | 4,597 | 7,904 | 11 |
+| Java | 1,165 | 1,165 | 0 | 1,165 | 2,047 | 0 |
+
+Implication: merged-candidate comparison is not broad enough for the normal-case
+target. A reduce-construction redesign must primarily remove work from the
+single-candidate path: retained child collection, builder-to-parent copying,
+summary/finalization, and parent/trailing-extra stack push.
+
 ### Candidate Ranking
 
 | Rank | Direction | Decision |
 | ---: | --- | --- |
-| 1 | Full reduce-construction redesign | Still the top parser-core candidate. It targets `ts_parser__reduce`, node construction, child-array allocation/copying, summarization, and stack push as one pipeline. It must not be a linear-pop fast path, buffer-adoption variant, or standalone merged-candidate selection rewrite. |
+| 1 | Full reduce-construction redesign | Still the top parser-core candidate. The fresh-reduce shape counters show normal parsing is almost entirely single-candidate, so the next version must target collection-to-final-parent construction for that path while preserving the old path for reparses and rare merged groups. It must not become buffer adoption or standalone merged-candidate selection. |
 | 2 | Lexer/external scanner work | Now co-equal for C++ and material for all languages. Needs separate direction triage because generated grammar lexers may limit core-library leverage. |
 | 3 | Balancing/compress redesign | Important for Rust and moderate for JS/TS/Go/Python. Do not remove balancing; contains-repetition pruning and single-pass compression both regressed or failed to improve Rust. Only consider a correctness-preserving redesign with tree-shape evidence, not schedule tuning. |
 | 4 | Summarization during reduce construction | Only after a real builder changes selection/ownership. A direct arena copy-plus-summary loop regressed and is closed. |
@@ -515,8 +533,10 @@ implementation:
 - Kill criteria: if the design collapses into a linear fast path, buffer
   adoption, or isolated summarizer tweak, do not implement it.
 - Implementation boundary if evidence passes: redesign the reduce construction
-  protocol as a coherent replacement for the current `StackSliceArray` to node
-  construction pipeline, not as a special fast path.
+  protocol as a coherent replacement for the current single-candidate
+  `StackSliceArray` / `StackPopBuilder` to final-parent construction pipeline,
+  while keeping rare merged groups and reparses on the conservative path until
+  equivalence is proven.
 
 ### Reduce-Construction Redesign Sketch
 
