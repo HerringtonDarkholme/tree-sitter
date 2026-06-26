@@ -138,6 +138,7 @@ may refer to these rows, but should not duplicate them as separate attempts.
 | Cross-language reduce-construction profiling | Profiling/design | `cargo flamegraph` plus temporary reduce-shape counters across all seven target languages. Supports investigating a full reduce-construction redesign, but shows lexer and balancing are too large for reduce-only work to guarantee 20%. |
 | Refreshed C++ raw parse flamegraph | Profiling/design | `cargo flamegraph` on C++ `rule.cc` with `/tmp/ts-raw-profile-harness-plain` produced `/tmp/tree-sitter-current-cpp.svg`: reduce `30.37%`, new node `10.59%`, summarize `7.94%`, stack pop `7.01%`, balance `4.05%`, `ts_lex` `22.90%`, keyword lex `6.07%`. Confirms reduce construction remains the largest library-owned target even on a lexer-heavy language. |
 | Fresh-reduce candidate shape instrumentation | Profiling/design | Temporary parser-local counters across the seven target languages showed normal fresh parsing is almost entirely single-candidate. TypeScript, JavaScript, Python, Rust, and Java had zero merged groups; Go had `12 / 64540` merged groups; C++ had `5 / 4592` merged groups. This closes merged-candidate selection as a primary normal-case direction and shifts reduce work toward single-candidate collection/finalization. |
+| C++ marker-index flamegraph | Profiling/design | `cargo flamegraph` on C++ `marker-index.h` with `/tmp/ts-raw-profile-harness-plain` produced `/tmp/tree-sitter-cpp-marker-current.svg`: reduce `27.81%`, `ts_lex` `21.93%`, keyword lex `5.88%`, new node in arena `9.63%`, summarize `8.56%`, stack pop into builder `5.88%`, stack push `5.35%` across visible frames, balance `3.74%`. Confirms C++ needs both reduce-construction and lexer/runtime-boundary work for a universal 20% target. |
 
 ### Rejected Or Closed
 
@@ -402,6 +403,14 @@ the same priority order: `ts_parser__reduce` `30.37%`,
 `ts_subtree_summarize_children` `7.94%`, `ts_stack_pop_count` `7.01%`,
 `ts_parser__balance_subtree` `4.05%`, `ts_lex` `22.90%`, and
 `ts_lex_keywords` `6.07%`.
+
+Refreshed C++ `marker-index.h` sample after single-candidate shape triage:
+`ts_parser__reduce` `27.81%`, `ts_lex` `21.93%`,
+`ts_lex_keywords` `5.88%`, `ts_subtree_new_node_in_arena` `9.63%`,
+`ts_subtree_summarize_children` `8.56%`, `ts_stack_pop_count_into` `5.88%`,
+visible `ts_stack_push` frames `5.35%`, `ts_parser__balance_subtree` `3.74%`,
+and `ts_subtree_compress` `1.60%`. Output:
+`/tmp/tree-sitter-cpp-marker-current.svg`.
 
 Refreshed JavaScript `jquery.js` sample after the kept parser-owned stack-pop
 builder still points at reduce construction as the largest parser-owned target:
