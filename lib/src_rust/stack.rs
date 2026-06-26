@@ -225,10 +225,10 @@ pub(crate) unsafe fn array_grow<T>(arr: &mut Array<T>, count: u32) {
     }
 }
 
-pub(crate) unsafe fn array_push<T>(arr: *mut Array<T>, element: T) {
-    array_grow(arr.as_mut().unwrap_unchecked(), 1);
-    ptr::write((*arr).contents.add((*arr).size as usize), element);
-    (*arr).size += 1;
+pub(crate) unsafe fn array_push<T>(arr: &mut Array<T>, element: T) {
+    array_grow(arr, 1);
+    ptr::write(arr.contents.add(arr.size as usize), element);
+    arr.size += 1;
 }
 
 pub(crate) unsafe fn array_pop<T>(arr: *mut Array<T>) -> T {
@@ -905,10 +905,9 @@ unsafe fn stack__iter(
                     next_iterator.is_pending = false;
                 } else {
                     if include_subtrees {
-                        array_push(
-                            ptr::addr_of_mut!(next_iterator.subtrees).cast::<Array<Subtree>>(),
-                            link.subtree,
-                        );
+                        let subtrees = &mut *ptr::addr_of_mut!(next_iterator.subtrees)
+                            .cast::<Array<Subtree>>();
+                        array_push(subtrees, link.subtree);
                         ts_subtree_retain(link.subtree);
                     }
 
@@ -1033,7 +1032,7 @@ unsafe fn summarize_stack_callback(
         }
     }
     array_push(
-        session.summary,
+        session.summary.as_mut().unwrap_unchecked(),
         StackSummaryEntry {
             position: node.position,
             depth,
