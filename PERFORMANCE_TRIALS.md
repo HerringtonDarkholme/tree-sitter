@@ -179,6 +179,7 @@ may refer to these rows, but should not duplicate them as separate attempts.
 | Direct descriptor comparison for merged reduce candidates | Reduce/candidate selection | Mixed/rejected. JavaScript `-r 10` improved `18608` -> `18781` avg and Go `-r 5` improved `11531` -> `13017`, but TypeScript `-r 10` regressed `24076` -> `23567` avg and `20753` -> `20491` worst; large TypeScript `parser.ts` improved, but the aggregate gate failed |
 | Fresh-parse direct graph builder collection | Reduce/stack pop | Rejected on Go warm same-session canary. Patched direct graph collection into `StackPopBuilder` avoided the old `StackSliceArray` conversion path for fresh reductions, but Go `-r 10` regressed from reverted baseline `18768` avg / `16707` worst bytes/ms to patched `17672` avg / `15865` worst. The graph fallback rate alone did not prove the conversion detour was worth replacing. |
 | Single-group reduce control-flow split | Reduce/finalization | Rejected on JavaScript warm same-session canary. TypeScript looked positive in an initial `-r 10` canary (`26287` avg), but JavaScript regressed from reverted baseline `20395` avg / `19617` worst bytes/ms to patched `19648` avg / `19276` worst. Separating single-candidate control flow without removing child collection, arena copy, or summary work is insufficient. |
+| Direct arena finalization for linear fresh reductions | Reduce/node construction | Rejected on JavaScript canary. The trial allocated an arena node block up front, filled it directly from the linear stack pop, removed trailing extras, and initialized the parent in place. TypeScript `-r 5` improved to `26333` avg / `22424` worst bytes/ms, but JavaScript `-r 10` regressed to `19811` avg / `18514` worst after a prior run at `20469` avg / `18584` worst. The second stack walk and branch/protocol overhead outweighed avoiding the builder-to-arena copy for JavaScript. |
 | Propagated contains-repetition flag for balancing | Balance/compress | Regressed Rust same-session canary: patched `13149` avg / `11290` worst bytes/ms vs reverted baseline `14124` avg / `12362` worst; metadata overhead outweighed traversal pruning |
 | 16-bit symbol inline leaf encoding | Subtree inline representation | Regressed JavaScript and did not reduce allocation counts |
 | Global mutex slab for `SubtreeHeapData + children` blocks | Subtree block allocation | JavaScript benchmark stalled; global lock path not viable |
@@ -226,6 +227,7 @@ result.
 | Direct merged-candidate descriptor comparison | Mixed. It helped JavaScript/Go and the large TypeScript parser file, but regressed the TypeScript aggregate benchmark. Do not retry as a standalone replacement for temporary candidate parents. |
 | Fresh-parse direct graph builder collection | Warm Go canary regressed despite the highest recorded graph fallback rate. Do not retry direct graph collection as an isolated `StackPopBuilder` completion; only revisit if a full reduce-construction protocol redesign removes more of the candidate materialization pipeline at the same time. |
 | Single-group reduce control-flow split | Warm JavaScript regressed. Do not retry single-candidate branching unless the change removes a material phase such as builder child collection, builder-to-arena copy, or summary/finalization work. |
+| Direct arena finalization for linear fresh reductions | JavaScript regressed even though TypeScript improved. Do not retry as a linear-only two-pass stack walk. A future direct-finalization design would need to collect directly in one pass without adding another stack traversal. |
 | Broad inlining/caching/check-progress fast paths | Repeatedly regressed or stayed below baseline. |
 | Lexer ASCII/direct UTF-8 fast paths | Mixed or negative. |
 
@@ -264,6 +266,91 @@ Main lesson:
 - The next serious work should be a real parser-local reduce builder that writes
   child spans in the desired representation from the start. Do not try to rescue
   already-allocated `SubtreeArray` buffers after the fact.
+
+## Reflection 2: Reduce Protocol And Boundary Evidence
+
+Attempts covered:
+
+- Direct merged-candidate descriptor comparison.
+- Propagated contains-repetition balance flag.
+- Single-pass repeat compression schedule.
+- Builder-specific copy plus summary finalization.
+- Fresh-parse direct graph builder collection.
+- Reduce-construction equivalence map.
+- Fresh-reduce candidate shape instrumentation.
+- C++ `marker-index.h` flamegraph.
+- Single-group reduce control-flow split.
+- Direct arena finalization for linear fresh reductions.
+
+Wins:
+
+- Parser-owned stack-pop builder remained the last kept reduce-construction
+  architecture slice.
+- Fresh-reduce candidate shape instrumentation clarified that normal parsing is
+  overwhelmingly single-candidate; merged-candidate work is not a primary
+  normal-case lever.
+- C++ profiling clarified that reduce and lexer are co-dominant, so the 20%
+  universal target needs more than reduce construction alone.
+
+Losses:
+
+- Standalone merged-candidate selection was too narrow and regressed the
+  TypeScript aggregate.
+- Graph fallback collection regressed Go despite Go having the highest graph
+  fallback rate.
+- Control-flow-only single-candidate branching regressed JavaScript.
+- Two-pass direct arena finalization helped TypeScript but regressed
+  JavaScript; avoiding the copy did not offset the extra stack walk and protocol
+  overhead.
+- Balance metadata and schedule changes did not improve Rust, the language
+  where balance/compress matters most.
+
+Repeated mistakes:
+
+- Several trials changed a local symptom of reduce construction without removing
+  the full phase that the profiler shows: stack collection, parent allocation,
+  child copy, summarization, and stack push still remained as separate costs.
+- Candidate selection kept resurfacing, but normal fresh parsing does not spend
+  enough time on merged candidates to justify it as a primary direction.
+
+Closed directions:
+
+- Standalone merged-candidate descriptor comparison.
+- Isolated graph builder collection.
+- Single-candidate control-flow branching without removing a material phase.
+- Two-pass direct arena finalization for linear stack pops.
+- Balance branch-pruning metadata and compression schedule tuning.
+
+Open evidence:
+
+- `ts_parser__reduce` remains the largest runtime-owned frame across the target
+  languages, but the remaining viable reduce design must collect directly into
+  final storage in one pass or remove summary/finalization work as part of a
+  larger protocol.
+- C++ and JavaScript still show large generated lexer/external scanner shares.
+  Core-library lexer micro-fast paths failed before, and generated
+  `set_contains` is not library runtime code in the benchmark fixtures.
+- Stack push/node creation is visible, but pool sizing and broad helper inlining
+  are already closed. A useful stack direction must batch or avoid pushes as
+  part of reduce construction, not tune node allocation locally.
+
+Next direction:
+
+- Stop standalone reduce micro-architecture trials until there is a one-pass
+  reduce-construction design that writes children into final storage without a
+  second stack walk.
+- In parallel, run lexer-boundary instrumentation to separate reusable runtime
+  costs from generated `ts_lex`, keyword lexing, and external scanner costs.
+  Only implement lexer work if the measured cost is in `ts_lexer__get_lookahead`,
+  `ts_lexer__do_advance`, included-range handling, or another core runtime
+  function, not generated fixture code.
+
+Acceptance gate:
+
+- Any kept library optimization must pass same-session `cargo xtask benchmark
+  --kind normal -r 10 --language` for TypeScript, JavaScript, Python, Go, Rust,
+  C++, and Java, with no average or meaningful worst-file regression.
+- Kept library code must pass `cargo test --all` outside the sandbox.
 
 ## Performance Trial Decision Process
 
