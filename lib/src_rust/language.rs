@@ -13,11 +13,11 @@
 use std::ffi::c_void;
 use std::ptr;
 
-use crate::ffi::{TSLanguage, TSStateId, TSSymbol, TSFieldId};
+use crate::ffi::{TSFieldId, TSLanguage, TSStateId, TSSymbol};
 
 // Re-use types already defined in subtree.rs
+use super::alloc::{ts_free, ts_malloc};
 use super::subtree::TSSymbolMetadata;
-use super::alloc::{ts_malloc, ts_free};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -265,13 +265,8 @@ const _: () = assert!(std::mem::size_of::<LookaheadIterator>() == 56);
 // ---------------------------------------------------------------------------
 
 #[inline(always)]
-const unsafe fn lang(self_: *const TSLanguage) -> *const TSLanguageFull {
-    self_.cast::<TSLanguageFull>()
-}
-
-#[inline]
-unsafe fn language_ref<'a>(language: *const TSLanguageFull) -> &'a TSLanguageFull {
-    language.as_ref().unwrap_unchecked()
+const unsafe fn lang<'a>(self_: *const TSLanguage) -> &'a TSLanguageFull {
+    &*self_.cast::<TSLanguageFull>()
 }
 
 #[inline]
@@ -280,10 +275,7 @@ unsafe fn lookahead_iterator_mut<'a>(self_: *mut LookaheadIterator) -> &'a mut L
 }
 
 #[inline]
-unsafe fn parse_action_entry(
-    language: &TSLanguageFull,
-    index: usize,
-) -> &TSParseActionEntry {
+unsafe fn parse_action_entry(language: &TSLanguageFull, index: usize) -> &TSParseActionEntry {
     language
         .parse_actions
         .add(index)
@@ -293,10 +285,7 @@ unsafe fn parse_action_entry(
 
 #[inline]
 const unsafe fn parse_action_at(language: &TSLanguageFull, index: usize) -> *const TSParseAction {
-    language
-        .parse_actions
-        .add(index)
-        .cast::<TSParseAction>()
+    language.parse_actions.add(index).cast::<TSParseAction>()
 }
 
 // ---------------------------------------------------------------------------
@@ -313,11 +302,7 @@ extern "C" {
     fn fputs(s: *const i8, stream: *mut c_void) -> i32;
 }
 
-unsafe fn c_string_prefix_cmp(
-    left: *const i8,
-    right: *const i8,
-    len: usize,
-) -> std::cmp::Ordering {
+unsafe fn c_string_prefix_cmp(left: *const i8, right: *const i8, len: usize) -> std::cmp::Ordering {
     for i in 0..len {
         let left_byte = *left.add(i) as u8;
         let right_byte = *right.add(i) as u8;
@@ -344,9 +329,11 @@ pub unsafe fn ts_language_lookup(
     symbol: TSSymbol,
 ) -> u16 {
     let l = lang(self_);
-    if u32::from(state) >= (*l).large_state_count {
-        let index = *(*l).small_parse_table_map.add(state as usize - (*l).large_state_count as usize);
-        let mut data = (*l).small_parse_table.add(index as usize);
+    if u32::from(state) >= l.large_state_count {
+        let index = *l
+            .small_parse_table_map
+            .add(state as usize - l.large_state_count as usize);
+        let mut data = l.small_parse_table.add(index as usize);
         let group_count = *data;
         data = data.add(1);
         for _ in 0..group_count {
@@ -363,7 +350,8 @@ pub unsafe fn ts_language_lookup(
         }
         0
     } else {
-        *(*l).parse_table.add(state as usize * (*l).symbol_count as usize + symbol as usize)
+        *l.parse_table
+            .add(state as usize * l.symbol_count as usize + symbol as usize)
     }
 }
 
@@ -410,14 +398,18 @@ pub unsafe fn ts_language_lookaheads(
     state: TSStateId,
 ) -> LookaheadIterator {
     let l = lang(self_);
-    let is_small_state = u32::from(state) >= (*l).large_state_count;
+    let is_small_state = u32::from(state) >= l.large_state_count;
     let (data, group_end, group_count): (*const u16, *const u16, u16) = if is_small_state {
-        let index = *(*l).small_parse_table_map.add(state as usize - (*l).large_state_count as usize);
-        let data = (*l).small_parse_table.add(index as usize);
+        let index = *l
+            .small_parse_table_map
+            .add(state as usize - l.large_state_count as usize);
+        let data = l.small_parse_table.add(index as usize);
         (data, data.add(1), *data)
     } else {
         (
-            (*l).parse_table.add(state as usize * (*l).symbol_count as usize).sub(1),
+            l.parse_table
+                .add(state as usize * l.symbol_count as usize)
+                .sub(1),
             ptr::null(),
             0,
         )
@@ -464,7 +456,7 @@ pub unsafe fn ts_lookahead_iterator__next(self_: &mut LookaheadIterator) -> bool
         loop {
             self_.data = self_.data.add(1);
             self_.symbol = self_.symbol.wrapping_add(1);
-            if self_.symbol >= (*l).symbol_count as u16 {
+            if self_.symbol >= l.symbol_count as u16 {
                 return false;
             }
             self_.table_value = *self_.data;
@@ -476,7 +468,7 @@ pub unsafe fn ts_lookahead_iterator__next(self_: &mut LookaheadIterator) -> bool
 
     // Depending on if the symbol is terminal or non-terminal, the table value
     // either represents a list of actions or a successor state.
-    let language = language_ref(l);
+    let language = l;
     if u32::from(self_.symbol) < language.token_count {
         let entry = parse_action_entry(language, self_.table_value as usize);
         self_.action_count = u16::from(entry.entry.count);
@@ -496,8 +488,8 @@ pub const unsafe fn ts_language_state_is_primary(
     state: TSStateId,
 ) -> bool {
     let l = lang(self_);
-    if (*l).abi_version >= LANGUAGE_VERSION_WITH_PRIMARY_STATES {
-        state == *(*l).primary_state_ids.add(state as usize)
+    if l.abi_version >= LANGUAGE_VERSION_WITH_PRIMARY_STATES {
+        state == *l.primary_state_ids.add(state as usize)
     } else {
         true
     }
@@ -513,7 +505,9 @@ pub const unsafe fn ts_language_enabled_external_tokens(
     if external_scanner_state == 0 {
         ptr::null()
     } else {
-        (*l).external_scanner.states.add((*l).external_token_count as usize * external_scanner_state as usize)
+        l.external_scanner
+            .states
+            .add(l.external_token_count as usize * external_scanner_state as usize)
     }
 }
 
@@ -525,7 +519,8 @@ pub const unsafe fn ts_language_alias_sequence(
 ) -> *const TSSymbol {
     let l = lang(self_);
     if production_id != 0 {
-        (*l).alias_sequences.add(production_id as usize * (*l).max_alias_sequence_length as usize)
+        l.alias_sequences
+            .add(production_id as usize * l.max_alias_sequence_length as usize)
     } else {
         ptr::null()
     }
@@ -540,7 +535,9 @@ pub const unsafe fn ts_language_alias_at(
 ) -> TSSymbol {
     let l = lang(self_);
     if production_id != 0 {
-        *(*l).alias_sequences.add(production_id as usize * (*l).max_alias_sequence_length as usize + child_index as usize)
+        *l.alias_sequences.add(
+            production_id as usize * l.max_alias_sequence_length as usize + child_index as usize,
+        )
     } else {
         0
     }
@@ -555,14 +552,16 @@ pub unsafe fn ts_language_field_map(
     end: *mut *const TSFieldMapEntry,
 ) {
     let l = lang(self_);
-    if (*l).field_count == 0 {
+    if l.field_count == 0 {
         *start = ptr::null();
         *end = ptr::null();
         return;
     }
-    let slice = *(*l).field_map_slices.add(production_id as usize);
-    *start = (*l).field_map_entries.add(slice.index as usize);
-    *end = (*l).field_map_entries.add(slice.index as usize + slice.length as usize);
+    let slice = *l.field_map_slices.add(production_id as usize);
+    *start = l.field_map_entries.add(slice.index as usize);
+    *end = l
+        .field_map_entries
+        .add(slice.index as usize + slice.length as usize);
 }
 
 /// Get all aliases for a symbol.
@@ -574,21 +573,21 @@ pub unsafe fn ts_language_aliases_for_symbol(
     end: *mut *const TSSymbol,
 ) {
     let l = lang(self_);
-    *start = (*l).public_symbol_map.add(original_symbol as usize);
+    *start = l.public_symbol_map.add(original_symbol as usize);
     *end = (*start).add(1);
 
     let mut idx: usize = 0;
     loop {
-        let symbol = *(*l).alias_map.add(idx);
+        let symbol = *l.alias_map.add(idx);
         idx += 1;
         if symbol == 0 || symbol > original_symbol {
             break;
         }
-        let count = *(*l).alias_map.add(idx);
+        let count = *l.alias_map.add(idx);
         idx += 1;
         if symbol == original_symbol {
-            *start = (*l).alias_map.add(idx).cast::<TSSymbol>();
-            *end = (*l).alias_map.add(idx + count as usize).cast::<TSSymbol>();
+            *start = l.alias_map.add(idx).cast::<TSSymbol>();
+            *end = l.alias_map.add(idx + count as usize).cast::<TSSymbol>();
             break;
         }
         idx += count as usize;
@@ -629,9 +628,7 @@ pub unsafe fn ts_language_write_symbol_as_dot_string(
 // ===========================================================================
 
 #[no_mangle]
-pub unsafe extern "C" fn ts_language_copy(
-    self_: *const TSLanguage,
-) -> *const TSLanguage {
+pub unsafe extern "C" fn ts_language_copy(self_: *const TSLanguage) -> *const TSLanguage {
     if !self_.is_null() && ts_language_is_wasm(self_) {
         ts_wasm_language_retain(self_);
     }
@@ -646,18 +643,14 @@ pub unsafe extern "C" fn ts_language_delete(self_: *const TSLanguage) {
 }
 
 #[no_mangle]
-pub const unsafe extern "C" fn ts_language_symbol_count(
-    self_: *const TSLanguage,
-) -> u32 {
+pub const unsafe extern "C" fn ts_language_symbol_count(self_: *const TSLanguage) -> u32 {
     let l = lang(self_);
-    (*l).symbol_count + (*l).alias_count
+    l.symbol_count + l.alias_count
 }
 
 #[no_mangle]
-pub const unsafe extern "C" fn ts_language_state_count(
-    self_: *const TSLanguage,
-) -> u32 {
-    (*lang(self_)).state_count
+pub const unsafe extern "C" fn ts_language_state_count(self_: *const TSLanguage) -> u32 {
+    lang(self_).state_count
 }
 
 #[no_mangle]
@@ -666,9 +659,9 @@ pub unsafe extern "C" fn ts_language_supertypes(
     length: *mut u32,
 ) -> *const TSSymbol {
     let l = lang(self_);
-    if (*l).abi_version >= LANGUAGE_VERSION_WITH_RESERVED_WORDS {
-        *length = (*l).supertype_count;
-        (*l).supertype_symbols
+    if l.abi_version >= LANGUAGE_VERSION_WITH_RESERVED_WORDS {
+        *length = l.supertype_count;
+        l.supertype_symbols
     } else {
         *length = 0;
         ptr::null()
@@ -682,22 +675,20 @@ pub unsafe extern "C" fn ts_language_subtypes(
     length: *mut u32,
 ) -> *const TSSymbol {
     let l = lang(self_);
-    if (*l).abi_version < LANGUAGE_VERSION_WITH_RESERVED_WORDS
+    if l.abi_version < LANGUAGE_VERSION_WITH_RESERVED_WORDS
         || !ts_language_symbol_metadata(self_, supertype).supertype
     {
         *length = 0;
         return ptr::null();
     }
-    let slice = *(*l).supertype_map_slices.add(supertype as usize);
+    let slice = *l.supertype_map_slices.add(supertype as usize);
     *length = u32::from(slice.length);
-    (*l).supertype_map_entries.add(slice.index as usize)
+    l.supertype_map_entries.add(slice.index as usize)
 }
 
 #[no_mangle]
-pub const unsafe extern "C" fn ts_language_abi_version(
-    self_: *const TSLanguage,
-) -> u32 {
-    (*lang(self_)).abi_version
+pub const unsafe extern "C" fn ts_language_abi_version(self_: *const TSLanguage) -> u32 {
+    lang(self_).abi_version
 }
 
 #[no_mangle]
@@ -705,30 +696,26 @@ pub const unsafe extern "C" fn ts_language_metadata(
     self_: *const TSLanguage,
 ) -> *const TSLanguageMetadata {
     let l = lang(self_);
-    if (*l).abi_version >= LANGUAGE_VERSION_WITH_RESERVED_WORDS {
-        ptr::addr_of!((*l).metadata)
+    if l.abi_version >= LANGUAGE_VERSION_WITH_RESERVED_WORDS {
+        ptr::addr_of!(l.metadata)
     } else {
         ptr::null()
     }
 }
 
 #[no_mangle]
-pub const unsafe extern "C" fn ts_language_name(
-    self_: *const TSLanguage,
-) -> *const i8 {
+pub const unsafe extern "C" fn ts_language_name(self_: *const TSLanguage) -> *const i8 {
     let l = lang(self_);
-    if (*l).abi_version >= LANGUAGE_VERSION_WITH_RESERVED_WORDS {
-        (*l).name
+    if l.abi_version >= LANGUAGE_VERSION_WITH_RESERVED_WORDS {
+        l.name
     } else {
         ptr::null()
     }
 }
 
 #[no_mangle]
-pub const unsafe extern "C" fn ts_language_field_count(
-    self_: *const TSLanguage,
-) -> u32 {
-    (*lang(self_)).field_count
+pub const unsafe extern "C" fn ts_language_field_count(self_: *const TSLanguage) -> u32 {
+    lang(self_).field_count
 }
 
 pub unsafe fn ts_language_table_entry(
@@ -743,7 +730,7 @@ pub unsafe fn ts_language_table_entry(
         result.is_reusable = false;
         result.actions = ptr::null();
     } else {
-        let language = language_ref(l);
+        let language = l;
         debug_assert!(u32::from(symbol) < language.token_count);
         let action_index = ts_language_lookup(self_, state, symbol) as usize;
         let entry = parse_action_entry(language, action_index);
@@ -758,15 +745,15 @@ pub const unsafe fn ts_language_lex_mode_for_state(
     state: TSStateId,
 ) -> TSLexerMode {
     let l = lang(self_);
-    if (*l).abi_version < 15 {
-        let mode = *(*l).lex_modes.cast::<TSLexMode>().add(state as usize);
+    if l.abi_version < 15 {
+        let mode = *l.lex_modes.cast::<TSLexMode>().add(state as usize);
         TSLexerMode {
             lex_state: mode.lex_state,
             external_lex_state: mode.external_lex_state,
             reserved_word_set_id: 0,
         }
     } else {
-        *(*l).lex_modes.add(state as usize)
+        *l.lex_modes.add(state as usize)
     }
 }
 
@@ -779,10 +766,10 @@ pub unsafe fn ts_language_is_reserved_word(
     let lex_mode = ts_language_lex_mode_for_state(self_, state);
     if lex_mode.reserved_word_set_id > 0 {
         let start =
-            u32::from(lex_mode.reserved_word_set_id) * u32::from((*l).max_reserved_word_set_size);
-        let end = start + u32::from((*l).max_reserved_word_set_size);
+            u32::from(lex_mode.reserved_word_set_id) * u32::from(l.max_reserved_word_set_size);
+        let end = start + u32::from(l.max_reserved_word_set_size);
         for i in start..end {
-            let w = *(*l).reserved_words.add(i as usize);
+            let w = *l.reserved_words.add(i as usize);
             if w == symbol {
                 return true;
             }
@@ -800,11 +787,19 @@ pub const unsafe extern "C" fn ts_language_symbol_metadata(
     symbol: TSSymbol,
 ) -> TSSymbolMetadata {
     if symbol == ts_builtin_sym_error {
-        TSSymbolMetadata { visible: true, named: true, supertype: false }
+        TSSymbolMetadata {
+            visible: true,
+            named: true,
+            supertype: false,
+        }
     } else if symbol == ts_builtin_sym_error_repeat {
-        TSSymbolMetadata { visible: false, named: false, supertype: false }
+        TSSymbolMetadata {
+            visible: false,
+            named: false,
+            supertype: false,
+        }
     } else {
-        *(*lang(self_)).symbol_metadata.add(symbol as usize)
+        *lang(self_).symbol_metadata.add(symbol as usize)
     }
 }
 
@@ -815,7 +810,7 @@ pub const unsafe fn ts_language_public_symbol(
     if symbol == ts_builtin_sym_error {
         symbol
     } else {
-        *(*lang(self_)).public_symbol_map.add(symbol as usize)
+        *lang(self_).public_symbol_map.add(symbol as usize)
     }
 }
 
@@ -828,13 +823,17 @@ pub unsafe extern "C" fn ts_language_next_state(
     let l = lang(self_);
     if symbol == ts_builtin_sym_error || symbol == ts_builtin_sym_error_repeat {
         0
-    } else if u32::from(symbol) < (*l).token_count {
+    } else if u32::from(symbol) < l.token_count {
         let mut count: u32 = 0;
         let actions = ts_language_actions(self_, state, symbol, &mut count);
         if count > 0 {
             let action = *actions.add(count as usize - 1);
             if action.type_ == TSParseActionTypeShift {
-                return if action.shift.extra { state } else { action.shift.state };
+                return if action.shift.extra {
+                    state
+                } else {
+                    action.shift.state
+                };
             }
         }
         0
@@ -853,7 +852,7 @@ pub unsafe extern "C" fn ts_language_symbol_name(
     } else if symbol == ts_builtin_sym_error_repeat {
         c"_ERROR".as_ptr().cast::<i8>()
     } else if u32::from(symbol) < ts_language_symbol_count(self_) {
-        *(*lang(self_)).symbol_names.add(symbol as usize)
+        *lang(self_).symbol_names.add(symbol as usize)
     } else {
         ptr::null()
     }
@@ -878,11 +877,11 @@ pub unsafe extern "C" fn ts_language_symbol_for_name(
         if (!metadata.visible && !metadata.supertype) || metadata.named != is_named {
             continue;
         }
-        let symbol_name = *(*l).symbol_names.add(i as usize);
+        let symbol_name = *l.symbol_names.add(i as usize);
         if c_string_prefix_cmp(symbol_name, string, length as usize).is_eq()
             && *symbol_name.add(length as usize) == 0
         {
-            return *(*l).public_symbol_map.add(i as usize);
+            return *l.public_symbol_map.add(i as usize);
         }
     }
     0
@@ -912,7 +911,7 @@ pub unsafe extern "C" fn ts_language_field_name_for_id(
 ) -> *const i8 {
     let count = ts_language_field_count(self_);
     if count > 0 && u32::from(id) <= count {
-        *(*lang(self_)).field_names.add(id as usize)
+        *lang(self_).field_names.add(id as usize)
     } else {
         ptr::null()
     }
@@ -927,7 +926,7 @@ pub unsafe extern "C" fn ts_language_field_id_for_name(
     let l = lang(self_);
     let count = ts_language_field_count(self_) as u16;
     for i in 1..=count {
-        let field_name = *(*l).field_names.add(i as usize);
+        let field_name = *l.field_names.add(i as usize);
         match c_string_prefix_cmp(name, field_name, name_length as usize) {
             std::cmp::Ordering::Equal if *field_name.add(name_length as usize) == 0 => return i,
             std::cmp::Ordering::Less => return 0,
@@ -947,7 +946,7 @@ pub unsafe extern "C" fn ts_lookahead_iterator_new(
     self_: *const TSLanguage,
     state: TSStateId,
 ) -> *mut LookaheadIterator {
-    if u32::from(state) >= (*lang(self_)).state_count {
+    if u32::from(state) >= lang(self_).state_count {
         return ptr::null_mut();
     }
     let iterator = ts_malloc(std::mem::size_of::<LookaheadIterator>()).cast::<LookaheadIterator>();
@@ -956,9 +955,7 @@ pub unsafe extern "C" fn ts_lookahead_iterator_new(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn ts_lookahead_iterator_delete(
-    self_: *mut LookaheadIterator,
-) {
+pub unsafe extern "C" fn ts_lookahead_iterator_delete(self_: *mut LookaheadIterator) {
     ts_free(self_.cast::<c_void>());
 }
 
@@ -967,7 +964,7 @@ pub unsafe extern "C" fn ts_lookahead_iterator_reset_state(
     self_: *mut LookaheadIterator,
     state: TSStateId,
 ) -> bool {
-    if u32::from(state) >= (*lang((*self_).language)).state_count {
+    if u32::from(state) >= lang((*self_).language).state_count {
         return false;
     }
     *self_ = ts_language_lookaheads((*self_).language, state);
@@ -987,7 +984,7 @@ pub unsafe extern "C" fn ts_lookahead_iterator_reset(
     language: *const TSLanguage,
     state: TSStateId,
 ) -> bool {
-    if u32::from(state) >= (*lang(language)).state_count {
+    if u32::from(state) >= lang(language).state_count {
         return false;
     }
     *self_ = ts_language_lookaheads(language, state);
@@ -995,9 +992,7 @@ pub unsafe extern "C" fn ts_lookahead_iterator_reset(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn ts_lookahead_iterator_next(
-    self_: *mut LookaheadIterator,
-) -> bool {
+pub unsafe extern "C" fn ts_lookahead_iterator_next(self_: *mut LookaheadIterator) -> bool {
     ts_lookahead_iterator__next(lookahead_iterator_mut(self_))
 }
 
