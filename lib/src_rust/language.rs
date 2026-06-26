@@ -373,7 +373,7 @@ pub(crate) unsafe fn ts_language_actions(
     self_: *const TSLanguage,
     state: TSStateId,
     symbol: TSSymbol,
-    count: *mut u32,
+    count: &mut u32,
 ) -> *const TSParseAction {
     let mut entry = TableEntry::empty();
     ts_language_table_entry(self_, state, symbol, &mut entry);
@@ -735,21 +735,21 @@ pub(crate) unsafe fn ts_language_table_entry(
     self_: *const TSLanguage,
     state: TSStateId,
     symbol: TSSymbol,
-    result: *mut TableEntry,
+    result: &mut TableEntry,
 ) {
     let l = lang(self_);
     if symbol == ts_builtin_sym_error || symbol == ts_builtin_sym_error_repeat {
-        (*result).action_count = 0;
-        (*result).is_reusable = false;
-        (*result).actions = ptr::null();
+        result.action_count = 0;
+        result.is_reusable = false;
+        result.actions = ptr::null();
     } else {
         let language = language_ref(l);
         debug_assert!(u32::from(symbol) < language.token_count);
         let action_index = ts_language_lookup(self_, state, symbol) as usize;
         let entry = parse_action_entry(language, action_index);
-        (*result).action_count = u32::from(entry.entry.count);
-        (*result).is_reusable = entry.entry.reusable;
-        (*result).actions = parse_action_at(language, action_index + 1);
+        result.action_count = u32::from(entry.entry.count);
+        result.is_reusable = entry.entry.reusable;
+        result.actions = parse_action_at(language, action_index + 1);
     }
 }
 
