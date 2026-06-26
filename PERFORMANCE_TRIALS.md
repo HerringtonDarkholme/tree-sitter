@@ -140,6 +140,7 @@ may refer to these rows, but should not duplicate them as separate attempts.
 | Fresh-reduce candidate shape instrumentation | Profiling/design | Temporary parser-local counters across the seven target languages showed normal fresh parsing is almost entirely single-candidate. TypeScript, JavaScript, Python, Rust, and Java had zero merged groups; Go had `12 / 64540` merged groups; C++ had `5 / 4592` merged groups. This closes merged-candidate selection as a primary normal-case direction and shifts reduce work toward single-candidate collection/finalization. |
 | C++ marker-index flamegraph | Profiling/design | `cargo flamegraph` on C++ `marker-index.h` with `/tmp/ts-raw-profile-harness-plain` produced `/tmp/tree-sitter-cpp-marker-current.svg`: reduce `27.81%`, `ts_lex` `21.93%`, keyword lex `5.88%`, new node in arena `9.63%`, summarize `8.56%`, stack pop into builder `5.88%`, stack push `5.35%` across visible frames, balance `3.74%`. Confirms C++ needs both reduce-construction and lexer/runtime-boundary work for a universal 20% target. |
 | Lexer/runtime boundary counters | Profiling/design | Temporary parser and lexer counters across the seven target languages showed included-range stepping is zero in normal parsing and chunk reads are tiny. External scanner calls are high for JavaScript/TypeScript/Python and moderate for Rust, but absent for Go/C++/Java. Core runtime lookahead/advance callbacks are broad, but prior single-range and UTF-8/ASCII fast paths already failed, so lexer work needs narrower boundary evidence before code. |
+| Reduce push/pop shape counters | Profiling/design | Temporary fresh-reduce counters showed trailing-extra stack pushes are too rare for batching to be a primary direction: `10,313` trailing pushes vs `319,371` parent pushes across the seven target languages. The broader signal is internal subtree churn: reductions popped `316,248` internal subtrees, almost one per reduction group. This supports pending/lazy reduction metadata as the next architecture design and deprioritizes parent-plus-extra push batching. |
 
 ### Rejected Or Closed
 
@@ -726,6 +727,34 @@ Implications:
   runtime work only with flamegraph evidence for a specific reusable operation,
   not generic callback-count evidence.
 
+Temporary reduce push/pop shape instrumentation, removed before committing:
+
+| Language | Groups | Merged groups | Candidates | Parent pushes | Trailing pushes | Groups with trailing | Popped subtrees | Popped internal | Internal visible | Internal named | Internal hidden | Popped leaves | Popped extras | Graph fallbacks |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| JavaScript | 102,012 | 0 | 102,012 | 102,012 | 3,180 | 2,230 | 181,515 | 101,972 | 34,129 | 93,274 | 67,843 | 74,875 | 4,668 | 1,007 |
+| TypeScript | 65,903 | 0 | 65,903 | 65,903 | 3,086 | 1,147 | 114,540 | 65,221 | 21,965 | 60,463 | 43,256 | 44,811 | 4,508 | 271 |
+| Python | 59,977 | 0 | 59,977 | 59,977 | 659 | 444 | 102,457 | 59,894 | 18,377 | 51,446 | 41,517 | 41,275 | 1,288 | 14 |
+| Go | 64,540 | 12 | 64,552 | 64,540 | 2,528 | 1,090 | 119,443 | 62,917 | 26,787 | 55,922 | 36,130 | 52,172 | 4,354 | 4,913 |
+| Rust | 21,182 | 0 | 21,182 | 21,182 | 849 | 311 | 35,947 | 20,665 | 5,972 | 14,473 | 14,693 | 13,929 | 1,353 | 0 |
+| C++ | 4,592 | 5 | 4,597 | 4,592 | 11 | 11 | 7,918 | 4,485 | 1,931 | 4,148 | 2,554 | 3,420 | 13 | 16 |
+| Java | 1,165 | 0 | 1,165 | 1,165 | 0 | 0 | 2,061 | 1,094 | 377 | 1,007 | 717 | 967 | 0 | 18 |
+| Total | 319,371 | 17 | 319,388 | 319,371 | 10,313 | 5,233 | 563,881 | 316,248 | 109,538 | 280,733 | 206,710 | 231,449 | 16,184 | 6,239 |
+
+Implications:
+
+- Parent-plus-trailing-extra stack push batching is too narrow by itself.
+  Trailing pushes are only `10,313 / 329,684` = `3.1%` of reduce-finalization
+  pushes, and only `5,233 / 319,371` = `1.6%` of groups have trailing extras.
+- Merged groups remain negligible: `17 / 319,371` groups.
+- Internal subtree churn is broad: `316,248 / 319,371` = `99.0%` as many
+  internal popped subtrees as reduction groups. This is the first evidence that
+  a pending/lazy reduction descriptor could remove a repeated materialize-then-
+  immediately-consume pattern.
+- The internal nodes are not merely invisible wrappers. Across all languages,
+  `280,733` internal popped nodes are named and `206,710` are hidden. A pending
+  design must preserve metadata and tree identity lazily; it cannot just skip
+  hidden nodes.
+
 ### Candidate Ranking
 
 | Rank | Direction | Decision |
@@ -740,14 +769,15 @@ Implications:
 1. Multi-phase reduce protocol redesign.
    - Goal: remove multiple reduce phases together: candidate materialization,
      builder-to-arena copying, separate child summarization, and repeated
-     parent/trailing-extra stack pushes.
+     parent/trailing-extra stack pushes or immediate internal-parent
+     materialization.
    - Why first: reduce is still the largest shared parser-owned frame, and
      lexer counters ruled out easy reusable lexer surfaces. The latest reduce
      storage trial proved that removing only one copy is insufficient, not that
      reduce is no longer the broad parser-core target.
    - Tooling: `cargo flamegraph` for post-builder samples, temporary counters
-     for stack-push batches and summary fallback causes, same-session
-     seven-language benchmarks.
+     for pending reduction metadata, stack-push batches, and summary fallback
+     causes, same-session seven-language benchmarks.
    - Reject if it is a linear-only direct-storage path, buffer adoption, direct
      graph collection, candidate-selection-only change, or summary-loop rewrite.
 
@@ -791,10 +821,10 @@ Implications:
 The next parser-core trial should be a multi-phase reduce design measurement,
 not a direct-storage implementation:
 
-- Hypothesis: the remaining reduce opportunity requires removing at least two
-  phases together, likely parent/trailing-extra stack-push repetition plus
-  summary or candidate materialization. Removing only builder-to-arena copy was
-  not universal.
+- Hypothesis: the remaining reduce opportunity requires removing repeated
+  internal-parent materialization. Parent-plus-trailing-extra push batching is
+  too narrow, but reductions almost always pop an already-materialized internal
+  subtree soon after creating one.
 - History check: direct graph collection, direct arena finalization, one-pass
   linear final storage, summary-loop rewrites, and candidate-selection-only
   changes are closed as standalone reduce directions.
@@ -804,9 +834,10 @@ not a direct-storage implementation:
 - Kill criteria: reject any trial that is linear-only direct storage, buffer
   adoption, graph collection alone, summary-loop rewrite alone, or a branch-only
   fast path.
-- Implementation boundary if evidence passes: design either a batched
-  reduce-stack push protocol or a pending-reduction descriptor that avoids
-  materializing intermediate parents until metadata or tree identity is needed.
+- Implementation boundary if evidence passes: design a pending-reduction
+  descriptor that exposes subtree metadata lazily and materializes only when
+  tree identity, child iteration, external scanner state, comparison, or final
+  tree output requires it.
 
 ### Reduce-Construction Redesign Sketch
 
