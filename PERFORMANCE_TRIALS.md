@@ -16,26 +16,28 @@ live outside the repo under `/tmp`.
 
 ## Current Baseline
 
-- Last pushed batch: `f17c0325` (`Use direct lexer EOF checks internally`)
-- Current local positive commit: `459741ff` (`Fast path linear stack pops`)
-- Weighted normal parsing throughput after `459741ff`:
-  - baseline at `ff183714`: `18151.8 bytes/ms`
-  - current: `19067.5 bytes/ms`
-  - delta: `+5.04%`
+- Last pushed batch: `40bf2b97` (`Record tree arena page size trial`)
+- Current local log-only commit: `68512e16` (`Record additional parser architecture trials`)
+- Current kept architecture change: `9e843a09` (`Allocate parser reduction nodes in tree arena`)
+- Same-session language-average throughput for the kept arena-reduction slice:
+  - baseline before arena-reduction slice: `94646 bytes/ms` total across seven language averages
+  - after arena-reduction slice: `99678 bytes/ms` total across seven language averages
+  - delta: `+5.3%`
 
-Per-language weighted deltas after `459741ff`:
+Per-language deltas for the kept arena-reduction slice:
 
 | Language | Baseline bytes/ms | Current bytes/ms | Delta |
 | --- | ---: | ---: | ---: |
-| C++ | 7481.3 | 10363.1 | +38.52% |
-| Go | 16483.3 | 16543.6 | +0.37% |
-| Java | 7371.4 | 12446.7 | +68.85% |
-| JavaScript | 18173.8 | 19110.9 | +5.16% |
-| Python | 12615.2 | 13025.8 | +3.26% |
-| Rust | 16492.2 | 19762.1 | +19.83% |
-| TypeScript | 26661.9 | 27397.0 | +2.76% |
+| JavaScript | 17119 | 18072 | +5.6% |
+| TypeScript | 22095 | 23024 | +4.2% |
+| Python | 9031 | 9276 | +2.7% |
+| Go | 15102 | 15265 | +1.1% |
+| Rust | 13683 | 15139 | +10.6% |
+| C++ | 7028 | 7068 | +0.6% |
+| Java | 10588 | 11834 | +11.8% |
 
-The remaining gap is mostly TypeScript, JavaScript, Go, and Python.
+The remaining 20% target is not met. The remaining gap is mostly TypeScript,
+JavaScript, Go, Python, and C++.
 
 ## Profiling Setup
 
@@ -179,6 +181,128 @@ Same-session canary result for `329f8b08`:
 | --- | --- |
 | Reset benchmark allocator for raw parsing | Removed from history because benchmark source changes are out of scope |
 
+## Reflection Cadence
+
+After every ten performance attempts, stop and write a reflection before making
+the next code experiment. A reflection must answer:
+
+- Which attempts were positive, negative, or inconclusive?
+- Which directions are now closed?
+- Which profiler evidence still supports the next direction?
+- What acceptance gate must the next experiment pass?
+
+This is meant to prevent repeating already-failed ideas like refcount ordering,
+page-size tuning, or partial arena adoption without new evidence.
+
+### Reflection 1: Arena/Allocation Architecture Batch
+
+Attempts covered:
+
+1. Record subtree allocation profiling results.
+2. Record subtree slab allocation trials.
+3. Add subtree ownership regression test.
+4. Record additional subtree allocation misses.
+5. Record subtree allocation malloc trial.
+6. Record subtree small-block pool trial.
+7. Add arena-backed tree storage foundation.
+8. Allocate parser reduction nodes in tree arena.
+9. Record arena leaf allocation trial.
+10. Record tree arena page size trial.
+11. Record additional parser architecture trials.
+
+What worked:
+
+- Arena-backed normal tree storage plus arena allocation for parser reduction
+  parent nodes is the only kept architecture win in this batch.
+- It gave a same-session average gain of `+5.3%` across the seven target
+  language averages, with stronger Rust and Java wins.
+- The `arena_owned` clone bug was real and fixed by clearing the ownership bit
+  on heap clones.
+
+What failed:
+
+- Pooling/slab variants reduced some allocator activity but added enough
+  bookkeeping or locality cost to regress benchmarks.
+- Arena-backed heap leaves were not universal: Go and Rust regressed.
+- Larger arena pages regressed JavaScript.
+- Stack-pop array adoption variants were mixed and should not be mistaken for a
+  real builder path.
+- Refcount ordering changes failed twice and are closed.
+- Skipping balancing showed no universal upside.
+
+Main lesson:
+
+- Allocation count alone is not predictive. Several changes reduced allocation
+  pressure or looked cheaper locally but lost on cache locality, branch layout,
+  or language-specific parse shape.
+- The next serious work should build a real parser-local reduce builder that
+  writes child spans in the desired representation from the start. Do not try to
+  rescue already-allocated `SubtreeArray` buffers after the fact.
+
+Next acceptance gate:
+
+- Before coding the builder, collect reduce child-count distribution and
+  `ts_stack_pop_count` linear-vs-graph fallback rates across at least
+  JavaScript, TypeScript, Go, and Rust.
+- Any kept optimization must pass same-session normal benchmarks for all seven
+  target languages and `cargo test --all` outside the sandbox.
+
+## Direction Triage Before Further Experiments
+
+### Closed Directions
+
+Do not retry these without new profile evidence that contradicts the recorded
+results:
+
+| Direction | Why closed |
+| --- | --- |
+| Relaxed/release-acquire subtree or arena refcount ordering | Failed twice: the earlier clean JavaScript benchmark regressed, and the post-arena JavaScript canary regressed from 18072 to 17604 avg bytes/ms. Current flamegraph shows retain/release frames, but not as a dominant standalone bottleneck. |
+| Larger tree arena pages | 64 KiB pages reduced page churn in theory but regressed JavaScript to 17256 avg bytes/ms, likely from worse locality/cache behavior. |
+| Arena-backed lexer leaves | Helped some languages but regressed Go and Rust, so it is not universal. |
+| Adopting stack-pop malloc buffers into `TreeArena` | Both external metadata and embedded-header variants were mixed: JavaScript was flat/regressed while TypeScript moved in opposite directions. This is not the same as a real builder path and should not be repeated. |
+| Skipping or deferring all balancing | JavaScript improved, but TypeScript regressed badly. Balancing cannot be removed as a universal normal-parse win. |
+
+### Current Hotspot Evidence
+
+Latest JavaScript `jquery.js` flamegraph after the kept arena-reduction slice:
+
+| Frame | Samples | Share |
+| --- | ---: | ---: |
+| `ts_parser__reduce` | 475 | 27.76% |
+| `ts_lex` | 197 | 11.51% |
+| `ts_subtree_new_node_in_arena` | 147 | 8.59% |
+| `ts_stack_pop_count` | 147 | 8.59% |
+| `tree_sitter_javascript_external_scanner_scan` | 137 | 8.01% |
+| `ts_parser__balance_subtree` | 112 | 6.55% |
+| `ts_subtree_compress` | 92 | 5.38% |
+| `ts_subtree_summarize_children` | 91 | 5.32% |
+
+The evidence says the next experiment should target the reduce/stack-pop/node
+construction pipeline as a whole. It should not target isolated refcount memory
+ordering unless a new flamegraph shows refcount operations rising above the
+reduce/stack-pop/summarize frames.
+
+### Candidate Directions
+
+| Priority | Direction | Reason | Pre-code gate |
+| --- | --- | --- | --- |
+| 1 | Real parser-local builder pop path | Directly targets the shared `ts_parser__reduce` + `ts_stack_pop_count` + node construction pipeline. Unlike adopted-block trials, it should write child spans into builder scratch storage from the start, not allocate a normal `SubtreeArray` and try to rescue it later. | Before coding, collect per-language child-count and stack-pop fallback rates using profiling or temporary local instrumentation outside committed benchmark code. |
+| 2 | Reduce summarization work during builder construction | `ts_subtree_summarize_children` remains visible and is called immediately for every reduction. A builder could accumulate summary fields while writing children, avoiding a second child walk. | Only proceed if builder-pop profiling shows child-span construction still dominates after stack-pop copying is removed. |
+| 3 | Lexer/external scanner profiling by language | JavaScript spends substantial time in `ts_lex`, external scanner scan, and keyword lexing. This may help JS/TS but is less likely to be universal across Go/Rust/Python/C++/Java. | Require flamegraphs for at least JS, TS, Go, Rust before implementing lexer changes. |
+
+### Experiment Acceptance Gate
+
+Before keeping any new library optimization:
+
+- Run same-session `cargo xtask benchmark --kind normal -r 10 --language` for
+  TypeScript, JavaScript, Python, Go, Rust, C++, and Java.
+- Treat a target-language average regression or meaningful worst-file regression
+  as a reject unless another target-language gain is large enough and there is a
+  clear universal explanation.
+- Run `cargo test --all` outside the sandbox before committing kept library code.
+- Record failed trials here immediately, including the direction and the
+  canary numbers that rejected it.
+
 ## Measurement Rules
 
 - Do not edit benchmark source code.
@@ -196,6 +320,7 @@ cargo xtask benchmark --kind normal -r 10 --language typescript
 - Commit only positive library changes.
 - Keep each optimization in its own commit.
 - Push only after 10 additional optimization commits, unless explicitly asked.
+- After every 10 perf attempts, add a reflection before the next experiment.
 
 ## Validation Notes
 
