@@ -143,6 +143,7 @@ may refer to these rows, but should not duplicate them as separate attempts.
 | Lexer/runtime boundary counters | Profiling/design | Temporary parser and lexer counters across the seven target languages showed included-range stepping is zero in normal parsing and chunk reads are tiny. External scanner calls are high for JavaScript/TypeScript/Python and moderate for Rust, but absent for Go/C++/Java. Core runtime lookahead/advance callbacks are broad, but prior single-range and UTF-8/ASCII fast paths already failed, so lexer work needs narrower boundary evidence before code. |
 | Reduce push/pop shape counters | Profiling/design | Temporary fresh-reduce counters showed trailing-extra stack pushes are too rare for batching to be a primary direction: `10,313` trailing pushes vs `319,371` parent pushes across the seven target languages. The broader signal is internal subtree churn: reductions popped `316,248` internal subtrees, almost one per reduction group. This supports pending/lazy reduction metadata as the next architecture design and deprioritizes parent-plus-extra push batching. |
 | Pending materialization pressure counters | Profiling/design | Temporary counters showed normal parsing rarely forces full tree comparison after reduce: `0` `ts_subtree_compare` calls across the seven-language run. Stack equivalence checked `9,678` links across `319,371` reduced parents, with Go contributing most of that. External-token metadata is the main required descriptor surface: `47,710` reduced parents had external tokens and `14,730` had external scanner state changes. |
+| Pending reduction lifetime counters | Profiling/design | Temporary library-only counters across the seven target languages showed `315,724` internal children consumed by later reductions versus `319,371` pushed parents. `253,760 / 319,371` pushed reductions had at least one internal child, `126,638` were single-internal-child reductions, merged candidate groups remained only `17`, and trailing extras stayed `10,313`. This supports a pending-descriptor forest because the hot loop repeatedly materializes parents that almost immediately become reduce inputs; it does not support standalone candidate-selection work. |
 
 ### Rejected Or Closed
 
@@ -812,61 +813,110 @@ Implications:
   fields, external scanner metadata, child-span ownership, and a forced
   materialization path.
 
-### Pending Reduction Implementation Slice
+Temporary pending lifetime instrumentation, removed before committing:
 
-Do not start by changing final tree storage. The next production-code slice, if
-attempted, should be a behavior-preserving stack-link payload abstraction:
+| Language | Pushed parents | Internal children consumed by later reductions | Reductions with internal child | Single-internal-child reductions | Trailing extras | Merged candidate groups | Internal children with external tokens | Internal children with scanner-state change | Internal children with dynamic precedence |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| JavaScript | 102,012 | 101,774 | 83,239 | 42,859 | 3,180 | 0 | 19,163 | 0 | 8,915 |
+| TypeScript | 65,903 | 65,199 | 53,273 | 27,812 | 3,086 | 0 | 6,484 | 0 | 4,299 |
+| Python | 59,977 | 59,890 | 47,046 | 21,240 | 659 | 0 | 19,760 | 14,394 | 651 |
+| Go | 64,540 | 62,137 | 49,584 | 23,851 | 2,528 | 12 | 0 | 0 | 12,280 |
+| Rust | 21,182 | 21,169 | 16,414 | 9,114 | 849 | 0 | 2,277 | 319 | 0 |
+| C++ | 4,592 | 4,466 | 3,358 | 1,292 | 11 | 5 | 0 | 0 | 2,324 |
+| Java | 1,165 | 1,089 | 846 | 470 | 0 | 0 | 0 | 0 | 126 |
+| Total | 319,371 | 315,724 | 253,760 | 126,638 | 10,313 | 17 | 47,684 | 14,713 | 28,595 |
 
-1. Introduce a parser-private payload type equivalent to the current
-   `StackLink { subtree: Subtree, is_pending: bool }` behavior.
-2. Route stack metadata queries through payload helper functions:
-   error cost, total size, total bytes, visible node count, dynamic precedence,
-   symbol, child count, extra flag, external scanner state equality, retain, and
-   release.
-3. Keep the only concrete payload variant as `Subtree` for the first commit.
-   This commit must be benchmark-neutral before adding lazy reductions.
-4. Add a second payload variant only after the compatibility layer is proven:
-   `PendingReductionSummary` containing parent summary metadata, production id,
-   dynamic precedence, external scanner metadata, child-span ownership, and a
-   forced materialization pointer/path.
-5. Materialize before child iteration, public tree output, tree comparison,
-   mutable subtree access, or any operation not covered by the payload metadata
-   API.
+Implications:
+
+- The upper bound for pending reductions is real: internal children consumed by
+  later reductions are `98.9%` as many as pushed parents across the target
+  benchmark. This is exactly the repeated materialize-then-reduce-input cycle
+  that a descriptor forest can attack.
+- The next implementation should not try to eliminate final tree construction.
+  The final tree still needs real nodes. The win must come from moving parent
+  allocation, child copying, summary calculation, retain/release churn, and
+  stack metadata queries out of the reduce hot loop and into one controlled
+  materialization pass.
+- Merged candidates remain rare (`17` groups), so the algorithm should preserve
+  selection semantics but not optimize primarily for candidate comparison.
+- External scanner metadata remains the riskiest descriptor field. JavaScript,
+  TypeScript, Python, and Rust all need descriptor-visible external-token
+  metadata, and Python needs scanner-state-change metadata.
+
+### Pending Descriptor Algorithm
+
+The next production-code slice should add a second stack-link payload variant,
+not another direct-storage reduce path.
+
+Proposed representation:
+
+```text
+StackLinkPayload
+  Materialized(Subtree)
+  PendingReduction(PendingReductionId)
+
+PendingReduction
+  symbol
+  production_id
+  parse_state
+  child_span in parser-owned pending storage
+  trailing_extra_span
+  cached Length / total bytes / visible node count
+  cached error cost / dynamic precedence
+  cached flags: visible, named, extra, fragile, external tokens,
+                external scanner state changed, depends on column
+  cached first/last leaf metadata
+  cached external scanner state payload when present
+  materialized Subtree, initially null
+```
+
+Hot-path behavior:
+
+1. `ts_parser__reduce` builds a `PendingReduction` descriptor for the selected
+   candidate instead of immediately calling `ts_subtree_new_node_in_arena`.
+2. `ts_stack_push` stores `PendingReductionId` in `StackLinkPayload`.
+3. `stack_node_new`, `stack_node_add_link`, stack error cost, dynamic
+   precedence, position, node count, and merge/equivalence checks use payload
+   metadata helpers and must not materialize.
+4. A later reduce can pop pending payloads and append pending child ids to the
+   new descriptor without first converting them to `Subtree`.
+5. Materialization happens only at final tree output, child iteration, mutable
+   subtree access, public tree comparison, reparsing, or any metadata query that
+   the descriptor API cannot answer.
 
 Kill criteria:
 
-- If the `Subtree`-only payload abstraction regresses the seven-language normal
-  benchmark, reject the pending-reduction direction before adding lazy payloads.
-- If the lazy payload needs to materialize in `stack_node_new`, ordinary stack
-  merging, or non-ambiguous reduce pop, reject it; those are the hot paths it is
-  meant to avoid.
-- If external scanner metadata cannot be copied/compared without materializing
-  children, reject it for the universal target because JavaScript, TypeScript,
-  Python, and Rust all exercise that metadata.
+- Reject if ordinary reduce pop, stack push, stack merge, or stack metadata
+  updates force materialization.
+- Reject if external scanner state cannot be copied/compared from descriptor
+  metadata without walking materialized children.
+- Reject if the first working prototype shifts cost to final materialization
+  without improving same-session seven-language normal benchmarks.
+- Reject if the implementation becomes a linear-only fast path, direct arena
+  reservation retry, buffer adoption scheme, candidate-selection-only change,
+  or summary-loop rewrite.
 
 ### Candidate Ranking
 
 | Rank | Direction | Decision |
 | ---: | --- | --- |
-| 1 | Multi-phase reduce protocol redesign | Back to the top implementation direction. Lexer counters ruled out included-range/chunking work and showed external scanners are not universal. Future reduce work must remove more than the builder-to-arena copy: summary, stack-push, or graph-candidate materialization must move too. |
+| 1 | Pending-reduction descriptor forest | Top implementation direction. Lifetime counters show `315,724` internal children consumed by later reductions versus `319,371` pushed parents, so the target is repeated hot-loop parent materialization and stack payload churn. The implementation must move allocation/copy/summary/refcount work out of reduce, not repeat direct-storage or candidate-selection-only trials. |
 | 2 | Lexer/runtime boundary investigation | Measurement remains useful, but not yet an implementation direction. Only pursue code if a flamegraph isolates reusable runtime work beyond generated `ts_lex`, keyword lexing, external scanner bodies, included-range checks, or chunk reads. |
 | 3 | Balancing/compress redesign | Important for Rust and moderate for JS/TS/Go/Python. Do not remove balancing; contains-repetition pruning and single-pass compression both regressed or failed to improve Rust. Only consider a correctness-preserving redesign with tree-shape evidence, not schedule tuning. |
 | 4 | Summarization during reduce construction | Only after a real builder changes selection/ownership. A direct arena copy-plus-summary loop regressed and is closed. |
 
 ### Next Direction Queue
 
-1. Multi-phase reduce protocol redesign.
-   - Goal: remove multiple reduce phases together: candidate materialization,
-     builder-to-arena copying, separate child summarization, and repeated
-     parent/trailing-extra stack pushes or immediate internal-parent
-     materialization.
-   - Why first: reduce is still the largest shared parser-owned frame, and
-     lexer counters ruled out easy reusable lexer surfaces. The latest reduce
-     storage trial proved that removing only one copy is insufficient, not that
-     reduce is no longer the broad parser-core target.
-   - Tooling: `cargo flamegraph` for post-builder samples, temporary counters
-     for pending reduction metadata, stack-push batches, and summary fallback
-     causes, same-session seven-language benchmarks.
+1. Pending-reduction descriptor forest.
+   - Goal: let fresh reductions push descriptor payloads instead of immediately
+     materialized parent `Subtree` nodes, then materialize the descriptor forest
+     only at final tree output or an explicit forced-materialization boundary.
+   - Why first: reduce is still the largest shared parser-owned frame, lexer
+     counters ruled out easy reusable lexer surfaces, and lifetime counters show
+     almost every reduced parent becomes a later reduce input.
+   - Tooling: temporary materialization-gate counters, `cargo flamegraph` before
+     and after the prototype, same-session seven-language benchmarks, and
+     `cargo test --all` outside sandbox for kept production code.
    - Reject if it is a linear-only direct-storage path, buffer adoption, direct
      graph collection, candidate-selection-only change, or summary-loop rewrite.
 
@@ -907,26 +957,30 @@ Kill criteria:
 
 ### Next Parser Trial
 
-The next parser-core trial should be a multi-phase reduce design measurement,
-not a direct-storage implementation:
+The next parser-core trial should be a pending-descriptor prototype:
 
-- Hypothesis: the remaining reduce opportunity requires removing repeated
-  internal-parent materialization. Parent-plus-trailing-extra push batching is
-  too narrow, but reductions almost always pop an already-materialized internal
-  subtree soon after creating one.
+- Hypothesis: fresh parsing can reduce hot-loop work by representing selected
+  parents as pending descriptors while they are on the parse stack. The final
+  tree still materializes real nodes, but reduce no longer has to allocate,
+  summarize, retain, release, and immediately repop many internal parents.
 - History check: direct graph collection, direct arena finalization, one-pass
   linear final storage, summary-loop rewrites, and candidate-selection-only
   changes are closed as standalone reduce directions.
-- Evidence status: reduce remains the largest shared parser-owned frame, while
-  lexer counters ruled out included-range/chunking and showed external scanner
-  work is not universal.
-- Kill criteria: reject any trial that is linear-only direct storage, buffer
-  adoption, graph collection alone, summary-loop rewrite alone, or a branch-only
-  fast path.
-- Implementation boundary if evidence passes: design a pending-reduction
-  descriptor that exposes subtree metadata lazily and materializes only when
-  tree identity, child iteration, external scanner state, comparison, or final
-  tree output requires it.
+- Evidence status: lifetime counters show `315,724` internal children consumed
+  by later reductions across `319,371` pushed parents; pressure counters show
+  stack equivalence is moderate and full tree comparison is absent in normal
+  parsing.
+- First slice: add `PendingReduction` storage and the second
+  `StackLinkPayload` variant behind metadata helpers, then force materialization
+  at every unsupported operation. Expect this slice to be correctness-heavy and
+  not necessarily the final performance win.
+- Second slice: make fresh `ts_parser__reduce` create pending descriptors for
+  selected parents, while reparses keep materialized `Subtree` behavior until
+  changed-range tests prove descriptor materialization boundaries.
+- Kill criteria: reject if ordinary reduce pop, stack push, stack merge, or
+  stack metadata updates force materialization; reject if external scanner
+  metadata requires child materialization in JavaScript, TypeScript, Python, or
+  Rust.
 
 ### Reduce-Construction Redesign Sketch
 
