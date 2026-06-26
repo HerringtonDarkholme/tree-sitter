@@ -406,6 +406,95 @@ redesign, then a no-code review against closed history before implementation:
   protocol as a coherent replacement for the current `StackSliceArray` to node
   construction pipeline, not as a special fast path.
 
+### Reduce-Construction Redesign Sketch
+
+Current protocol:
+
+1. `ts_stack_pop_count` materializes one or more `StackSlice` values.
+2. Each `StackSlice` owns a malloc-backed `SubtreeArray`.
+3. `ts_parser__reduce` removes trailing extras by shrinking that array and
+   moving extras into parser scratch arrays.
+4. `ts_parser__new_node` copies the selected children into the tree arena and
+   deletes the malloc-backed array.
+5. `ts_subtree_summarize_children` walks the copied children to fill parent
+   metadata.
+6. Merged slices may allocate scratch nodes via `ts_parser__select_children`
+   just to choose the best candidate.
+7. The selected parent and trailing extras are pushed back onto the stack.
+
+Design target:
+
+- Replace the `StackSliceArray` plus malloc-backed `SubtreeArray` protocol with
+  a parser-owned reduce-construction context.
+- The stack should report candidate slices into that context instead of owning
+  child arrays.
+- The context should represent each candidate as a child span plus metadata,
+  support graph fallback, support merged-slice candidate selection, and allocate
+  the final parent once after selection.
+- Summary metadata should be computed while finalizing the candidate, or at
+  least from the same child span, so construction does not force a second
+  independent child-array walk.
+
+Required properties:
+
+- Handles both linear and graph stack pops.
+- Preserves merged-slice selection semantics from `ts_parser__select_tree`.
+- Preserves trailing-extra push order.
+- Preserves retain/release behavior for children that are inspected but not
+  selected.
+- Does not reuse adopted malloc buffers.
+- Does not create a linear-only fast path.
+- Does not special-case zero-child or no-alias nodes.
+
+Sketch:
+
+```text
+ReduceBuilder
+  scratch children storage owned by TSParser
+  candidate descriptors: stack version, base node, child span, trailing extras
+  candidate summary metadata for selection
+
+ts_stack_collect_pop_slices(stack, version, count, builder)
+  walks linear and graph paths
+  appends children into builder spans
+  records destination stack node/version
+  leaves ownership cleanup with builder
+
+ts_parser__reduce
+  asks stack to collect candidates into builder
+  rejects versions over the max-version limit
+  selects the winning candidate per destination version
+  allocates exactly one arena parent for each winner
+  fills child storage and summary metadata from the builder span
+  pushes parent and trailing extras
+  merges stack versions
+  clears builder scratch state
+```
+
+Implementation slices if this design survives review:
+
+1. Add the builder data types behind parser-private APIs with no behavior
+   change.
+2. Add collection instrumentation/tests for candidate equivalence against
+   `ts_stack_pop_count`.
+3. Route graph and linear collection through the builder while still creating
+   normal `SubtreeArray` nodes, proving semantic equivalence first.
+4. Move final parent allocation to consume selected builder spans directly.
+5. Fold summary computation into finalization only after the builder path is
+   correct and benchmark-positive.
+
+Pre-implementation rejection criteria:
+
+- If the first implementation slice needs a linear-only branch to be useful,
+  reject it.
+- If candidate selection still requires constructing every candidate as a full
+  subtree in normal cases, reject it.
+- If ownership requires overloading `SubtreeArray.capacity` or adopting malloc
+  blocks, reject it.
+- If the design cannot explain how it helps Go graph fallback and C++ lexer-heavy
+  profiles, treat it as insufficient for the 20% target and pair it with a
+  separate lexer/balance direction before implementation.
+
 ## Parser Acceptance Gate
 
 Before keeping any new library optimization:
