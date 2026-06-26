@@ -16,14 +16,14 @@ use std::ffi::c_void;
 use std::ptr;
 
 use crate::ffi::{
-    TSInput, TSInputEncodingUTF16BE, TSInputEncodingUTF16LE, TSInputEncodingUTF8,
-    TSLogger, TSPoint, TSRange,
+    TSInput, TSInputEncodingUTF8, TSInputEncodingUTF16BE, TSInputEncodingUTF16LE, TSLogger,
+    TSPoint, TSRange,
 };
 
 use super::alloc::{ts_free, ts_realloc};
 use super::language::TSLexer;
-use super::length::{length_is_undefined, Length, LENGTH_UNDEFINED};
-use super::unicode::{ts_decode_utf8, ts_decode_utf16_le, ts_decode_utf16_be, TS_DECODE_ERROR};
+use super::length::{LENGTH_UNDEFINED, Length, length_is_undefined};
+use super::unicode::{TS_DECODE_ERROR, ts_decode_utf8, ts_decode_utf16_be, ts_decode_utf16_le};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -91,16 +91,6 @@ const _: () = assert!(std::mem::size_of::<ColumnData>() == 8);
 // Internal (static) functions
 // ---------------------------------------------------------------------------
 
-#[inline]
-unsafe fn lexer_ref<'a>(lexer: *const TSLexer) -> &'a Lexer {
-    lexer.cast::<Lexer>().as_ref().unwrap_unchecked()
-}
-
-#[inline]
-unsafe fn lexer_mut<'a>(lexer: *mut TSLexer) -> &'a mut Lexer {
-    lexer.cast::<Lexer>().as_mut().unwrap_unchecked()
-}
-
 /// Sets the column data to the given value and marks it valid.
 fn ts_lexer__set_column_data(self_: &mut Lexer, val: u32) {
     self_.column_data.valid = true;
@@ -122,7 +112,7 @@ fn ts_lexer__invalidate_column_data(self_: &mut Lexer) {
 
 /// Check if the lexer has reached EOF.
 unsafe extern "C" fn ts_lexer__eof(lexer: *const TSLexer) -> bool {
-    let self_ = lexer_ref(lexer);
+    let self_ = lexer.cast::<Lexer>().as_ref().unwrap_unchecked();
     self_.current_included_range_index == self_.included_range_count
 }
 
@@ -316,7 +306,7 @@ unsafe fn ts_lexer__do_advance(self_: &mut Lexer, skip: bool) {
 
 /// Advance to the next character (with logging). `TSLexer` vtable callback.
 unsafe extern "C" fn ts_lexer__advance(lexer: *mut TSLexer, skip: bool) {
-    let self_ = lexer_mut(lexer);
+    let self_ = lexer.cast::<Lexer>().as_mut().unwrap_unchecked();
     if self_.chunk.is_null() {
         return;
     }
@@ -331,11 +321,7 @@ unsafe extern "C" fn ts_lexer__advance(lexer: *mut TSLexer, skip: bool) {
                     character,
                 );
             } else {
-                ts_lexer__log_shim(
-                    lexer,
-                    c"skip character:%d".as_ptr().cast::<i8>(),
-                    character,
-                );
+                ts_lexer__log_shim(lexer, c"skip character:%d".as_ptr().cast::<i8>(), character);
             }
         } else if (32..127).contains(&character) {
             ts_lexer__log_shim(
@@ -357,16 +343,14 @@ unsafe extern "C" fn ts_lexer__advance(lexer: *mut TSLexer, skip: bool) {
 
 /// Mark that a token match has completed. `TSLexer` vtable callback.
 unsafe extern "C" fn ts_lexer__mark_end(lexer: *mut TSLexer) {
-    let self_ = lexer_mut(lexer);
+    let self_ = lexer.cast::<Lexer>().as_mut().unwrap_unchecked();
     if !ts_lexer__eof(&self_.data) {
         // If the lexer is right at the beginning of included range,
         // then the token should be considered to end at the *end* of the
         // previous included range, rather than here.
         let range_index = self_.current_included_range_index as usize;
         let current_included_range = ts_lexer__included_range(self_, range_index);
-        if range_index > 0
-            && self_.current_position.bytes == current_included_range.start_byte
-        {
+        if range_index > 0 && self_.current_position.bytes == current_included_range.start_byte {
             let previous_included_range = ts_lexer__included_range(self_, range_index - 1);
             self_.token_end_position = Length {
                 bytes: previous_included_range.end_byte,
@@ -380,7 +364,7 @@ unsafe extern "C" fn ts_lexer__mark_end(lexer: *mut TSLexer) {
 
 /// Get the current column number. `TSLexer` vtable callback.
 unsafe extern "C" fn ts_lexer__get_column(lexer: *mut TSLexer) -> u32 {
-    let self_ = lexer_mut(lexer);
+    let self_ = lexer.cast::<Lexer>().as_mut().unwrap_unchecked();
 
     self_.did_get_column = true;
 
@@ -422,7 +406,7 @@ unsafe extern "C" fn ts_lexer__get_column(lexer: *mut TSLexer) -> u32 {
 /// Is the lexer at a boundary between two disjoint included ranges?
 /// `TSLexer` vtable callback.
 unsafe extern "C" fn ts_lexer__is_at_included_range_start(lexer: *const TSLexer) -> bool {
-    let self_ = lexer_ref(lexer);
+    let self_ = lexer.cast::<Lexer>().as_ref().unwrap_unchecked();
     if self_.current_included_range_index < self_.included_range_count {
         let range_index = self_.current_included_range_index as usize;
         let current_range = ts_lexer__included_range(self_, range_index);
@@ -568,9 +552,11 @@ pub unsafe fn ts_lexer_set_included_ranges(
     }
 
     let count = count as usize;
-    self_.included_ranges =
-        ts_realloc(self_.included_ranges.cast::<c_void>(), count * std::mem::size_of::<TSRange>())
-            .cast::<TSRange>();
+    self_.included_ranges = ts_realloc(
+        self_.included_ranges.cast::<c_void>(),
+        count * std::mem::size_of::<TSRange>(),
+    )
+    .cast::<TSRange>();
     std::ptr::copy_nonoverlapping(ranges, self_.included_ranges, count);
     self_.included_range_count = count as u32;
     ts_lexer_goto(self_, self_.current_position);
@@ -578,10 +564,7 @@ pub unsafe fn ts_lexer_set_included_ranges(
 }
 
 /// Get the current included ranges.
-pub unsafe fn ts_lexer_included_ranges(
-    self_: &Lexer,
-    count: *mut u32,
-) -> *mut TSRange {
+pub unsafe fn ts_lexer_included_ranges(self_: &Lexer, count: *mut u32) -> *mut TSRange {
     *count = self_.included_range_count;
     self_.included_ranges
 }
