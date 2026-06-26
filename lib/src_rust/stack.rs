@@ -293,10 +293,6 @@ pub(crate) unsafe fn array_insert<T>(arr: &mut Array<T>, index: u32, element: T)
     arr.size += 1;
 }
 
-pub(crate) unsafe fn array_front<T>(arr: &Array<T>) -> *mut T {
-    array_get(arr, 0)
-}
-
 pub(crate) const unsafe fn array_new<T>() -> Array<T> {
     Array {
         contents: ptr::null_mut(),
