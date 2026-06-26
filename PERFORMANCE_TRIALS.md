@@ -166,6 +166,7 @@ Same-session canary result for `329f8b08`:
 | Raw-pointer child loop in `ts_subtree_summarize_children` | Subtree summarize | JS/TS/Go/Python canaries regressed; the existing slice iterator appears to optimize better |
 | Use `ts_malloc` instead of `ts_realloc(NULL, size)` in subtree array allocation | Subtree allocation | JS/TS/Go/Python canaries regressed; allocator-call simplification did not overcome codegen/layout effects |
 | Parser `SubtreePool` free lists for 1-4 child node blocks | Subtree block allocation | Allocation calls dropped by ~1.8k/parse on JS, but harness and JS/TS/Go canaries regressed; per-release pool bookkeeping outweighed reuse |
+| Arena-backed heap leaves during lexing | Subtree allocation | JavaScript/TypeScript/Python improved, but Go regressed to 14165 avg bytes/ms and Rust regressed to 13219 avg bytes/ms; not viable as a universal normal-parse optimization |
 
 ## Non-Library Trial Removed
 
