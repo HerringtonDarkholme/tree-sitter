@@ -694,6 +694,52 @@ unsafe fn ts_stack__add_slice(
     array_push(&mut self_.slices, slice);
 }
 
+unsafe fn ts_stack_pop_count_linear(
+    self_: &mut Stack,
+    version: StackVersion,
+    count: u32,
+) -> Option<StackSliceArray> {
+    array_clear(&mut self_.slices);
+
+    let mut node = stack_head(self_, version).node;
+    let mut subtree_count = 0;
+    let mut subtrees = SubtreeArray {
+        contents: ptr::null_mut(),
+        size: 0,
+        capacity: 0,
+    };
+    let reserve_count = ts_subtree_alloc_size(count) / std::mem::size_of::<Subtree>();
+    array_reserve(
+        subtree_array_as_array_mut(&mut subtrees),
+        u32::try_from(reserve_count).unwrap(),
+    );
+
+    while subtree_count < count {
+        let current_node = node.as_ref().unwrap_unchecked();
+        if current_node.link_count != 1 {
+            ts_subtree_array_delete(self_.subtree_pool.as_mut().unwrap_unchecked(), &mut subtrees);
+            return None;
+        }
+
+        let link = current_node.links[0];
+        node = link.node;
+        if link.subtree.ptr.is_null() {
+            subtree_count += 1;
+        } else {
+            array_push(subtree_array_as_array_mut(&mut subtrees), link.subtree);
+            ts_subtree_retain(link.subtree);
+
+            if !ts_subtree_extra(link.subtree) {
+                subtree_count += 1;
+            }
+        }
+    }
+
+    ts_subtree_array_reverse(&mut subtrees);
+    ts_stack__add_slice(self_, version, stack_node_mut(node), &subtrees);
+    Some(ptr::read(&self_.slices))
+}
+
 /// Core iteration function for walking the stack graph.
 unsafe fn stack__iter(
     stack: &mut Stack,
@@ -1059,6 +1105,10 @@ pub unsafe fn ts_stack_pop_count(
     version: StackVersion,
     count: u32,
 ) -> StackSliceArray {
+    if let Some(result) = ts_stack_pop_count_linear(self_, version, count) {
+        return result;
+    }
+
     stack__iter(
         self_,
         version,
