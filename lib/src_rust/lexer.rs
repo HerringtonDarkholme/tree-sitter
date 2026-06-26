@@ -138,7 +138,7 @@ unsafe fn ts_lexer__included_range(self_: &Lexer, index: usize) -> &TSRange {
 }
 
 #[inline]
-unsafe fn ts_lexer__included_ranges(self_: &Lexer) -> &[TSRange] {
+const unsafe fn ts_lexer__included_ranges(self_: &Lexer) -> &[TSRange] {
     std::slice::from_raw_parts(self_.included_ranges, self_.included_range_count as usize)
 }
 
@@ -444,7 +444,7 @@ extern "C" {
 // ===========================================================================
 
 /// Initialize a Lexer, setting up the `TSLexer` vtable and default state.
-pub(crate) unsafe fn ts_lexer_init(self_: &mut Lexer) {
+pub unsafe fn ts_lexer_init(self_: &mut Lexer) {
     let s = self_;
     s.data.advance = Some(ts_lexer__advance);
     s.data.mark_end = Some(ts_lexer__mark_end);
@@ -477,26 +477,26 @@ pub(crate) unsafe fn ts_lexer_init(self_: &mut Lexer) {
 }
 
 /// Free the lexer's `included_ranges` allocation.
-pub(crate) unsafe fn ts_lexer_delete(self_: &mut Lexer) {
+pub unsafe fn ts_lexer_delete(self_: &mut Lexer) {
     ts_free(self_.included_ranges.cast::<c_void>());
 }
 
 /// Set the input source for the lexer.
-pub(crate) unsafe fn ts_lexer_set_input(self_: &mut Lexer, input: TSInput) {
+pub unsafe fn ts_lexer_set_input(self_: &mut Lexer, input: TSInput) {
     self_.input = input;
     ts_lexer__clear_chunk(self_);
     ts_lexer_goto(self_, self_.current_position);
 }
 
 /// Move the lexer to the given position (no-op if already there).
-pub(crate) unsafe fn ts_lexer_reset(self_: &mut Lexer, position: Length) {
+pub unsafe fn ts_lexer_reset(self_: &mut Lexer, position: Length) {
     if position.bytes != self_.current_position.bytes {
         ts_lexer_goto(self_, position);
     }
 }
 
 /// Prepare the lexer to start scanning a new token.
-pub(crate) unsafe fn ts_lexer_start(self_: &mut Lexer) {
+pub unsafe fn ts_lexer_start(self_: &mut Lexer) {
     self_.token_start_position = self_.current_position;
     self_.token_end_position = LENGTH_UNDEFINED;
     self_.data.result_symbol = 0;
@@ -518,7 +518,7 @@ pub(crate) unsafe fn ts_lexer_start(self_: &mut Lexer) {
 }
 
 /// Finalize the current token scan.
-pub(crate) unsafe fn ts_lexer_finish(self_: &mut Lexer, lookahead_end_byte: &mut u32) {
+pub unsafe fn ts_lexer_finish(self_: &mut Lexer, lookahead_end_byte: &mut u32) {
     if length_is_undefined(self_.token_end_position) {
         ts_lexer__mark_end(&mut self_.data);
     }
@@ -544,12 +544,12 @@ pub(crate) unsafe fn ts_lexer_finish(self_: &mut Lexer, lookahead_end_byte: &mut
 }
 
 /// Mark the end of the current token.
-pub(crate) unsafe fn ts_lexer_mark_end(self_: &mut Lexer) {
+pub unsafe fn ts_lexer_mark_end(self_: &mut Lexer) {
     ts_lexer__mark_end(&mut self_.data);
 }
 
 /// Set the included ranges for the lexer. Returns false if ranges are invalid.
-pub(crate) unsafe fn ts_lexer_set_included_ranges(
+pub unsafe fn ts_lexer_set_included_ranges(
     self_: &mut Lexer,
     mut ranges: *const TSRange,
     mut count: u32,
@@ -578,7 +578,7 @@ pub(crate) unsafe fn ts_lexer_set_included_ranges(
 }
 
 /// Get the current included ranges.
-pub(crate) unsafe fn ts_lexer_included_ranges(
+pub unsafe fn ts_lexer_included_ranges(
     self_: &Lexer,
     count: *mut u32,
 ) -> *mut TSRange {

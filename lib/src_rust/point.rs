@@ -56,7 +56,7 @@ pub const fn point_eq(a: TSPoint, b: TSPoint) -> bool {
     a.row == b.row && a.column == b.column
 }
 
-pub(crate) fn point_edit(point: &mut TSPoint, byte: &mut u32, edit: &TSInputEdit) {
+pub fn point_edit(point: &mut TSPoint, byte: &mut u32, edit: &TSInputEdit) {
     let start_byte = *byte;
     let start_point = *point;
 

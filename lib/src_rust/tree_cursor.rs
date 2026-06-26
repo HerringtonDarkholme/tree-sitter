@@ -133,7 +133,7 @@ unsafe fn tree_cursor_entry_array_back_mut(arr: &mut TreeCursorEntryArray) -> &m
 }
 
 #[inline]
-unsafe fn tree_cursor_entry_slice(arr: &TreeCursorEntryArray) -> &[TreeCursorEntry] {
+const unsafe fn tree_cursor_entry_slice(arr: &TreeCursorEntryArray) -> &[TreeCursorEntry] {
     std::slice::from_raw_parts(arr.contents, arr.size as usize)
 }
 
@@ -295,7 +295,7 @@ unsafe fn cursor_child<'a>(parent: Subtree, index: u32) -> &'a Subtree {
 }
 
 #[inline]
-unsafe fn cursor_children<'a>(parent: Subtree) -> &'a [Subtree] {
+const unsafe fn cursor_children<'a>(parent: Subtree) -> &'a [Subtree] {
     std::slice::from_raw_parts(
         ts_subtree_children(parent),
         ts_subtree_child_count(parent) as usize,
@@ -493,7 +493,7 @@ pub unsafe extern "C" fn ts_tree_cursor_reset(self_: *mut TSTreeCursor, node: TS
     ts_tree_cursor_init_ref(tree_cursor_mut(self_), node);
 }
 
-pub(crate) unsafe fn ts_tree_cursor_init_ref(cursor: &mut TreeCursor, node: TSNode) {
+pub unsafe fn ts_tree_cursor_init_ref(cursor: &mut TreeCursor, node: TSNode) {
     cursor.tree = node.tree.cast::<TSTree>();
     cursor.root_alias_symbol = node.context[3] as TSSymbol;
     array_clear(&mut cursor.stack);

@@ -222,7 +222,7 @@ unsafe fn node_child<'a>(parent: Subtree, index: u32) -> &'a Subtree {
 }
 
 #[inline]
-unsafe fn node_children<'a>(parent: Subtree) -> &'a [Subtree] {
+const unsafe fn node_children<'a>(parent: Subtree) -> &'a [Subtree] {
     std::slice::from_raw_parts(
         ts_subtree_children(parent),
         ts_subtree_child_count(parent) as usize,
@@ -263,7 +263,7 @@ unsafe fn ts_node_child_iterator_next(
 // ---------------------------------------------------------------------------
 
 #[inline]
-unsafe fn ts_node__is_relevant(self_: TSNode, include_anonymous: bool) -> bool {
+const unsafe fn ts_node__is_relevant(self_: TSNode, include_anonymous: bool) -> bool {
     let tree = ts_node__subtree(self_);
     if include_anonymous {
         ts_subtree_visible(tree) || ts_node__alias(&self_) != 0
@@ -731,7 +731,7 @@ pub unsafe extern "C" fn ts_node_eq(self_: TSNode, other: TSNode) -> bool {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn ts_node_is_null(self_: TSNode) -> bool {
+pub const unsafe extern "C" fn ts_node_is_null(self_: TSNode) -> bool {
     node_is_null(self_)
 }
 
@@ -741,7 +741,7 @@ pub const unsafe extern "C" fn ts_node_is_extra(self_: TSNode) -> bool {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn ts_node_is_named(self_: TSNode) -> bool {
+pub const unsafe extern "C" fn ts_node_is_named(self_: TSNode) -> bool {
     let alias = ts_node__alias(&self_) as TSSymbol;
     if alias != 0 {
         ts_language_symbol_metadata(node_language(self_), alias).named

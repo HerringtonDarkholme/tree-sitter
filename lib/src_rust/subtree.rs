@@ -402,7 +402,7 @@ static EMPTY_EXTERNAL_SCANNER_STATE: ExternalScannerState = ExternalScannerState
 // ExternalScannerState functions
 // ===========================================================================
 
-pub(crate) unsafe fn ts_external_scanner_state_init(
+pub unsafe fn ts_external_scanner_state_init(
     self_: &mut ExternalScannerState,
     data: *const u8,
     length: u32,
@@ -416,7 +416,7 @@ pub(crate) unsafe fn ts_external_scanner_state_init(
     }
 }
 
-pub(crate) unsafe fn ts_external_scanner_state_copy(self_: &ExternalScannerState) -> ExternalScannerState {
+pub unsafe fn ts_external_scanner_state_copy(self_: &ExternalScannerState) -> ExternalScannerState {
     let mut result = ExternalScannerState {
         data: ExternalScannerStateData {
             short_data: self_.data.short_data,
@@ -434,13 +434,13 @@ pub(crate) unsafe fn ts_external_scanner_state_copy(self_: &ExternalScannerState
     result
 }
 
-pub(crate) unsafe fn ts_external_scanner_state_delete(self_: &mut ExternalScannerState) {
+pub unsafe fn ts_external_scanner_state_delete(self_: &mut ExternalScannerState) {
     if self_.length > EXTERNAL_SCANNER_STATE_INLINE_SIZE as u32 {
         ts_free(self_.data.long_data.cast::<c_void>());
     }
 }
 
-pub(crate) const unsafe fn ts_external_scanner_state_data(self_: &ExternalScannerState) -> *const u8 {
+pub const unsafe fn ts_external_scanner_state_data(self_: &ExternalScannerState) -> *const u8 {
     if self_.length > EXTERNAL_SCANNER_STATE_INLINE_SIZE as u32 {
         self_.data.long_data
     } else {
@@ -448,7 +448,7 @@ pub(crate) const unsafe fn ts_external_scanner_state_data(self_: &ExternalScanne
     }
 }
 
-pub(crate) unsafe fn ts_external_scanner_state_eq(
+pub unsafe fn ts_external_scanner_state_eq(
     self_: &ExternalScannerState,
     buffer: *const u8,
     length: u32,
@@ -499,7 +499,7 @@ unsafe fn array_push_subtree(arr: &mut SubtreeArray, element: Subtree) {
 // SubtreeArray functions
 // ===========================================================================
 
-pub(crate) unsafe fn ts_subtree_array_copy(self_: SubtreeArray, dest: &mut SubtreeArray) {
+pub unsafe fn ts_subtree_array_copy(self_: SubtreeArray, dest: &mut SubtreeArray) {
     dest.size = self_.size;
     dest.capacity = self_.capacity;
     dest.contents = self_.contents;
@@ -513,14 +513,14 @@ pub(crate) unsafe fn ts_subtree_array_copy(self_: SubtreeArray, dest: &mut Subtr
     }
 }
 
-pub(crate) unsafe fn ts_subtree_array_clear(pool: &mut SubtreePool, self_: &mut SubtreeArray) {
+pub unsafe fn ts_subtree_array_clear(pool: &mut SubtreePool, self_: &mut SubtreeArray) {
     for i in 0..self_.size {
         ts_subtree_release(pool, *self_.contents.add(i as usize));
     }
     self_.size = 0;
 }
 
-pub(crate) unsafe fn ts_subtree_array_delete(pool: &mut SubtreePool, self_: &mut SubtreeArray) {
+pub unsafe fn ts_subtree_array_delete(pool: &mut SubtreePool, self_: &mut SubtreeArray) {
     ts_subtree_array_clear(pool, self_);
     if !self_.contents.is_null() {
         ts_free(self_.contents.cast::<c_void>());
@@ -530,7 +530,7 @@ pub(crate) unsafe fn ts_subtree_array_delete(pool: &mut SubtreePool, self_: &mut
     self_.capacity = 0;
 }
 
-pub(crate) unsafe fn ts_subtree_array_remove_trailing_extras(
+pub unsafe fn ts_subtree_array_remove_trailing_extras(
     self_: &mut SubtreeArray,
     destination: &mut SubtreeArray,
 ) {
@@ -547,7 +547,7 @@ pub(crate) unsafe fn ts_subtree_array_remove_trailing_extras(
     ts_subtree_array_reverse(destination);
 }
 
-pub(crate) unsafe fn ts_subtree_array_reverse(self_: &mut SubtreeArray) {
+pub unsafe fn ts_subtree_array_reverse(self_: &mut SubtreeArray) {
     let limit = self_.size / 2;
     for i in 0..limit {
         let reverse_index = self_.size as usize - 1 - i as usize;
@@ -722,7 +722,7 @@ pub const unsafe fn ts_subtree_missing(self_: Subtree) -> bool {
 }
 
 #[inline]
-pub(crate) const unsafe fn ts_subtree_is_keyword(self_: Subtree) -> bool {
+pub const unsafe fn ts_subtree_is_keyword(self_: Subtree) -> bool {
     if self_.data.is_inline() {
         self_.data.is_keyword()
     } else {
@@ -740,7 +740,7 @@ pub const unsafe fn ts_subtree_parse_state(self_: Subtree) -> TSStateId {
 }
 
 #[inline]
-pub(crate) unsafe fn ts_subtree_lookahead_bytes(self_: Subtree) -> u32 {
+pub unsafe fn ts_subtree_lookahead_bytes(self_: Subtree) -> u32 {
     if self_.data.is_inline() {
         u32::from(self_.data.lookahead_bytes())
     } else {
@@ -768,7 +768,7 @@ pub const unsafe fn ts_subtree_children(self_: Subtree) -> *mut Subtree {
 }
 
 #[inline]
-unsafe fn subtree_children<'a>(self_: Subtree) -> &'a [Subtree] {
+const unsafe fn subtree_children<'a>(self_: Subtree) -> &'a [Subtree] {
     let count = ts_subtree_child_count(self_) as usize;
     if count == 0 {
         &[]
@@ -840,7 +840,7 @@ pub unsafe fn ts_subtree_leaf_symbol(self_: Subtree) -> TSSymbol {
 }
 
 #[inline]
-pub(crate) const unsafe fn ts_subtree_leaf_parse_state(self_: Subtree) -> TSStateId {
+pub const unsafe fn ts_subtree_leaf_parse_state(self_: Subtree) -> TSStateId {
     if self_.data.is_inline() {
         return self_.data.parse_state;
     }
@@ -957,7 +957,7 @@ pub const unsafe fn ts_subtree_error_cost(self_: Subtree) -> u32 {
 // --- #30: dynamic_precedence, production_id ---
 
 #[inline]
-pub(crate) const unsafe fn ts_subtree_dynamic_precedence(self_: Subtree) -> i32 {
+pub const unsafe fn ts_subtree_dynamic_precedence(self_: Subtree) -> i32 {
     if self_.data.is_inline() || (*self_.ptr).child_count == 0 {
         0
     } else {
@@ -966,7 +966,7 @@ pub(crate) const unsafe fn ts_subtree_dynamic_precedence(self_: Subtree) -> i32 
 }
 
 #[inline]
-pub(crate) const unsafe fn ts_subtree_production_id(self_: Subtree) -> u16 {
+pub const unsafe fn ts_subtree_production_id(self_: Subtree) -> u16 {
     if ts_subtree_child_count(self_) > 0 {
         (*self_.ptr).data.children.production_id
     } else {
@@ -977,12 +977,12 @@ pub(crate) const unsafe fn ts_subtree_production_id(self_: Subtree) -> u16 {
 // --- #31: fragile/external/depends_on_column accessors ---
 
 #[inline]
-pub(crate) const unsafe fn ts_subtree_fragile_left(self_: Subtree) -> bool {
+pub const unsafe fn ts_subtree_fragile_left(self_: Subtree) -> bool {
     if self_.data.is_inline() { false } else { (*self_.ptr).fragile_left() }
 }
 
 #[inline]
-pub(crate) const unsafe fn ts_subtree_fragile_right(self_: Subtree) -> bool {
+pub const unsafe fn ts_subtree_fragile_right(self_: Subtree) -> bool {
     if self_.data.is_inline() { false } else { (*self_.ptr).fragile_right() }
 }
 
@@ -992,17 +992,17 @@ pub const unsafe fn ts_subtree_has_external_tokens(self_: Subtree) -> bool {
 }
 
 #[inline]
-pub(crate) const unsafe fn ts_subtree_has_external_scanner_state_change(self_: Subtree) -> bool {
+pub const unsafe fn ts_subtree_has_external_scanner_state_change(self_: Subtree) -> bool {
     if self_.data.is_inline() { false } else { (*self_.ptr).has_external_scanner_state_change() }
 }
 
 #[inline]
-pub(crate) const unsafe fn ts_subtree_depends_on_column(self_: Subtree) -> bool {
+pub const unsafe fn ts_subtree_depends_on_column(self_: Subtree) -> bool {
     if self_.data.is_inline() { false } else { (*self_.ptr).depends_on_column() }
 }
 
 #[inline]
-pub(crate) const unsafe fn ts_subtree_is_fragile(self_: Subtree) -> bool {
+pub const unsafe fn ts_subtree_is_fragile(self_: Subtree) -> bool {
     if self_.data.is_inline() {
         false
     } else {

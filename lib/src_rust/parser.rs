@@ -500,7 +500,7 @@ unsafe fn parser_subtree_child<'a>(parent: Subtree, index: u32) -> &'a Subtree {
 }
 
 #[inline]
-unsafe fn parser_subtree_children<'a>(parent: Subtree) -> &'a [Subtree] {
+const unsafe fn parser_subtree_children<'a>(parent: Subtree) -> &'a [Subtree] {
     std::slice::from_raw_parts(
         ts_subtree_children(parent),
         ts_subtree_child_count(parent) as usize,

@@ -108,7 +108,7 @@ unsafe fn array_write_range(arr: &mut TSRangeArray, index: u32, range: TSRange) 
 }
 
 #[inline]
-unsafe fn range_array_slice(arr: &TSRangeArray) -> &[TSRange] {
+const unsafe fn range_array_slice(arr: &TSRangeArray) -> &[TSRange] {
     std::slice::from_raw_parts(arr.contents, arr.size as usize)
 }
 
@@ -118,7 +118,7 @@ unsafe fn range_array_slice_mut(arr: &mut TSRangeArray) -> &mut [TSRange] {
 }
 
 #[inline]
-pub unsafe fn ts_range_slice<'a>(ranges: *const TSRange, count: u32) -> &'a [TSRange] {
+pub const unsafe fn ts_range_slice<'a>(ranges: *const TSRange, count: u32) -> &'a [TSRange] {
     if count == 0 {
         &[]
     } else {
@@ -151,7 +151,7 @@ unsafe fn array_push_range(arr: &mut TSRangeArray, range: TSRange) {
     arr.size += 1;
 }
 
-pub(crate) fn ts_range_edit_ref(range: &mut TSRange, edit: &TSInputEdit) {
+pub fn ts_range_edit_ref(range: &mut TSRange, edit: &TSInputEdit) {
     if range.end_byte >= edit.old_end_byte {
         if range.end_byte != u32::MAX {
             range.end_byte = edit.new_end_byte + (range.end_byte - edit.old_end_byte);
@@ -224,7 +224,7 @@ unsafe fn stack_write(arr: &mut TreeCursorEntryArray, index: u32, entry: TreeCur
 }
 
 #[inline]
-unsafe fn stack_slice(arr: &TreeCursorEntryArray) -> &[TreeCursorEntry] {
+const unsafe fn stack_slice(arr: &TreeCursorEntryArray) -> &[TreeCursorEntry] {
     std::slice::from_raw_parts(arr.contents, arr.size as usize)
 }
 
@@ -277,7 +277,7 @@ unsafe fn subtree_child<'a>(parent: Subtree, index: u32) -> &'a Subtree {
 }
 
 #[inline]
-unsafe fn subtree_children<'a>(parent: Subtree) -> &'a [Subtree] {
+const unsafe fn subtree_children<'a>(parent: Subtree) -> &'a [Subtree] {
     std::slice::from_raw_parts(
         ts_subtree_children(parent),
         ts_subtree_child_count(parent) as usize,
@@ -607,7 +607,7 @@ pub unsafe fn ts_range_array_intersects(
     ts_range_array_intersects_ref(ranges, start_index, start_byte, end_byte)
 }
 
-pub(crate) unsafe fn ts_range_array_get_changed_ranges_ref(
+pub unsafe fn ts_range_array_get_changed_ranges_ref(
     old_ranges: &[TSRange],
     new_ranges: &[TSRange],
     differences: &mut TSRangeArray,
@@ -808,7 +808,7 @@ pub unsafe fn ts_subtree_get_changed_ranges(
     )
 }
 
-pub(crate) unsafe fn ts_subtree_get_changed_ranges_ref(
+pub unsafe fn ts_subtree_get_changed_ranges_ref(
     old_tree: &Subtree,
     new_tree: &Subtree,
     old_cursor: &mut TreeCursor,
