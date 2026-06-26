@@ -788,11 +788,6 @@ unsafe fn mutable_subtree_children<'a>(self_: MutableSubtree) -> &'a mut [Subtre
 }
 
 #[inline]
-unsafe fn mutable_subtree_mut<'a>(self_: *mut MutableSubtree) -> &'a mut MutableSubtree {
-    self_.as_mut().unwrap_unchecked()
-}
-
-#[inline]
 unsafe fn mutable_subtree_data_mut<'a>(self_: MutableSubtree) -> &'a mut SubtreeHeapData {
     self_.ptr.as_mut().unwrap_unchecked()
 }
