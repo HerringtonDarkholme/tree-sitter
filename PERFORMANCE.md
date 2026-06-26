@@ -3388,3 +3388,53 @@ Source-code analysis:
   outliers do not currently point to a source-level regression in this batch.
 - Full `cargo test --all` passed before every committed code change in this
   checkpoint.
+
+### 2026-06-25 21:01 EDT
+
+- Repo head: `17778178`
+- Batch base: `34802f4a`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: 10 small tier-2 stack/array raw-pointer cleanup commits:
+  `Take array init by mutable reference` through
+  `Take array get by reference`.
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 25595.5 | 23089.3 | +10.85% |
+| TypeScript error parses | 32 | 1681.0 | 1599.7 | +5.08% |
+| JavaScript normal parses | 2 | 17310.2 | 16259.9 | +6.46% |
+| JavaScript error parses | 37 | 2031.4 | 1922.1 | +5.68% |
+| Overall parser throughput | 82 | 2309.6 | 2191.4 | +5.39% |
+
+Per-case regressions over 5%: none.
+
+Prior checkpoint at `34802f4a` measured Rust overall throughput of 2296.3
+bytes/ms and a Rust-vs-C delta of +5.19%. This checkpoint measured 2309.6
+bytes/ms, so absolute Rust throughput moved by about +0.58%. C throughput moved
+from 2183.0 to 2191.4 bytes/ms, and the Rust-vs-C delta moved to +5.39%.
+
+Source-code analysis:
+
+- The batch contains no exported `#[no_mangle] extern "C"` signature changes,
+  no struct layout changes, no C header field changes, and no parser action or
+  parsing table semantic changes.
+- The stack callback commit removes an unnecessary internal C ABI callback type
+  in tier 2. The callbacks are only passed within Rust stack traversal code, so
+  changing them to Rust ABI does not affect generated parser, CLI, library, or
+  external C ABI behavior.
+- The array commits change internal helper signatures from raw array pointers to
+  `&Array<T>` / `&mut Array<T>` at existing ownership boundaries. The helpers
+  still perform the same pointer arithmetic and preserve the `Array<T>` memory
+  layout used by FFI-facing data structures.
+- The final tier-0/1/2 extern audit found no other removable C ABI use in those
+  tiers without crossing an external ABI or C-library boundary: remaining
+  externs are allocator/libc/stdio imports, exported tree-sitter API symbols,
+  generated language/scanner callback ABI, lexer variadic log shim, or wasm
+  store C imports.
+- Full `cargo test --all` passed before every committed code change in this
+  checkpoint.
