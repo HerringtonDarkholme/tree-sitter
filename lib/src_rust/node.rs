@@ -80,7 +80,7 @@ const unsafe fn node_language(self_: TSNode) -> *const TSLanguage {
 }
 
 #[inline]
-const fn node_is_null(self_: TSNode) -> bool {
+fn node_is_null(self_: TSNode) -> bool {
     self_.id.is_null()
 }
 
@@ -731,7 +731,7 @@ pub unsafe extern "C" fn ts_node_eq(self_: TSNode, other: TSNode) -> bool {
 }
 
 #[no_mangle]
-pub const unsafe extern "C" fn ts_node_is_null(self_: TSNode) -> bool {
+pub unsafe extern "C" fn ts_node_is_null(self_: TSNode) -> bool {
     node_is_null(self_)
 }
 
