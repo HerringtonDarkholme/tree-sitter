@@ -24,75 +24,116 @@ ts_parser__advance -> ts_parser__reduce
   -> stack push / merge
 ```
 
-## Kept Trials
+## Itemized Trial Index
 
-Subtree/array helpers: avoid slice creation for subtree child access; inline hot
-array helpers.
+### Kept
 
-Lexer/token helpers: compare lexer modes without `memcmp`; delay token reuse
-mode checks; skip progress state updates without callback; avoid slice creation
-for lexer range access; fast path single lexer range reset; use direct lexer EOF
-checks internally.
+- Avoid slice creation for subtree child access
+- Inline hot array helpers
+- Compare lexer modes without `memcmp`
+- Delay token reuse mode checks
+- Skip progress state updates without callback
+- Avoid slice creation for lexer range access
+- Fast path single lexer range reset
+- Use direct lexer EOF checks internally
+- Fast path linear stack pops
+- Direct nonterminal next-state lookup in reduce
+- Add arena-backed tree storage foundation
+- Allocate parser reduction nodes in tree arena
+- Parser-owned stack-pop builder for fresh reductions
+- Stack-link payload abstraction
+- Descriptor-capable stack payload layout
+- Pending descriptor metadata dispatch
+- Parser-owned pending descriptor storage
+- Pending descriptor metadata construction
+- Stack push API for pending reduction descriptors
+- Descriptor-aware stack-pop collection primitive
+- Payload span access/release for reduce wiring
 
-Reduce/storage: fast path linear stack pops; direct nonterminal next-state lookup
-in reduce; add arena-backed tree storage foundation; allocate parser reduction
-nodes in tree arena; parser-owned stack-pop builder for fresh reductions.
+### Measurement
 
-Pending-reduction foundation: stack-link payload abstraction; descriptor-capable
-stack payload layout; pending descriptor metadata dispatch; parser-owned pending
-descriptor storage; pending descriptor metadata construction; stack push API for
-pending reduction descriptors; descriptor-aware stack-pop collection primitive;
-payload span access/release for reduce wiring.
+- Cross-language reduce-construction profiling
+- Refreshed C++ `rule.cc` flamegraph
+- C++ `marker-index.h` flamegraph
+- Fresh-reduce candidate shape counters
+- Lexer/runtime boundary counters
+- Reduce push/pop shape counters
+- Pending materialization pressure counters
+- Pending reduction lifetime counters
 
-## Measurement Trials
+### Closed: Summarization
 
-Profiling/counters: cross-language reduce-construction profiling; refreshed C++
-`rule.cc` flamegraph; C++ `marker-index.h` flamegraph; fresh-reduce candidate
-shape counters; lexer/runtime boundary counters; reduce push/pop shape counters;
-pending materialization pressure counters; pending reduction lifetime counters.
+- Broad metadata caching in `ts_subtree_summarize_children`
+- Single-child summarizer fast path
+- Alias-sequence condition reorder
+- Specialized no-alias non-error summarizer
+- Raw-pointer summarizer loop
+- Combine arena copy with summary calculation
+- Builder-specific copy plus summary finalization
+- Skip summarize for zero-child non-error nodes
 
-## Closed Trials
+### Closed: Stack Pop And Reduce Control
 
-Summarization: broad metadata caching in `ts_subtree_summarize_children`;
-single-child summarizer fast path; alias-sequence condition reorder; specialized
-no-alias non-error summarizer; raw-pointer summarizer loop; combine arena copy
-with summary calculation; builder-specific copy plus summary finalization; skip
-summarize for zero-child non-error nodes.
+- Smaller stack-pop reserve count
+- Specialized graph walk without callback
+- Guard no-op subtree-array reversals
+- Direct graph builder collection
+- Direct linear reduce pop into parser scratch storage
+- Stack-pop trailing-extra split before parent construction
+- Direct merged-candidate descriptor comparison
+- Single-group reduce control-flow split
+- Direct arena finalization for linear fresh reductions
+- One-pass final-storage linear collection
+- Guard halted-version scans in reduce
+- Guard zero dynamic-precedence writes
+- Hoist reduce nonterminal check
 
-Stack pop / reduce control: smaller stack-pop reserve count; specialized graph
-walk without callback; guard no-op subtree-array reversals; direct graph builder
-collection; direct linear reduce pop into parser scratch storage; stack-pop
-trailing-extra split before parent construction; direct merged-candidate
-descriptor comparison; single-group reduce control-flow split; direct arena
-finalization for linear fresh reductions; one-pass final-storage linear
-collection; guard halted-version scans in reduce; guard zero dynamic-precedence
-writes; hoist reduce nonterminal check.
+### Closed: Allocation And Storage
 
-Allocation/storage: arena-backed heap leaves during lexing; 16-bit symbol inline
-leaf encoding; pool-backed zero-child node allocation; increase
-`TS_MAX_TREE_POOL_SIZE`; global mutex slab for subtree blocks; atomic global slab
-for subtree blocks; parser free lists for 1-4 child blocks; use `ts_malloc`
-instead of `ts_realloc(NULL)`; increase tree arena page size; adopt stack-pop
-child arrays into tree arena; embedded adopted-block headers.
+- Arena-backed heap leaves during lexing
+- 16-bit symbol inline leaf encoding
+- Pool-backed zero-child node allocation
+- Increase `TS_MAX_TREE_POOL_SIZE`
+- Global mutex slab for subtree blocks
+- Atomic global slab for subtree blocks
+- Parser free lists for 1-4 child blocks
+- Use `ts_malloc` instead of `ts_realloc(NULL)`
+- Increase tree arena page size
+- Adopt stack-pop child arrays into tree arena
+- Embedded adopted-block headers
 
-Refcount: relaxed/release-acquire refcount ordering; `#[inline]` on
-`ts_subtree_retain`; refcount-one direct release fast path.
+### Closed: Refcount
 
-Lexer/token path: passing `is_leaf` into shift; direct `as u8` casts in leaf
-creation; ASCII fast path in lexer lookahead; direct UTF-8 decode path;
-single-range lexer advance fast path; no-log lexer advance callback
-specialization; pointer equality for stack merge external tokens; same-token
-external-token set fast path; pointer equality in external scanner state
-equality.
+- Relaxed/release-acquire refcount ordering
+- `#[inline]` on `ts_subtree_retain`
+- Refcount-one direct release fast path
 
-Parse table / parser state / stack helpers: terminal-only table-entry helper;
-broad language table-entry inlining; caching `language_is_wasm`; broad stack
-getter/push inlining; increasing `MAX_NODE_POOL_SIZE`.
+### Closed: Lexer And Token Path
 
-Balancing/compression: skip/deferring all balancing; propagated
-contains-repetition balance flag; single-pass repeat compression schedule.
+- Passing `is_leaf` into shift
+- Direct `as u8` casts in leaf creation
+- ASCII fast path in lexer lookahead
+- Direct UTF-8 decode path
+- Single-range lexer advance fast path
+- No-log lexer advance callback specialization
+- Pointer equality for stack merge external tokens
+- Same-token external-token set fast path
+- Pointer equality in external scanner state equality
 
-Benchmark scope: reset benchmark allocator.
+### Closed: Parse Table And Stack Helpers
+
+- Terminal-only table-entry helper
+- Broad language table-entry inlining
+- Caching `language_is_wasm`
+- Broad stack getter/push inlining
+- Increasing `MAX_NODE_POOL_SIZE`
+
+### Closed: Balancing And Benchmark Scope
+
+- Skip/deferring all balancing
+- Propagated contains-repetition balance flag
+- Single-pass repeat compression schedule
+- Reset benchmark allocator
 
 ## Reflections
 
@@ -117,6 +158,8 @@ metadata updates force broad materialization.
 ## Process Rules
 
 - Check this file before every new performance trial.
+- Closed trials may be revisited when the hypothesis changes, profiles change,
+  or architecture changes make the old result obsolete.
 - Do not edit benchmark source code.
 - Use `cargo test --all` outside the sandbox for kept production code.
 - Commit each kept optimization separately.
