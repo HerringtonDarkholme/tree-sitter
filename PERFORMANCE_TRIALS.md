@@ -67,6 +67,7 @@ the generated lexer/runtime contract.
 - Pending descriptor payload-child ownership and summary
 - Pending descriptor recursive materialization boundary
 - Payload-aware stack graph traversal primitive
+- Segmented stack storage foundation
 
 ### Measurement
 
@@ -331,6 +332,12 @@ requires first-class branching support because multi-version reductions and
 merge attempts are common. Rust, Python, TypeScript, and JavaScript would be
 good validation cases for a segmented contiguous stack, but Go is the design
 gate for universality.
+
+Segmented stack storage foundation added dormant `StackSegment` and
+`StackFrame` arrays to `Stack`, plus lifecycle clearing/release plumbing. This
+does not enable segment-backed parsing yet and is not expected to move
+benchmarks by itself. It establishes the storage owner needed for the segmented
+stack implementation slice. `cargo test --all` passed outside the sandbox.
 
 ## Next Direction
 

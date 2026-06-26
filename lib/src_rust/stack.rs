@@ -136,6 +136,42 @@ pub struct Array<T> {
 pub type StackNodeArray = Array<*mut StackNode>;
 pub type StackLinkPayloadArray = Array<StackLinkPayload>;
 
+pub type StackSegmentId = u32;
+pub const STACK_SEGMENT_ID_NONE: StackSegmentId = u32::MAX;
+
+pub type StackSegmentBaseKind = u8;
+pub const STACK_SEGMENT_BASE_GRAPH: StackSegmentBaseKind = 0;
+pub const STACK_SEGMENT_BASE_SEGMENT: StackSegmentBaseKind = 1;
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct StackSegment {
+    pub base_node: *mut StackNode,
+    pub base_segment: StackSegmentId,
+    pub base_top: u32,
+    pub start: u32,
+    pub len: u32,
+    pub ref_count: u32,
+    pub base_kind: StackSegmentBaseKind,
+    pub sealed: bool,
+}
+
+pub type StackSegmentArray = Array<StackSegment>;
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct StackFrame {
+    pub payload: StackLinkPayload,
+    pub position: Length,
+    pub error_cost: u32,
+    pub node_count: u32,
+    pub dynamic_precedence: i32,
+    pub state: TSStateId,
+    pub flags: u8,
+}
+
+pub type StackFrameArray = Array<StackFrame>;
+
 #[repr(C)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum StackStatus {
@@ -192,6 +228,8 @@ pub struct StackHead {
 #[repr(C)]
 pub struct Stack {
     pub heads: Array<StackHead>,
+    pub segments: StackSegmentArray,
+    pub frames: StackFrameArray,
     pub slices: StackSliceArray,
     pub iterators: Array<StackIterator>,
     pub node_pool: StackNodeArray,
@@ -206,13 +244,15 @@ pub struct Stack {
 const _: () = assert!(std::mem::size_of::<StackLink>() == 24);
 const _: () = assert!(std::mem::size_of::<StackLinkPayload>() == 16);
 const _: () = assert!(std::mem::size_of::<StackNode>() == 232);
+const _: () = assert!(std::mem::size_of::<StackSegment>() == 32);
+const _: () = assert!(std::mem::size_of::<StackFrame>() == 48);
 const _: () = assert!(std::mem::size_of::<StackIterator>() == 32);
 const _: () = assert!(std::mem::size_of::<StackStatus>() == 4);
 const _: () = assert!(std::mem::size_of::<StackSlice>() == 24);
 const _: () = assert!(std::mem::size_of::<StackSliceSpan>() == 12);
 const _: () = assert!(std::mem::size_of::<StackSummaryEntry>() == 20);
 const _: () = assert!(std::mem::size_of::<StackHead>() == 48);
-const _: () = assert!(std::mem::size_of::<Stack>() == 80);
+const _: () = assert!(std::mem::size_of::<Stack>() == 112);
 
 pub type StackAction = u32;
 pub const StackActionNone: StackAction = 0;
@@ -1109,6 +1149,25 @@ unsafe fn stack_payload_array_delete(
     }
 }
 
+unsafe fn stack_segment_storage_clear(self_: &mut Stack) {
+    let subtree_pool = self_.subtree_pool.as_mut().unwrap_unchecked();
+    for i in 0..self_.frames.size {
+        let payload = array_get_ref(&self_.frames, i).payload;
+        if !stack_link_payload_is_null(payload) {
+            stack_link_payload_release(payload, subtree_pool);
+        }
+    }
+    let node_pool = &mut self_.node_pool;
+    for i in 0..self_.segments.size {
+        let segment = *array_get_ref(&self_.segments, i);
+        if segment.base_kind == STACK_SEGMENT_BASE_GRAPH && !segment.base_node.is_null() {
+            stack_node_release(stack_node_mut(segment.base_node), node_pool, subtree_pool);
+        }
+    }
+    array_clear(&mut self_.frames);
+    array_clear(&mut self_.segments);
+}
+
 unsafe fn stack_payload_array_copy(
     source: &StackLinkPayloadArray,
     destination: &mut StackLinkPayloadArray,
@@ -1682,10 +1741,14 @@ pub unsafe fn ts_stack_new(subtree_pool: &mut SubtreePool) -> *mut Stack {
     let stack = self_.as_mut().unwrap_unchecked();
 
     array_init(&mut stack.heads);
+    array_init(&mut stack.segments);
+    array_init(&mut stack.frames);
     array_init(&mut stack.slices);
     array_init(&mut stack.iterators);
     array_init(&mut stack.node_pool);
     array_reserve(&mut stack.heads, 4);
+    array_reserve(&mut stack.segments, 4);
+    array_reserve(&mut stack.frames, 32);
     array_reserve(&mut stack.slices, 4);
     array_reserve(&mut stack.iterators, 4);
     array_reserve(&mut stack.node_pool, MAX_NODE_POOL_SIZE);
@@ -1705,6 +1768,13 @@ pub unsafe fn ts_stack_new(subtree_pool: &mut SubtreePool) -> *mut Stack {
 
 /// Free the parse stack.
 pub unsafe fn ts_stack_delete(self_: &mut Stack) {
+    stack_segment_storage_clear(self_);
+    if !self_.segments.contents.is_null() {
+        array_delete(&mut self_.segments);
+    }
+    if !self_.frames.contents.is_null() {
+        array_delete(&mut self_.frames);
+    }
     if !self_.slices.contents.is_null() {
         array_delete(&mut self_.slices);
     }
@@ -2155,6 +2225,7 @@ pub unsafe fn ts_stack_resume(stack: &mut Stack, version: StackVersion) -> Subtr
 
 /// Clear all versions, resetting to initial state.
 pub unsafe fn ts_stack_clear(self_: &mut Stack) {
+    stack_segment_storage_clear(self_);
     stack_node_retain(stack_node_mut(self_.base_node));
     let heads = &mut self_.heads;
     let node_pool = &mut self_.node_pool;
