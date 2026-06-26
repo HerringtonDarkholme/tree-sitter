@@ -9,7 +9,15 @@ use serde_json::Value;
 
 use crate::{core_parity, root_dir, PerfGate};
 
-const DEFAULT_LANGUAGES: &[&str] = &["typescript", "tsx", "javascript", "python", "rust", "c"];
+const DEFAULT_LANGUAGES: &[&str] = &[
+    "cpp",
+    "go",
+    "java",
+    "javascript",
+    "python",
+    "rust",
+    "typescript",
+];
 
 pub fn run(args: &PerfGate) -> Result<()> {
     let root = root_dir();
@@ -26,8 +34,8 @@ pub fn run(args: &PerfGate) -> Result<()> {
         println!("==> {language}: C core");
         let c_results = run_benchmark(root, args, language, CoreImpl::C, Some(&c_core_src_dir))?;
 
-        let comparisons = compare_measurements(language, &rust_results, &c_results)?;
-        print_language_summary(language, &comparisons);
+        let comparisons = compare_measurements(args, language, &rust_results, &c_results)?;
+        print_language_summary(args, language, &comparisons)?;
         all_comparisons.extend(comparisons);
     }
 
@@ -68,6 +76,7 @@ fn run_benchmark(
             "TREE_SITTER_BENCHMARK_REPETITION_COUNT",
             args.repetitions.to_string(),
         )
+        .env("TREE_SITTER_BENCHMARK_KIND_FILTER", benchmark_kind(args)?)
         .env(
             "TREE_SITTER_BENCHMARK_ERROR_LIMIT",
             args.error_limit.to_string(),
@@ -143,6 +152,7 @@ fn parse_benchmark_results(output: &[u8]) -> Result<BTreeMap<CaseKey, Measuremen
 }
 
 fn compare_measurements(
+    args: &PerfGate,
     language: &str,
     rust_results: &BTreeMap<CaseKey, Measurement>,
     c_results: &BTreeMap<CaseKey, Measurement>,
@@ -157,10 +167,11 @@ fn compare_measurements(
         );
     }
 
+    let parser_kinds = parser_kinds(args)?;
     let comparisons = rust_results
         .iter()
         .filter_map(|(key, rust)| {
-            if !is_parser_case(key) {
+            if !is_parser_case(&parser_kinds, key) {
                 return None;
             }
             c_results.get(key).map(|c| Comparison {
@@ -178,13 +189,17 @@ fn compare_measurements(
     Ok(comparisons)
 }
 
-fn print_language_summary(language: &str, comparisons: &[Comparison]) {
+fn print_language_summary(
+    args: &PerfGate,
+    language: &str,
+    comparisons: &[Comparison],
+) -> Result<()> {
     println!("  {language} parser throughput:");
-    for kind in ["normal", "error"] {
+    for kind in parser_kinds(args)? {
         let aggregate = aggregate(
             comparisons
                 .iter()
-                .filter(|comparison| comparison.key.kind == kind),
+                .filter(|comparison| comparison.key.kind == kind.as_str()),
         );
         let Some(aggregate) = aggregate else {
             continue;
@@ -197,6 +212,7 @@ fn print_language_summary(language: &str, comparisons: &[Comparison]) {
             aggregate.rust_delta_percent(),
         );
     }
+    Ok(())
 }
 
 fn print_overall_summary(args: &PerfGate, comparisons: &[Comparison]) {
@@ -283,8 +299,20 @@ fn aggregate<'a>(comparisons: impl Iterator<Item = &'a Comparison>) -> Option<Ag
     (aggregate.cases != 0).then_some(aggregate)
 }
 
-fn is_parser_case(key: &CaseKey) -> bool {
-    matches!(key.kind.as_str(), "normal" | "error")
+fn is_parser_case(parser_kinds: &[String], key: &CaseKey) -> bool {
+    parser_kinds.iter().any(|kind| key.kind == kind.as_str())
+}
+
+fn parser_kinds(args: &PerfGate) -> Result<Vec<String>> {
+    match args.kind.as_str() {
+        "all" => Ok(vec!["normal".into(), "error".into()]),
+        "normal" | "error" => Ok(vec![args.kind.clone()]),
+        other => bail!("unsupported perf-gate kind {other:?}; expected normal, error, or all"),
+    }
+}
+
+fn benchmark_kind(args: &PerfGate) -> Result<String> {
+    Ok(parser_kinds(args)?.join(","))
 }
 
 fn required_str<'a>(value: &'a Value, key: &str) -> Result<&'a str> {

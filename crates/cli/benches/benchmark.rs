@@ -19,6 +19,18 @@ static LANGUAGE_FILTER: LazyLock<Option<String>> =
     LazyLock::new(|| env::var("TREE_SITTER_BENCHMARK_LANGUAGE_FILTER").ok());
 static EXAMPLE_FILTER: LazyLock<Option<String>> =
     LazyLock::new(|| env::var("TREE_SITTER_BENCHMARK_EXAMPLE_FILTER").ok());
+static KIND_FILTER: LazyLock<Option<Vec<String>>> = LazyLock::new(|| {
+    env::var("TREE_SITTER_BENCHMARK_KIND_FILTER")
+        .ok()
+        .map(|value| {
+            value
+                .split(',')
+                .map(str::trim)
+                .filter(|kind| !kind.is_empty())
+                .map(str::to_owned)
+                .collect()
+        })
+});
 static REPETITION_COUNT: LazyLock<usize> = LazyLock::new(|| {
     env::var("TREE_SITTER_BENCHMARK_REPETITION_COUNT").map_or(5, |s| s.parse::<usize>().unwrap())
 });
@@ -69,12 +81,24 @@ static EXAMPLE_AND_QUERY_PATHS_BY_LANGUAGE_DIR: LazyLock<
         paths
     }
 
+    fn collect_benchmark_examples(relative_path: &Path) -> Vec<PathBuf> {
+        collect_files(
+            &ROOT_DIR
+                .join("crates")
+                .join("cli")
+                .join("benches")
+                .join("examples")
+                .join(relative_path),
+        )
+    }
+
     fn process_dir(result: &mut BTreeMap<PathBuf, (Vec<PathBuf>, Vec<PathBuf>)>, dir: &Path) {
         if dir.join("grammar.js").exists() {
             let relative_path = dir.strip_prefix(GRAMMARS_DIR.as_path()).unwrap();
             let (example_paths, query_paths) = result.entry(relative_path.to_owned()).or_default();
 
             example_paths.extend(collect_local_and_parent_files(dir, "examples"));
+            example_paths.extend(collect_benchmark_examples(relative_path));
             query_paths.extend(collect_local_and_parent_files(dir, "queries"));
             if relative_path == Path::new("typescript/typescript") {
                 example_paths.extend(typescript_repo_examples());
@@ -155,66 +179,72 @@ fn main() {
         let language = get_language(language_path);
         parser.set_language(&language).unwrap();
 
-        info!("  Constructing Queries");
-        for path in query_paths {
-            if let Some(filter) = EXAMPLE_FILTER.as_ref() {
-                if !path.to_str().unwrap().contains(filter.as_str()) {
-                    continue;
-                }
-            }
-
-            parse(language_name, "query", path, max_path_length, |source| {
-                Query::new(&language, str::from_utf8(source).unwrap())
-                    .with_context(|| format!("Query file path: {}", path.display()))
-                    .expect("Failed to parse query");
-            });
-        }
-
-        info!("  Parsing Valid Code:");
-        let mut normal_speeds = Vec::new();
-        for example_path in example_paths {
-            if let Some(filter) = EXAMPLE_FILTER.as_ref() {
-                if !example_path.to_str().unwrap().contains(filter.as_str()) {
-                    continue;
-                }
-            }
-
-            normal_speeds.push(parse(
-                language_name,
-                "normal",
-                example_path,
-                max_path_length,
-                |code| {
-                    parser.parse(code, None).expect("Failed to parse");
-                },
-            ));
-        }
-
-        info!("  Parsing Invalid Code (mismatched languages):");
-        let mut error_speeds = Vec::new();
-        for (other_language_path, (example_paths, _)) in
-            EXAMPLE_AND_QUERY_PATHS_BY_LANGUAGE_DIR.iter()
-        {
-            if other_language_path != language_path {
-                for example_path in example_paths
-                    .iter()
-                    .take((*ERROR_CASE_LIMIT).unwrap_or(usize::MAX))
-                {
-                    if let Some(filter) = EXAMPLE_FILTER.as_ref() {
-                        if !example_path.to_str().unwrap().contains(filter.as_str()) {
-                            continue;
-                        }
+        if should_run_kind("query") {
+            info!("  Constructing Queries");
+            for path in query_paths {
+                if let Some(filter) = EXAMPLE_FILTER.as_ref() {
+                    if !path.to_str().unwrap().contains(filter.as_str()) {
+                        continue;
                     }
+                }
 
-                    error_speeds.push(parse(
-                        language_name,
-                        "error",
-                        example_path,
-                        max_path_length,
-                        |code| {
-                            parser.parse(code, None).expect("Failed to parse");
-                        },
-                    ));
+                parse(language_name, "query", path, max_path_length, |source| {
+                    Query::new(&language, str::from_utf8(source).unwrap())
+                        .with_context(|| format!("Query file path: {}", path.display()))
+                        .expect("Failed to parse query");
+                });
+            }
+        }
+
+        let mut normal_speeds = Vec::new();
+        if should_run_kind("normal") {
+            info!("  Parsing Valid Code:");
+            for example_path in example_paths {
+                if let Some(filter) = EXAMPLE_FILTER.as_ref() {
+                    if !example_path.to_str().unwrap().contains(filter.as_str()) {
+                        continue;
+                    }
+                }
+
+                normal_speeds.push(parse(
+                    language_name,
+                    "normal",
+                    example_path,
+                    max_path_length,
+                    |code| {
+                        parser.parse(code, None).expect("Failed to parse");
+                    },
+                ));
+            }
+        }
+
+        let mut error_speeds = Vec::new();
+        if should_run_kind("error") {
+            info!("  Parsing Invalid Code (mismatched languages):");
+            for (other_language_path, (example_paths, _)) in
+                EXAMPLE_AND_QUERY_PATHS_BY_LANGUAGE_DIR.iter()
+            {
+                if other_language_path != language_path {
+                    for example_path in example_paths
+                        .iter()
+                        .take((*ERROR_CASE_LIMIT).unwrap_or(usize::MAX))
+                    {
+                        if let Some(filter) = EXAMPLE_FILTER.as_ref() {
+                            if !example_path.to_str().unwrap().contains(filter.as_str()) {
+                                continue;
+                            }
+                        }
+
+                        error_speeds.push(parse(
+                            language_name,
+                            "error",
+                            example_path,
+                            max_path_length,
+                            |code| {
+                                parser.parse(code, None).expect("Failed to parse");
+                            },
+                        ));
+                    }
                 }
             }
         }
@@ -244,6 +274,13 @@ fn main() {
         info!("  Worst Speed (errors):   {worst_error} bytes/ms");
     }
     info!("");
+}
+
+fn should_run_kind(kind: &str) -> bool {
+    match KIND_FILTER.as_ref() {
+        Some(filter) => filter.iter().any(|item| item == kind || item == "all"),
+        None => true,
+    }
 }
 
 fn aggregate(speeds: &[usize]) -> Option<(usize, usize)> {

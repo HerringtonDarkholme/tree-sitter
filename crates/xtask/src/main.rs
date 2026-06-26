@@ -234,6 +234,9 @@ struct PerfGate {
     /// The number of times to parse each sample.
     #[arg(long, default_value = "10")]
     repetitions: usize,
+    /// Benchmark case kind to compare: normal, error, or all.
+    #[arg(long, default_value = "normal")]
+    kind: String,
     /// Maximum number of mismatched-language error samples per other language.
     #[arg(long, default_value = "8")]
     error_limit: usize,
