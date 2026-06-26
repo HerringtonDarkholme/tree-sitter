@@ -147,9 +147,13 @@ Same-session canary result for `329f8b08`:
 | Broad `ts_parser__check_progress` inlining | Parser progress check | Negative |
 | Early no-callback return in `ts_parser__check_progress` | Parser progress check | Clean JavaScript benchmark regressed |
 | Guard halted-version scans in `ts_parser__reduce` | Reduce path version limiting | Clean JavaScript benchmark regressed |
-| Pointer-equality fast path for `ts_stack_can_merge` last external tokens | Stack merge | Warm Go benchmark remained below current baseline |
+| Pointer-equality fast path for `ts_stack_can_merge` last external tokens | Stack merge | Retested after `329f8b08`; warm JavaScript benchmark remained below current baseline |
 | Guard no-op subtree-array reversals in stack pops | Stack pop | Warm JavaScript benchmark remained below current baseline |
 | Same-token fast path in `ts_stack_set_last_external_token` | External token tracking | Warm JavaScript benchmark remained below current baseline |
+| Skip summarize for zero-child non-error nodes | Subtree construction | Retested after `329f8b08`; warm JavaScript benchmark remained below current baseline |
+| Guard zero dynamic-precedence writes in reduce | Reduce path | Retested after `329f8b08`; warm JavaScript benchmark remained below current baseline |
+| Pointer-equality fast path in `ts_subtree_external_scanner_state_eq` | External scanner state comparison | Retested after `329f8b08`; warm JavaScript benchmark remained below current baseline |
+| Hoist reduce nonterminal check out of pop-slice loop | Reduce path | Retested after `329f8b08`; warm JavaScript benchmark remained below current baseline |
 
 ## Non-Library Trial Removed
 
