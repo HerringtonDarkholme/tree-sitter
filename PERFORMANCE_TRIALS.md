@@ -165,7 +165,7 @@ cargo xtask benchmark --kind normal -r 10 --language typescript
 
 ## Validation Notes
 
-### 2026-06-26
+### 2026-06-26 sandboxed run
 
 Command:
 
@@ -184,3 +184,21 @@ Result:
   - `tests::detect_language::detect_language_without_filename`
 
 The failure happened while only this trial-log markdown file was changed.
+
+### 2026-06-26 non-sandbox run
+
+Command:
+
+```sh
+cargo test --all
+```
+
+Result:
+
+- Passed when run outside the sandbox.
+- Summary:
+  - `tree_sitter`: 8 passed
+  - `tree_sitter_cli`: 269 passed
+  - `tree_sitter_generate`: 59 passed
+  - `tree_sitter_tags`: 2 passed
+  - doctests passed, with one ignored doc test
