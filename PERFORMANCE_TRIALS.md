@@ -161,6 +161,9 @@ Same-session canary result for `329f8b08`:
 | Zero-count fast path in linear stack pops | Stack pop | Warm JavaScript benchmark was below current baseline |
 | Refcount-one direct release fast path | Subtree release | Regressed JavaScript canary |
 | Terminal-only table-entry helper in advance loop | Parse table lookup | Warm JavaScript benchmark remained below current baseline |
+| Increase `TS_MAX_TREE_POOL_SIZE` from 32 to 128 | Childless subtree pool | Allocator counts were unchanged; JS harness got slower despite noisy benchmark canaries |
+| Pool-backed zero-child `ts_subtree_new_node` plus zero-count stack-pop reserve skip | Childless subtree allocation | Allocator counts were unchanged and JS/TS/Go canaries regressed, so zero-child reductions are not the dominant 80-byte allocation source |
+| Raw-pointer child loop in `ts_subtree_summarize_children` | Subtree summarize | JS/TS/Go/Python canaries regressed; the existing slice iterator appears to optimize better |
 
 ## Non-Library Trial Removed
 
