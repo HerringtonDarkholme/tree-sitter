@@ -147,6 +147,7 @@ may refer to these rows, but should not duplicate them as separate attempts.
 | Pointer-equality fast path in `ts_subtree_external_scanner_state_eq` | External scanner state comparison | Retested after reduce lookup win; remained below baseline |
 | Hoist reduce nonterminal check out of pop-slice loop | Reduce path | Retested after reduce lookup win; remained below baseline |
 | Specialized no-alias non-error subtree summarizer | Subtree summarize | Retested after reduce lookup win; remained below baseline |
+| Combine arena child copy with summary calculation | Reduce/node construction | Regressed JavaScript same-session canary: patched `17447` avg bytes/ms vs reverted baseline `18091`; too close to the closed raw-pointer summarizer direction |
 | 16-bit symbol inline leaf encoding | Subtree inline representation | Regressed JavaScript and did not reduce allocation counts |
 | Global mutex slab for `SubtreeHeapData + children` blocks | Subtree block allocation | JavaScript benchmark stalled; global lock path not viable |
 | Atomic global slab with `SubtreeArray.capacity` slab marker | Subtree block allocation | JavaScript benchmark stalled; ownership marker was too fragile |
@@ -183,6 +184,7 @@ result.
 | `TS_MAX_TREE_POOL_SIZE` tuning | Allocation counts were unchanged and benchmarks got noisier/slower. |
 | Refcount-one release fast path | Regressed JavaScript. |
 | Raw pointer summarizer loop | Regressed JS/TS/Go/Python. Existing iterator compiled better. |
+| Combined arena copy plus summarizer loop | Regressed JavaScript in same-session A/B. Do not retry summary-loop rewrites unless the full builder design changes the ownership/selection protocol first. |
 | Broad inlining/caching/check-progress fast paths | Repeatedly regressed or stayed below baseline. |
 | Lexer ASCII/direct UTF-8 fast paths | Mixed or negative. |
 
@@ -385,7 +387,7 @@ Per-parse reduce-shape summary:
 | 1 | Full reduce-construction redesign | Still the top parser-core candidate. It targets `ts_parser__reduce`, node construction, child-array allocation/copying, summarization, and stack push as one pipeline. It must not be a linear-pop fast path or buffer-adoption variant. |
 | 2 | Lexer/external scanner work | Now co-equal for C++ and material for all languages. Needs separate direction triage because generated grammar lexers may limit core-library leverage. |
 | 3 | Balancing/compress redesign | Important for Rust and moderate for JS/TS/Go/Python. Do not remove balancing; only consider a correctness-preserving redesign. |
-| 4 | Summarization during reduce construction | Only inside a reduce-construction redesign. Standalone summarizer micro-optimizations are closed. |
+| 4 | Summarization during reduce construction | Only after a real builder changes selection/ownership. A direct arena copy-plus-summary loop regressed and is closed. |
 
 ### Next Parser Trial
 
@@ -396,8 +398,8 @@ redesign, then a no-code review against closed history before implementation:
   parser-core direction with enough shared leverage to pair with later lexer or
   balancing work toward the 20% target.
 - History check: direct linear stack-pop, stack-pop buffer adoption, child-array
-  adoption, summarizer micro-optimizations, page-size tuning, refcount ordering,
-  and allocation pools are closed.
+  adoption, summarizer micro-optimizations, combined copy-plus-summary, page-size
+  tuning, refcount ordering, and allocation pools are closed.
 - Evidence status: collected for TypeScript, JavaScript, Python, Go, Rust, C++,
   and Java.
 - Kill criteria: if the design collapses into a linear fast path, buffer
@@ -431,9 +433,9 @@ Design target:
 - The context should represent each candidate as a child span plus metadata,
   support graph fallback, support merged-slice candidate selection, and allocate
   the final parent once after selection.
-- Summary metadata should be computed while finalizing the candidate, or at
-  least from the same child span, so construction does not force a second
-  independent child-array walk.
+- Summary metadata may be computed while finalizing the candidate only if the
+  builder changes the candidate-selection/ownership protocol first. A direct
+  copy-plus-summary rewrite of `ts_subtree_new_node_in_arena` regressed.
 
 Required properties:
 
@@ -480,8 +482,8 @@ Implementation slices if this design survives review:
 3. Route graph and linear collection through the builder while still creating
    normal `SubtreeArray` nodes, proving semantic equivalence first.
 4. Move final parent allocation to consume selected builder spans directly.
-5. Fold summary computation into finalization only after the builder path is
-   correct and benchmark-positive.
+5. Revisit summary computation only after the builder path is correct and
+   benchmark-positive. Do not repeat the direct copy-plus-summary loop.
 
 Pre-implementation rejection criteria:
 
