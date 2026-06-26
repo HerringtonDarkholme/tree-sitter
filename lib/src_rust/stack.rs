@@ -14,18 +14,18 @@ use crate::ffi::{TSLanguage, TSStateId};
 
 use super::alloc::{ts_calloc, ts_free, ts_malloc, ts_realloc};
 use super::error_costs::{ERROR_COST_PER_RECOVERY, ERROR_STATE};
-use super::length::{length_add, length_zero, Length};
+use super::language::ts_language_write_symbol_as_dot_string;
+use super::length::{Length, length_add, length_zero};
 use super::subtree::{
-    ts_builtin_sym_error_repeat, ts_external_scanner_state_data, ts_subtree_alloc_size,
-    ts_subtree_child_count, ts_subtree_dynamic_precedence, ts_subtree_error_cost,
-    ts_subtree_external_scanner_state_eq, ts_subtree_extra, ts_subtree_is_error,
-    ts_subtree_external_scanner_state, ts_subtree_named, ts_subtree_padding,
-    ts_subtree_release, ts_subtree_retain, ts_subtree_size, ts_subtree_symbol,
+    NULL_SUBTREE, Subtree, SubtreeArray, SubtreePool, ts_builtin_sym_error_repeat,
+    ts_external_scanner_state_data, ts_subtree_alloc_size, ts_subtree_child_count,
+    ts_subtree_dynamic_precedence, ts_subtree_error_cost, ts_subtree_external_scanner_state,
+    ts_subtree_external_scanner_state_eq, ts_subtree_extra, ts_subtree_is_error, ts_subtree_named,
+    ts_subtree_padding, ts_subtree_release, ts_subtree_retain, ts_subtree_size, ts_subtree_symbol,
     ts_subtree_total_bytes, ts_subtree_total_size, ts_subtree_visible,
-    ts_subtree_visible_descendant_count, Subtree, SubtreeArray, SubtreePool, NULL_SUBTREE,
+    ts_subtree_visible_descendant_count,
 };
 use super::subtree::{ts_subtree_array_copy, ts_subtree_array_delete, ts_subtree_array_reverse};
-use super::language::ts_language_write_symbol_as_dot_string;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -144,8 +144,7 @@ pub const StackActionNone: StackAction = 0;
 pub const StackActionStop: StackAction = 1;
 pub const StackActionPop: StackAction = 2;
 
-pub type StackCallback =
-    unsafe fn(payload: *mut c_void, iterator: &StackIterator) -> StackAction;
+pub type StackCallback = unsafe fn(payload: *mut c_void, iterator: &StackIterator) -> StackAction;
 
 /// Session state for the summarize callback.
 #[repr(C)]
@@ -203,9 +202,11 @@ pub unsafe fn array_reserve<T>(arr: &mut Array<T>, new_capacity: u32) {
         if arr.contents.is_null() {
             arr.contents = ts_malloc(new_capacity as usize * elem_size).cast::<T>();
         } else {
-            arr.contents =
-                ts_realloc(arr.contents.cast::<c_void>(), new_capacity as usize * elem_size)
-                    .cast::<T>();
+            arr.contents = ts_realloc(
+                arr.contents.cast::<c_void>(),
+                new_capacity as usize * elem_size,
+            )
+            .cast::<T>();
         }
         arr.capacity = new_capacity;
     }
@@ -251,13 +252,19 @@ pub unsafe fn array_get_mut<T>(arr: &mut Array<T>, index: u32) -> &mut T {
 #[inline]
 pub unsafe fn array_back_ref<T>(arr: &Array<T>) -> &T {
     debug_assert!(arr.size > 0);
-    arr.contents.add(arr.size as usize - 1).as_ref().unwrap_unchecked()
+    arr.contents
+        .add(arr.size as usize - 1)
+        .as_ref()
+        .unwrap_unchecked()
 }
 
 #[inline]
 pub unsafe fn array_back_mut<T>(arr: &mut Array<T>) -> &mut T {
     debug_assert!(arr.size > 0);
-    arr.contents.add(arr.size as usize - 1).as_mut().unwrap_unchecked()
+    arr.contents
+        .add(arr.size as usize - 1)
+        .as_mut()
+        .unwrap_unchecked()
 }
 
 pub unsafe fn array_erase<T>(arr: &mut Array<T>, index: u32) {
@@ -319,7 +326,11 @@ pub unsafe fn array_splice<T>(
         );
     }
     if new_count > 0 && !new_contents.is_null() {
-        ptr::copy(new_contents, contents.add(index as usize), new_count as usize);
+        ptr::copy(
+            new_contents,
+            contents.add(index as usize),
+            new_count as usize,
+        );
     }
     arr.size = new_size;
 }
@@ -338,45 +349,12 @@ pub unsafe fn array_assign<T>(self_: &mut Array<T>, other: &Array<T>) {
 
 #[inline]
 unsafe fn stack_head(self_: &Stack, version: StackVersion) -> &StackHead {
-    stack_head_array_get(&self_.heads, version)
+    array_get_ref(&self_.heads, version)
 }
 
 #[inline]
 unsafe fn stack_head_mut(self_: &mut Stack, version: StackVersion) -> &mut StackHead {
-    stack_head_array_get_mut(&mut self_.heads, version)
-}
-
-#[inline]
-unsafe fn stack_head_array_get(self_: &Array<StackHead>, version: StackVersion) -> &StackHead {
-    array_get_ref(self_, version)
-}
-
-#[inline]
-unsafe fn stack_head_array_get_mut(
-    self_: &mut Array<StackHead>,
-    version: StackVersion,
-) -> &mut StackHead {
-    array_get_mut(self_, version)
-}
-
-#[inline]
-unsafe fn stack_head_array_read(self_: &Array<StackHead>, version: StackVersion) -> StackHead {
-    stack_head_read_ref(stack_head_array_get(self_, version))
-}
-
-#[inline]
-unsafe fn stack_head_array_write(
-    self_: &mut Array<StackHead>,
-    version: StackVersion,
-    head: StackHead,
-) {
-    debug_assert!(version < self_.size);
-    ptr::write(self_.contents.add(version as usize), head);
-}
-
-#[inline]
-const unsafe fn stack_head_read_ref(self_: &StackHead) -> StackHead {
-    ptr::read(self_)
+    array_get_mut(&mut self_.heads, version)
 }
 
 #[inline]
@@ -406,41 +384,6 @@ unsafe fn stack_head_array_pair_mut(
 }
 
 #[inline]
-unsafe fn stack_head_array_back(self_: &Array<StackHead>) -> &StackHead {
-    array_back_ref(self_)
-}
-
-#[inline]
-unsafe fn stack_head_array_back_mut(self_: &mut Array<StackHead>) -> &mut StackHead {
-    array_back_mut(self_)
-}
-
-#[inline]
-unsafe fn stack_slice_array_get(self_: &StackSliceArray, index: u32) -> &StackSlice {
-    array_get_ref(self_, index)
-}
-
-#[inline]
-unsafe fn stack_slice_array_get_mut(self_: &mut StackSliceArray, index: u32) -> &mut StackSlice {
-    array_get_mut(self_, index)
-}
-
-#[inline]
-const unsafe fn stack_slice_array_read_ref(self_: &StackSliceArray) -> StackSliceArray {
-    ptr::read(self_)
-}
-
-#[inline]
-const unsafe fn subtree_array_read_ref(self_: &SubtreeArray) -> SubtreeArray {
-    ptr::read(self_)
-}
-
-#[inline]
-unsafe fn subtree_array_get(self_: &SubtreeArray, index: u32) -> Subtree {
-    *array_get_ref(subtree_array_as_array(self_), index)
-}
-
-#[inline]
 unsafe fn subtree_array_as_array(self_: &SubtreeArray) -> &Array<Subtree> {
     ptr::from_ref(self_)
         .cast::<Array<Subtree>>()
@@ -454,65 +397,6 @@ unsafe fn subtree_array_as_array_mut(self_: &mut SubtreeArray) -> &mut Array<Sub
         .cast::<Array<Subtree>>()
         .as_mut()
         .unwrap_unchecked()
-}
-
-#[inline]
-unsafe fn stack_node_pool_get(self_: &Array<*mut StackNode>, index: u32) -> *mut StackNode {
-    *array_get_ref(self_, index)
-}
-
-#[inline]
-unsafe fn stack_node_array_get(self_: &StackNodeArray, index: u32) -> *mut StackNode {
-    *array_get_ref(self_, index)
-}
-
-#[inline]
-unsafe fn stack_summary_array_get(
-    self_: &StackSummary,
-    index: u32,
-) -> &StackSummaryEntry {
-    array_get_ref(self_, index)
-}
-
-#[inline]
-unsafe fn stack_iterator_array_get(self_: &Array<StackIterator>, index: u32) -> &StackIterator {
-    array_get_ref(self_, index)
-}
-
-#[inline]
-unsafe fn stack_iterator_array_get_mut(
-    self_: &mut Array<StackIterator>,
-    index: u32,
-) -> &mut StackIterator {
-    array_get_mut(self_, index)
-}
-
-#[inline]
-unsafe fn stack_iterator_array_read(self_: &Array<StackIterator>, index: u32) -> StackIterator {
-    stack_iterator_read_ref(stack_iterator_array_get(self_, index))
-}
-
-#[inline]
-const unsafe fn stack_iterator_subtrees_read_ref(self_: &StackIterator) -> SubtreeArray {
-    ptr::read(&self_.subtrees)
-}
-
-#[inline]
-const unsafe fn stack_iterator_read_ref(self_: &StackIterator) -> StackIterator {
-    ptr::read(self_)
-}
-
-#[inline]
-unsafe fn stack_iterator_subtrees_read(
-    self_: &Array<StackIterator>,
-    index: u32,
-) -> SubtreeArray {
-    stack_iterator_subtrees_read_ref(stack_iterator_array_get(self_, index))
-}
-
-#[inline]
-unsafe fn stack_iterator_array_back_mut(self_: &mut Array<StackIterator>) -> &mut StackIterator {
-    array_back_mut(self_)
 }
 
 // ---------------------------------------------------------------------------
@@ -779,7 +663,7 @@ unsafe fn ts_stack__add_version(
     };
     array_push(&mut self_.heads, head);
     stack_node_retain(node);
-    let head = stack_head_array_back(&self_.heads);
+    let head = array_back_ref(&self_.heads);
     if !head.last_external_token.ptr.is_null() {
         ts_subtree_retain(head.last_external_token);
     }
@@ -795,10 +679,10 @@ unsafe fn ts_stack__add_slice(
 ) {
     let node_ptr = ptr::from_mut(node);
     for i in (0..self_.slices.size).rev() {
-        let version = stack_slice_array_get(&self_.slices, i).version;
+        let version = array_get_ref(&self_.slices, i).version;
         if stack_head(self_, version).node == node_ptr {
             let slice = StackSlice {
-                subtrees: subtree_array_read_ref(subtrees),
+                subtrees: ptr::read(subtrees),
                 version,
             };
             array_insert(&mut self_.slices, i + 1, slice);
@@ -808,7 +692,7 @@ unsafe fn ts_stack__add_slice(
 
     let version = ts_stack__add_version(self_, original_version, node);
     let slice = StackSlice {
-        subtrees: subtree_array_read_ref(subtrees),
+        subtrees: ptr::read(subtrees),
         version,
     };
     array_push(&mut self_.slices, slice);
@@ -841,10 +725,7 @@ unsafe fn stack__iter(
         let reserve_count =
             ts_subtree_alloc_size(goal_subtree_count) / std::mem::size_of::<Subtree>();
         let subtrees = subtree_array_as_array_mut(&mut new_iterator.subtrees);
-        array_reserve(
-            subtrees,
-            u32::try_from(reserve_count).unwrap(),
-        );
+        array_reserve(subtrees, u32::try_from(reserve_count).unwrap());
     }
     let include_subtrees = goal_subtree_count.is_some();
 
@@ -854,7 +735,7 @@ unsafe fn stack__iter(
         let mut i: u32 = 0;
         let mut size = stack.iterators.size;
         while i < size {
-            let iterator = stack_iterator_array_get(&stack.iterators, i);
+            let iterator = array_get_ref(&stack.iterators, i);
             let node = iterator.node;
 
             let action = callback(payload, iterator);
@@ -862,9 +743,9 @@ unsafe fn stack__iter(
             let should_stop = (action & StackActionStop) != 0 || (*node).link_count == 0;
 
             if should_pop {
-                let mut subtrees = stack_iterator_subtrees_read(&stack.iterators, i);
+                let mut subtrees = ptr::read(&array_get_ref(&stack.iterators, i).subtrees);
                 if !should_stop {
-                    let source_subtrees = subtree_array_read_ref(&subtrees);
+                    let source_subtrees = ptr::read(&subtrees);
                     ts_subtree_array_copy(&source_subtrees, &mut subtrees);
                 }
                 ts_subtree_array_reverse(&mut subtrees);
@@ -873,7 +754,7 @@ unsafe fn stack__iter(
 
             if should_stop {
                 if !should_pop {
-                    let iter = stack_iterator_array_get_mut(&mut stack.iterators, i);
+                    let iter = array_get_mut(&mut stack.iterators, i);
                     ts_subtree_array_delete(
                         subtree_pool_mut(stack.subtree_pool),
                         &mut iter.subtrees,
@@ -892,21 +773,18 @@ unsafe fn stack__iter(
                 let link: StackLink;
                 if j == u32::from((*node).link_count) {
                     link = (*node).links[0];
-                    next_iterator = stack_iterator_array_get_mut(&mut stack.iterators, i);
+                    next_iterator = array_get_mut(&mut stack.iterators, i);
                 } else {
                     if stack.iterators.size >= MAX_ITERATOR_COUNT {
                         j += 1;
                         continue;
                     }
                     link = (*node).links[j as usize];
-                    let current_iterator = stack_iterator_array_read(&stack.iterators, i);
+                    let current_iterator = ptr::read(array_get_ref(&stack.iterators, i));
                     array_push(&mut stack.iterators, current_iterator);
-                    next_iterator = stack_iterator_array_back_mut(&mut stack.iterators);
-                    let source_subtrees = stack_iterator_subtrees_read_ref(next_iterator);
-                    ts_subtree_array_copy(
-                        &source_subtrees,
-                        &mut next_iterator.subtrees,
-                    );
+                    next_iterator = array_back_mut(&mut stack.iterators);
+                    let source_subtrees = ptr::read(&next_iterator.subtrees);
+                    ts_subtree_array_copy(&source_subtrees, &mut next_iterator.subtrees);
                 }
 
                 next_iterator.node = link.node;
@@ -933,14 +811,11 @@ unsafe fn stack__iter(
         }
     }
 
-    stack_slice_array_read_ref(&stack.slices)
+    ptr::read(&stack.slices)
 }
 
 // Callbacks for stack__iter
-unsafe fn pop_count_callback(
-    payload: *mut c_void,
-    iterator: &StackIterator,
-) -> StackAction {
+unsafe fn pop_count_callback(payload: *mut c_void, iterator: &StackIterator) -> StackAction {
     let goal_subtree_count = *u32_payload_ref(payload);
     if iterator.subtree_count == goal_subtree_count {
         StackActionPop | StackActionStop
@@ -964,14 +839,14 @@ const unsafe fn pop_pending_callback(
     }
 }
 
-unsafe fn pop_error_callback(
-    payload: *mut c_void,
-    iterator: &StackIterator,
-) -> StackAction {
+unsafe fn pop_error_callback(payload: *mut c_void, iterator: &StackIterator) -> StackAction {
     if iterator.subtrees.size > 0 {
         let found_error = bool_payload_mut(payload);
         if !*found_error
-            && ts_subtree_is_error(subtree_array_get(&iterator.subtrees, 0))
+            && ts_subtree_is_error(*array_get_ref(
+                subtree_array_as_array(&iterator.subtrees),
+                0,
+            ))
         {
             *found_error = true;
             StackActionPop | StackActionStop
@@ -994,9 +869,7 @@ unsafe fn u32_payload_ref<'a>(payload: *const c_void) -> &'a u32 {
 }
 
 #[inline]
-unsafe fn summarize_stack_session_mut<'a>(
-    payload: *mut c_void,
-) -> &'a mut SummarizeStackSession {
+unsafe fn summarize_stack_session_mut<'a>(payload: *mut c_void) -> &'a mut SummarizeStackSession {
     payload
         .cast::<SummarizeStackSession>()
         .as_mut()
@@ -1013,10 +886,7 @@ unsafe fn stack_summary_mut<'a>(summary: *mut StackSummary) -> &'a mut StackSumm
     summary.as_mut().unwrap_unchecked()
 }
 
-unsafe fn pop_all_callback(
-    _payload: *mut c_void,
-    iterator: &StackIterator,
-) -> StackAction {
+unsafe fn pop_all_callback(_payload: *mut c_void, iterator: &StackIterator) -> StackAction {
     let node = stack_node_ref(iterator.node);
     if node.link_count == 0 {
         StackActionPop
@@ -1025,10 +895,7 @@ unsafe fn pop_all_callback(
     }
 }
 
-unsafe fn summarize_stack_callback(
-    payload: *mut c_void,
-    iterator: &StackIterator,
-) -> StackAction {
+unsafe fn summarize_stack_callback(payload: *mut c_void, iterator: &StackIterator) -> StackAction {
     let node = stack_node_ref(iterator.node);
     let session = summarize_stack_session_mut(payload);
     let state = node.state;
@@ -1038,7 +905,7 @@ unsafe fn summarize_stack_callback(
     }
     let summary = stack_summary_ref(session.summary);
     for i in (0..summary.size).rev() {
-        let entry = stack_summary_array_get(summary, i);
+        let entry = array_get_ref(summary, i);
         if entry.depth < depth {
             break;
         }
@@ -1105,16 +972,12 @@ pub unsafe fn ts_stack_delete(self_: &mut Stack) {
     let node_pool = &mut self_.node_pool;
     let subtree_pool = subtree_pool_mut(self_.subtree_pool);
     for i in 0..heads.size {
-        stack_head_delete(
-            stack_head_array_get_mut(heads, i),
-            node_pool,
-            subtree_pool,
-        );
+        stack_head_delete(array_get_mut(heads, i), node_pool, subtree_pool);
     }
     array_clear(heads);
     if !node_pool.contents.is_null() {
         for i in 0..node_pool.size {
-            ts_free(stack_node_pool_get(node_pool, i).cast::<c_void>());
+            ts_free((*array_get_ref(node_pool, i)).cast::<c_void>());
         }
         array_delete(node_pool);
     }
@@ -1149,10 +1012,7 @@ pub unsafe fn ts_stack_position(self_: &Stack, version: StackVersion) -> Length 
 }
 
 /// Get the last external token for a version.
-pub unsafe fn ts_stack_last_external_token(
-    self_: &Stack,
-    version: StackVersion,
-) -> Subtree {
+pub unsafe fn ts_stack_last_external_token(self_: &Stack, version: StackVersion) -> Subtree {
     stack_head(self_, version).last_external_token
 }
 
@@ -1163,7 +1023,7 @@ pub unsafe fn ts_stack_set_last_external_token(
     token: Subtree,
 ) {
     let subtree_pool = subtree_pool_mut(self_.subtree_pool);
-    let head = stack_head_array_get_mut(&mut self_.heads, version);
+    let head = array_get_mut(&mut self_.heads, version);
     if !token.ptr.is_null() {
         ts_subtree_retain(token);
     }
@@ -1179,8 +1039,7 @@ pub unsafe fn ts_stack_error_cost(self_: &Stack, version: StackVersion) -> u32 {
     let node = stack_node_ref(head.node);
     let mut result = node.error_cost;
     if head.status == StackStatus::Paused
-        || (node.state == ERROR_STATE
-            && node.links[0].subtree.ptr.is_null())
+        || (node.state == ERROR_STATE && node.links[0].subtree.ptr.is_null())
     {
         result += ERROR_COST_PER_RECOVERY;
     }
@@ -1188,10 +1047,7 @@ pub unsafe fn ts_stack_error_cost(self_: &Stack, version: StackVersion) -> u32 {
 }
 
 /// Get the node count since last error for a version.
-pub unsafe fn ts_stack_node_count_since_error(
-    self_: &mut Stack,
-    version: StackVersion,
-) -> u32 {
+pub unsafe fn ts_stack_node_count_since_error(self_: &mut Stack, version: StackVersion) -> u32 {
     let head = stack_head_mut(self_, version);
     let node = stack_node_ref(head.node);
     if node.node_count < head.node_count_at_last_error {
@@ -1210,7 +1066,7 @@ pub unsafe fn ts_stack_push(
 ) {
     let heads = &mut stack.heads;
     let node_pool = &mut stack.node_pool;
-    let head = stack_head_array_get_mut(heads, version);
+    let head = array_get_mut(heads, version);
     let new_node = stack_node_new(head.node, subtree, pending, state, node_pool);
     if subtree.ptr.is_null() {
         head.node_count_at_last_error = (*new_node).node_count;
@@ -1234,14 +1090,10 @@ pub unsafe fn ts_stack_pop_count(
 }
 
 /// Pop an error from the top of a version.
-pub unsafe fn ts_stack_pop_error(
-    self_: &mut Stack,
-    version: StackVersion,
-) -> SubtreeArray {
+pub unsafe fn ts_stack_pop_error(self_: &mut Stack, version: StackVersion) -> SubtreeArray {
     let node = stack_head(self_, version).node;
     for i in 0..(*node).link_count as usize {
-        if !(*node).links[i].subtree.ptr.is_null()
-            && ts_subtree_is_error((*node).links[i].subtree)
+        if !(*node).links[i].subtree.ptr.is_null() && ts_subtree_is_error((*node).links[i].subtree)
         {
             let mut found_error = false;
             let pop = stack__iter(
@@ -1253,9 +1105,9 @@ pub unsafe fn ts_stack_pop_error(
             );
             if pop.size > 0 {
                 debug_assert!(pop.size == 1);
-                let first_pop = stack_slice_array_get(&pop, 0);
+                let first_pop = array_get_ref(&pop, 0);
                 ts_stack_renumber_version(self_, first_pop.version, version);
-                return subtree_array_read_ref(&first_pop.subtrees);
+                return ptr::read(&first_pop.subtrees);
             }
             break;
         }
@@ -1268,10 +1120,7 @@ pub unsafe fn ts_stack_pop_error(
 }
 
 /// Pop pending entries from a version.
-pub unsafe fn ts_stack_pop_pending(
-    self_: &mut Stack,
-    version: StackVersion,
-) -> StackSliceArray {
+pub unsafe fn ts_stack_pop_pending(self_: &mut Stack, version: StackVersion) -> StackSliceArray {
     let mut pop = stack__iter(
         self_,
         version,
@@ -1280,7 +1129,7 @@ pub unsafe fn ts_stack_pop_pending(
         Some(0),
     );
     if pop.size > 0 {
-        let first_pop = stack_slice_array_get_mut(&mut pop, 0);
+        let first_pop = array_get_mut(&mut pop, 0);
         ts_stack_renumber_version(self_, first_pop.version, version);
         first_pop.version = version;
     }
@@ -1288,19 +1137,12 @@ pub unsafe fn ts_stack_pop_pending(
 }
 
 /// Pop all entries from a version.
-pub unsafe fn ts_stack_pop_all(
-    self_: &mut Stack,
-    version: StackVersion,
-) -> StackSliceArray {
+pub unsafe fn ts_stack_pop_all(self_: &mut Stack, version: StackVersion) -> StackSliceArray {
     stack__iter(self_, version, pop_all_callback, ptr::null_mut(), Some(0))
 }
 
 /// Record a summary of parse states near the top of a version.
-pub unsafe fn ts_stack_record_summary(
-    self_: &mut Stack,
-    version: StackVersion,
-    max_depth: u32,
-) {
+pub unsafe fn ts_stack_record_summary(self_: &mut Stack, version: StackVersion, max_depth: u32) {
     let mut session = SummarizeStackSession {
         summary: ts_malloc(std::mem::size_of::<StackSummary>()).cast::<StackSummary>(),
         max_depth,
@@ -1322,26 +1164,17 @@ pub unsafe fn ts_stack_record_summary(
 }
 
 /// Get the recorded summary for a version.
-pub unsafe fn ts_stack_get_summary(
-    stack: &Stack,
-    version: StackVersion,
-) -> *mut StackSummary {
+pub unsafe fn ts_stack_get_summary(stack: &Stack, version: StackVersion) -> *mut StackSummary {
     stack_head(stack, version).summary
 }
 
 /// Get the dynamic precedence of a version.
-pub unsafe fn ts_stack_dynamic_precedence(
-    self_: &Stack,
-    version: StackVersion,
-) -> i32 {
+pub unsafe fn ts_stack_dynamic_precedence(self_: &Stack, version: StackVersion) -> i32 {
     stack_node_ref(stack_head(self_, version).node).dynamic_precedence
 }
 
 /// Check if a version has advanced since the last error.
-pub unsafe fn ts_stack_has_advanced_since_error(
-    self_: &Stack,
-    version: StackVersion,
-) -> bool {
+pub unsafe fn ts_stack_has_advanced_since_error(self_: &Stack, version: StackVersion) -> bool {
     let head = stack_head(self_, version);
     let mut node = head.node;
     if (*node).error_cost == 0 {
@@ -1371,20 +1204,12 @@ pub unsafe fn ts_stack_remove_version(self_: &mut Stack, version: StackVersion) 
     let heads = &mut self_.heads;
     let node_pool = &mut self_.node_pool;
     let subtree_pool = subtree_pool_mut(self_.subtree_pool);
-    stack_head_delete(
-        stack_head_array_get_mut(heads, version),
-        node_pool,
-        subtree_pool,
-    );
+    stack_head_delete(array_get_mut(heads, version), node_pool, subtree_pool);
     array_erase(heads, version);
 }
 
 /// Renumber version v1 to v2 (move v1 into v2's slot, removing v2).
-pub unsafe fn ts_stack_renumber_version(
-    stack: &mut Stack,
-    v1: StackVersion,
-    v2: StackVersion,
-) {
+pub unsafe fn ts_stack_renumber_version(stack: &mut Stack, v1: StackVersion, v2: StackVersion) {
     if v1 == v2 {
         return;
     }
@@ -1400,31 +1225,24 @@ pub unsafe fn ts_stack_renumber_version(
         target_head.summary = ptr::null_mut();
     }
     stack_head_delete(target_head, node_pool, subtree_pool);
-    *target_head = stack_head_read_ref(source_head);
+    *target_head = ptr::read(source_head);
     array_erase(heads, v1);
 }
 
 /// Swap two versions.
-pub unsafe fn ts_stack_swap_versions(
-    stack: &mut Stack,
-    v1: StackVersion,
-    v2: StackVersion,
-) {
-    let temp = stack_head_array_read(&stack.heads, v1);
-    let other = stack_head_array_read(&stack.heads, v2);
-    stack_head_array_write(&mut stack.heads, v1, other);
-    stack_head_array_write(&mut stack.heads, v2, temp);
+pub unsafe fn ts_stack_swap_versions(stack: &mut Stack, v1: StackVersion, v2: StackVersion) {
+    let temp = ptr::read(array_get_ref(&stack.heads, v1));
+    let other = ptr::read(array_get_ref(&stack.heads, v2));
+    ptr::write(array_get_mut(&mut stack.heads, v1), other);
+    ptr::write(array_get_mut(&mut stack.heads, v2), temp);
 }
 
 /// Copy a version, creating a new one.
-pub unsafe fn ts_stack_copy_version(
-    stack: &mut Stack,
-    version: StackVersion,
-) -> StackVersion {
+pub unsafe fn ts_stack_copy_version(stack: &mut Stack, version: StackVersion) -> StackVersion {
     debug_assert!(version < stack.heads.size);
-    let version_head = stack_head_array_read(&stack.heads, version);
+    let version_head = ptr::read(array_get_ref(&stack.heads, version));
     array_push(&mut stack.heads, version_head);
-    let head = stack_head_array_back_mut(&mut stack.heads);
+    let head = array_back_mut(&mut stack.heads);
     stack_node_retain(stack_node_mut(head.node));
     if !head.last_external_token.ptr.is_null() {
         ts_subtree_retain(head.last_external_token);
@@ -1448,7 +1266,11 @@ pub unsafe fn ts_stack_merge(
         let (head1, head2) = stack_head_array_pair_mut(stack_heads, version1, version2);
         let head2_node = stack_node_ref(head2.node);
         for i in 0..head2_node.link_count as usize {
-            stack_node_add_link(stack_node_mut(head1.node), head2_node.links[i], subtree_pool);
+            stack_node_add_link(
+                stack_node_mut(head1.node),
+                head2_node.links[i],
+                subtree_pool,
+            );
         }
         let head1_node = stack_node_ref(head1.node);
         if head1_node.state == ERROR_STATE {
@@ -1486,11 +1308,7 @@ pub unsafe fn ts_stack_halt(self_: &mut Stack, version: StackVersion) {
 }
 
 /// Pause a version with a lookahead token.
-pub unsafe fn ts_stack_pause(
-    stack: &mut Stack,
-    version: StackVersion,
-    lookahead: Subtree,
-) {
+pub unsafe fn ts_stack_pause(stack: &mut Stack, version: StackVersion, lookahead: Subtree) {
     let head = stack_head_mut(stack, version);
     head.status = StackStatus::Paused;
     head.lookahead_when_paused = lookahead;
@@ -1513,10 +1331,7 @@ pub unsafe fn ts_stack_is_paused(self_: &Stack, version: StackVersion) -> bool {
 }
 
 /// Resume a paused version, returning its stored lookahead.
-pub unsafe fn ts_stack_resume(
-    stack: &mut Stack,
-    version: StackVersion,
-) -> Subtree {
+pub unsafe fn ts_stack_resume(stack: &mut Stack, version: StackVersion) -> Subtree {
     let head = stack_head_mut(stack, version);
     debug_assert!(head.status == StackStatus::Paused);
     let result = head.lookahead_when_paused;
@@ -1532,11 +1347,7 @@ pub unsafe fn ts_stack_clear(self_: &mut Stack) {
     let node_pool = &mut self_.node_pool;
     let subtree_pool = subtree_pool_mut(self_.subtree_pool);
     for i in 0..heads.size {
-        stack_head_delete(
-            stack_head_array_get_mut(heads, i),
-            node_pool,
-            subtree_pool,
-        );
+        stack_head_delete(array_get_mut(heads, i), node_pool, subtree_pool);
     }
     array_clear(heads);
     array_push(
@@ -1584,7 +1395,9 @@ pub unsafe fn ts_stack_print_dot_graph(
 
         fprintf(
             f,
-            c"node_head_%u [shape=none, label=\"\"]\n".as_ptr().cast::<i8>(),
+            c"node_head_%u [shape=none, label=\"\"]\n"
+                .as_ptr()
+                .cast::<i8>(),
             i,
         );
         fprintf(
@@ -1609,12 +1422,8 @@ pub unsafe fn ts_stack_print_dot_graph(
             fprintf(f, c"\nsummary:".as_ptr().cast::<i8>());
             let summary = stack_summary_ref(head.summary);
             for j in 0..summary.size {
-                let entry = stack_summary_array_get(summary, j);
-                fprintf(
-                    f,
-                    c" %u".as_ptr().cast::<i8>(),
-                    u32::from(entry.state),
-                );
+                let entry = array_get_ref(summary, j);
+                fprintf(f, c" %u".as_ptr().cast::<i8>(), u32::from(entry.state));
             }
         }
 
@@ -1650,11 +1459,11 @@ pub unsafe fn ts_stack_print_dot_graph(
         let mut all_iterators_done = true;
 
         for i in 0..stack.iterators.size {
-            let iterator = stack_iterator_array_read(&stack.iterators, i);
+            let iterator = ptr::read(array_get_ref(&stack.iterators, i));
             let mut node = iterator.node;
 
             for j in 0..visited_nodes.size {
-                if stack_node_array_get(&visited_nodes, j) == node {
+                if *array_get_ref(&visited_nodes, j) == node {
                     node = ptr::null_mut();
                     break;
                 }
@@ -1673,10 +1482,7 @@ pub unsafe fn ts_stack_print_dot_graph(
                 && !node_ref.links[0].subtree.ptr.is_null()
                 && ts_subtree_extra(node_ref.links[0].subtree)
             {
-                fprintf(
-                    f,
-                    c"shape=point margin=0 label=\"\"".as_ptr().cast::<i8>(),
-                );
+                fprintf(f, c"shape=point margin=0 label=\"\"".as_ptr().cast::<i8>());
             } else {
                 fprintf(
                     f,
@@ -1730,7 +1536,9 @@ pub unsafe fn ts_stack_print_dot_graph(
                     fprintf(f, c"\"".as_ptr().cast::<i8>());
                     fprintf(
                         f,
-                        c"labeltooltip=\"error_cost: %u\ndynamic_precedence: %d\"".as_ptr().cast::<i8>(),
+                        c"labeltooltip=\"error_cost: %u\ndynamic_precedence: %d\""
+                            .as_ptr()
+                            .cast::<i8>(),
                         ts_subtree_error_cost(link.subtree),
                         ts_subtree_dynamic_precedence(link.subtree),
                     );
@@ -1739,10 +1547,10 @@ pub unsafe fn ts_stack_print_dot_graph(
                 fprintf(f, c"];\n".as_ptr().cast::<i8>());
 
                 let next_iterator = if j == 0 {
-                    stack_iterator_array_get_mut(&mut stack.iterators, i)
+                    array_get_mut(&mut stack.iterators, i)
                 } else {
-                    array_push(&mut stack.iterators, stack_iterator_read_ref(&iterator));
-                    stack_iterator_array_back_mut(&mut stack.iterators)
+                    array_push(&mut stack.iterators, ptr::read(&iterator));
+                    array_back_mut(&mut stack.iterators)
                 };
                 next_iterator.node = link.node;
             }
