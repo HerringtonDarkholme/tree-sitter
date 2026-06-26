@@ -197,8 +197,6 @@ extern "C" {
     fn fprintf(f: *mut c_void, fmt: *const i8, ...) -> i32;
     fn fputs(s: *const i8, f: *mut c_void) -> i32;
     fn fputc(c: i32, f: *mut c_void) -> i32;
-    fn memcmp(s1: *const c_void, s2: *const c_void, n: usize) -> i32;
-
     #[cfg(not(target_os = "windows"))]
     fn fdopen(fd: i32, mode: *const i8) -> *mut c_void;
     #[cfg(not(target_os = "windows"))]
@@ -932,11 +930,9 @@ unsafe fn ts_parser__can_reuse_first_leaf(
 
     // If the token was created in a state with the same set of lookaheads, it is reusable.
     if table_entry.action_count > 0
-        && memcmp(
-            ptr::from_ref(&leaf_lex_mode).cast::<c_void>(),
-            ptr::from_ref(&current_lex_mode).cast::<c_void>(),
-            core::mem::size_of::<TSLexerMode>(),
-        ) == 0
+        && leaf_lex_mode.lex_state == current_lex_mode.lex_state
+        && leaf_lex_mode.external_lex_state == current_lex_mode.external_lex_state
+        && leaf_lex_mode.reserved_word_set_id == current_lex_mode.reserved_word_set_id
         && (leaf_symbol != lang.keyword_capture_token
             || (!ts_subtree_is_keyword(tree) && ts_subtree_parse_state(tree) == state))
     {
