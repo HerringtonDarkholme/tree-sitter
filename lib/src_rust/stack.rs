@@ -231,9 +231,9 @@ pub(crate) unsafe fn array_push<T>(arr: &mut Array<T>, element: T) {
     arr.size += 1;
 }
 
-pub(crate) unsafe fn array_pop<T>(arr: *mut Array<T>) -> T {
-    (*arr).size -= 1;
-    ptr::read((*arr).contents.add((*arr).size as usize))
+pub(crate) unsafe fn array_pop<T>(arr: &mut Array<T>) -> T {
+    arr.size -= 1;
+    ptr::read(arr.contents.add(arr.size as usize))
 }
 
 pub(crate) unsafe fn array_get<T>(arr: *const Array<T>, index: u32) -> *mut T {
