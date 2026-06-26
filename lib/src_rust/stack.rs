@@ -576,6 +576,22 @@ const fn stack_link_payload_new(subtree: Subtree, is_pending: bool) -> StackLink
 }
 
 #[inline]
+const fn stack_link_payload_new_pending_reduction(
+    pending_reduction: *mut PendingReduction,
+    is_pending: bool,
+) -> StackLinkPayload {
+    StackLinkPayload {
+        value: StackLinkPayloadValue { pending_reduction },
+        flags: STACK_LINK_PAYLOAD_IS_PENDING_REDUCTION
+            | if is_pending {
+                STACK_LINK_PAYLOAD_IS_PENDING_LINK
+            } else {
+                0
+            },
+    }
+}
+
+#[inline]
 const unsafe fn stack_link_payload_subtree(payload: StackLinkPayload) -> Subtree {
     payload.value.subtree
 }
@@ -688,10 +704,9 @@ unsafe fn stack_link_payload_extra(payload: StackLinkPayload) -> bool {
 }
 
 /// Allocate a new stack node, reusing from pool if available.
-unsafe fn stack_node_new(
+unsafe fn stack_node_new_with_payload(
     previous_node: *mut StackNode,
-    subtree: Subtree,
-    is_pending: bool,
+    payload: StackLinkPayload,
     state: TSStateId,
     pool: &mut StackNodeArray,
 ) -> *mut StackNode {
@@ -707,7 +722,6 @@ unsafe fn stack_node_new(
 
     if !previous_node.is_null() {
         (*node).link_count = 1;
-        let payload = stack_link_payload_new(subtree, is_pending);
         (*node).links[0] = StackLink {
             node: previous_node,
             payload,
@@ -730,6 +744,21 @@ unsafe fn stack_node_new(
     }
 
     node
+}
+
+unsafe fn stack_node_new(
+    previous_node: *mut StackNode,
+    subtree: Subtree,
+    is_pending: bool,
+    state: TSStateId,
+    pool: &mut StackNodeArray,
+) -> *mut StackNode {
+    stack_node_new_with_payload(
+        previous_node,
+        stack_link_payload_new(subtree, is_pending),
+        state,
+        pool,
+    )
 }
 
 /// Check if two subtrees are equivalent for merging purposes.
@@ -1462,6 +1491,26 @@ pub unsafe fn ts_stack_push(
     if subtree.ptr.is_null() {
         head.node_count_at_last_error = (*new_node).node_count;
     }
+    head.node = new_node;
+}
+
+/// Push a pending reduction descriptor onto a version.
+pub unsafe fn ts_stack_push_pending_reduction(
+    stack: &mut Stack,
+    version: StackVersion,
+    pending_reduction: *mut PendingReduction,
+    pending: bool,
+    state: TSStateId,
+) {
+    let heads = &mut stack.heads;
+    let node_pool = &mut stack.node_pool;
+    let head = array_get_mut(heads, version);
+    let new_node = stack_node_new_with_payload(
+        head.node,
+        stack_link_payload_new_pending_reduction(pending_reduction, pending),
+        state,
+        node_pool,
+    );
     head.node = new_node;
 }
 
