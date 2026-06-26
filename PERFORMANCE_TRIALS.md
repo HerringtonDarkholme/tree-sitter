@@ -139,6 +139,7 @@ may refer to these rows, but should not duplicate them as separate attempts.
 | Refreshed C++ raw parse flamegraph | Profiling/design | `cargo flamegraph` on C++ `rule.cc` with `/tmp/ts-raw-profile-harness-plain` produced `/tmp/tree-sitter-current-cpp.svg`: reduce `30.37%`, new node `10.59%`, summarize `7.94%`, stack pop `7.01%`, balance `4.05%`, `ts_lex` `22.90%`, keyword lex `6.07%`. Confirms reduce construction remains the largest library-owned target even on a lexer-heavy language. |
 | Fresh-reduce candidate shape instrumentation | Profiling/design | Temporary parser-local counters across the seven target languages showed normal fresh parsing is almost entirely single-candidate. TypeScript, JavaScript, Python, Rust, and Java had zero merged groups; Go had `12 / 64540` merged groups; C++ had `5 / 4592` merged groups. This closes merged-candidate selection as a primary normal-case direction and shifts reduce work toward single-candidate collection/finalization. |
 | C++ marker-index flamegraph | Profiling/design | `cargo flamegraph` on C++ `marker-index.h` with `/tmp/ts-raw-profile-harness-plain` produced `/tmp/tree-sitter-cpp-marker-current.svg`: reduce `27.81%`, `ts_lex` `21.93%`, keyword lex `5.88%`, new node in arena `9.63%`, summarize `8.56%`, stack pop into builder `5.88%`, stack push `5.35%` across visible frames, balance `3.74%`. Confirms C++ needs both reduce-construction and lexer/runtime-boundary work for a universal 20% target. |
+| Lexer/runtime boundary counters | Profiling/design | Temporary parser and lexer counters across the seven target languages showed included-range stepping is zero in normal parsing and chunk reads are tiny. External scanner calls are high for JavaScript/TypeScript/Python and moderate for Rust, but absent for Go/C++/Java. Core runtime lookahead/advance callbacks are broad, but prior single-range and UTF-8/ASCII fast paths already failed, so lexer work needs narrower boundary evidence before code. |
 
 ### Rejected Or Closed
 
@@ -699,42 +700,70 @@ the no-alias small majority, but C++, JavaScript, TypeScript, and Go have enough
 alias candidates that summary fusion should follow storage redesign, not lead
 it.
 
+Temporary lexer/runtime boundary instrumentation, removed before committing:
+
+| Language | Main lex | Keyword lex | External scan | External serialize | External deserialize | Lookahead | Advance | Skip advance | Consume advance | Mark end | Chunk reads | Included-range steps |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| JavaScript | 71,744 | 26,932 | 75,345 | 3,601 | 75,345 | 676,515 | 587,424 | 207,868 | 379,558 | 398,266 | 10 | 0 |
+| TypeScript | 44,342 | 18,757 | 45,479 | 1,137 | 45,479 | 666,090 | 612,181 | 287,813 | 324,379 | 327,931 | 58 | 0 |
+| Python | 33,557 | 11,731 | 41,922 | 8,365 | 41,922 | 451,415 | 412,976 | 272,829 | 140,159 | 150,310 | 84 | 0 |
+| Go | 40,139 | 14,990 | 0 | 0 | 0 | 262,441 | 235,602 | 22,695 | 212,911 | 193,918 | 8 | 0 |
+| Rust | 13,373 | 5,087 | 5,555 | 558 | 5,555 | 99,051 | 88,002 | 25,085 | 62,919 | 44,986 | 8 | 0 |
+| C++ | 3,178 | 1,395 | 0 | 0 | 0 | 19,754 | 17,167 | 2,329 | 14,840 | 12,285 | 4 | 0 |
+| Java | 871 | 365 | 0 | 0 | 0 | 5,131 | 4,487 | 1,046 | 3,443 | 2,835 | 4 | 0 |
+
+Implications:
+
+- Included-range stepping is not a normal-case target for the seven-language
+  benchmark. Every measured language had `0` included-range steps.
+- Input chunking is not a normal-case target; chunk reads are tiny relative to
+  lookahead/advance counts.
+- External scanners are important for JavaScript, TypeScript, Python, and Rust,
+  but absent in Go, C++, and Java samples. Scanner-boundary work cannot be the
+  primary universal lever.
+- Runtime lookahead/advance/mark-end callbacks are broad, but previous
+  single-range advance and UTF-8/ASCII decode fast paths regressed. Reopen lexer
+  runtime work only with flamegraph evidence for a specific reusable operation,
+  not generic callback-count evidence.
+
 ### Candidate Ranking
 
 | Rank | Direction | Decision |
 | ---: | --- | --- |
-| 1 | Lexer/runtime boundary investigation | Now the highest-priority measurement direction. C++ and JavaScript have large lexer/scanner shares, and one-pass final-storage reduce construction regressed Go/Rust/Java. Needs boundary evidence before code because generated grammar lexers and external scanners may limit core-library leverage. |
-| 2 | Multi-phase reduce protocol redesign | Still a parser-core candidate only if it removes more than the builder-to-arena copy. The rejected one-pass linear collection helped TypeScript/C++ but regressed Go/Rust/Java, so future reduce work must also eliminate summary, stack-push, or graph-candidate materialization costs. |
+| 1 | Multi-phase reduce protocol redesign | Back to the top implementation direction. Lexer counters ruled out included-range/chunking work and showed external scanners are not universal. Future reduce work must remove more than the builder-to-arena copy: summary, stack-push, or graph-candidate materialization must move too. |
+| 2 | Lexer/runtime boundary investigation | Measurement remains useful, but not yet an implementation direction. Only pursue code if a flamegraph isolates reusable runtime work beyond generated `ts_lex`, keyword lexing, external scanner bodies, included-range checks, or chunk reads. |
 | 3 | Balancing/compress redesign | Important for Rust and moderate for JS/TS/Go/Python. Do not remove balancing; contains-repetition pruning and single-pass compression both regressed or failed to improve Rust. Only consider a correctness-preserving redesign with tree-shape evidence, not schedule tuning. |
 | 4 | Summarization during reduce construction | Only after a real builder changes selection/ownership. A direct arena copy-plus-summary loop regressed and is closed. |
 
 ### Next Direction Queue
 
-1. Lexer/runtime boundary investigation.
-   - Goal: determine whether the core runtime has a real library-owned lexer
-     optimization surface after generated lexer and external scanner costs are
-     separated.
-   - Why first: C++ and JavaScript show large lexer/scanner shares, prior core
-     lexer ASCII/direct UTF-8 fast paths failed, and the latest reduce-storage
-     architecture trial was mixed. This needs boundary evidence before code.
-   - Tooling: `cargo flamegraph`, temporary counters around
-     `ts_lexer__get_lookahead`, `ts_lexer__do_advance`, included-range handling,
-     generated `ts_lex`, and external scanner calls.
-   - Reject if the remaining cost is dominated by generated grammar code or
-     external scanners rather than reusable runtime code.
-
-2. Multi-phase reduce protocol redesign.
+1. Multi-phase reduce protocol redesign.
    - Goal: remove multiple reduce phases together: candidate materialization,
      builder-to-arena copying, separate child summarization, and repeated
      parent/trailing-extra stack pushes.
-   - Why second: reduce is still the largest shared parser-owned frame, but
-     removing only the child copy regressed Go/Rust/Java. A useful redesign must
-     change more than storage.
+   - Why first: reduce is still the largest shared parser-owned frame, and
+     lexer counters ruled out easy reusable lexer surfaces. The latest reduce
+     storage trial proved that removing only one copy is insufficient, not that
+     reduce is no longer the broad parser-core target.
    - Tooling: `cargo flamegraph` for post-builder samples, temporary counters
      for stack-push batches and summary fallback causes, same-session
      seven-language benchmarks.
    - Reject if it is a linear-only direct-storage path, buffer adoption, direct
      graph collection, candidate-selection-only change, or summary-loop rewrite.
+
+2. Lexer/runtime boundary investigation.
+   - Goal: determine whether the core runtime has a real library-owned lexer
+     optimization surface after generated lexer and external scanner costs are
+     separated.
+   - Why second: C++ and JavaScript show large lexer/scanner shares, but the
+     new counters ruled out included-range stepping and chunking. External
+     scanner work is not universal, and prior core lexer ASCII/direct UTF-8
+     fast paths failed.
+   - Tooling: `cargo flamegraph`, temporary counters around
+     `ts_lexer__get_lookahead`, `ts_lexer__do_advance`, included-range handling,
+     generated `ts_lex`, and external scanner calls.
+   - Reject if the remaining cost is dominated by generated grammar code or
+     external scanners rather than reusable runtime code.
 
 3. Balance/compress redesign.
    - Goal: reduce post-parse tree balancing/compression cost without removing
@@ -759,26 +788,25 @@ it.
 
 ### Next Parser Trial
 
-The next trial should be lexer/runtime boundary instrumentation, not production
-code:
+The next parser-core trial should be a multi-phase reduce design measurement,
+not a direct-storage implementation:
 
-- Hypothesis: after reduce-storage copy removal proved mixed, the next broad
-  parser speedup is more likely at the lexer/runtime boundary or in a
-  multi-phase reduce redesign, not in direct arena storage alone.
-- History check: ASCII/direct UTF-8 lexer fast paths failed, and generated
-  grammar code must not be edited. Direct graph collection, direct arena
-  finalization, and one-pass linear final storage are closed as standalone
-  reduce directions.
-- Evidence status: C++ and JavaScript flamegraphs show large `ts_lex`,
-  keyword-lex, and external scanner shares, but the reusable runtime portion is
-  not yet isolated.
-- Kill criteria: if counters show the cost is mostly generated `ts_lex`,
-  keyword lexer tables, or external scanner implementation code, do not edit the
-  core runtime for this direction.
-- Implementation boundary if evidence passes: only optimize reusable runtime
-  work such as `ts_lexer__get_lookahead`, `ts_lexer__do_advance`,
-  included-range checks, mark/end bookkeeping, or external-scanner call
-  boundary overhead.
+- Hypothesis: the remaining reduce opportunity requires removing at least two
+  phases together, likely parent/trailing-extra stack-push repetition plus
+  summary or candidate materialization. Removing only builder-to-arena copy was
+  not universal.
+- History check: direct graph collection, direct arena finalization, one-pass
+  linear final storage, summary-loop rewrites, and candidate-selection-only
+  changes are closed as standalone reduce directions.
+- Evidence status: reduce remains the largest shared parser-owned frame, while
+  lexer counters ruled out included-range/chunking and showed external scanner
+  work is not universal.
+- Kill criteria: reject any trial that is linear-only direct storage, buffer
+  adoption, graph collection alone, summary-loop rewrite alone, or a branch-only
+  fast path.
+- Implementation boundary if evidence passes: design either a batched
+  reduce-stack push protocol or a pending-reduction descriptor that avoids
+  materializing intermediate parents until metadata or tree identity is needed.
 
 ### Reduce-Construction Redesign Sketch
 
