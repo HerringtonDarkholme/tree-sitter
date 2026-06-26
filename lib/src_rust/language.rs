@@ -281,10 +281,10 @@ unsafe fn lookahead_iterator_mut<'a>(self_: *mut LookaheadIterator) -> &'a mut L
 
 #[inline]
 unsafe fn parse_action_entry<'a>(
-    language: *const TSLanguageFull,
+    language: &TSLanguageFull,
     index: usize,
 ) -> &'a TSParseActionEntry {
-    language_ref(language)
+    language
         .parse_actions
         .add(index)
         .as_ref()
@@ -292,8 +292,8 @@ unsafe fn parse_action_entry<'a>(
 }
 
 #[inline]
-unsafe fn parse_action_at(language: *const TSLanguageFull, index: usize) -> *const TSParseAction {
-    language_ref(language)
+unsafe fn parse_action_at(language: &TSLanguageFull, index: usize) -> *const TSParseAction {
+    language
         .parse_actions
         .add(index)
         .cast::<TSParseAction>()
@@ -476,10 +476,11 @@ pub(crate) unsafe fn ts_lookahead_iterator__next(self_: &mut LookaheadIterator) 
 
     // Depending on if the symbol is terminal or non-terminal, the table value
     // either represents a list of actions or a successor state.
-    if u32::from(self_.symbol) < (*l).token_count {
-        let entry = parse_action_entry(l, self_.table_value as usize);
+    let language = language_ref(l);
+    if u32::from(self_.symbol) < language.token_count {
+        let entry = parse_action_entry(language, self_.table_value as usize);
         self_.action_count = u16::from(entry.entry.count);
-        self_.actions = parse_action_at(l, self_.table_value as usize + 1);
+        self_.actions = parse_action_at(language, self_.table_value as usize + 1);
         self_.next_state = 0;
     } else {
         self_.action_count = 0;
@@ -742,12 +743,13 @@ pub(crate) unsafe fn ts_language_table_entry(
         (*result).is_reusable = false;
         (*result).actions = ptr::null();
     } else {
-        debug_assert!(u32::from(symbol) < (*l).token_count);
+        let language = language_ref(l);
+        debug_assert!(u32::from(symbol) < language.token_count);
         let action_index = ts_language_lookup(self_, state, symbol) as usize;
-        let entry = parse_action_entry(l, action_index);
+        let entry = parse_action_entry(language, action_index);
         (*result).action_count = u32::from(entry.entry.count);
         (*result).is_reusable = entry.entry.reusable;
-        (*result).actions = parse_action_at(l, action_index + 1);
+        (*result).actions = parse_action_at(language, action_index + 1);
     }
 }
 
