@@ -193,6 +193,87 @@ cargo xtask benchmark --kind normal -r 10 --language typescript
 
 ## Validation Notes
 
+### 2026-06-26 parser tree arena reduction slice
+
+Change:
+
+- Added parser-owned `TreeArena` allocation for normal parse runs.
+- Moved reduction/accept/recovery parent node allocation through
+  `ts_subtree_new_node_in_arena`.
+- Transferred the arena to the returned `TSTree` on successful parse.
+
+Initial failure:
+
+- `cargo test --all` failed in corpus allocation checks.
+- Narrow repro: `cargo test -p tree-sitter-cli test_corpus_for_javascript_language -- --nocapture`.
+- The first JavaScript corpus case passed parsing but reported leaked allocation indices during
+  edit/reparse trials.
+
+Root cause:
+
+- `ts_subtree_clone` copied the `arena_owned` flag from an arena-backed source subtree into a
+  fresh heap allocation.
+- Edit/reparse can clone arena-owned subtrees from an old tree. Those clones must be normal
+  heap-owned nodes; otherwise release skips freeing them.
+
+Fix:
+
+- Clear `arena_owned` on cloned heap subtrees.
+
+Validation:
+
+- `cargo test -p tree-sitter-cli test_corpus_for_javascript_language -- --nocapture` passed
+  outside the sandbox.
+
+Full validation:
+
+- First `cargo test --all` run passed corpus allocation checks but aborted later with a transient
+  misaligned-pointer panic in `test_tree_cursor_child_for_point`.
+- The same test passed in isolation.
+- A second `cargo test --all` run passed outside the sandbox.
+
+Benchmark result, compared against the same worktree with only this library-code patch reversed:
+
+| Language | Baseline avg bytes/ms | Arena slice avg bytes/ms | Avg delta | Baseline worst | Arena slice worst | Worst delta |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| JavaScript | 17119 | 18072 | +5.6% | 16463 | 16770 | +1.9% |
+| TypeScript | 22095 | 23024 | +4.2% | 19086 | 19649 | +2.9% |
+| Python | 9031 | 9276 | +2.7% | 441 | 395 | -10.4% |
+| Go | 15102 | 15265 | +1.1% | 12399 | 13884 | +12.0% |
+| Rust | 13683 | 15139 | +10.6% | 10388 | 11696 | +12.6% |
+| C++ | 7028 | 7068 | +0.6% | 5697 | 6104 | +7.1% |
+| Java | 10588 | 11834 | +11.8% | 8827 | 9721 | +10.1% |
+
+Mean of language-average throughput values:
+
+- Baseline: 94646 bytes/ms total across the seven language averages.
+- Arena slice: 99678 bytes/ms total across the seven language averages.
+- Delta: +5.3%.
+
+Conclusion:
+
+- This is a real architecture-level allocation/layout improvement, but it is not the requested
+  20% gain by itself.
+- It should remain a foundation for later work only if additional arena/tree-builder changes can
+  build on it without regressing C++/Go/Python.
+
+Flamegraph/profiling:
+
+- Command:
+
+```sh
+cargo flamegraph --release -o /tmp/tree-sitter-js-jquery-arena-slice-flamegraph.svg -- \
+  /Users/hd/code/test/tree-sitter/test/fixtures/grammars/javascript/src \
+  /Users/hd/code/test/tree-sitter/test/fixtures/grammars/javascript/examples/jquery.js \
+  2000
+```
+
+- Output: `/tmp/tree-sitter-js-jquery-arena-slice-flamegraph.svg`.
+- Harness result on JavaScript `jquery.js`: 18750 bytes/ms, 13.19 ms/parse.
+- Allocator result: about 68038 allocation calls/parse and 12.4 MB requested/parse.
+- Dominant exact allocation sizes remained 88, 96, and 104 bytes. This means parent-node arena
+  allocation is not enough; major heap traffic still comes from other subtree allocation paths.
+
 ### 2026-06-26 sandboxed run
 
 Command:

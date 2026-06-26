@@ -1511,6 +1511,7 @@ pub unsafe fn ts_subtree_clone(self_: Subtree) -> MutableSubtree {
         );
     }
     (*result).ref_count = 1;
+    (*result).set_arena_owned(false);
     MutableSubtree { ptr: result }
 }
 
