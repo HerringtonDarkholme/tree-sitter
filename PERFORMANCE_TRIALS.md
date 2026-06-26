@@ -50,6 +50,7 @@ ts_parser__advance -> ts_parser__reduce
 - Descriptor-aware stack-pop collection primitive
 - Payload span access/release for reduce wiring
 - Pending descriptor payload-child ownership and summary
+- Pending descriptor recursive materialization boundary
 
 ### Measurement
 

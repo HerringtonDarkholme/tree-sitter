@@ -1144,6 +1144,93 @@ unsafe fn ts_parser__pending_reduction_new_from_payloads(
     pending
 }
 
+unsafe fn ts_parser__materialize_pending_reduction(
+    self_: &mut TSParser,
+    pending: *mut PendingReduction,
+) -> Subtree {
+    let pending_ref = pending.as_mut().unwrap_unchecked();
+    if !pending_ref.materialized.ptr.is_null() {
+        ts_subtree_retain(pending_ref.materialized);
+        return pending_ref.materialized;
+    }
+
+    let mut children = SubtreeArray {
+        contents: ptr::null_mut(),
+        size: 0,
+        capacity: 0,
+    };
+
+    if !pending_ref.payload_children.contents.is_null() {
+        array_reserve(
+            subtree_array_as_array_mut(&mut children),
+            pending_ref.payload_children.size,
+        );
+        for i in 0..pending_ref.payload_children.size {
+            let payload = *array_get_ref(&pending_ref.payload_children, i);
+            let child = if ts_stack_link_payload_is_pending_reduction(payload) {
+                ts_parser__materialize_pending_reduction(
+                    self_,
+                    ts_stack_link_payload_pending_reduction(payload),
+                )
+            } else {
+                let child = ts_stack_link_payload_subtree(payload);
+                ts_subtree_retain(child);
+                child
+            };
+            array_push(subtree_array_as_array_mut(&mut children), child);
+        }
+
+        for i in 0..pending_ref.payload_children.size {
+            ts_stack_link_payload_release(
+                *array_get_ref(&pending_ref.payload_children, i),
+                &mut self_.tree_pool,
+            );
+        }
+        array_delete(&mut pending_ref.payload_children);
+    } else {
+        children = ptr::read(&pending_ref.children);
+        pending_ref.children = SubtreeArray {
+            contents: ptr::null_mut(),
+            size: 0,
+            capacity: 0,
+        };
+    }
+
+    let result = ts_parser__new_node(
+        self_,
+        pending_ref.symbol,
+        &mut children,
+        u32::from(pending_ref.production_id),
+    );
+
+    (*result.ptr).padding = pending_ref.padding;
+    (*result.ptr).size = pending_ref.size;
+    (*result.ptr).lookahead_bytes = pending_ref.lookahead_bytes;
+    (*result.ptr).error_cost = pending_ref.error_cost;
+    (*result.ptr).parse_state = pending_ref.parse_state;
+    (*result.ptr).set_extra(pending_ref.flags & PENDING_REDUCTION_EXTRA != 0);
+    (*result.ptr).set_fragile_left(pending_ref.flags & PENDING_REDUCTION_FRAGILE_LEFT != 0);
+    (*result.ptr).set_fragile_right(pending_ref.flags & PENDING_REDUCTION_FRAGILE_RIGHT != 0);
+    (*result.ptr)
+        .set_has_external_tokens(pending_ref.flags & PENDING_REDUCTION_HAS_EXTERNAL_TOKENS != 0);
+    (*result.ptr).set_has_external_scanner_state_change(
+        pending_ref.flags & PENDING_REDUCTION_HAS_EXTERNAL_SCANNER_STATE_CHANGE != 0,
+    );
+    (*result.ptr)
+        .set_depends_on_column(pending_ref.flags & PENDING_REDUCTION_DEPENDS_ON_COLUMN != 0);
+    (*result.ptr).data.children.visible_child_count = pending_ref.visible_child_count;
+    (*result.ptr).data.children.named_child_count = pending_ref.named_child_count;
+    (*result.ptr).data.children.visible_descendant_count = pending_ref.visible_descendant_count;
+    (*result.ptr).data.children.dynamic_precedence = pending_ref.dynamic_precedence;
+    (*result.ptr).data.children.repeat_depth = pending_ref.repeat_depth;
+    (*result.ptr).data.children.first_leaf.symbol = pending_ref.first_leaf_symbol;
+    (*result.ptr).data.children.first_leaf.parse_state = pending_ref.first_leaf_parse_state;
+
+    pending_ref.materialized = ts_subtree_from_mut(result);
+    ts_subtree_retain(pending_ref.materialized);
+    pending_ref.materialized
+}
+
 // ---------------------------------------------------------------------------
 // ReduceActionSet helper
 // ---------------------------------------------------------------------------
