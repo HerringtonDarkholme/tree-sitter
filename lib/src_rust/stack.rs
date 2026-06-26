@@ -255,19 +255,19 @@ pub(crate) unsafe fn array_get_mut<T>(arr: &mut Array<T>, index: u32) -> &mut T 
         .unwrap_unchecked()
 }
 
-pub(crate) unsafe fn array_back<T>(arr: *const Array<T>) -> *mut T {
-    debug_assert!((*arr).size > 0);
-    (*arr).contents.add((*arr).size as usize - 1)
+pub(crate) unsafe fn array_back<T>(arr: &Array<T>) -> *mut T {
+    debug_assert!(arr.size > 0);
+    arr.contents.add(arr.size as usize - 1)
 }
 
 #[inline]
 pub(crate) unsafe fn array_back_ref<T>(arr: &Array<T>) -> &T {
-    array_back(ptr::from_ref(arr)).as_ref().unwrap_unchecked()
+    array_back(arr).as_ref().unwrap_unchecked()
 }
 
 #[inline]
 pub(crate) unsafe fn array_back_mut<T>(arr: &mut Array<T>) -> &mut T {
-    array_back(ptr::from_mut(arr)).as_mut().unwrap_unchecked()
+    array_back(arr).as_mut().unwrap_unchecked()
 }
 
 pub(crate) unsafe fn array_erase<T>(arr: &mut Array<T>, index: u32) {
