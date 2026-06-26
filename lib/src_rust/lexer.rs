@@ -113,6 +113,11 @@ fn ts_lexer__invalidate_column_data(self_: &mut Lexer) {
 /// Check if the lexer has reached EOF.
 unsafe extern "C" fn ts_lexer__eof(lexer: *const TSLexer) -> bool {
     let self_ = lexer.cast::<Lexer>().as_ref().unwrap_unchecked();
+    ts_lexer__is_eof(self_)
+}
+
+#[inline]
+fn ts_lexer__is_eof(self_: &Lexer) -> bool {
     self_.current_included_range_index == self_.included_range_count
 }
 
@@ -377,7 +382,7 @@ unsafe extern "C" fn ts_lexer__advance(lexer: *mut TSLexer, skip: bool) {
 /// Mark that a token match has completed. `TSLexer` vtable callback.
 unsafe extern "C" fn ts_lexer__mark_end(lexer: *mut TSLexer) {
     let self_ = lexer.cast::<Lexer>().as_mut().unwrap_unchecked();
-    if !ts_lexer__eof(&self_.data) {
+    if !ts_lexer__is_eof(self_) {
         // If the lexer is right at the beginning of included range,
         // then the token should be considered to end at the *end* of the
         // previous included range, rather than here.
@@ -417,16 +422,16 @@ unsafe extern "C" fn ts_lexer__get_column(lexer: *mut TSLexer) -> u32 {
         ts_lexer__set_column_data(self_, 0);
         ts_lexer__get_chunk(self_);
 
-        if !ts_lexer__eof(lexer) {
+        if !ts_lexer__is_eof(self_) {
             ts_lexer__get_lookahead(self_);
 
             // Advance to the recorded position
             while self_.current_position.bytes < goal_byte
-                && !ts_lexer__eof(lexer)
+                && !ts_lexer__is_eof(self_)
                 && !self_.chunk.is_null()
             {
                 ts_lexer__do_advance(self_, false);
-                if ts_lexer__eof(lexer) {
+                if ts_lexer__is_eof(self_) {
                     break;
                 }
             }
@@ -518,7 +523,7 @@ pub unsafe fn ts_lexer_start(self_: &mut Lexer) {
     self_.token_end_position = LENGTH_UNDEFINED;
     self_.data.result_symbol = 0;
     self_.did_get_column = false;
-    if !ts_lexer__eof(&self_.data) {
+    if !ts_lexer__is_eof(self_) {
         if self_.chunk_size == 0 {
             ts_lexer__get_chunk(self_);
         }
