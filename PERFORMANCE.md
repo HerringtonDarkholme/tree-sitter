@@ -352,6 +352,67 @@ Source-code analysis:
 - Full `cargo test --all` passed before every committed code change in this
   checkpoint.
 
+### 2026-06-25 20:06 EDT
+
+- Repo head: `52235569`
+- Batch base: `e14aaa98`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: 10 small raw-pointer/reference cleanups:
+  `Use subtree array helper in stack callback` through
+  `Use language references for parse actions`.
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 25797.2 | 24129.8 | +6.91% |
+| TypeScript error parses | 32 | 1679.3 | 1574.8 | +6.64% |
+| JavaScript normal parses | 2 | 17670.8 | 16428.5 | +7.56% |
+| JavaScript error parses | 37 | 2120.1 | 2000.2 | +6.00% |
+| Overall parser throughput | 82 | 2345.6 | 2204.0 | +6.43% |
+
+Per-case regressions over 5%:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `javascript error compound-statement-without-trailing-newline.py` | 2784.9 | 3186.6 | 12.61% |
+
+Prior checkpoint at `e14aaa98` measured Rust overall throughput of 2284.2
+bytes/ms and a Rust-vs-C delta of +5.44%. This checkpoint measured 2345.6
+bytes/ms, so absolute Rust throughput moved by about +2.69%. C throughput moved
+from 2166.3 to 2204.0 bytes/ms, and the Rust-vs-C delta moved to +6.43%.
+
+Source-code analysis:
+
+- The batch contains no exported `#[no_mangle] extern "C"` signature changes,
+  no struct layout changes, no C header field changes, and no parser action or
+  parsing table semantic changes.
+- The stack commit replaces one direct `SubtreeArray.contents.add(0)` read in
+  an internal stack callback with a typed local accessor. This preserves the
+  same indexed read and does not alter stack traversal control flow.
+- The subtree commits convert internal Rust-only helpers from raw pointer
+  parameters to references where all callers already had references, then remove
+  now-unused pointer adapters. The affected areas are trailing extras removal,
+  subtree compression, subtree comparison, subtree edit, subtree constructors,
+  and symbol update helpers.
+- The language commit changes parse-action helper inputs from
+  `*const TSLanguageFull` to `&TSLanguageFull` at two internal call sites. It
+  does not change parse table representation, action pointer arithmetic, or
+  exported `TSLanguage` APIs.
+- The JavaScript error outlier is the same
+  `compound-statement-without-trailing-newline.py` fixture that appeared in the
+  previous checkpoint, but the slowdown is larger in this run. The source
+  changes in this batch do not special-case JavaScript or error recovery, and
+  all aggregate buckets are faster than C with absolute Rust throughput higher
+  than the previous checkpoint. No rollback was performed, but this fixture
+  should remain the first targeted rerun if the next batch reports another
+  >5% per-case regression.
+- Full `cargo test --all` passed before every committed code change in this
+  checkpoint.
+
 ### 2026-06-25 16:40 EDT
 
 - Repo head: `4811d155`
