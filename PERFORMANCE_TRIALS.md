@@ -216,21 +216,113 @@ Main lesson:
   child spans in the desired representation from the start. Do not try to rescue
   already-allocated `SubtreeArray` buffers after the fact.
 
-## Next Directions
+## Performance Trial Decision Process
 
-### 0. History Triage Gate
+Use this workflow for every performance attempt, independent of the current
+optimization direction.
 
-Before writing any optimization code:
+1. Define the target bottleneck.
+   - Name the exact hot path, resource, data structure, or workflow cost.
+   - Cite current evidence: flamegraph frame, sample output, allocation profile,
+     benchmark result, or measured distribution.
+   - If there is no current evidence, profile before coding.
 
-- Search this file for the target area, using terms from the proposed change
-  and nearby implementation names.
-- Search the commit history for the same area.
-- Write down whether the idea is new, a repeat, or only a variant of a closed
-  direction.
-- If it is a repeat or near-repeat, stop unless there is new profiler evidence
-  that directly contradicts the recorded result.
+2. Check history before coding.
+   - Search this file and git history for the target area.
+   - Classify the idea as `new`, `repeat`, or `near-repeat`.
+   - For `repeat` or `near-repeat`, continue only if new profiler evidence
+     directly contradicts the old result.
+   - If the idea is only a small conditional fast path in an already-closed
+     area, reject it.
 
-Minimum searches for reduce/stack/tree-storage work:
+3. Estimate leverage.
+   - Prefer changes that remove or simplify a repeated phase, conversion,
+     allocation family, ownership pattern, traversal, synchronization point, or
+     other recurring cost.
+   - Reject changes that only rearrange a small branch, annotation, guard, or
+     special case unless profiler evidence shows that exact operation is a
+     dominant cost in the target workload.
+
+4. Write the trial hypothesis.
+   - Expected win source.
+   - Workloads expected to benefit.
+   - Known risk from previous trials.
+   - Kill criteria before benchmark time is spent.
+
+5. Implement one scoped change.
+   - Do not edit measurement fixtures or benchmark harnesses unless the trial
+     explicitly targets measurement methodology.
+   - Do not combine unrelated optimizations.
+   - If instrumentation is needed, keep it temporary and remove it before
+     committing production code.
+
+6. Measure in increasing cost order.
+   - Smoke benchmark the most relevant sample or workload first.
+   - If the smoke result is negative or only noise, revert and log.
+   - If positive, run the full benchmark matrix required by the current target.
+   - For kept code, run the project validation required by the current
+     acceptance gate.
+
+7. Decide.
+   - Keep only if the target workload holds or the net gain is large with a
+     clear explanation for any localized regression.
+   - Reject meaningful worst-file regressions unless there is an explicit
+     reason they are noise or outside the target workload.
+   - Revert failed code before moving to the next idea.
+   - Log the result immediately, including why it should or should not be
+     revisited.
+
+### Trial Log Entry
+
+Each trial entry should include:
+
+- `Hypothesis`: what should become faster and why.
+- `History check`: new/repeat/near-repeat, with matching prior rows or commits.
+- `Change`: the implementation surface touched.
+- `Evidence`: profiling, benchmark numbers, and test result if kept.
+- `Decision`: kept, rejected, abandoned before benchmark, or needs follow-up.
+- `Do not retry unless`: the specific new evidence required to reopen it.
+
+## Performance Reflection Process
+
+Write one reflection after every ten performance attempts, before starting the
+next code experiment.
+
+- `Attempts covered`: list the ten trials or measurements.
+- `Wins`: what was kept and why it was real.
+- `Losses`: what failed, grouped by failure mode.
+- `Repeated mistakes`: any direction that was retried without enough new
+  evidence.
+- `Closed directions`: areas that should not be retried.
+- `Open evidence`: profiler facts that still point at unresolved bottlenecks.
+- `Next direction`: the single highest-priority direction and why it beats the
+  alternatives.
+- `Acceptance gate`: exact benchmarks/tests required before keeping it.
+
+## Performance Next Direction Triage
+
+Choose the next optimization direction by ranking candidates in this order:
+
+1. Hotspot size in the current target workload.
+2. Breadth across the required benchmark cases.
+3. Leverage: removes or simplifies a phase, copy, allocation family, repeated
+   traversal, synchronization point, or ownership transition rather than adding
+   a special case.
+4. Clean separation from closed trial history.
+5. Correctness risk and testability.
+6. Benchmark cost.
+
+When two candidates are close, pick the one with stronger workload evidence. Do
+not pick the easier patch if it mostly repeats a closed direction.
+
+## Current Parser Next-Direction Plan
+
+This section applies the generic process above to the current raw parser
+performance goal. It is current work, not the reusable process.
+
+### History Gate For Parser Work
+
+Before writing parser optimization code, run at least:
 
 ```sh
 rg -n "stack-pop|stack pop|linear|adopt|builder|SubtreeArray|reduce builder|scratch|child arrays" PERFORMANCE_TRIALS.md
@@ -241,7 +333,7 @@ The `2026-06-26` direct linear reduce-pop scratch-buffer sketch failed this
 gate. It was reverted before benchmarking because it was too close to recorded
 linear stack-pop and stack-pop adoption attempts.
 
-### 1. Measure Stack-Pop Shape Before Coding
+### Evidence To Refresh
 
 Collected on `2026-06-26` with temporary local instrumentation only:
 
@@ -252,67 +344,47 @@ Collected on `2026-06-26` with temporary local instrumentation only:
 | Go `proc.go` | `6,079,200` | `500,000` | 1-3 |
 | Rust `ast.rs` | `3,542,800` | `0` | 1-3 |
 
-If implementing another builder/storage change, first collect or refresh:
+Before coding the next parser architecture change, refresh full-path profiles
+for the seven target languages and record:
 
-- reduce child-count distribution
-- `ts_stack_pop_count` linear vs graph fallback rates
-- number of slices returned per reduce
-- trailing-extra removal frequency
-- bytes requested for child arrays
-
-Minimum target languages for this measurement:
-
-- JavaScript
-- TypeScript
-- Go
-- Rust
+- reduce pipeline share
+- lex/external scanner share
+- balance/compress share
+- child-count distribution
+- graph fallback rate
+- child-array allocation/copy bytes
+- summary child-walk cost
 
 Use temporary local instrumentation or profiling harnesses only. Do not commit
 benchmark-source changes.
 
-### 2. Real Parser-Local Reduce Builder
+### Candidate Ranking
 
-If the measurements support it, implement a builder path that replaces this
-pipeline:
+| Rank | Direction | Decision |
+| ---: | --- | --- |
+| 1 | Full reduce-construction redesign | Investigate first. It targets `ts_parser__reduce`, node construction, child-array allocation/copying, summarization, and stack push as one pipeline. It must not be a linear-pop fast path or buffer-adoption variant. |
+| 2 | Summarization during reduce construction | Only after the reduce-construction design exists. Standalone summarizer micro-optimizations are closed. |
+| 3 | Lexer/external scanner work | Secondary. Profile all target languages first because current evidence is strongest for JavaScript/TypeScript, not universal. |
+| 4 | Balancing/compress redesign | Do not remove balancing. Revisit only with profiles showing language-neutral balancing cost and a correctness-preserving replacement. |
 
-```text
-ts_stack_pop_count
-ts_subtree_array_remove_trailing_extras
-ts_subtree_new_node_in_arena
-ts_subtree_summarize_children
-ts_stack_push
-```
+### Next Parser Trial
 
-The builder must write child spans into builder-owned scratch storage from the
-start. It should not allocate a normal `SubtreeArray` and then adopt it.
+The next trial should be a design/profiling trial, not code:
 
-Potential wins:
+- Hypothesis: a full reduce-construction redesign is the only remaining
+  parser-core direction with enough leverage for a universal gain.
+- History check: direct linear stack-pop, stack-pop buffer adoption, child-array
+  adoption, summarizer micro-optimizations, page-size tuning, refcount ordering,
+  and allocation pools are closed.
+- Evidence needed before code: cross-language flamegraphs plus reduce-shape
+  instrumentation for TypeScript, JavaScript, Python, Go, Rust, C++, and Java.
+- Kill criteria: if reduce construction plus summarization is not a large shared
+  cost across the seven languages, do not implement the builder.
+- Implementation boundary if evidence passes: redesign the reduce construction
+  protocol as a coherent replacement for the current `StackSliceArray` to node
+  construction pipeline, not as a special fast path.
 
-- fewer child-array allocations
-- fewer child-array copies
-- better locality during reduction and summarization
-- cleaner ownership than adopting malloc buffers
-
-### 3. Summarization During Builder Construction
-
-Only after the builder path exists, test whether summary fields can be computed
-while writing child spans, avoiding a second child walk in
-`ts_subtree_summarize_children`.
-
-Do not do another standalone summarizer micro-optimization; those have already
-failed.
-
-### 4. Lexer Profiling Is Secondary
-
-Lexer/external scanner frames are large for JavaScript, but less obviously
-universal. Before touching lexer code, collect flamegraphs for at least:
-
-- JavaScript
-- TypeScript
-- Go
-- Rust
-
-## Acceptance Gate
+## Parser Acceptance Gate
 
 Before keeping any new library optimization:
 
@@ -325,7 +397,7 @@ Before keeping any new library optimization:
   code.
 - Record failed trials here immediately with direction and canary numbers.
 
-## Tooling
+## Parser Tooling
 
 Primary profiler:
 
@@ -359,7 +431,7 @@ cargo test --all
 
 Validation must run outside the sandbox.
 
-## Process Rules
+## Parser Process Rules
 
 - Do not edit benchmark source code.
 - Do not use `cargo check` as validation.
