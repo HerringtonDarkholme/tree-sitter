@@ -291,6 +291,7 @@ pub unsafe extern "C" fn ts_tree_get_changed_ranges(
 ) -> *mut TSRange {
     let old_tree_ref = tree_ref(old_tree);
     let new_tree_ref = tree_ref(new_tree);
+    let length = output_length_mut(length);
     let mut cursor1 = tree_cursor_empty();
     let mut cursor2 = tree_cursor_empty();
     ts_tree_cursor_init_ref(&mut cursor1, ts_tree_root_node_ref(old_tree, old_tree_ref));
