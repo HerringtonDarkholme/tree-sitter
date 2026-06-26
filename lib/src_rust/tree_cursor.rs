@@ -824,6 +824,12 @@ pub unsafe extern "C" fn ts_tree_cursor_current_status(
 ) {
     let cursor = tree_cursor_ref(self_);
     let language = (*cursor.tree).language;
+    let field_id = field_id.as_mut().unwrap_unchecked();
+    let has_later_siblings = has_later_siblings.as_mut().unwrap_unchecked();
+    let has_later_named_siblings = has_later_named_siblings.as_mut().unwrap_unchecked();
+    let can_have_later_siblings_with_this_field =
+        can_have_later_siblings_with_this_field.as_mut().unwrap_unchecked();
+    let supertype_count = supertype_count.as_mut().unwrap_unchecked();
     let max_supertypes = *supertype_count;
     *field_id = 0;
     *supertype_count = 0;
