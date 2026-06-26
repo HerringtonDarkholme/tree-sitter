@@ -85,9 +85,9 @@ unsafe fn tree_cursor_mut<'a>(cursor: *mut TSTreeCursor) -> &'a mut TreeCursor {
 #[repr(C)]
 #[derive(PartialEq, Eq, Clone, Copy)]
 pub enum TreeCursorStep {
-    TreeCursorStepNone = 0,
-    TreeCursorStepHidden = 1,
-    TreeCursorStepVisible = 2,
+    None = 0,
+    Hidden = 1,
+    Visible = 2,
 }
 
 /// `CursorChildIterator` — internal iterator for children
@@ -459,18 +459,18 @@ unsafe fn ts_tree_cursor_goto_sibling_internal(
             let entry = child.entry;
             if child.visible {
                 array_push(&mut cursor.stack, entry);
-                return TreeCursorStep::TreeCursorStepVisible;
+                return TreeCursorStep::Visible;
             }
 
             if ts_subtree_visible_child_count(*entry.subtree) > 0 {
                 array_push(&mut cursor.stack, entry);
-                return TreeCursorStep::TreeCursorStepHidden;
+                return TreeCursorStep::Hidden;
             }
         }
     }
 
     cursor.stack.size = initial_size;
-    TreeCursorStep::TreeCursorStepNone
+    TreeCursorStep::None
 }
 
 // ---------------------------------------------------------------------------
@@ -525,21 +525,21 @@ unsafe fn tree_cursor_goto_first_child_internal(cursor: &mut TreeCursor) -> Tree
         let entry = child.entry;
         if child.visible {
             array_push(&mut cursor.stack, entry);
-            return TreeCursorStep::TreeCursorStepVisible;
+            return TreeCursorStep::Visible;
         }
         if ts_subtree_visible_child_count(*entry.subtree) > 0 {
             array_push(&mut cursor.stack, entry);
-            return TreeCursorStep::TreeCursorStepHidden;
+            return TreeCursorStep::Hidden;
         }
     }
-    TreeCursorStep::TreeCursorStepNone
+    TreeCursorStep::None
 }
 
 unsafe fn tree_cursor_goto_first_child(cursor: &mut TreeCursor) -> bool {
     loop {
         match tree_cursor_goto_first_child_internal(cursor) {
-            TreeCursorStep::TreeCursorStepHidden => {}
-            TreeCursorStep::TreeCursorStepVisible => return true,
+            TreeCursorStep::Hidden => {}
+            TreeCursorStep::Visible => return true,
             _ => return false,
         }
     }
@@ -562,19 +562,19 @@ pub unsafe extern "C" fn ts_tree_cursor_goto_first_child(
 unsafe fn tree_cursor_goto_last_child_internal(cursor: &mut TreeCursor) -> TreeCursorStep {
     let mut iterator = ts_tree_cursor_iterate_children(cursor);
     if iterator.parent.ptr.is_null() || (*iterator.parent.ptr).child_count == 0 {
-        return TreeCursorStep::TreeCursorStepNone;
+        return TreeCursorStep::None;
     }
 
     let mut last_entry = TreeCursorEntry::empty();
-    let mut last_step = TreeCursorStep::TreeCursorStepNone;
+    let mut last_step = TreeCursorStep::None;
     while let Some(child) = ts_tree_cursor_child_iterator_next(&mut iterator) {
         let entry = child.entry;
         if child.visible {
             last_entry = entry;
-            last_step = TreeCursorStep::TreeCursorStepVisible;
+            last_step = TreeCursorStep::Visible;
         } else if ts_subtree_visible_child_count(*entry.subtree) > 0 {
             last_entry = entry;
-            last_step = TreeCursorStep::TreeCursorStepHidden;
+            last_step = TreeCursorStep::Hidden;
         }
     }
     if !last_entry.subtree.is_null() {
@@ -582,14 +582,14 @@ unsafe fn tree_cursor_goto_last_child_internal(cursor: &mut TreeCursor) -> TreeC
         return last_step;
     }
 
-    TreeCursorStep::TreeCursorStepNone
+    TreeCursorStep::None
 }
 
 unsafe fn tree_cursor_goto_last_child(cursor: &mut TreeCursor) -> bool {
     loop {
         match tree_cursor_goto_last_child_internal(cursor) {
-            TreeCursorStep::TreeCursorStepHidden => {}
-            TreeCursorStep::TreeCursorStepVisible => return true,
+            TreeCursorStep::Hidden => {}
+            TreeCursorStep::Visible => return true,
             _ => return false,
         }
     }
@@ -641,11 +641,11 @@ pub unsafe extern "C" fn ts_tree_cursor_goto_next_sibling(
 ) -> bool {
     let cursor = tree_cursor_mut(self_);
     match tree_cursor_goto_next_sibling_internal(cursor) {
-        TreeCursorStep::TreeCursorStepHidden => {
+        TreeCursorStep::Hidden => {
             tree_cursor_goto_first_child(cursor);
             true
         }
-        TreeCursorStep::TreeCursorStepVisible => true,
+        TreeCursorStep::Visible => true,
         _ => false,
     }
 }
@@ -655,7 +655,7 @@ unsafe fn tree_cursor_goto_previous_sibling_internal(cursor: &mut TreeCursor) ->
         cursor,
         ts_tree_cursor_child_iterator_previous,
     );
-    if step == TreeCursorStep::TreeCursorStepNone {
+    if step == TreeCursorStep::None {
         return step;
     }
 
@@ -696,11 +696,11 @@ pub unsafe extern "C" fn ts_tree_cursor_goto_previous_sibling(
 ) -> bool {
     let cursor = tree_cursor_mut(self_);
     match tree_cursor_goto_previous_sibling_internal(cursor) {
-        TreeCursorStep::TreeCursorStepHidden => {
+        TreeCursorStep::Hidden => {
             tree_cursor_goto_last_child(cursor);
             true
         }
-        TreeCursorStep::TreeCursorStepVisible => true,
+        TreeCursorStep::Visible => true,
         _ => false,
     }
 }
