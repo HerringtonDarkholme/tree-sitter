@@ -7,17 +7,17 @@ use crate::ffi::{TSLanguage, TSNode, TSPoint, TSRange, TSSymbol};
 
 use super::alloc::{ts_calloc, ts_free, ts_malloc};
 use super::get_changed_ranges::{
-    ts_range_array_get_changed_ranges_ref, ts_range_edit_ref, ts_range_slice,
-    ts_subtree_get_changed_ranges_ref, TSRangeArray,
+    TSRangeArray, ts_range_array_get_changed_ranges_ref, ts_range_edit_ref, ts_range_slice,
+    ts_subtree_get_changed_ranges_ref,
 };
 use super::language::{ts_language_copy, ts_language_delete};
-use super::length::{length_add, Length};
+use super::length::{Length, length_add};
 use super::node::ts_node_new;
 use super::subtree::{
-    ts_subtree_edit, ts_subtree_padding, ts_subtree_pool_delete, ts_subtree_pool_new,
-    ts_subtree_print_dot_graph, ts_subtree_release, ts_subtree_retain, Subtree,
+    Subtree, ts_subtree_edit, ts_subtree_padding, ts_subtree_pool_delete, ts_subtree_pool_new,
+    ts_subtree_print_dot_graph, ts_subtree_release, ts_subtree_retain,
 };
-use super::tree_cursor::{ts_tree_cursor_init_ref, TreeCursor, TreeCursorEntryArray};
+use super::tree_cursor::{TreeCursor, TreeCursorEntryArray, ts_tree_cursor_init_ref};
 
 // ---------------------------------------------------------------------------
 // Extern C functions (still in C or other Rust modules)
@@ -64,16 +64,6 @@ pub unsafe fn tree_ref<'a>(tree: *const TSTree) -> &'a TSTree {
 #[inline]
 unsafe fn tree_mut<'a>(tree: *mut TSTree) -> &'a mut TSTree {
     tree.as_mut().unwrap_unchecked()
-}
-
-#[inline]
-unsafe fn input_edit_ref<'a>(edit: *const TSInputEdit) -> &'a TSInputEdit {
-    edit.as_ref().unwrap_unchecked()
-}
-
-#[inline]
-unsafe fn output_length_mut<'a>(length: *mut u32) -> &'a mut u32 {
-    length.as_mut().unwrap_unchecked()
 }
 
 unsafe fn ts_tree_init_ref(
@@ -142,8 +132,11 @@ const fn ts_tree_language_ref(tree: &TSTree) -> *const TSLanguage {
 
 unsafe fn ts_tree_included_ranges_ref(tree: &TSTree, length: &mut u32) -> *mut TSRange {
     *length = tree.included_range_count;
-    let ranges =
-        ts_calloc(tree.included_range_count as usize, std::mem::size_of::<TSRange>()).cast::<TSRange>();
+    let ranges = ts_calloc(
+        tree.included_range_count as usize,
+        std::mem::size_of::<TSRange>(),
+    )
+    .cast::<TSRange>();
     if tree.included_range_count > 0 {
         std::ptr::copy_nonoverlapping(
             tree.included_ranges,
@@ -270,7 +263,7 @@ pub unsafe extern "C" fn ts_tree_included_ranges(
     length: *mut u32,
 ) -> *mut TSRange {
     let tree = tree_ref(self_);
-    let length = output_length_mut(length);
+    let length = length.as_mut().unwrap_unchecked();
     ts_tree_included_ranges_ref(tree, length)
 }
 
@@ -282,7 +275,7 @@ pub unsafe extern "C" fn ts_tree_included_ranges(
 #[no_mangle]
 pub unsafe extern "C" fn ts_tree_edit(self_: *mut TSTree, edit: *const TSInputEdit) {
     let tree = tree_mut(self_);
-    let edit = input_edit_ref(edit);
+    let edit = edit.as_ref().unwrap_unchecked();
     ts_tree_edit_ref(tree, edit);
 }
 
@@ -294,7 +287,7 @@ pub unsafe extern "C" fn ts_tree_get_changed_ranges(
 ) -> *mut TSRange {
     let old_tree_ref = tree_ref(old_tree);
     let new_tree_ref = tree_ref(new_tree);
-    let length = output_length_mut(length);
+    let length = length.as_mut().unwrap_unchecked();
     let mut cursor1 = tree_cursor_empty();
     let mut cursor2 = tree_cursor_empty();
     ts_tree_cursor_init_ref(&mut cursor1, ts_tree_root_node_ref(old_tree, old_tree_ref));

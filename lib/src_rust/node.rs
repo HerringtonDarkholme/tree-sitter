@@ -46,16 +46,6 @@ unsafe fn ts_node__null() -> TSNode {
 }
 
 #[inline]
-unsafe fn node_mut<'a>(self_: *mut TSNode) -> &'a mut TSNode {
-    self_.as_mut().unwrap_unchecked()
-}
-
-#[inline]
-unsafe fn input_edit_ref<'a>(edit: *const TSInputEdit) -> &'a TSInputEdit {
-    edit.as_ref().unwrap_unchecked()
-}
-
-#[inline]
 const unsafe fn ts_node__alias(self_: &TSNode) -> u32 {
     self_.context[3]
 }
@@ -1145,8 +1135,8 @@ pub unsafe extern "C" fn ts_node_field_name_for_named_child(
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_node_edit(self_: *mut TSNode, edit: *const TSInputEdit) {
-    let self_ = node_mut(self_);
-    let edit = input_edit_ref(edit);
+    let self_ = self_.as_mut().unwrap_unchecked();
+    let edit = edit.as_ref().unwrap_unchecked();
     let mut start_byte = node_start_byte(*self_);
     let mut start_point = node_start_point(*self_);
 
