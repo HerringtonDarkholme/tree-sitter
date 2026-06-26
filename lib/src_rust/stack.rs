@@ -270,17 +270,17 @@ pub(crate) unsafe fn array_back_mut<T>(arr: &mut Array<T>) -> &mut T {
     array_back(ptr::from_mut(arr)).as_mut().unwrap_unchecked()
 }
 
-pub(crate) unsafe fn array_erase<T>(arr: *mut Array<T>, index: u32) {
-    debug_assert!(index < (*arr).size);
-    let count = (*arr).size as usize - index as usize - 1;
+pub(crate) unsafe fn array_erase<T>(arr: &mut Array<T>, index: u32) {
+    debug_assert!(index < arr.size);
+    let count = arr.size as usize - index as usize - 1;
     if count > 0 {
         ptr::copy(
-            (*arr).contents.add(index as usize + 1),
-            (*arr).contents.add(index as usize),
+            arr.contents.add(index as usize + 1),
+            arr.contents.add(index as usize),
             count,
         );
     }
-    (*arr).size -= 1;
+    arr.size -= 1;
 }
 
 pub(crate) unsafe fn array_insert<T>(arr: *mut Array<T>, index: u32, element: T) {
