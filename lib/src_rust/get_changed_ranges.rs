@@ -598,13 +598,12 @@ unsafe fn iterator_compare(
 // Exported functions — skeletons
 // ---------------------------------------------------------------------------
 
-pub unsafe fn ts_range_array_intersects(
-    self_: *const TSRangeArray,
+pub(crate) unsafe fn ts_range_array_intersects(
+    ranges: &TSRangeArray,
     start_index: u32,
     start_byte: u32,
     end_byte: u32,
 ) -> bool {
-    let ranges = range_array_ref(self_);
     ts_range_array_intersects_ref(ranges, start_index, start_byte, end_byte)
 }
 
