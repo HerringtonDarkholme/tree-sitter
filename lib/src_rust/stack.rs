@@ -750,7 +750,7 @@ unsafe fn stack_head_delete(
             ts_subtree_release(subtree_pool, self_.lookahead_when_paused);
         }
         if !self_.summary.is_null() {
-            array_delete(self_.summary.as_mut().unwrap_unchecked());
+            array_delete(stack_summary_mut(self_.summary));
             ts_free(self_.summary.cast::<c_void>());
         }
         stack_node_release(stack_node_mut(self_.node), pool, subtree_pool);
@@ -1002,6 +1002,11 @@ unsafe fn stack_summary_ref<'a>(summary: *const StackSummary) -> &'a StackSummar
     summary.as_ref().unwrap_unchecked()
 }
 
+#[inline]
+unsafe fn stack_summary_mut<'a>(summary: *mut StackSummary) -> &'a mut StackSummary {
+    summary.as_mut().unwrap_unchecked()
+}
+
 unsafe fn pop_all_callback(
     _payload: *mut c_void,
     iterator: &StackIterator,
@@ -1035,7 +1040,7 @@ unsafe fn summarize_stack_callback(
         }
     }
     array_push(
-        session.summary.as_mut().unwrap_unchecked(),
+        stack_summary_mut(session.summary),
         StackSummaryEntry {
             position: node.position,
             depth,
@@ -1293,7 +1298,7 @@ pub(crate) unsafe fn ts_stack_record_summary(
         summary: ts_malloc(std::mem::size_of::<StackSummary>()).cast::<StackSummary>(),
         max_depth,
     };
-    array_init(session.summary.as_mut().unwrap_unchecked());
+    array_init(stack_summary_mut(session.summary));
     stack__iter(
         self_,
         version,
@@ -1303,7 +1308,7 @@ pub(crate) unsafe fn ts_stack_record_summary(
     );
     let head = stack_head_mut(self_, version);
     if !head.summary.is_null() {
-        array_delete(head.summary.as_mut().unwrap_unchecked());
+        array_delete(stack_summary_mut(head.summary));
         ts_free(head.summary.cast::<c_void>());
     }
     head.summary = session.summary;
