@@ -9,7 +9,8 @@ Target languages: TypeScript, JavaScript, Python, Go, Rust, C++, Java.
 - Universal 20% target: not met.
 - Best kept gains: arena-backed reduction parents and parser-owned fresh
   reduction stack-pop builder.
-- Current direction: pending-reduction descriptor forest.
+- Current direction: complete parse-time representation boundary; no partial
+  descriptor stack wiring.
 - Avoid for now: small local fast paths, refcount-order tweaks, node-pool
   tuning, benchmark-harness edits, and SIMD without a reusable-runtime scan
   loop profile.
@@ -63,6 +64,7 @@ ts_parser__advance -> ts_parser__reduce
 - Pending materialization pressure counters
 - Pending reduction lifetime counters
 - Payload-child foundation `-r 10` checkpoint
+- C++ normal `cargo flamegraph` high-sample checkpoint
 
 ### Closed: Summarization
 
@@ -91,6 +93,7 @@ ts_parser__advance -> ts_parser__reduce
 - Guard zero dynamic-precedence writes
 - Hoist reduce nonterminal check
 - Broad descriptor reduce/accept stack traversal wiring
+- Removing unused descriptor-payload layer after failed wiring
 
 ### Closed: Allocation And Storage
 
@@ -155,8 +158,32 @@ ts_parser__advance -> ts_parser__reduce
    assumptions in reduce, recovery, accept, merge, and final materialization.
    This failed before benchmarking with allocator traps and subtree metadata
    panics, so it was backed out instead of being tuned.
+6. The descriptor-payload layer cannot be treated as dead code by local diff
+   inspection. Removing it after the failed wiring made `cargo test --all`
+   abort in `test_tree_cursor_child_for_point` with a misaligned subtree
+   pointer, so the layer is entangled with the current stack-payload layout.
+   Do not prune it without first simplifying the full stack payload model.
 
 ## Latest Checkpoint
+
+C++ normal flamegraph, `cargo flamegraph --bench benchmark -p tree-sitter-cli`
+with bench debuginfo and 2000 repetitions:
+
+| Frame | Samples |
+| --- | ---: |
+| `ts_parser__reduce` | 24.7% |
+| `ts_lex` | 22.2% |
+| `ts_subtree_new_node_in_arena` | 12.0% |
+| `ts_subtree_summarize_children` | 9.5% |
+| `ts_lex_keywords` | 7.9% |
+| `ts_parser__balance_subtree` | 4.2% |
+| `ts_stack_renumber_version` | 4.0% |
+| `ts_stack_pop_count_into` | 3.7% |
+
+Interpretation: C++ is split across generated lexer/keyword code and reduction
+construction. A universal 20% library-only gain is unlikely from reducer local
+tuning; it requires removing or deferring a full tree-construction phase, or a
+separate generated-lexer strategy outside reusable runtime code.
 
 Payload-child foundation versus `origin/master`, normal `-r 10` average speed:
 
