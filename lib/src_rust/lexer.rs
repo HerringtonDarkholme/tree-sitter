@@ -124,7 +124,12 @@ fn ts_lexer__clear_chunk(self_: &mut Lexer) {
 }
 
 unsafe fn ts_lexer__included_range(self_: &Lexer, index: usize) -> &TSRange {
-    ts_lexer__included_ranges(self_).get_unchecked(index)
+    debug_assert!(index < self_.included_range_count as usize);
+    self_
+        .included_ranges
+        .add(index)
+        .as_ref()
+        .unwrap_unchecked()
 }
 
 #[inline]
