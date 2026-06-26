@@ -3438,3 +3438,86 @@ Source-code analysis:
   store C imports.
 - Full `cargo test --all` passed before every committed code change in this
   checkpoint.
+
+### 2026-06-25 22:32 EDT
+
+- Repo head: `dbf2a3cc`
+- Batch base: `6cc97d59`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: 10 small stack/parser raw-pointer cleanup commits:
+  `Remove unused array front helper` through
+  `Use from_mut for stack callback payloads`.
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+Initial run:
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 25146.8 | 23786.3 | +5.72% |
+| TypeScript error parses | 32 | 1699.1 | 1588.3 | +6.98% |
+| JavaScript normal parses | 2 | 13725.3 | 16052.9 | -14.50% |
+| JavaScript error parses | 37 | 2048.7 | 1941.1 | +5.55% |
+| Overall parser throughput | 82 | 2321.9 | 2190.3 | +6.01% |
+
+Initial per-case regressions over 5%:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `javascript normal jquery.js` | 12017.7 | 15712.6 | 23.52% |
+| `javascript error compound-statement-without-trailing-newline.py` | 2799.3 | 3267.7 | 14.34% |
+| `typescript normal builderStatePublic.ts` | 17413.5 | 19519.7 | 10.79% |
+| `typescript error compound-statement-without-trailing-newline.py` | 865.5 | 951.7 | 9.05% |
+| `javascript error mixed-spaces-tabs.py` | 356.3 | 389.6 | 8.54% |
+| `javascript error corePublic.ts` | 2374.7 | 2588.5 | 8.26% |
+| `typescript error text-editor-component.js` | 14967.4 | 16005.3 | 6.48% |
+| `javascript error utilities.ts` | 2332.1 | 2483.1 | 6.08% |
+
+Rerun:
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 25858.2 | 24190.3 | +6.89% |
+| TypeScript error parses | 32 | 1742.6 | 1653.8 | +5.37% |
+| JavaScript normal parses | 2 | 17975.2 | 16107.4 | +11.60% |
+| JavaScript error parses | 37 | 2088.7 | 2029.7 | +2.91% |
+| Overall parser throughput | 82 | 2386.3 | 2282.2 | +4.56% |
+
+Rerun per-case regressions over 5%:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `typescript error no_newline_at_eof.go` | 1208.5 | 1315.6 | 8.14% |
+
+Prior checkpoint at `6cc97d59` measured Rust overall throughput of 2309.6
+bytes/ms and a Rust-vs-C delta of +5.39%. This checkpoint's rerun measured
+2386.3 bytes/ms, so absolute Rust throughput moved by about +3.32%. C
+throughput moved from 2191.4 to 2282.2 bytes/ms, and the Rust-vs-C delta moved
+to +4.56%.
+
+Source-code analysis:
+
+- The batch contains no exported `#[no_mangle] extern "C"` signature changes,
+  no struct layout changes, no C header field changes, and no parser action or
+  parsing table semantic changes.
+- The array commits remove a dead helper, use initialized source slices for
+  bulk copy/assignment, and change internal helper signatures/casts from raw
+  pointer spelling to reference or pointer-adapter spelling. Destination writes
+  that append into reserved but not-yet-sized storage remain raw pointer writes.
+- The parser and stack array-view commits centralize repr-compatible array view
+  casts behind local helpers or pointer adapter methods. They do not alter the
+  underlying `Array<T>`, `SubtreeArray`, `MutableSubtreeArray`, or
+  `TSRangeArray` layout.
+- The summary and callback payload commits replace repeated inline casts or
+  `ptr::addr_of_mut!` on local variables with existing helper/reference forms.
+  The callback payload ABI remains `*mut c_void`.
+- The initial run's broad JavaScript normal regression did not reproduce on the
+  rerun: JavaScript normal moved from -14.50% to +11.60%, and the eight initial
+  per-case regressions collapsed to one different TypeScript error fixture.
+  Given this instability, the initial per-case list is treated as benchmark
+  noise rather than a stable source-level regression for this mechanical batch.
+- Full `cargo test --all` passed before every committed code change in this
+  checkpoint.
