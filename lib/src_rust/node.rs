@@ -20,7 +20,7 @@ use super::subtree::{
     ts_subtree_size, ts_subtree_string, ts_subtree_symbol, ts_subtree_total_bytes,
     ts_subtree_visible, ts_subtree_visible_descendant_count,
 };
-use super::tree::{TSTree, tree_ref, ts_tree_root_node_ref};
+use super::tree::{TSTree, ts_tree_root_node_ref};
 
 // ---------------------------------------------------------------------------
 // Types
@@ -781,7 +781,7 @@ pub const unsafe extern "C" fn ts_node_named_child_count(self_: TSNode) -> u32 {
 #[no_mangle]
 pub unsafe extern "C" fn ts_node_parent(self_: TSNode) -> TSNode {
     let tree = node_tree(self_);
-    let mut node = ts_tree_root_node_ref(tree, tree_ref(tree));
+    let mut node = ts_tree_root_node_ref(tree, tree.as_ref().unwrap_unchecked());
     if node.id == self_.id {
         return ts_node__null();
     }

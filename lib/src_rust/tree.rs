@@ -56,16 +56,6 @@ pub struct TSTree {
     pub included_range_count: u32,
 }
 
-#[inline]
-pub unsafe fn tree_ref<'a>(tree: *const TSTree) -> &'a TSTree {
-    tree.as_ref().unwrap_unchecked()
-}
-
-#[inline]
-unsafe fn tree_mut<'a>(tree: *mut TSTree) -> &'a mut TSTree {
-    tree.as_mut().unwrap_unchecked()
-}
-
 unsafe fn ts_tree_init_ref(
     tree: &mut TSTree,
     root: Subtree,
@@ -187,7 +177,7 @@ pub unsafe fn ts_tree_new(
     included_range_count: u32,
 ) -> *mut TSTree {
     let result = ts_malloc(std::mem::size_of::<TSTree>()).cast::<TSTree>();
-    let tree = tree_mut(result);
+    let tree = result.as_mut().unwrap_unchecked();
     let included_ranges = ts_range_slice(included_ranges, included_range_count);
     ts_tree_init_ref(tree, root, language, included_ranges);
     result
@@ -195,7 +185,7 @@ pub unsafe fn ts_tree_new(
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_tree_copy(self_: *const TSTree) -> *mut TSTree {
-    let tree = tree_ref(self_);
+    let tree = self_.as_ref().unwrap_unchecked();
     ts_tree_copy_ref(tree)
 }
 
@@ -204,7 +194,7 @@ pub unsafe extern "C" fn ts_tree_delete(self_: *mut TSTree) {
     if self_.is_null() {
         return;
     }
-    let tree = tree_mut(self_);
+    let tree = self_.as_mut().unwrap_unchecked();
     ts_tree_delete_ref(tree);
     ts_free(self_.cast::<c_void>());
 }
@@ -216,7 +206,7 @@ pub unsafe extern "C" fn ts_tree_delete(self_: *mut TSTree) {
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_tree_root_node(self_: *const TSTree) -> TSNode {
-    let tree = tree_ref(self_);
+    let tree = self_.as_ref().unwrap_unchecked();
     ts_tree_root_node_ref(self_, tree)
 }
 
@@ -226,13 +216,13 @@ pub unsafe extern "C" fn ts_tree_root_node_with_offset(
     offset_bytes: u32,
     offset_extent: TSPoint,
 ) -> TSNode {
-    let tree = tree_ref(self_);
+    let tree = self_.as_ref().unwrap_unchecked();
     ts_tree_root_node_with_offset_ref(self_, tree, offset_bytes, offset_extent)
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_tree_language(self_: *const TSTree) -> *const TSLanguage {
-    let tree = tree_ref(self_);
+    let tree = self_.as_ref().unwrap_unchecked();
     tree.language
 }
 
@@ -241,7 +231,7 @@ pub unsafe extern "C" fn ts_tree_included_ranges(
     self_: *const TSTree,
     length: *mut u32,
 ) -> *mut TSRange {
-    let tree = tree_ref(self_);
+    let tree = self_.as_ref().unwrap_unchecked();
     let length = length.as_mut().unwrap_unchecked();
     ts_tree_included_ranges_ref(tree, length)
 }
@@ -253,7 +243,7 @@ pub unsafe extern "C" fn ts_tree_included_ranges(
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_tree_edit(self_: *mut TSTree, edit: *const TSInputEdit) {
-    let tree = tree_mut(self_);
+    let tree = self_.as_mut().unwrap_unchecked();
     let edit = edit.as_ref().unwrap_unchecked();
     ts_tree_edit_ref(tree, edit);
 }
@@ -264,8 +254,8 @@ pub unsafe extern "C" fn ts_tree_get_changed_ranges(
     new_tree: *const TSTree,
     length: *mut u32,
 ) -> *mut TSRange {
-    let old_tree_ref = tree_ref(old_tree);
-    let new_tree_ref = tree_ref(new_tree);
+    let old_tree_ref = old_tree.as_ref().unwrap_unchecked();
+    let new_tree_ref = new_tree.as_ref().unwrap_unchecked();
     let length = length.as_mut().unwrap_unchecked();
     let mut cursor1 = tree_cursor_empty();
     let mut cursor2 = tree_cursor_empty();
@@ -326,7 +316,7 @@ pub unsafe extern "C" fn _ts_dup(file_descriptor: i32) -> i32 {
 #[cfg(not(target_family = "wasm"))]
 #[no_mangle]
 pub unsafe extern "C" fn ts_tree_print_dot_graph(self_: *const TSTree, file_descriptor: i32) {
-    let tree = tree_ref(self_);
+    let tree = self_.as_ref().unwrap_unchecked();
     ts_tree_print_dot_graph_ref(tree, file_descriptor);
 }
 
