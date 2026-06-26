@@ -9,8 +9,9 @@ Target languages: TypeScript, JavaScript, Python, Go, Rust, C++, Java.
 - Universal 20% target: not met.
 - Best kept gains: arena-backed reduction parents and parser-owned fresh
   reduction stack-pop builder.
-- Current direction: complete parse-time representation boundary; no partial
-  descriptor stack wiring.
+- Current direction: architecture investigation before more code trials. The
+  next attempt must remove a hot phase from normal parsing, not add another
+  partial fast path.
 - Avoid for now: small local fast paths, refcount-order tweaks, node-pool
   tuning, benchmark-harness edits, and SIMD without a reusable-runtime scan
   loop profile.
@@ -24,6 +25,19 @@ ts_parser__advance -> ts_parser__reduce
   -> child summarization
   -> stack push / merge
 ```
+
+Normal parsing repeatedly crosses four expensive boundaries:
+
+- Persistent stack graph traversal collects children from backward links.
+- Concrete child arrays are formed and retained before each parent exists.
+- Every reduction eagerly allocates `SubtreeHeapData`, copies children into the
+  tree arena, and summarizes child metadata immediately.
+- The concrete parent is pushed back into the graph and then participates in
+  version merge/recovery/accept logic.
+
+The C++ profile also has a separate generated-lexer cost center. Runtime-only
+parser work cannot reclaim that unless it avoids lexer invocations or changes
+the generated lexer/runtime contract.
 
 ## Itemized Trial Index
 
@@ -298,53 +312,69 @@ materialization boundary.
 
 ### Observations
 
-- The measured hot path is still split between generated lexing and concrete
-  tree construction. A universal 20% gain from reusable runtime code alone is
-  only plausible if parsing avoids a whole construction phase, not if it makes
-  existing construction incrementally cheaper.
-- Local reduce, summarization, allocation, refcount, stack-pop, and stack-node
-  layout work is exhausted for this target. Several of those changes produced
-  narrow wins, but none generalized across the target languages.
-- Descriptor/lazy-reduction work is the only remaining library-side direction
-  with enough theoretical upside, but partial wiring has repeatedly failed when
-  it crossed stack version ownership boundaries. The hard problem is not
-  metadata calculation; it is preserving stack/recovery/accept semantics while
-  concrete subtrees are absent.
-- Lazy-candidate counters are favorable for most target languages, but Go only
-  has about 40% conservative lazy-candidate reduce spans. Universal improvement
-  requires solving branching/multi-version reductions, not only the easy
-  single-version path.
-- C++ profiles show lexer and keyword code are also major costs. If the
-  descriptor path cannot demonstrate materialization reduction, the next real
-  20% path probably requires generated-code/grammar-side lexer changes, not
-  more reusable-runtime tuning.
+- `ts_parser__advance` is an action interpreter: get/reuse/lex one lookahead,
+  fetch the parse-table entry, run reductions until a shift/accept/recover
+  action, then repeat. This creates many small crossings between parser, stack,
+  subtree, and language-table code.
+- `ts_parser__reduce` eagerly creates a concrete tree node for every reduction,
+  even in a fresh normal parse where most nodes will only be consumed by later
+  reductions before final tree publication.
+- The stack is a persistent graph even when the parse is effectively linear.
+  Link-count measurements show most stack nodes have one predecessor, but the
+  compact-node trial proved that simply shrinking graph nodes is not enough.
+  The bigger question is whether the common path should use a graph at all.
+- Pending descriptors already model subtree-like metadata, but partial lazy
+  wiring has failed at ownership boundaries. The useful design is not "make
+  reduce lazy"; it is "parse into a stack-native forest and materialize once".
+- Go is the hard universal case because normal Go fixtures hit more branching
+  and multi-pop reductions. Any 20% plan that only optimizes single-version
+  reductions is expected to miss Go.
+- C++ has enough generated lexer/keyword time that parser-only construction
+  wins may be capped. If parser construction drops and C++ still misses, the
+  next front is the generated lexer contract, not more subtree micro-tuning.
 
 ### Strategy
 
-Do not add more local fast paths. Treat the next optimization as an architecture
-spike with explicit exit criteria:
+Do not add more local fast paths. Rank future work by removed phase:
 
-1. First prove descriptor pressure with temporary counters: how many normal
-   reductions can remain unmaterialized until accept, how many must materialize
-   for merge/recovery/trailing-extra/error handling, and how often accept needs
-   multiple final stack paths.
-2. Build boundary APIs independently, in this order: counted reduce payloads,
-   merge/recovery materialization rules, then a dedicated accept pop-all payload
-   model. Do not reuse counted-reduce helpers for accept.
-3. Use a limited normal reduce path for non-error, non-fragile, single-version
-   reductions only as a correctness boundary test, not as the expected
-   universal optimization. It cannot cover Go.
-4. The real descriptor trial must include a design for multi-version or
-   multi-pop reductions, or pair the descriptor work with a separate Go-specific
-   architecture win.
-5. Reject the descriptor strategy if multi-version handling forces most
-   descriptors to materialize before accept, or if C++/TypeScript still spend
-   most time in generated lexer code after construction is reduced.
+1. **Linear-stack normal parser.** Keep the current persistent graph for forks,
+   recovery, reuse, and old-tree parsing, but use a contiguous frame stack for
+   fresh single-version normal parsing. A frame stores payload, state, position,
+   cost, precedence, node count, and external-token metadata. Reductions pop a
+   slice of frames directly; forks promote the current linear stack into the
+   graph. This attacks stack-node allocation, pointer chasing, graph traversal,
+   payload retain/release churn, and version-renumber work together.
+2. **Stack-native parse forest with final materialization.** Push
+   `PendingReduction`/payload descriptors through normal parsing and build
+   concrete `SubtreeHeapData` only at accept or at forced boundaries
+   (recovery, subtree comparison, reusable-node interaction, public tree
+   publication). This attacks parent allocation, child copying, and immediate
+   summarization. It must handle multi-version and multi-pop paths before it is
+   counted as a real candidate.
+3. **Action-trace execution.** Cache deterministic state/lookahead action runs
+   that contain only normal reductions and one final shift/accept. Execute the
+   trace as one parser operation with precomputed reduce metadata and
+   nonterminal next states. This attacks repeated table-entry lookup,
+   action-loop overhead, and interleaved stack/version bookkeeping.
+4. **Generated lexer contract.** If parser construction drops but C++/JS/TS are
+   still lexer-bound, prototype a generated-lexer bulk-scan API for common
+   ASCII classes and keyword dispatch. SIMD belongs here, not inside random
+   parser branches.
 
-The compact stack-node layout trial rules out node-size reduction by itself as
-the big architecture path. The next useful work is either a measured
-descriptor-materialization proof or a deliberate pivot to generated lexer
-performance.
+### Measurement Plan
+
+- Use `cargo flamegraph --bench benchmark -p tree-sitter-cli` for high-sample
+  C++ and TypeScript profiles, plus same-session normal `-r 10` benchmarks for
+  all seven target languages.
+- Add temporary library-only counters, never benchmark-harness edits, to measure
+  phase removal: linear-stack coverage, graph promotions, reductions covered by
+  descriptors, forced materializations, action-trace lengths, and lexer calls
+  per byte/token.
+- For each architecture spike, first prove coverage with counters, then build
+  the smallest correctness slice, then benchmark. Do not benchmark code that
+  fails `cargo test --all` outside the sandbox.
+- Reject a direction when its coverage ceiling cannot plausibly produce a
+  universal 20% win, even if one language improves.
 
 ## Process Rules
 
