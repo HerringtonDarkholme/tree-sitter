@@ -647,10 +647,10 @@ unsafe fn ts_node__field_name_from_language(
 }
 
 // ---------------------------------------------------------------------------
-// Exported functions — constructors
+// Internal constructors
 // ---------------------------------------------------------------------------
 
-pub unsafe fn ts_node_new(
+pub(crate) unsafe fn ts_node_new(
     tree: *const TSTree,
     subtree: *const Subtree,
     position: Length,
