@@ -1057,6 +1057,35 @@ unsafe fn stack_pop_builder_release_payloads(
     builder.payloads.size = start;
 }
 
+pub unsafe fn ts_stack_pop_builder_payloads(
+    builder: &StackPopBuilder,
+    span: StackSliceSpan,
+) -> StackLinkPayloadArray {
+    StackLinkPayloadArray {
+        contents: if span.size > 0 {
+            builder.payloads.contents.add(span.start as usize)
+        } else {
+            ptr::null_mut()
+        },
+        size: span.size,
+        capacity: span.size,
+    }
+}
+
+pub unsafe fn ts_stack_pop_builder_release_payload_span(
+    stack: &mut Stack,
+    builder: &mut StackPopBuilder,
+    span: StackSliceSpan,
+) {
+    let end = span.start + span.size;
+    for i in span.start..end {
+        stack_link_payload_release(
+            *array_get_ref(&builder.payloads, i),
+            stack.subtree_pool.as_mut().unwrap_unchecked(),
+        );
+    }
+}
+
 unsafe fn ts_stack_pop_count_linear(
     self_: &mut Stack,
     version: StackVersion,

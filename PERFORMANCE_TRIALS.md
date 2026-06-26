@@ -41,7 +41,8 @@ nodes in tree arena; parser-owned stack-pop builder for fresh reductions.
 Pending-reduction foundation: stack-link payload abstraction; descriptor-capable
 stack payload layout; pending descriptor metadata dispatch; parser-owned pending
 descriptor storage; pending descriptor metadata construction; stack push API for
-pending reduction descriptors; descriptor-aware stack-pop collection primitive.
+pending reduction descriptors; descriptor-aware stack-pop collection primitive;
+payload span access/release for reduce wiring.
 
 ## Measurement Trials
 
