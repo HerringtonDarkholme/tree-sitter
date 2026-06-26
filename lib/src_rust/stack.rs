@@ -438,7 +438,10 @@ unsafe fn subtree_array_get(self_: &SubtreeArray, index: u32) -> Subtree {
 
 #[inline]
 unsafe fn subtree_array_as_array(self_: &SubtreeArray) -> &Array<Subtree> {
-    &*ptr::from_ref(self_).cast::<Array<Subtree>>()
+    ptr::from_ref(self_)
+        .cast::<Array<Subtree>>()
+        .as_ref()
+        .unwrap_unchecked()
 }
 
 #[inline]
