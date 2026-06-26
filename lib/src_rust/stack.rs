@@ -98,6 +98,22 @@ pub type StackSliceArray = Array<StackSlice>;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
+pub struct StackSliceSpan {
+    pub start: u32,
+    pub size: u32,
+    pub version: StackVersion,
+}
+
+pub type StackSliceSpanArray = Array<StackSliceSpan>;
+
+#[repr(C)]
+pub struct StackPopBuilder {
+    pub slices: StackSliceSpanArray,
+    pub subtrees: SubtreeArray,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
 pub struct StackSummaryEntry {
     pub position: Length,
     pub depth: u32,
@@ -135,6 +151,7 @@ const _: () = assert!(std::mem::size_of::<StackNode>() == 232);
 const _: () = assert!(std::mem::size_of::<StackIterator>() == 32);
 const _: () = assert!(std::mem::size_of::<StackStatus>() == 4);
 const _: () = assert!(std::mem::size_of::<StackSlice>() == 24);
+const _: () = assert!(std::mem::size_of::<StackSliceSpan>() == 12);
 const _: () = assert!(std::mem::size_of::<StackSummaryEntry>() == 20);
 const _: () = assert!(std::mem::size_of::<StackHead>() == 48);
 const _: () = assert!(std::mem::size_of::<Stack>() == 80);
@@ -345,6 +362,31 @@ pub unsafe fn array_assign<T>(self_: &mut Array<T>, other: &Array<T>) {
     if other.size > 0 {
         ptr::copy(other.contents, self_.contents, other.size as usize);
     }
+}
+
+pub const unsafe fn ts_stack_pop_builder_new() -> StackPopBuilder {
+    StackPopBuilder {
+        slices: array_new(),
+        subtrees: SubtreeArray {
+            contents: ptr::null_mut(),
+            size: 0,
+            capacity: 0,
+        },
+    }
+}
+
+pub unsafe fn ts_stack_pop_builder_delete(self_: &mut StackPopBuilder) {
+    if !self_.slices.contents.is_null() {
+        array_delete(&mut self_.slices);
+    }
+    if !self_.subtrees.contents.is_null() {
+        array_delete(subtree_array_as_array_mut(&mut self_.subtrees));
+    }
+}
+
+unsafe fn ts_stack_pop_builder_clear(self_: &mut StackPopBuilder) {
+    self_.slices.size = 0;
+    self_.subtrees.size = 0;
 }
 
 #[inline]
@@ -694,6 +736,77 @@ unsafe fn ts_stack__add_slice(
     array_push(&mut self_.slices, slice);
 }
 
+unsafe fn stack_pop_builder_reverse_subtrees(builder: &mut StackPopBuilder, start: u32, size: u32) {
+    let limit = size / 2;
+    for i in 0..limit {
+        let reverse_index = start as usize + size as usize - 1 - i as usize;
+        let a = builder.subtrees.contents.add(start as usize + i as usize);
+        let b = builder.subtrees.contents.add(reverse_index);
+        ptr::swap(a, b);
+    }
+}
+
+unsafe fn stack_pop_builder_append_subtrees(
+    builder: &mut StackPopBuilder,
+    subtrees: &SubtreeArray,
+) -> StackSliceSpan {
+    stack_pop_builder_append_subtrees_with_order(builder, subtrees, true)
+}
+
+unsafe fn stack_pop_builder_append_subtrees_in_order(
+    builder: &mut StackPopBuilder,
+    subtrees: &SubtreeArray,
+) -> StackSliceSpan {
+    stack_pop_builder_append_subtrees_with_order(builder, subtrees, false)
+}
+
+unsafe fn stack_pop_builder_append_subtrees_with_order(
+    builder: &mut StackPopBuilder,
+    subtrees: &SubtreeArray,
+    reverse: bool,
+) -> StackSliceSpan {
+    let start = builder.subtrees.size;
+    let dest = subtree_array_as_array_mut(&mut builder.subtrees);
+    array_reserve(dest, start + subtrees.size);
+    if subtrees.size > 0 {
+        ptr::copy_nonoverlapping(
+            subtrees.contents,
+            dest.contents.add(start as usize),
+            subtrees.size as usize,
+        );
+    }
+    dest.size = start + subtrees.size;
+    if reverse {
+        stack_pop_builder_reverse_subtrees(builder, start, subtrees.size);
+    }
+    StackSliceSpan {
+        start,
+        size: subtrees.size,
+        version: STACK_VERSION_NONE,
+    }
+}
+
+unsafe fn stack_pop_builder_add_slice(
+    self_: &mut Stack,
+    original_version: StackVersion,
+    node: &mut StackNode,
+    builder: &mut StackPopBuilder,
+    mut slice: StackSliceSpan,
+) {
+    let node_ptr = ptr::from_mut(node);
+    for i in (0..builder.slices.size).rev() {
+        let version = array_get_ref(&builder.slices, i).version;
+        if stack_head(self_, version).node == node_ptr {
+            slice.version = version;
+            array_insert(&mut builder.slices, i + 1, slice);
+            return;
+        }
+    }
+
+    slice.version = ts_stack__add_version(self_, original_version, node);
+    array_push(&mut builder.slices, slice);
+}
+
 unsafe fn ts_stack_pop_count_linear(
     self_: &mut Stack,
     version: StackVersion,
@@ -717,7 +830,10 @@ unsafe fn ts_stack_pop_count_linear(
     while subtree_count < count {
         let current_node = node.as_ref().unwrap_unchecked();
         if current_node.link_count != 1 {
-            ts_subtree_array_delete(self_.subtree_pool.as_mut().unwrap_unchecked(), &mut subtrees);
+            ts_subtree_array_delete(
+                self_.subtree_pool.as_mut().unwrap_unchecked(),
+                &mut subtrees,
+            );
             return None;
         }
 
@@ -738,6 +854,63 @@ unsafe fn ts_stack_pop_count_linear(
     ts_subtree_array_reverse(&mut subtrees);
     ts_stack__add_slice(self_, version, stack_node_mut(node), &subtrees);
     Some(ptr::read(&self_.slices))
+}
+
+unsafe fn ts_stack_pop_count_linear_into(
+    self_: &mut Stack,
+    version: StackVersion,
+    count: u32,
+    builder: &mut StackPopBuilder,
+) -> bool {
+    let mut node = stack_head(self_, version).node;
+    let mut subtree_count = 0;
+    let start = builder.subtrees.size;
+    let reserve_count = ts_subtree_alloc_size(count) / std::mem::size_of::<Subtree>();
+    array_reserve(
+        subtree_array_as_array_mut(&mut builder.subtrees),
+        start + u32::try_from(reserve_count).unwrap(),
+    );
+
+    while subtree_count < count {
+        let current_node = node.as_ref().unwrap_unchecked();
+        if current_node.link_count != 1 {
+            let subtrees = subtree_array_as_array_mut(&mut builder.subtrees);
+            for i in start..subtrees.size {
+                ts_subtree_release(
+                    self_.subtree_pool.as_mut().unwrap_unchecked(),
+                    *array_get_ref(subtrees, i),
+                );
+            }
+            subtrees.size = start;
+            return false;
+        }
+
+        let link = current_node.links[0];
+        node = link.node;
+        if link.subtree.ptr.is_null() {
+            subtree_count += 1;
+        } else {
+            array_push(
+                subtree_array_as_array_mut(&mut builder.subtrees),
+                link.subtree,
+            );
+            ts_subtree_retain(link.subtree);
+
+            if !ts_subtree_extra(link.subtree) {
+                subtree_count += 1;
+            }
+        }
+    }
+
+    let size = builder.subtrees.size - start;
+    stack_pop_builder_reverse_subtrees(builder, start, size);
+    let slice = StackSliceSpan {
+        start,
+        size,
+        version: STACK_VERSION_NONE,
+    };
+    stack_pop_builder_add_slice(self_, version, stack_node_mut(node), builder, slice);
+    true
 }
 
 /// Core iteration function for walking the stack graph.
@@ -1116,6 +1289,34 @@ pub unsafe fn ts_stack_pop_count(
         ptr::addr_of!(count).cast_mut().cast::<c_void>(),
         Some(count),
     )
+}
+
+/// Pop a given number of entries from a version into a caller-owned builder.
+pub unsafe fn ts_stack_pop_count_into(
+    self_: &mut Stack,
+    version: StackVersion,
+    count: u32,
+    builder: &mut StackPopBuilder,
+) {
+    ts_stack_pop_builder_clear(builder);
+    if ts_stack_pop_count_linear_into(self_, version, count, builder) {
+        return;
+    }
+
+    let pop = stack__iter(
+        self_,
+        version,
+        pop_count_callback,
+        ptr::addr_of!(count).cast_mut().cast::<c_void>(),
+        Some(count),
+    );
+    for i in 0..pop.size {
+        let mut slice = ptr::read(array_get_ref(&pop, i));
+        let mut span = stack_pop_builder_append_subtrees_in_order(builder, &slice.subtrees);
+        span.version = slice.version;
+        array_push(&mut builder.slices, span);
+        array_delete(subtree_array_as_array_mut(&mut slice.subtrees));
+    }
 }
 
 /// Pop an error from the top of a version.

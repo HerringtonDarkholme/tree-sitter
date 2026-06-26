@@ -73,7 +73,10 @@ use super::stack::{
     ts_stack_node_count_since_error,
     ts_stack_pause,
     ts_stack_pop_all,
+    ts_stack_pop_builder_delete,
+    ts_stack_pop_builder_new,
     ts_stack_pop_count,
+    ts_stack_pop_count_into,
     ts_stack_pop_error,
     ts_stack_pop_pending,
     ts_stack_position,
@@ -89,6 +92,8 @@ use super::stack::{
     ts_stack_version_count,
     Array,
     Stack,
+    StackPopBuilder,
+    StackSliceSpan,
     StackVersion,
     STACK_VERSION_NONE,
 };
@@ -401,6 +406,7 @@ pub struct TSParser {
     wasm_store: *mut TSWasmStore,
     reduce_actions: ReduceActionSet,
     finished_tree: Subtree,
+    reduce_builder: StackPopBuilder,
     trailing_extras: SubtreeArray,
     trailing_extras2: SubtreeArray,
     scratch_trees: SubtreeArray,
@@ -1524,6 +1530,72 @@ unsafe fn ts_parser__new_node(
     }
 }
 
+unsafe fn ts_parser__builder_span_subtrees(
+    builder: &StackPopBuilder,
+    span: StackSliceSpan,
+) -> SubtreeArray {
+    SubtreeArray {
+        contents: if span.size > 0 {
+            builder.subtrees.contents.add(span.start as usize)
+        } else {
+            ptr::null_mut()
+        },
+        size: span.size,
+        capacity: span.size,
+    }
+}
+
+unsafe fn ts_parser__new_node_from_builder_span(
+    self_: &mut TSParser,
+    symbol: TSSymbol,
+    children: &SubtreeArray,
+    production_id: u32,
+) -> MutableSubtree {
+    if self_.tree_arena.is_null() {
+        let mut owned_children = SubtreeArray {
+            contents: ptr::null_mut(),
+            size: 0,
+            capacity: 0,
+        };
+        array_reserve(
+            subtree_array_as_array_mut(&mut owned_children),
+            children.size,
+        );
+        if children.size > 0 {
+            ptr::copy_nonoverlapping(
+                children.contents,
+                owned_children.contents,
+                children.size as usize,
+            );
+        }
+        owned_children.size = children.size;
+        ts_subtree_new_node(symbol, &mut owned_children, production_id, self_.language)
+    } else {
+        ts_subtree_new_node_in_arena(
+            self_.tree_arena,
+            symbol,
+            children.contents,
+            children.size,
+            production_id,
+            self_.language,
+        )
+    }
+}
+
+unsafe fn ts_parser__release_builder_span(self_: &mut TSParser, span: StackSliceSpan) {
+    if span.size == 0 {
+        return;
+    }
+    let contents = self_
+        .reduce_builder
+        .subtrees
+        .contents
+        .add(span.start as usize);
+    for i in 0..span.size {
+        ts_subtree_release(&mut self_.tree_pool, *contents.add(i as usize));
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Internal helpers — shift/reduce/accept
 // ---------------------------------------------------------------------------
@@ -1571,6 +1643,178 @@ unsafe fn ts_parser__reduce(
     is_fragile: bool,
     end_of_non_terminal_extra: bool,
 ) -> StackVersion {
+    if !self_.old_tree.ptr.is_null() {
+        return ts_parser__reduce_with_slices(
+            self_,
+            version,
+            symbol,
+            count,
+            dynamic_precedence,
+            production_id,
+            is_fragile,
+            end_of_non_terminal_extra,
+        );
+    }
+
+    let parser = ptr::from_mut(self_);
+    let initial_version_count = ts_stack_version_count(parser_stack_ref(self_.stack));
+
+    ts_stack_pop_count_into(
+        parser_stack_mut(self_.stack),
+        version,
+        count,
+        &mut self_.reduce_builder,
+    );
+    let mut removed_version_count: u32 = 0;
+    let stack = parser_stack_mut(self_.stack);
+    let halted_version_count = ts_stack_halted_version_count(stack);
+    let mut i: u32 = 0;
+    let pop_size = self_.reduce_builder.slices.size;
+    while i < pop_size {
+        let span = *array_get_ref(&self_.reduce_builder.slices, i);
+        let slice_version = span.version - removed_version_count;
+
+        // Limit max versions
+        if slice_version > MAX_VERSION_COUNT + MAX_VERSION_COUNT_OVERFLOW + halted_version_count {
+            ts_stack_remove_version(stack, slice_version);
+            ts_parser__release_builder_span(self_, span);
+            removed_version_count += 1;
+            while i + 1 < pop_size {
+                LOG!(
+                    parser,
+                    c"aborting reduce with too many versions"
+                        .as_ptr()
+                        .cast::<i8>()
+                );
+                let next_span = *array_get_ref(&self_.reduce_builder.slices, i + 1);
+                if next_span.version != span.version {
+                    break;
+                }
+                ts_parser__release_builder_span(self_, next_span);
+                i += 1;
+            }
+            i += 1;
+            continue;
+        }
+
+        // Remove trailing extras from children
+        let mut children = ts_parser__builder_span_subtrees(&self_.reduce_builder, span);
+        ts_subtree_array_remove_trailing_extras(&mut children, &mut self_.trailing_extras);
+
+        let mut parent = ts_parser__new_node_from_builder_span(
+            self_,
+            symbol,
+            &children,
+            u32::from(production_id),
+        );
+
+        // Handle merged stack versions
+        while i + 1 < pop_size {
+            let next_span = *array_get_ref(&self_.reduce_builder.slices, i + 1);
+            if next_span.version != span.version {
+                break;
+            }
+            i += 1;
+
+            let mut next_slice_children =
+                ts_parser__builder_span_subtrees(&self_.reduce_builder, next_span);
+            ts_subtree_array_remove_trailing_extras(
+                &mut next_slice_children,
+                &mut self_.trailing_extras2,
+            );
+
+            if ts_parser__select_children(self_, ts_subtree_from_mut(parent), &next_slice_children)
+            {
+                ts_subtree_array_clear(&mut self_.tree_pool, &mut self_.trailing_extras);
+                ts_subtree_release(&mut self_.tree_pool, ts_subtree_from_mut(parent));
+                array_swap(
+                    subtree_array_as_array_mut(&mut self_.trailing_extras),
+                    subtree_array_as_array_mut(&mut self_.trailing_extras2),
+                );
+                parent = ts_parser__new_node_from_builder_span(
+                    self_,
+                    symbol,
+                    &next_slice_children,
+                    u32::from(production_id),
+                );
+            } else {
+                array_clear(subtree_array_as_array_mut(&mut self_.trailing_extras2));
+                ts_parser__release_builder_span(self_, next_span);
+            }
+        }
+
+        let state = ts_stack_state(stack, slice_version);
+        let next_state = if symbol != ts_builtin_sym_error
+            && symbol != ts_builtin_sym_error_repeat
+            && u32::from(symbol) >= parser_language_full(self_.language).token_count
+        {
+            ts_language_lookup(self_.language, state, symbol)
+        } else {
+            ts_language_next_state(self_.language, state, symbol)
+        };
+        if end_of_non_terminal_extra && next_state == state {
+            (*parent.ptr).set_extra(true);
+        }
+        if is_fragile || pop_size > 1 || initial_version_count > 1 {
+            (*parent.ptr).set_fragile_left(true);
+            (*parent.ptr).set_fragile_right(true);
+            (*parent.ptr).parse_state = TS_TREE_STATE_NONE;
+        } else {
+            (*parent.ptr).parse_state = state;
+        }
+        (*parent.ptr).data.children.dynamic_precedence += dynamic_precedence;
+
+        // Push the parent node and trailing extras
+        ts_stack_push(
+            stack,
+            slice_version,
+            ts_subtree_from_mut(parent),
+            false,
+            next_state,
+        );
+        for j in 0..self_.trailing_extras.size {
+            ts_stack_push(
+                stack,
+                slice_version,
+                *array_get_ref(subtree_array_as_array(&self_.trailing_extras), j),
+                false,
+                next_state,
+            );
+        }
+
+        for j in 0..slice_version {
+            if j == version {
+                continue;
+            }
+            if ts_stack_merge(stack, j, slice_version) {
+                removed_version_count += 1;
+                break;
+            }
+        }
+
+        i += 1;
+    }
+    self_.reduce_builder.slices.size = 0;
+    self_.reduce_builder.subtrees.size = 0;
+
+    if ts_stack_version_count(stack) > initial_version_count {
+        initial_version_count
+    } else {
+        STACK_VERSION_NONE
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+unsafe fn ts_parser__reduce_with_slices(
+    self_: &mut TSParser,
+    version: StackVersion,
+    symbol: TSSymbol,
+    count: u32,
+    dynamic_precedence: i32,
+    production_id: u16,
+    is_fragile: bool,
+    end_of_non_terminal_extra: bool,
+) -> StackVersion {
     let parser = ptr::from_mut(self_);
     let initial_version_count = ts_stack_version_count(parser_stack_ref(self_.stack));
 
@@ -1583,7 +1827,6 @@ unsafe fn ts_parser__reduce(
         let mut slice = ptr::read(array_get_ref(&pop, i));
         let slice_version = slice.version - removed_version_count;
 
-        // Limit max versions
         if slice_version > MAX_VERSION_COUNT + MAX_VERSION_COUNT_OVERFLOW + halted_version_count {
             ts_stack_remove_version(stack, slice_version);
             ts_subtree_array_delete(&mut self_.tree_pool, &mut slice.subtrees);
@@ -1606,18 +1849,11 @@ unsafe fn ts_parser__reduce(
             continue;
         }
 
-        // Remove trailing extras from children
         let mut children = slice.subtrees;
         ts_subtree_array_remove_trailing_extras(&mut children, &mut self_.trailing_extras);
+        let mut parent =
+            ts_parser__new_node(self_, symbol, &mut children, u32::from(production_id));
 
-        let mut parent = ts_parser__new_node(
-            self_,
-            symbol,
-            &mut children,
-            u32::from(production_id),
-        );
-
-        // Handle merged stack versions
         while i + 1 < pop.size {
             let mut next_slice = ptr::read(array_get_ref(&pop, i + 1));
             if next_slice.version != slice.version {
@@ -1625,7 +1861,6 @@ unsafe fn ts_parser__reduce(
             }
             i += 1;
 
-            // Make a shallow copy of the subtrees (C does struct copy)
             let mut next_slice_children = SubtreeArray {
                 contents: next_slice.subtrees.contents,
                 size: next_slice.subtrees.size,
@@ -1652,7 +1887,6 @@ unsafe fn ts_parser__reduce(
                 );
             } else {
                 array_clear(subtree_array_as_array_mut(&mut self_.trailing_extras2));
-                // Use the original size from next_slice.subtrees to delete all subtrees
                 ts_subtree_array_delete(&mut self_.tree_pool, &mut next_slice.subtrees);
             }
         }
@@ -1678,7 +1912,6 @@ unsafe fn ts_parser__reduce(
         }
         (*parent.ptr).data.children.dynamic_precedence += dynamic_precedence;
 
-        // Push the parent node and trailing extras
         ts_stack_push(
             stack,
             slice_version,
@@ -2098,12 +2331,8 @@ unsafe fn ts_parser__recover(self_: &mut TSParser, version: StackVersion, mut lo
     };
     array_reserve(subtree_array_as_array_mut(&mut children), 1);
     array_push(subtree_array_as_array_mut(&mut children), lookahead);
-    let mut error_repeat = ts_parser__new_node(
-        self_,
-        ts_builtin_sym_error_repeat,
-        &mut children,
-        0,
-    );
+    let mut error_repeat =
+        ts_parser__new_node(self_, ts_builtin_sym_error_repeat, &mut children, 0);
 
     // Merge with existing error on top of stack
     if node_count_since_error > 0 {
@@ -2789,6 +3018,7 @@ pub unsafe extern "C" fn ts_parser_new() -> *mut TSParser {
     array_reserve(&mut parser.reduce_actions, 4);
     parser.tree_pool = ts_subtree_pool_new(32);
     parser.stack = ts_stack_new(&mut parser.tree_pool);
+    parser.reduce_builder = ts_stack_pop_builder_new();
     parser.finished_tree = NULL_SUBTREE;
     parser.tree_arena = ptr::null_mut();
     parser.reusable_node = reusable_node_new();
@@ -2841,6 +3071,7 @@ pub unsafe extern "C" fn ts_parser_delete(self_: *mut TSParser) {
     ts_parser__set_cached_token(parser, 0, NULL_SUBTREE, NULL_SUBTREE);
     ts_subtree_pool_delete(&mut parser.tree_pool);
     reusable_node_delete(&mut parser.reusable_node);
+    ts_stack_pop_builder_delete(&mut parser.reduce_builder);
     array_delete(subtree_array_as_array_mut(&mut parser.trailing_extras));
     array_delete(subtree_array_as_array_mut(&mut parser.trailing_extras2));
     array_delete(subtree_array_as_array_mut(&mut parser.scratch_trees));

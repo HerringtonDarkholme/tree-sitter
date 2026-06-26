@@ -19,9 +19,10 @@ the repo under `/tmp`.
 
 The 20% universal target is not met.
 
-Current kept architecture change:
+Current kept architecture changes:
 
 - `9e843a09` - allocate parser reduction nodes in a tree arena.
+- parser-owned stack-pop builder for reductions.
 
 Measured same-session impact of that kept slice:
 
@@ -41,7 +42,26 @@ Mean of language averages:
 - Arena slice: `99678 bytes/ms`
 - Delta: `+5.3%`
 
-Remaining weak spots: TypeScript, JavaScript, Go, Python, and C++.
+Measured same-session impact of the parser-owned stack-pop builder on top of
+the arena slice:
+
+| Language | Baseline bytes/ms | Builder bytes/ms | Delta |
+| --- | ---: | ---: | ---: |
+| JavaScript | 18936 | 20127 | +6.3% |
+| TypeScript | 24072 | 25684 | +6.7% |
+| Python | 10311 | 11361 | +10.2% |
+| Go | 16708 | 18571 | +11.1% |
+| Rust | 16188 | 16487 | +1.8% |
+| C++ | 8920 | 9924 | +11.3% |
+| Java | 11535 | 12283 | +6.5% |
+
+Mean of language averages:
+
+- Baseline: `106670 bytes/ms`
+- Builder: `114437 bytes/ms`
+- Delta: `+7.3%`
+
+Remaining weak spots: TypeScript, JavaScript, Python, and Java.
 
 ## Current Hotspots
 
@@ -80,11 +100,13 @@ scan inside the core library to vectorize without grammar-level changes.
 | --- | --- |
 | Tree storage | Arena-backed `TSTree` foundation was added. |
 | Reduction allocation | Parser reduction/accept/recovery parent nodes now allocate in the tree arena. |
+| Stack pop materialization | Fresh parses now collect reduction stack-pop candidates into a parser-owned builder buffer instead of malloc-backed `SubtreeArray` values; reparses keep the original slice path for changed-range correctness. |
 | Ownership correctness | Heap clones clear `arena_owned`, fixing edit/reparse leaks from cloned arena-backed nodes. |
 | Earlier local parser fast paths | Several small wins were kept before the arena work, including linear stack-pop fast paths and direct nonterminal next-state lookup. |
 
-The only recent architecture-level win is arena-backed reduction parent nodes.
-It is useful, but it is not large enough by itself.
+The recent architecture-level wins are arena-backed reduction parent nodes and
+parser-owned stack-pop builder materialization. They are useful, but the full
+20% universal target is not proven yet.
 
 ## Itemized Trial Index
 
@@ -107,6 +129,7 @@ may refer to these rows, but should not duplicate them as separate attempts.
 | Direct nonterminal next-state lookup in reduce | Reduce path | Positive on JS/Go/TS canaries |
 | Add arena-backed tree storage foundation | Tree storage | Positive foundation, kept |
 | Allocate parser reduction nodes in tree arena | Reduce/node allocation | Positive architecture slice, `+5.3%` mean of seven language averages |
+| Parser-owned stack-pop builder for fresh-parse reductions | Reduce/stack pop | Positive architecture slice, `+7.3%` mean of seven language averages on top of arena slice; reparses use the original slice path after `test_get_changed_ranges` exposed changed-range sensitivity; `cargo test --all` passed outside sandbox |
 
 ### Measurement And Design Trials
 
