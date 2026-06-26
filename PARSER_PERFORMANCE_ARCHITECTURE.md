@@ -40,6 +40,18 @@ For `jquery.js`, exact-size sampling showed about 38k 88-byte allocations, 11k
 parse. These match `SubtreeHeapData` alone and `SubtreeHeapData` plus small child
 arrays. This makes subtree block allocation the first architectural target.
 
+A global size-class slab protected by a mutex was prototyped and rejected: it
+preserved layout but the JavaScript benchmark did not reach the first file
+result in normal time. The next allocator design should avoid per-block global
+locking. Prefer parser-local pages with a clear finalization story, or an
+arena-backed `TSTree` with page lifetime tied to tree lifetime.
+
+A second atomic global slab was also rejected. It removed the mutex, but still
+used a high-bit marker in `SubtreeArray.capacity` to distinguish slab-backed
+child storage. That interacted poorly with generic array growth and parser
+ownership paths. Future designs should not overload `SubtreeArray` metadata for
+allocation ownership; use an explicit tree/builder owner instead.
+
 ## Primary Revamp: Parser-Owned Tree Builder Arena
 
 Introduce a parser-owned tree builder for normal parses. Reductions should build
