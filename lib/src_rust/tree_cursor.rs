@@ -217,11 +217,12 @@ unsafe fn array_init(arr: &mut TreeCursorEntryArray) {
 
 unsafe fn array_push_all(dst: &mut TreeCursorEntryArray, src: &TreeCursorEntryArray) {
     if src.size > 0 {
+        let src_entries = tree_cursor_entry_slice(src);
         array_grow(dst, src.size);
         ptr::copy_nonoverlapping(
-            src.contents,
+            src_entries.as_ptr(),
             dst.contents.add(dst.size as usize),
-            src.size as usize,
+            src_entries.len(),
         );
         dst.size += src.size;
     }
