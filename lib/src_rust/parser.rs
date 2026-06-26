@@ -915,11 +915,8 @@ unsafe fn ts_parser__can_reuse_first_leaf(
     tree: Subtree,
     table_entry: &TableEntry,
 ) -> bool {
-    let lang = parser_language_full(self_.language);
     let leaf_symbol = ts_subtree_leaf_symbol(tree);
-    let leaf_state = ts_subtree_leaf_parse_state(tree);
     let current_lex_mode = ts_language_lex_mode_for_state(self_.language, state);
-    let leaf_lex_mode = ts_language_lex_mode_for_state(self_.language, leaf_state);
 
     // At the end of a non-terminal extra node, the lexer normally returns
     // NULL, which indicates that the parser should look for a reduce action
@@ -929,14 +926,20 @@ unsafe fn ts_parser__can_reuse_first_leaf(
     }
 
     // If the token was created in a state with the same set of lookaheads, it is reusable.
-    if table_entry.action_count > 0
-        && leaf_lex_mode.lex_state == current_lex_mode.lex_state
-        && leaf_lex_mode.external_lex_state == current_lex_mode.external_lex_state
-        && leaf_lex_mode.reserved_word_set_id == current_lex_mode.reserved_word_set_id
-        && (leaf_symbol != lang.keyword_capture_token
-            || (!ts_subtree_is_keyword(tree) && ts_subtree_parse_state(tree) == state))
-    {
-        return true;
+    if table_entry.action_count > 0 {
+        let leaf_state = ts_subtree_leaf_parse_state(tree);
+        let leaf_lex_mode = ts_language_lex_mode_for_state(self_.language, leaf_state);
+        if leaf_lex_mode.lex_state == current_lex_mode.lex_state
+            && leaf_lex_mode.external_lex_state == current_lex_mode.external_lex_state
+            && leaf_lex_mode.reserved_word_set_id == current_lex_mode.reserved_word_set_id
+        {
+            let lang = parser_language_full(self_.language);
+            if leaf_symbol != lang.keyword_capture_token
+                || (!ts_subtree_is_keyword(tree) && ts_subtree_parse_state(tree) == state)
+            {
+                return true;
+            }
+        }
     }
 
     // Empty tokens are not reusable in states with different lookaheads.
