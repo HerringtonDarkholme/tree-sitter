@@ -132,11 +132,6 @@ unsafe fn ts_lexer__included_range(self_: &Lexer, index: usize) -> &TSRange {
         .unwrap_unchecked()
 }
 
-#[inline]
-const unsafe fn ts_lexer__included_ranges(self_: &Lexer) -> &[TSRange] {
-    std::slice::from_raw_parts(self_.included_ranges, self_.included_range_count as usize)
-}
-
 /// Call the input callback to obtain a new chunk of source code.
 unsafe fn ts_lexer__get_chunk(self_: &mut Lexer) {
     self_.chunk_start = self_.current_position.bytes;
@@ -198,6 +193,39 @@ unsafe fn ts_lexer_goto(self_: &mut Lexer, position: Length) {
     }
 
     self_.current_position = position;
+
+    if self_.included_range_count == 1 {
+        let included_range = *ts_lexer__included_range(self_, 0);
+        if included_range.end_byte > self_.current_position.bytes
+            && included_range.end_byte > included_range.start_byte
+        {
+            if included_range.start_byte >= self_.current_position.bytes {
+                self_.current_position = Length {
+                    bytes: included_range.start_byte,
+                    extent: included_range.start_point,
+                };
+            }
+            self_.current_included_range_index = 0;
+            if !self_.chunk.is_null()
+                && (self_.current_position.bytes < self_.chunk_start
+                    || self_.current_position.bytes >= self_.chunk_start + self_.chunk_size)
+            {
+                ts_lexer__clear_chunk(self_);
+            }
+            self_.lookahead_size = 0;
+            self_.data.lookahead = 0;
+        } else {
+            self_.current_included_range_index = 1;
+            self_.current_position = Length {
+                bytes: included_range.end_byte,
+                extent: included_range.end_point,
+            };
+            ts_lexer__clear_chunk(self_);
+            self_.lookahead_size = 1;
+            self_.data.lookahead = 0;
+        }
+        return;
+    }
 
     // Move to the first valid position at or after the given position.
     let found_included_range = 'range_search: {
