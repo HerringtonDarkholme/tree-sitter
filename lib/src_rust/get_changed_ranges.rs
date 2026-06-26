@@ -75,9 +75,9 @@ struct Iterator {
 /// `IteratorComparison` — result of comparing two iterators
 #[derive(PartialEq, Eq)]
 enum IteratorComparison {
-    IteratorDiffers,
-    IteratorMayDiffer,
-    IteratorMatches,
+    Differs,
+    MayDiffer,
+    Matches,
 }
 
 struct VisibleState {
@@ -555,13 +555,13 @@ unsafe fn iterator_compare(
     let new_symbol = ts_subtree_symbol(new_tree);
 
     if old_tree.ptr.is_null() && new_tree.ptr.is_null() {
-        return IteratorComparison::IteratorMatches;
+        return IteratorComparison::Matches;
     }
     if old_tree.ptr.is_null() || new_tree.ptr.is_null() {
-        return IteratorComparison::IteratorDiffers;
+        return IteratorComparison::Differs;
     }
     if old_visible.alias_symbol != new_visible.alias_symbol || old_symbol != new_symbol {
-        return IteratorComparison::IteratorDiffers;
+        return IteratorComparison::Differs;
     }
 
     let old_size = ts_subtree_size(old_tree).bytes;
@@ -588,10 +588,10 @@ unsafe fn iterator_compare(
                 &new_iter.prev_external_token,
             ))
     {
-        return IteratorComparison::IteratorMayDiffer;
+        return IteratorComparison::MayDiffer;
     }
 
-    IteratorComparison::IteratorMatches
+    IteratorComparison::Matches
 }
 
 // ---------------------------------------------------------------------------
@@ -845,7 +845,7 @@ pub unsafe fn ts_subtree_get_changed_ranges_ref(
         // Even if the two subtrees appear to be identical, they could differ
         // internally if they contain a range of text that was previously
         // excluded from the parse, and is now included, or vice-versa.
-        if comparison == IteratorComparison::IteratorMatches
+        if comparison == IteratorComparison::Matches
             && ts_range_array_intersects_ref(
                 included_range_differences_array,
                 included_range_difference_index,
@@ -853,20 +853,20 @@ pub unsafe fn ts_subtree_get_changed_ranges_ref(
                 iterator_end_position(&old_iter).bytes,
             )
         {
-            comparison = IteratorComparison::IteratorMayDiffer;
+            comparison = IteratorComparison::MayDiffer;
         }
 
         let is_changed = match comparison {
             // If the subtrees are definitely identical, move to the end
             // of both subtrees.
-            IteratorComparison::IteratorMatches => {
+            IteratorComparison::Matches => {
                 next_position = iterator_end_position(&old_iter);
                 false
             }
 
             // If the subtrees might differ internally, descend into both
             // subtrees, finding the first child that spans the current position.
-            IteratorComparison::IteratorMayDiffer => {
+            IteratorComparison::MayDiffer => {
                 if iterator_descend(&mut old_iter, position.bytes) {
                     if !iterator_descend(&mut new_iter, position.bytes) {
                         next_position = iterator_end_position(&old_iter);
@@ -888,7 +888,7 @@ pub unsafe fn ts_subtree_get_changed_ranges_ref(
 
             // If the subtrees are different, record a change and then move
             // to the end of both subtrees.
-            IteratorComparison::IteratorDiffers => {
+            IteratorComparison::Differs => {
                 next_position = length_min(
                     iterator_end_position(&old_iter),
                     iterator_end_position(&new_iter),
