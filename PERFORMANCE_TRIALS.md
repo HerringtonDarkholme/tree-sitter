@@ -755,6 +755,31 @@ Implications:
   design must preserve metadata and tree identity lazily; it cannot just skip
   hidden nodes.
 
+Pending-reduction stack inventory:
+
+The stack currently consumes these `Subtree` properties immediately after a
+reduce push:
+
+- `stack_node_new`: `error_cost`, `total_size`, visible-descendant node count,
+  visibility, symbol, and `dynamic_precedence`.
+- `stack__subtree_is_equivalent` and stack link merging: symbol, error cost,
+  padding bytes, size bytes, child count, extra flag, external scanner state
+  equality, and dynamic precedence replacement.
+- `ts_stack_has_advanced_since_error`: total bytes and error cost while walking
+  links.
+- External-token handling in parser shift/reduce paths still needs last external
+  token/scanner state to remain equivalent.
+- Merged candidate selection still needs full tree comparison when ambiguity is
+  present, but merged groups are rare in normal parsing.
+
+Implication: a pending-reduction descriptor is viable only if it stores or lazily
+computes the same summary metadata as `SubtreeHeapData`, plus enough identity to
+materialize before child iteration, external scanner state comparison, tree
+comparison, or final tree output. This is not a small special case. The design
+must introduce a stack-link payload abstraction or a descriptor-backed `Subtree`
+query layer; otherwise the first forced metadata query will materialize the node
+immediately and lose the intended phase removal.
+
 ### Candidate Ranking
 
 | Rank | Direction | Decision |
