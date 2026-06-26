@@ -270,11 +270,6 @@ const unsafe fn lang<'a>(self_: *const TSLanguage) -> &'a TSLanguageFull {
 }
 
 #[inline]
-unsafe fn lookahead_iterator_mut<'a>(self_: *mut LookaheadIterator) -> &'a mut LookaheadIterator {
-    self_.as_mut().unwrap_unchecked()
-}
-
-#[inline]
 unsafe fn parse_action_entry(language: &TSLanguageFull, index: usize) -> &TSParseActionEntry {
     language
         .parse_actions
@@ -993,7 +988,7 @@ pub unsafe extern "C" fn ts_lookahead_iterator_reset(
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_lookahead_iterator_next(self_: *mut LookaheadIterator) -> bool {
-    ts_lookahead_iterator__next(lookahead_iterator_mut(self_))
+    ts_lookahead_iterator__next(self_.as_mut().unwrap_unchecked())
 }
 
 #[no_mangle]
