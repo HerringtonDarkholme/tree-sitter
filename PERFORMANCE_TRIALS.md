@@ -76,6 +76,7 @@ Keep one row per unique trial. Do not duplicate reruns.
 | Parser-owned stack-pop builder for fresh reductions | Reduce stack pop | Kept, broad positive; reparses use old slice path |
 | Stack-link payload abstraction | Stack foundation | Kept pending-reduction foundation |
 | Descriptor-capable stack payload layout | Stack foundation | Kept; layout unchanged for hot stack nodes |
+| Pending descriptor metadata dispatch | Stack foundation | Kept; stack metadata helpers can read pending descriptor fields without materialization |
 
 ### Measurement And Design
 
