@@ -251,19 +251,16 @@ pub unsafe fn array_get_mut<T>(arr: &mut Array<T>, index: u32) -> &mut T {
     array_get(arr, index).as_mut().unwrap_unchecked()
 }
 
-pub unsafe fn array_back<T>(arr: &Array<T>) -> *mut T {
-    debug_assert!(arr.size > 0);
-    arr.contents.add(arr.size as usize - 1)
-}
-
 #[inline]
 pub unsafe fn array_back_ref<T>(arr: &Array<T>) -> &T {
-    array_back(arr).as_ref().unwrap_unchecked()
+    debug_assert!(arr.size > 0);
+    arr.contents.add(arr.size as usize - 1).as_ref().unwrap_unchecked()
 }
 
 #[inline]
 pub unsafe fn array_back_mut<T>(arr: &mut Array<T>) -> &mut T {
-    array_back(arr).as_mut().unwrap_unchecked()
+    debug_assert!(arr.size > 0);
+    arr.contents.add(arr.size as usize - 1).as_mut().unwrap_unchecked()
 }
 
 pub unsafe fn array_erase<T>(arr: &mut Array<T>, index: u32) {
