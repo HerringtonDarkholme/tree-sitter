@@ -473,17 +473,6 @@ unsafe fn ts_tree_cursor_goto_sibling_internal(
 }
 
 // ---------------------------------------------------------------------------
-// Inline from header: ts_tree_cursor_current_subtree
-// ---------------------------------------------------------------------------
-
-#[inline]
-pub unsafe fn ts_tree_cursor_current_subtree(self_: *const TSTreeCursor) -> Subtree {
-    let cursor = tree_cursor_ref(self_);
-    let last_entry = tree_cursor_entry_array_back(&cursor.stack);
-    *last_entry.subtree
-}
-
-// ---------------------------------------------------------------------------
 // Lifecycle: ts_tree_cursor_new, reset, init, delete
 // ---------------------------------------------------------------------------
 
