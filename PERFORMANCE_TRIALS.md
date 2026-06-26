@@ -167,6 +167,13 @@ ts_parser__advance -> ts_parser__reduce
    abort in `test_tree_cursor_child_for_point` with a misaligned subtree
    pointer, so the layer is entangled with the current stack-payload layout.
    Do not prune it without first simplifying the full stack payload model.
+7. Representation-boundary work must be validated one ownership boundary at a
+   time. Counted payload traversal passed because it preserved existing reduce
+   version semantics; accept/finalization through the reduce builder failed
+   because pop-all has different stack-version ownership. Future lazy-reduction
+   work must first provide explicit, tested models for reduce, merge/recovery,
+   and accept/finalization. Do not route one boundary through another boundary's
+   helper just because the payload shape is similar.
 
 ## Latest Checkpoint
 
