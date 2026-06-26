@@ -67,6 +67,7 @@ ts_parser__advance -> ts_parser__reduce
 - Payload-child foundation `-r 10` checkpoint
 - C++ normal `cargo flamegraph` high-sample checkpoint
 - Stack-node link-count distribution probe
+- Descriptor lazy-candidate pressure counters
 
 ### Closed: Summarization
 
@@ -256,6 +257,27 @@ pop-all payload result or stack-version removal model. The unsafe pop-all
 payload API was removed; keep only counted payload traversal until that model is
 designed.
 
+Descriptor lazy-candidate pressure counters, normal `-r 1`, temporary
+instrumentation only:
+
+| Language | Spans | Lazy Candidate | Candidate % | Children | Lazy Children % | Main Blockers |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| TypeScript | 65903 | 58094 | 88.1% | 111261 | 87.2% | fragile, multi-version |
+| JavaScript | 102012 | 91341 | 89.5% | 177717 | 88.6% | fragile, multi-version |
+| Python | 59977 | 55244 | 92.1% | 101788 | 90.6% | fragile |
+| Go | 64540 | 25822 | 40.0% | 114091 | 41.1% | multi-version, multi-pop |
+| Rust | 21182 | 18782 | 88.7% | 35098 | 85.4% | fragile |
+| C++ | 4592 | 3167 | 69.0% | 7881 | 70.5% | multi-version, fragile |
+| Java | 1165 | 886 | 76.1% | 2047 | 77.4% | multi-version, fragile |
+
+Accept multi-path count was zero for all seven target-language normal fixtures.
+Interpretation: descriptor/lazy reductions remain plausible for TypeScript,
+JavaScript, Python, Rust, and Java, and maybe C++. Go is the universal-risk
+case: most Go reductions hit multi-version or multi-pop conditions, so a
+single-version-only lazy path cannot deliver a universal 20% gain. The next
+descriptor trial must either handle Go's branching path or explicitly prove a
+different optimization for Go.
+
 Payload-child foundation versus `origin/master`, normal `-r 10` average speed:
 
 | Language | Current | Origin | Delta |
@@ -288,6 +310,10 @@ materialization boundary.
   it crossed stack version ownership boundaries. The hard problem is not
   metadata calculation; it is preserving stack/recovery/accept semantics while
   concrete subtrees are absent.
+- Lazy-candidate counters are favorable for most target languages, but Go only
+  has about 40% conservative lazy-candidate reduce spans. Universal improvement
+  requires solving branching/multi-version reductions, not only the easy
+  single-version path.
 - C++ profiles show lexer and keyword code are also major costs. If the
   descriptor path cannot demonstrate materialization reduction, the next real
   20% path probably requires generated-code/grammar-side lexer changes, not
@@ -305,12 +331,15 @@ spike with explicit exit criteria:
 2. Build boundary APIs independently, in this order: counted reduce payloads,
    merge/recovery materialization rules, then a dedicated accept pop-all payload
    model. Do not reuse counted-reduce helpers for accept.
-3. Only after those boundaries pass `cargo test --all`, wire a limited normal
-   reduce path for non-error, non-fragile, single-version reductions and measure
-   materialization reduction before benchmarking speed.
-4. Reject the descriptor strategy if counters show most reductions materialize
-   before accept, or if C++/TypeScript still spend most time in generated lexer
-   code after construction is reduced.
+3. Use a limited normal reduce path for non-error, non-fragile, single-version
+   reductions only as a correctness boundary test, not as the expected
+   universal optimization. It cannot cover Go.
+4. The real descriptor trial must include a design for multi-version or
+   multi-pop reductions, or pair the descriptor work with a separate Go-specific
+   architecture win.
+5. Reject the descriptor strategy if multi-version handling forces most
+   descriptors to materialize before accept, or if C++/TypeScript still spend
+   most time in generated lexer code after construction is reduced.
 
 The compact stack-node layout trial rules out node-size reduction by itself as
 the big architecture path. The next useful work is either a measured
