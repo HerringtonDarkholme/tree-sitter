@@ -2255,12 +2255,14 @@ unsafe fn ts_parser__check_progress(
     if self_.operation_count >= OP_COUNT_PER_PARSER_CALLBACK_CHECK {
         self_.operation_count = 0;
     }
+    if self_.parse_options.progress_callback.is_none() {
+        return true;
+    }
     if let Some(position) = position {
         self_.parse_state.current_byte_offset = position;
         self_.parse_state.has_error = self_.has_error;
     }
     if self_.operation_count == 0
-        && self_.parse_options.progress_callback.is_some()
         && self_.parse_options.progress_callback.unwrap()(&mut self_.parse_state)
     {
         if let Some(lookahead) = lookahead {
