@@ -165,7 +165,7 @@ pub fn ts_range_edit_ref(range: &mut TSRange, edit: &TSInputEdit) {
     }
 }
 
-unsafe fn ts_range_array_intersects_ref(
+pub unsafe fn ts_range_array_intersects_ref(
     ranges: &TSRangeArray,
     start_index: u32,
     start_byte: u32,
@@ -577,15 +577,6 @@ unsafe fn iterator_compare(
 // ---------------------------------------------------------------------------
 // Exported functions — skeletons
 // ---------------------------------------------------------------------------
-
-pub unsafe fn ts_range_array_intersects(
-    ranges: &TSRangeArray,
-    start_index: u32,
-    start_byte: u32,
-    end_byte: u32,
-) -> bool {
-    ts_range_array_intersects_ref(ranges, start_index, start_byte, end_byte)
-}
 
 pub unsafe fn ts_range_array_get_changed_ranges_ref(
     old_ranges: &[TSRange],

@@ -16,7 +16,7 @@ use super::error_costs::{
     ERROR_COST_PER_SKIPPED_TREE, ERROR_STATE,
 };
 use super::get_changed_ranges::{
-    ts_range_array_get_changed_ranges_ref, ts_range_array_intersects, ts_range_slice,
+    ts_range_array_get_changed_ranges_ref, ts_range_array_intersects_ref, ts_range_slice,
     TSRangeArray,
 };
 use super::language::{
@@ -1293,7 +1293,7 @@ unsafe fn ts_parser__has_included_range_difference(
     start_position: u32,
     end_position: u32,
 ) -> bool {
-    ts_range_array_intersects(
+    ts_range_array_intersects_ref(
         &self_.included_range_differences,
         self_.included_range_difference_index,
         start_position,
