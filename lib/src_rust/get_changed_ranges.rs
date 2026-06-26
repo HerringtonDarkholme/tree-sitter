@@ -58,6 +58,11 @@ unsafe fn tree_cursor_mut<'a>(cursor: *mut TreeCursor) -> &'a mut TreeCursor {
     cursor.as_mut().unwrap_unchecked()
 }
 
+#[inline]
+unsafe fn output_ranges_mut<'a>(ranges: *mut *mut TSRange) -> &'a mut *mut TSRange {
+    ranges.as_mut().unwrap_unchecked()
+}
+
 /// Iterator — internal state for tree diffing
 struct Iterator {
     cursor: TreeCursor,
@@ -792,6 +797,7 @@ pub unsafe fn ts_subtree_get_changed_ranges(
     included_range_differences: *const TSRangeArray,
     ranges: *mut *mut TSRange,
 ) -> u32 {
+    let ranges = output_ranges_mut(ranges);
     ts_subtree_get_changed_ranges_ref(
         subtree_ref(old_tree),
         subtree_ref(new_tree),
@@ -810,7 +816,7 @@ pub(crate) unsafe fn ts_subtree_get_changed_ranges_ref(
     new_cursor: &mut TreeCursor,
     language: *const TSLanguage,
     included_range_differences_array: &TSRangeArray,
-    ranges: *mut *mut TSRange,
+    ranges: &mut *mut TSRange,
 ) -> u32 {
     let mut results = TSRangeArray {
         contents: ptr::null_mut(),
