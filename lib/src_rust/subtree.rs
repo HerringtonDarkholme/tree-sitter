@@ -1054,11 +1054,6 @@ fn ts_subtree_can_inline(padding: Length, size: Length, lookahead_bytes: u32) ->
         && lookahead_bytes < 16
 }
 
-#[inline]
-unsafe fn subtree_pool_mut<'a>(pool: *mut SubtreePool) -> &'a mut SubtreePool {
-    pool.as_mut().unwrap_unchecked()
-}
-
 unsafe fn ts_subtree_set_has_changes(self_: &mut MutableSubtree) {
     if self_.data.is_inline() {
         self_.data.set_has_changes(true);
