@@ -1521,6 +1521,7 @@ unsafe fn ts_parser__shift(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 unsafe fn ts_parser__reduce(
     self_: &mut TSParser,
     version: StackVersion,

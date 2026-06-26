@@ -225,6 +225,7 @@ impl SubtreeHeapData {
     #[inline(always)] pub fn set_is_keyword(&mut self, v: bool) { if v { self.flags |= HEAP_IS_KEYWORD } else { self.flags &= !HEAP_IS_KEYWORD } }
 
     /// Build flags from individual booleans (for struct initialization)
+    #[allow(clippy::too_many_arguments)]
     #[inline]
     pub fn make_flags(
         visible: bool, named: bool, extra: bool,
@@ -1063,6 +1064,7 @@ unsafe fn ts_subtree_set_has_changes(self_: &mut MutableSubtree) {
 
 // --- #34: new_leaf ---
 
+#[allow(clippy::too_many_arguments)]
 pub unsafe fn ts_subtree_new_leaf(
     pool: &mut SubtreePool,
     symbol: TSSymbol,
@@ -1911,6 +1913,7 @@ unsafe fn ts_subtree__write_char_to_string(s: *mut i8, n: usize, chr: i32) -> us
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 unsafe fn ts_subtree__write_to_string(
     self_: Subtree,
     string: *mut i8,
