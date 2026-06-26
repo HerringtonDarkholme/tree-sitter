@@ -1242,7 +1242,7 @@ pub(crate) unsafe fn ts_stack_pop_error(
                 self_,
                 version,
                 pop_error_callback,
-                ptr::addr_of_mut!(found_error).cast::<c_void>(),
+                ptr::from_mut(&mut found_error).cast::<c_void>(),
                 Some(1),
             );
             if pop.size > 0 {
@@ -1304,7 +1304,7 @@ pub(crate) unsafe fn ts_stack_record_summary(
         self_,
         version,
         summarize_stack_callback,
-        ptr::addr_of_mut!(session).cast::<c_void>(),
+        ptr::from_mut(&mut session).cast::<c_void>(),
         None,
     );
     let head = stack_head_mut(self_, version);
