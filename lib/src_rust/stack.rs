@@ -211,22 +211,22 @@ pub(crate) unsafe fn array_reserve<T>(arr: &mut Array<T>, new_capacity: u32) {
     }
 }
 
-pub(crate) unsafe fn array_grow<T>(arr: *mut Array<T>, count: u32) {
-    let new_size = (*arr).size + count;
-    if new_size > (*arr).capacity {
-        let mut new_capacity = (*arr).capacity * 2;
+pub(crate) unsafe fn array_grow<T>(arr: &mut Array<T>, count: u32) {
+    let new_size = arr.size + count;
+    if new_size > arr.capacity {
+        let mut new_capacity = arr.capacity * 2;
         if new_capacity < 8 {
             new_capacity = 8;
         }
         if new_capacity < new_size {
             new_capacity = new_size;
         }
-        array_reserve(arr.as_mut().unwrap_unchecked(), new_capacity);
+        array_reserve(arr, new_capacity);
     }
 }
 
 pub(crate) unsafe fn array_push<T>(arr: *mut Array<T>, element: T) {
-    array_grow(arr, 1);
+    array_grow(arr.as_mut().unwrap_unchecked(), 1);
     ptr::write((*arr).contents.add((*arr).size as usize), element);
     (*arr).size += 1;
 }
@@ -284,7 +284,7 @@ pub(crate) unsafe fn array_erase<T>(arr: *mut Array<T>, index: u32) {
 }
 
 pub(crate) unsafe fn array_insert<T>(arr: *mut Array<T>, index: u32, element: T) {
-    array_grow(arr, 1);
+    array_grow(arr.as_mut().unwrap_unchecked(), 1);
     let count = (*arr).size as usize - index as usize;
     if count > 0 {
         ptr::copy(
