@@ -108,6 +108,12 @@ may refer to these rows, but should not duplicate them as separate attempts.
 | Add arena-backed tree storage foundation | Tree storage | Positive foundation, kept |
 | Allocate parser reduction nodes in tree arena | Reduce/node allocation | Positive architecture slice, `+5.3%` mean of seven language averages |
 
+### Measurement And Design Trials
+
+| Trial | Area | Result |
+| --- | --- | --- |
+| Cross-language reduce-construction profiling | Profiling/design | `cargo flamegraph` plus temporary reduce-shape counters across all seven target languages. Supports investigating a full reduce-construction redesign, but shows lexer and balancing are too large for reduce-only work to guarantee 20%. |
+
 ### Rejected Or Closed
 
 | Trial | Area | Result |
@@ -333,53 +339,69 @@ The `2026-06-26` direct linear reduce-pop scratch-buffer sketch failed this
 gate. It was reverted before benchmarking because it was too close to recorded
 linear stack-pop and stack-pop adoption attempts.
 
-### Evidence To Refresh
+### Current Evidence
 
-Collected on `2026-06-26` with temporary local instrumentation only:
+Collected on `2026-06-26` with `cargo flamegraph` using a plain temporary
+raw-parse harness under `/tmp/ts-raw-profile-harness-plain`:
+
+| Language sample | Reduce | New node | Summarize | Stack pop | Balance | Lex / scanner |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| JavaScript `jquery.js` | 28.52% | 9.13% | 6.62% | 8.44% | 6.39% | `ts_lex` 11.79%, external scan 8.29% |
+| TypeScript `parser.ts` | 28.11% | 9.32% | 6.73% | 7.60% | 6.58% | `ts_lex` 10.57%, external scan 6.81% |
+| Python `python3-grammar.py` | 23.91% | 8.61% | 6.19% | 5.43% | 5.69% | `ts_lex` 9.95%, external scan 9.62%, deserialize 7.11% |
+| Go `proc.go` | 34.62% | 8.35% | 5.46% | 11.85% | 6.38% | `ts_lex` 11.42% |
+| Rust `ast.rs` | 26.89% | 9.48% | 6.70% | 6.86% | 11.48% | `ts_lex` 15.49%, external scan 5.24% |
+| C++ `rule.cc` | 25.84% | 8.24% | 5.76% | 6.00% | 3.92% | `ts_lex` 25.84% |
+| Java `types.java` | 34.66% | 11.97% | 8.80% | 7.02% | 1.65% | `ts_lex` 15.82% |
+
+Temporary reduce-shape instrumentation, removed before committing:
 
 | Language sample | Linear pop-count calls | Graph fallback calls | Dominant reduce child counts |
 | --- | ---: | ---: | --- |
-| JavaScript `jquery.js` | `12,582,400` | `180,600` | 1-3 |
-| TypeScript `parser.ts` | `11,850,400` | `46,800` | 1-3 |
-| Go `proc.go` | `6,079,200` | `500,000` | 1-3 |
-| Rust `ast.rs` | `3,542,800` | `0` | 1-3 |
+| JavaScript `jquery.js` | `3,145,600` | `45,150` | 1-3 |
+| TypeScript `parser.ts` | `2,962,600` | `11,700` | 1-3 |
+| Python `python3-grammar.py` | `541,850` | `0` | 1-3 |
+| Go `proc.go` | `1,519,800` | `125,000` | 1-3 |
+| Rust `ast.rs` | `885,700` | `0` | 1-3 |
+| C++ `rule.cc` | `577,800` | `1,200` | 1-3 |
+| Java `types.java` | `85,000` | `0` | 1-3 |
 
-Before coding the next parser architecture change, refresh full-path profiles
-for the seven target languages and record:
+Per-parse reduce-shape summary:
 
-- reduce pipeline share
-- lex/external scanner share
-- balance/compress share
-- child-count distribution
-- graph fallback rate
-- child-array allocation/copy bytes
-- summary child-walk cost
-
-Use temporary local instrumentation or profiling harnesses only. Do not commit
-benchmark-source changes.
+| Language sample | Reductions/parse | Child-array bytes/parse | Trailing extras removed/parse | Graph fallback rate |
+| --- | ---: | ---: | ---: | ---: |
+| JavaScript `jquery.js` | 63,815 | 6,081,992 | 2,737 | 1.4% |
+| TypeScript `parser.ts` | 59,486 | 5,585,304 | 2,792 | 0.4% |
+| Python `python3-grammar.py` | 10,837 | 1,013,144 | 115 | 0.0% |
+| Go `proc.go` | 32,896 | 3,337,648 | 1,534 | 7.6% |
+| Rust `ast.rs` | 17,714 | 1,655,384 | 836 | 0.0% |
+| C++ `rule.cc` | 2,895 | 273,328 | 9 | 0.2% |
+| Java `types.java` | 85 | 8,160 | 26 | 0.0% |
 
 ### Candidate Ranking
 
 | Rank | Direction | Decision |
 | ---: | --- | --- |
-| 1 | Full reduce-construction redesign | Investigate first. It targets `ts_parser__reduce`, node construction, child-array allocation/copying, summarization, and stack push as one pipeline. It must not be a linear-pop fast path or buffer-adoption variant. |
-| 2 | Summarization during reduce construction | Only after the reduce-construction design exists. Standalone summarizer micro-optimizations are closed. |
-| 3 | Lexer/external scanner work | Secondary. Profile all target languages first because current evidence is strongest for JavaScript/TypeScript, not universal. |
-| 4 | Balancing/compress redesign | Do not remove balancing. Revisit only with profiles showing language-neutral balancing cost and a correctness-preserving replacement. |
+| 1 | Full reduce-construction redesign | Still the top parser-core candidate. It targets `ts_parser__reduce`, node construction, child-array allocation/copying, summarization, and stack push as one pipeline. It must not be a linear-pop fast path or buffer-adoption variant. |
+| 2 | Lexer/external scanner work | Now co-equal for C++ and material for all languages. Needs separate direction triage because generated grammar lexers may limit core-library leverage. |
+| 3 | Balancing/compress redesign | Important for Rust and moderate for JS/TS/Go/Python. Do not remove balancing; only consider a correctness-preserving redesign. |
+| 4 | Summarization during reduce construction | Only inside a reduce-construction redesign. Standalone summarizer micro-optimizations are closed. |
 
 ### Next Parser Trial
 
-The next trial should be a design/profiling trial, not code:
+The next trial should be a design sketch for the full reduce-construction
+redesign, then a no-code review against closed history before implementation:
 
 - Hypothesis: a full reduce-construction redesign is the only remaining
-  parser-core direction with enough leverage for a universal gain.
+  parser-core direction with enough shared leverage to pair with later lexer or
+  balancing work toward the 20% target.
 - History check: direct linear stack-pop, stack-pop buffer adoption, child-array
   adoption, summarizer micro-optimizations, page-size tuning, refcount ordering,
   and allocation pools are closed.
-- Evidence needed before code: cross-language flamegraphs plus reduce-shape
-  instrumentation for TypeScript, JavaScript, Python, Go, Rust, C++, and Java.
-- Kill criteria: if reduce construction plus summarization is not a large shared
-  cost across the seven languages, do not implement the builder.
+- Evidence status: collected for TypeScript, JavaScript, Python, Go, Rust, C++,
+  and Java.
+- Kill criteria: if the design collapses into a linear fast path, buffer
+  adoption, or isolated summarizer tweak, do not implement it.
 - Implementation boundary if evidence passes: redesign the reduce construction
   protocol as a coherent replacement for the current `StackSliceArray` to node
   construction pipeline, not as a special fast path.
