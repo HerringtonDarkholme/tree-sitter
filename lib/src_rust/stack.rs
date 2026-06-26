@@ -34,6 +34,7 @@ use super::subtree::{ts_subtree_array_copy, ts_subtree_array_delete, ts_subtree_
 const MAX_LINK_COUNT: usize = 8;
 const MAX_NODE_POOL_SIZE: u32 = 50;
 const MAX_ITERATOR_COUNT: u32 = 64;
+const STACK_LINK_PAYLOAD_IS_PENDING: u8 = 1 << 0;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -44,9 +45,16 @@ pub const STACK_VERSION_NONE: StackVersion = u32::MAX;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-pub struct StackLinkPayload {
+pub union StackLinkPayloadValue {
     pub subtree: Subtree,
-    pub is_pending: bool,
+    pub pending_reduction: *mut PendingReduction,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct StackLinkPayload {
+    pub value: StackLinkPayloadValue,
+    pub flags: u8,
 }
 
 #[repr(C)]
@@ -66,6 +74,11 @@ pub struct StackNode {
     pub error_cost: u32,
     pub node_count: u32,
     pub dynamic_precedence: i32,
+}
+
+#[repr(C)]
+pub struct PendingReduction {
+    pub ref_count: u32,
 }
 
 #[repr(C)]
@@ -153,6 +166,7 @@ pub struct Stack {
 // ---------------------------------------------------------------------------
 
 const _: () = assert!(std::mem::size_of::<StackLink>() == 24);
+const _: () = assert!(std::mem::size_of::<StackLinkPayload>() == 16);
 const _: () = assert!(std::mem::size_of::<StackNode>() == 232);
 const _: () = assert!(std::mem::size_of::<StackIterator>() == 32);
 const _: () = assert!(std::mem::size_of::<StackStatus>() == 4);
@@ -524,19 +538,23 @@ unsafe fn stack__subtree_node_count(subtree: Subtree) -> u32 {
 #[inline]
 const fn stack_link_payload_new(subtree: Subtree, is_pending: bool) -> StackLinkPayload {
     StackLinkPayload {
-        subtree,
-        is_pending,
+        value: StackLinkPayloadValue { subtree },
+        flags: if is_pending {
+            STACK_LINK_PAYLOAD_IS_PENDING
+        } else {
+            0
+        },
     }
 }
 
 #[inline]
 const unsafe fn stack_link_payload_subtree(payload: StackLinkPayload) -> Subtree {
-    payload.subtree
+    payload.value.subtree
 }
 
 #[inline]
 const unsafe fn stack_link_payload_is_pending(payload: StackLinkPayload) -> bool {
-    payload.is_pending
+    payload.flags & STACK_LINK_PAYLOAD_IS_PENDING != 0
 }
 
 #[inline]

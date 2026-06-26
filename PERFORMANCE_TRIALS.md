@@ -131,6 +131,7 @@ may refer to these rows, but should not duplicate them as separate attempts.
 | Allocate parser reduction nodes in tree arena | Reduce/node allocation | Positive architecture slice, `+5.3%` mean of seven language averages |
 | Parser-owned stack-pop builder for fresh-parse reductions | Reduce/stack pop | Positive architecture slice, `+7.3%` mean of seven language averages on top of arena slice; reparses use the original slice path after `test_get_changed_ranges` exposed changed-range sensitivity; `cargo test --all` passed outside sandbox |
 | Stack-link payload abstraction | Stack/reduce foundation | Kept as behavior-preserving foundation for pending reductions. It routes stack link retain/release and metadata queries through a concrete `Subtree` payload layer. Same-session normal benchmarks were broadly neutral/noisy: JavaScript `20387/18912` vs baseline `19925/18640`, TypeScript `26598/23246` and rerun `26412/22980` vs baseline `26709/23187`, Python `10322/440` vs `10082/507`, Go `17779/16198` vs `16842/15652`, Rust `17656/13473` vs `15865/13760`, C++ `7427/5846` plus noisy warm rerun `13202/12616` vs `7380/5984`, Java `13065/9937` vs `12093/10067`. `cargo test --all` passed outside sandbox. |
+| Descriptor-capable stack payload layout | Stack/reduce foundation | Kept as pending-reduction foundation. `StackLinkPayload` now has a union value slot plus flags so a future pending descriptor pointer can fit without growing `StackLink` (`24` bytes) or `StackNode` (`232` bytes). Same-session canaries were noisy but acceptable for a behavior-preserving layout slice: JavaScript patched `20318/19898` vs noisy baseline `17814/15829` after an earlier patched `18819/17344` vs baseline `19600/18381`; TypeScript `24138/20696`, Python `10217/252`, Go `17583/15068`, Rust `16199/11878`, C++ `4338/3265`, Java `10555/7207`. `cargo test --all` passed outside sandbox. |
 
 ### Measurement And Design Trials
 
@@ -845,7 +846,8 @@ Implications:
 
 ### Pending Descriptor Algorithm
 
-The next production-code slice should add a second stack-link payload variant,
+The descriptor-capable payload layout is in place. The next production-code
+slice should populate real pending-reduction metadata and materialization,
 not another direct-storage reduce path.
 
 Proposed representation:
