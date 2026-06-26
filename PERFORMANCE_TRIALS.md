@@ -274,17 +274,48 @@ materialization boundary.
 
 ## Next Direction
 
-Do not add more reduce fast paths. The next viable architecture work should be
-designed as a complete representation boundary, not a partial stack payload
-patch: either a separate parse-time node representation with one final tree
-lowering pass, or a fully descriptor-aware stack/recovery/merge/accept layer.
-Reject either direction unless it removes a full allocation/copy/summarization
-phase on normal parses and passes corpus tests before benchmarking.
+### Observations
+
+- The measured hot path is still split between generated lexing and concrete
+  tree construction. A universal 20% gain from reusable runtime code alone is
+  only plausible if parsing avoids a whole construction phase, not if it makes
+  existing construction incrementally cheaper.
+- Local reduce, summarization, allocation, refcount, stack-pop, and stack-node
+  layout work is exhausted for this target. Several of those changes produced
+  narrow wins, but none generalized across the target languages.
+- Descriptor/lazy-reduction work is the only remaining library-side direction
+  with enough theoretical upside, but partial wiring has repeatedly failed when
+  it crossed stack version ownership boundaries. The hard problem is not
+  metadata calculation; it is preserving stack/recovery/accept semantics while
+  concrete subtrees are absent.
+- C++ profiles show lexer and keyword code are also major costs. If the
+  descriptor path cannot demonstrate materialization reduction, the next real
+  20% path probably requires generated-code/grammar-side lexer changes, not
+  more reusable-runtime tuning.
+
+### Strategy
+
+Do not add more local fast paths. Treat the next optimization as an architecture
+spike with explicit exit criteria:
+
+1. First prove descriptor pressure with temporary counters: how many normal
+   reductions can remain unmaterialized until accept, how many must materialize
+   for merge/recovery/trailing-extra/error handling, and how often accept needs
+   multiple final stack paths.
+2. Build boundary APIs independently, in this order: counted reduce payloads,
+   merge/recovery materialization rules, then a dedicated accept pop-all payload
+   model. Do not reuse counted-reduce helpers for accept.
+3. Only after those boundaries pass `cargo test --all`, wire a limited normal
+   reduce path for non-error, non-fragile, single-version reductions and measure
+   materialization reduction before benchmarking speed.
+4. Reject the descriptor strategy if counters show most reductions materialize
+   before accept, or if C++/TypeScript still spend most time in generated lexer
+   code after construction is reduced.
 
 The compact stack-node layout trial rules out node-size reduction by itself as
-the big architecture path. Next work should focus above the stack storage
-level: reducing concrete subtree construction during parsing, or moving normal
-parse reductions into a compact parse-time tree that is lowered once at accept.
+the big architecture path. The next useful work is either a measured
+descriptor-materialization proof or a deliberate pivot to generated lexer
+performance.
 
 ## Process Rules
 
