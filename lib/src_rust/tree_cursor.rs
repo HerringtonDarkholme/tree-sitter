@@ -175,29 +175,15 @@ unsafe fn array_grow(arr: &mut TreeCursorEntryArray, count: u32) {
     }
 }
 
-#[inline]
-unsafe fn tree_cursor_entry_array_write(
-    arr: &mut TreeCursorEntryArray,
-    index: u32,
-    entry: TreeCursorEntry,
-) {
-    ptr::write(arr.contents.add(index as usize), entry);
-}
-
-#[inline]
-const unsafe fn tree_cursor_entry_array_read(arr: &TreeCursorEntryArray, index: u32) -> TreeCursorEntry {
-    ptr::read(arr.contents.add(index as usize))
-}
-
 unsafe fn array_push(arr: &mut TreeCursorEntryArray, entry: TreeCursorEntry) {
     array_grow(arr, 1);
-    tree_cursor_entry_array_write(arr, arr.size, entry);
+    ptr::write(arr.contents.add(arr.size as usize), entry);
     arr.size += 1;
 }
 
 unsafe fn array_pop(arr: &mut TreeCursorEntryArray) -> TreeCursorEntry {
     arr.size -= 1;
-    tree_cursor_entry_array_read(arr, arr.size)
+    ptr::read(arr.contents.add(arr.size as usize))
 }
 
 unsafe fn array_delete(arr: &mut TreeCursorEntryArray) {
@@ -217,12 +203,11 @@ unsafe fn array_init(arr: &mut TreeCursorEntryArray) {
 
 unsafe fn array_push_all(dst: &mut TreeCursorEntryArray, src: &TreeCursorEntryArray) {
     if src.size > 0 {
-        let src_entries = tree_cursor_entry_slice(src);
         array_grow(dst, src.size);
         ptr::copy_nonoverlapping(
-            src_entries.as_ptr(),
+            src.contents,
             dst.contents.add(dst.size as usize),
-            src_entries.len(),
+            src.size as usize,
         );
         dst.size += src.size;
     }
