@@ -352,6 +352,57 @@ Source-code analysis:
 - Full `cargo test --all` passed before every committed code change in this
   checkpoint.
 
+### 2026-06-25 20:35 EDT
+
+- Repo head: `a4730269`
+- Batch base: `65dfb73b`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: 10 Rust-core reference/raw-pointer cleanups:
+  `Tie parse action entry lifetime to language` through
+  `Take array reserve by mutable reference`.
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 24887.6 | 24370.2 | +2.12% |
+| TypeScript error parses | 32 | 1678.0 | 1593.0 | +5.34% |
+| JavaScript normal parses | 2 | 16981.4 | 15223.4 | +11.55% |
+| JavaScript error parses | 37 | 2009.1 | 1917.6 | +4.78% |
+| Overall parser throughput | 82 | 2296.3 | 2183.0 | +5.19% |
+
+Per-case regressions over 5%:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `javascript error compound-statement-without-trailing-newline.py` | 2782.3 | 3212.4 | 13.39% |
+
+Source-code analysis:
+
+- The batch contains no exported `#[no_mangle] extern "C"` signature changes,
+  no struct layout changes, no C header field changes, and no parser action or
+  parsing table semantic changes.
+- The tree-cursor commits remove unused Rust-only raw-pointer adapters. The
+  C-facing `ts_tree_cursor_goto_first_child_internal` and
+  `ts_tree_cursor_goto_next_sibling_internal` remain exported because C query
+  code still uses the header declarations.
+- The stack and language commits narrow Rust-internal signatures from raw
+  pointers to references: changed-range access, `ts_stack_new`'s subtree pool
+  parameter, language table out-parameters, and generic `array_clear` /
+  `array_reserve`.
+- The repeated JavaScript error-case regression is not explained by a direct
+  parser algorithm change in this batch. The only code in the parser hot path is
+  reference-shape cleanup around existing stack/language/array operations. Since
+  aggregate Rust throughput remains faster than C in every bucket and overall,
+  no rollback was performed. This fixture should remain the first targeted rerun
+  if a future source change touches stack iteration, parser error recovery, or
+  array growth behavior.
+- Full `cargo test --all` passed before every committed code change in this
+  checkpoint.
+
 ### 2026-06-25 20:06 EDT
 
 - Repo head: `52235569`
