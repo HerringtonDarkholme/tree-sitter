@@ -511,31 +511,49 @@ const unsafe fn stack_slice_subtrees_read_ref(self_: &StackSlice) -> SubtreeArra
 }
 
 unsafe fn subtree_array_as_array(self_: &SubtreeArray) -> &Array<Subtree> {
-    &*ptr::from_ref(self_).cast::<Array<Subtree>>()
+    ptr::from_ref(self_)
+        .cast::<Array<Subtree>>()
+        .as_ref()
+        .unwrap_unchecked()
 }
 
 unsafe fn subtree_array_as_array_mut(self_: &mut SubtreeArray) -> &mut Array<Subtree> {
-    &mut *ptr::from_mut(self_).cast::<Array<Subtree>>()
+    ptr::from_mut(self_)
+        .cast::<Array<Subtree>>()
+        .as_mut()
+        .unwrap_unchecked()
 }
 
 unsafe fn mutable_subtree_array_as_array(
     self_: &MutableSubtreeArray,
 ) -> &Array<MutableSubtree> {
-    &*ptr::from_ref(self_).cast::<Array<MutableSubtree>>()
+    ptr::from_ref(self_)
+        .cast::<Array<MutableSubtree>>()
+        .as_ref()
+        .unwrap_unchecked()
 }
 
 unsafe fn mutable_subtree_array_as_array_mut(
     self_: &mut MutableSubtreeArray,
 ) -> &mut Array<MutableSubtree> {
-    &mut *ptr::from_mut(self_).cast::<Array<MutableSubtree>>()
+    ptr::from_mut(self_)
+        .cast::<Array<MutableSubtree>>()
+        .as_mut()
+        .unwrap_unchecked()
 }
 
 unsafe fn ts_range_array_as_array(self_: &TSRangeArray) -> &Array<TSRange> {
-    &*ptr::from_ref(self_).cast::<Array<TSRange>>()
+    ptr::from_ref(self_)
+        .cast::<Array<TSRange>>()
+        .as_ref()
+        .unwrap_unchecked()
 }
 
 unsafe fn ts_range_array_as_array_mut(self_: &mut TSRangeArray) -> &mut Array<TSRange> {
-    &mut *ptr::from_mut(self_).cast::<Array<TSRange>>()
+    ptr::from_mut(self_)
+        .cast::<Array<TSRange>>()
+        .as_mut()
+        .unwrap_unchecked()
 }
 
 unsafe fn subtree_array_get(self_: &SubtreeArray, index: u32) -> Subtree {
