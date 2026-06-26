@@ -126,10 +126,6 @@ unsafe fn ts_tree_root_node_with_offset_ref(
     )
 }
 
-const fn ts_tree_language_ref(tree: &TSTree) -> *const TSLanguage {
-    tree.language
-}
-
 unsafe fn ts_tree_included_ranges_ref(tree: &TSTree, length: &mut u32) -> *mut TSRange {
     *length = tree.included_range_count;
     let ranges = ts_calloc(
@@ -147,28 +143,6 @@ unsafe fn ts_tree_included_ranges_ref(tree: &TSTree, length: &mut u32) -> *mut T
     ranges
 }
 
-#[inline]
-unsafe fn tree_included_range_mut(tree: &mut TSTree, index: u32) -> &mut TSRange {
-    tree_included_ranges_mut(tree).get_unchecked_mut(index as usize)
-}
-
-#[inline]
-unsafe fn tree_included_ranges_mut(tree: &mut TSTree) -> &mut [TSRange] {
-    std::slice::from_raw_parts_mut(tree.included_ranges, tree.included_range_count as usize)
-}
-
-#[inline]
-const unsafe fn included_range_slice<'a>(
-    included_ranges: *const TSRange,
-    count: u32,
-) -> &'a [TSRange] {
-    if count == 0 {
-        &[]
-    } else {
-        std::slice::from_raw_parts(included_ranges, count as usize)
-    }
-}
-
 const fn tree_cursor_empty() -> TreeCursor {
     TreeCursor {
         tree: std::ptr::null(),
@@ -182,8 +156,13 @@ const fn tree_cursor_empty() -> TreeCursor {
 }
 
 unsafe fn ts_tree_edit_ref(tree: &mut TSTree, edit: &TSInputEdit) {
-    for i in 0..tree.included_range_count {
-        ts_range_edit_ref(tree_included_range_mut(tree, i), edit);
+    let included_ranges = if tree.included_range_count == 0 {
+        &mut []
+    } else {
+        std::slice::from_raw_parts_mut(tree.included_ranges, tree.included_range_count as usize)
+    };
+    for range in included_ranges {
+        ts_range_edit_ref(range, edit);
     }
     let mut pool = ts_subtree_pool_new(0);
     tree.root = ts_subtree_edit(tree.root, edit, &mut pool);
@@ -209,7 +188,7 @@ pub unsafe fn ts_tree_new(
 ) -> *mut TSTree {
     let result = ts_malloc(std::mem::size_of::<TSTree>()).cast::<TSTree>();
     let tree = tree_mut(result);
-    let included_ranges = included_range_slice(included_ranges, included_range_count);
+    let included_ranges = ts_range_slice(included_ranges, included_range_count);
     ts_tree_init_ref(tree, root, language, included_ranges);
     result
 }
@@ -254,7 +233,7 @@ pub unsafe extern "C" fn ts_tree_root_node_with_offset(
 #[no_mangle]
 pub unsafe extern "C" fn ts_tree_language(self_: *const TSTree) -> *const TSLanguage {
     let tree = tree_ref(self_);
-    ts_tree_language_ref(tree)
+    tree.language
 }
 
 #[no_mangle]
