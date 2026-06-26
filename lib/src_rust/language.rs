@@ -280,10 +280,10 @@ unsafe fn lookahead_iterator_mut<'a>(self_: *mut LookaheadIterator) -> &'a mut L
 }
 
 #[inline]
-unsafe fn parse_action_entry<'a>(
+unsafe fn parse_action_entry(
     language: &TSLanguageFull,
     index: usize,
-) -> &'a TSParseActionEntry {
+) -> &TSParseActionEntry {
     language
         .parse_actions
         .add(index)
