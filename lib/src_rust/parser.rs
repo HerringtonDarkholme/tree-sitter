@@ -29,7 +29,7 @@ use super::language::{
     TSParseActionTypeReduce as TSPARSE_ACTION_TYPE_REDUCE,
     TSParseActionTypeShift as TSPARSE_ACTION_TYPE_SHIFT, TableEntry,
 };
-use super::length::{length_add, length_sub, length_zero};
+use super::length::{length_add, length_sub, length_zero, Length};
 use super::lexer::{
     ts_lexer_delete, ts_lexer_finish, ts_lexer_included_ranges, ts_lexer_init, ts_lexer_mark_end,
     ts_lexer_reset, ts_lexer_set_included_ranges, ts_lexer_set_input, ts_lexer_start, Lexer,
@@ -69,6 +69,11 @@ use super::stack::{
     ts_stack_is_halted,
     ts_stack_is_paused,
     ts_stack_last_external_token,
+    ts_stack_link_payload_is_pending_reduction,
+    ts_stack_link_payload_pending_reduction,
+    ts_stack_link_payload_retain,
+    ts_stack_link_payload_release,
+    ts_stack_link_payload_subtree,
     ts_stack_merge,
     ts_stack_new,
     ts_stack_node_count_since_error,
@@ -94,6 +99,7 @@ use super::stack::{
     Array,
     PendingReduction,
     Stack,
+    StackLinkPayload,
     StackPopBuilder,
     StackSliceSpan,
     StackVersion,
@@ -492,8 +498,19 @@ unsafe fn ts_parser__pending_reduction_delete(
     if !pending.materialized.ptr.is_null() {
         ts_subtree_release(&mut self_.tree_pool, pending.materialized);
         pending.materialized = NULL_SUBTREE;
-    } else if !pending.children.contents.is_null() {
-        ts_subtree_array_delete(&mut self_.tree_pool, &mut pending.children);
+    } else {
+        if !pending.children.contents.is_null() {
+            ts_subtree_array_delete(&mut self_.tree_pool, &mut pending.children);
+        }
+        if !pending.payload_children.contents.is_null() {
+            for i in 0..pending.payload_children.size {
+                ts_stack_link_payload_release(
+                    *array_get_ref(&pending.payload_children, i),
+                    &mut self_.tree_pool,
+                );
+            }
+            array_delete(&mut pending.payload_children);
+        }
     }
     ts_free(ptr::from_mut(pending).cast::<c_void>());
 }
@@ -652,6 +669,376 @@ unsafe fn ts_parser__pending_reduction_summarize_children(
     }
 }
 
+#[inline]
+unsafe fn ts_parser__payload_pending(payload: StackLinkPayload) -> *mut PendingReduction {
+    ts_stack_link_payload_pending_reduction(payload)
+}
+
+#[inline]
+unsafe fn ts_parser__payload_subtree(payload: StackLinkPayload) -> Subtree {
+    ts_stack_link_payload_subtree(payload)
+}
+
+#[inline]
+unsafe fn ts_parser__payload_symbol(payload: StackLinkPayload) -> TSSymbol {
+    if ts_stack_link_payload_is_pending_reduction(payload) {
+        (*ts_parser__payload_pending(payload)).symbol
+    } else {
+        ts_subtree_symbol(ts_parser__payload_subtree(payload))
+    }
+}
+
+#[inline]
+unsafe fn ts_parser__payload_extra(payload: StackLinkPayload) -> bool {
+    if ts_stack_link_payload_is_pending_reduction(payload) {
+        (*ts_parser__payload_pending(payload)).flags & PENDING_REDUCTION_EXTRA != 0
+    } else {
+        ts_subtree_extra(ts_parser__payload_subtree(payload))
+    }
+}
+
+#[inline]
+unsafe fn ts_parser__payload_child_count(payload: StackLinkPayload) -> u32 {
+    if ts_stack_link_payload_is_pending_reduction(payload) {
+        (*ts_parser__payload_pending(payload)).child_count
+    } else {
+        ts_subtree_child_count(ts_parser__payload_subtree(payload))
+    }
+}
+
+#[inline]
+unsafe fn ts_parser__payload_visible(payload: StackLinkPayload) -> bool {
+    if ts_stack_link_payload_is_pending_reduction(payload) {
+        (*ts_parser__payload_pending(payload)).flags & PENDING_REDUCTION_VISIBLE != 0
+    } else {
+        ts_subtree_visible(ts_parser__payload_subtree(payload))
+    }
+}
+
+#[inline]
+unsafe fn ts_parser__payload_named(payload: StackLinkPayload) -> bool {
+    if ts_stack_link_payload_is_pending_reduction(payload) {
+        (*ts_parser__payload_pending(payload)).flags & PENDING_REDUCTION_NAMED != 0
+    } else {
+        ts_subtree_named(ts_parser__payload_subtree(payload))
+    }
+}
+
+#[inline]
+unsafe fn ts_parser__payload_visible_child_count(payload: StackLinkPayload) -> u32 {
+    if ts_stack_link_payload_is_pending_reduction(payload) {
+        (*ts_parser__payload_pending(payload)).visible_child_count
+    } else {
+        ts_subtree_visible_child_count(ts_parser__payload_subtree(payload))
+    }
+}
+
+#[inline]
+unsafe fn ts_parser__payload_named_child_count(payload: StackLinkPayload) -> u32 {
+    if ts_stack_link_payload_is_pending_reduction(payload) {
+        (*ts_parser__payload_pending(payload)).named_child_count
+    } else {
+        ts_subtree_named_child_count(ts_parser__payload_subtree(payload))
+    }
+}
+
+#[inline]
+unsafe fn ts_parser__payload_visible_descendant_count(payload: StackLinkPayload) -> u32 {
+    if ts_stack_link_payload_is_pending_reduction(payload) {
+        (*ts_parser__payload_pending(payload)).visible_descendant_count
+    } else {
+        ts_subtree_visible_descendant_count(ts_parser__payload_subtree(payload))
+    }
+}
+
+#[inline]
+unsafe fn ts_parser__payload_has_external_tokens(payload: StackLinkPayload) -> bool {
+    if ts_stack_link_payload_is_pending_reduction(payload) {
+        (*ts_parser__payload_pending(payload)).flags & PENDING_REDUCTION_HAS_EXTERNAL_TOKENS != 0
+    } else {
+        ts_subtree_has_external_tokens(ts_parser__payload_subtree(payload))
+    }
+}
+
+#[inline]
+unsafe fn ts_parser__payload_has_external_scanner_state_change(
+    payload: StackLinkPayload,
+) -> bool {
+    if ts_stack_link_payload_is_pending_reduction(payload) {
+        (*ts_parser__payload_pending(payload)).flags
+            & PENDING_REDUCTION_HAS_EXTERNAL_SCANNER_STATE_CHANGE
+            != 0
+    } else {
+        ts_subtree_has_external_scanner_state_change(ts_parser__payload_subtree(payload))
+    }
+}
+
+#[inline]
+unsafe fn ts_parser__payload_depends_on_column(payload: StackLinkPayload) -> bool {
+    if ts_stack_link_payload_is_pending_reduction(payload) {
+        (*ts_parser__payload_pending(payload)).flags & PENDING_REDUCTION_DEPENDS_ON_COLUMN != 0
+    } else {
+        ts_subtree_depends_on_column(ts_parser__payload_subtree(payload))
+    }
+}
+
+#[inline]
+unsafe fn ts_parser__payload_padding(payload: StackLinkPayload) -> Length {
+    if ts_stack_link_payload_is_pending_reduction(payload) {
+        (*ts_parser__payload_pending(payload)).padding
+    } else {
+        ts_subtree_padding(ts_parser__payload_subtree(payload))
+    }
+}
+
+#[inline]
+unsafe fn ts_parser__payload_size(payload: StackLinkPayload) -> Length {
+    if ts_stack_link_payload_is_pending_reduction(payload) {
+        (*ts_parser__payload_pending(payload)).size
+    } else {
+        ts_subtree_size(ts_parser__payload_subtree(payload))
+    }
+}
+
+#[inline]
+unsafe fn ts_parser__payload_total_size(payload: StackLinkPayload) -> Length {
+    if ts_stack_link_payload_is_pending_reduction(payload) {
+        let pending = ts_parser__payload_pending(payload).as_ref().unwrap_unchecked();
+        length_add(pending.padding, pending.size)
+    } else {
+        ts_subtree_total_size(ts_parser__payload_subtree(payload))
+    }
+}
+
+#[inline]
+unsafe fn ts_parser__payload_lookahead_bytes(payload: StackLinkPayload) -> u32 {
+    if ts_stack_link_payload_is_pending_reduction(payload) {
+        (*ts_parser__payload_pending(payload)).lookahead_bytes
+    } else {
+        ts_subtree_lookahead_bytes(ts_parser__payload_subtree(payload))
+    }
+}
+
+#[inline]
+unsafe fn ts_parser__payload_error_cost(payload: StackLinkPayload) -> u32 {
+    if ts_stack_link_payload_is_pending_reduction(payload) {
+        (*ts_parser__payload_pending(payload)).error_cost
+    } else {
+        ts_subtree_error_cost(ts_parser__payload_subtree(payload))
+    }
+}
+
+#[inline]
+unsafe fn ts_parser__payload_dynamic_precedence(payload: StackLinkPayload) -> i32 {
+    if ts_stack_link_payload_is_pending_reduction(payload) {
+        (*ts_parser__payload_pending(payload)).dynamic_precedence
+    } else {
+        ts_subtree_dynamic_precedence(ts_parser__payload_subtree(payload))
+    }
+}
+
+#[inline]
+unsafe fn ts_parser__payload_is_error(payload: StackLinkPayload) -> bool {
+    if ts_stack_link_payload_is_pending_reduction(payload) {
+        let symbol = (*ts_parser__payload_pending(payload)).symbol;
+        symbol == ts_builtin_sym_error || symbol == ts_builtin_sym_error_repeat
+    } else {
+        ts_subtree_is_error(ts_parser__payload_subtree(payload))
+    }
+}
+
+#[inline]
+unsafe fn ts_parser__payload_fragile_left(payload: StackLinkPayload) -> bool {
+    if ts_stack_link_payload_is_pending_reduction(payload) {
+        (*ts_parser__payload_pending(payload)).flags & PENDING_REDUCTION_FRAGILE_LEFT != 0
+    } else {
+        ts_subtree_fragile_left(ts_parser__payload_subtree(payload))
+    }
+}
+
+#[inline]
+unsafe fn ts_parser__payload_fragile_right(payload: StackLinkPayload) -> bool {
+    if ts_stack_link_payload_is_pending_reduction(payload) {
+        (*ts_parser__payload_pending(payload)).flags & PENDING_REDUCTION_FRAGILE_RIGHT != 0
+    } else {
+        ts_subtree_fragile_right(ts_parser__payload_subtree(payload))
+    }
+}
+
+#[inline]
+unsafe fn ts_parser__payload_leaf_symbol(payload: StackLinkPayload) -> TSSymbol {
+    if ts_stack_link_payload_is_pending_reduction(payload) {
+        (*ts_parser__payload_pending(payload)).first_leaf_symbol
+    } else {
+        ts_subtree_leaf_symbol(ts_parser__payload_subtree(payload))
+    }
+}
+
+#[inline]
+unsafe fn ts_parser__payload_leaf_parse_state(payload: StackLinkPayload) -> TSStateId {
+    if ts_stack_link_payload_is_pending_reduction(payload) {
+        (*ts_parser__payload_pending(payload)).first_leaf_parse_state
+    } else {
+        ts_subtree_leaf_parse_state(ts_parser__payload_subtree(payload))
+    }
+}
+
+#[inline]
+unsafe fn ts_parser__payload_repeat_depth(payload: StackLinkPayload) -> u32 {
+    if ts_stack_link_payload_is_pending_reduction(payload) {
+        u32::from((*ts_parser__payload_pending(payload)).repeat_depth)
+    } else {
+        ts_subtree_repeat_depth(ts_parser__payload_subtree(payload))
+    }
+}
+
+unsafe fn ts_parser__pending_reduction_summarize_payload_children(
+    pending: &mut PendingReduction,
+    language: *const TSLanguage,
+) {
+    pending.child_count = pending.payload_children.size;
+    pending.named_child_count = 0;
+    pending.visible_child_count = 0;
+    pending.error_cost = 0;
+    pending.repeat_depth = 0;
+    pending.visible_descendant_count = 0;
+    pending.dynamic_precedence = 0;
+    pending.node_count = 0;
+    pending.padding = length_zero();
+    pending.size = length_zero();
+    pending.lookahead_bytes = 0;
+    pending.flags &= PENDING_REDUCTION_VISIBLE | PENDING_REDUCTION_NAMED | PENDING_REDUCTION_EXTRA;
+
+    let mut structural_index: u32 = 0;
+    let alias_sequence = ts_language_alias_sequence(language, u32::from(pending.production_id));
+    let mut lookahead_end_byte: u32 = 0;
+
+    for i in 0..pending.payload_children.size {
+        let child = *pending.payload_children.contents.add(i as usize);
+
+        if pending.size.extent.row == 0 && ts_parser__payload_depends_on_column(child) {
+            pending.flags |= PENDING_REDUCTION_DEPENDS_ON_COLUMN;
+        }
+
+        if ts_parser__payload_has_external_scanner_state_change(child) {
+            pending.flags |= PENDING_REDUCTION_HAS_EXTERNAL_SCANNER_STATE_CHANGE;
+        }
+
+        if i == 0 {
+            pending.padding = ts_parser__payload_padding(child);
+            pending.size = ts_parser__payload_size(child);
+        } else {
+            pending.size = length_add(pending.size, ts_parser__payload_total_size(child));
+        }
+
+        let child_lookahead_end_byte =
+            pending.padding.bytes + pending.size.bytes + ts_parser__payload_lookahead_bytes(child);
+        if child_lookahead_end_byte > lookahead_end_byte {
+            lookahead_end_byte = child_lookahead_end_byte;
+        }
+
+        if ts_parser__payload_symbol(child) != ts_builtin_sym_error_repeat {
+            pending.error_cost += ts_parser__payload_error_cost(child);
+        }
+
+        let grandchild_count = ts_parser__payload_child_count(child);
+        if (pending.symbol == ts_builtin_sym_error || pending.symbol == ts_builtin_sym_error_repeat)
+            && !ts_parser__payload_extra(child)
+            && !(ts_parser__payload_is_error(child) && grandchild_count == 0)
+        {
+            if ts_parser__payload_visible(child) {
+                pending.error_cost += ERROR_COST_PER_SKIPPED_TREE;
+            } else if grandchild_count > 0 {
+                pending.error_cost +=
+                    ERROR_COST_PER_SKIPPED_TREE * ts_parser__payload_visible_child_count(child);
+            }
+        }
+
+        pending.dynamic_precedence += ts_parser__payload_dynamic_precedence(child);
+        pending.visible_descendant_count += ts_parser__payload_visible_descendant_count(child);
+
+        if !ts_parser__payload_extra(child)
+            && ts_parser__payload_symbol(child) != 0
+            && !alias_sequence.is_null()
+            && *alias_sequence.add(structural_index as usize) != 0
+        {
+            pending.visible_descendant_count += 1;
+            pending.visible_child_count += 1;
+            if ts_language_symbol_metadata(language, *alias_sequence.add(structural_index as usize))
+                .named
+            {
+                pending.named_child_count += 1;
+            }
+        } else if ts_parser__payload_visible(child) {
+            pending.visible_descendant_count += 1;
+            pending.visible_child_count += 1;
+            if ts_parser__payload_named(child) {
+                pending.named_child_count += 1;
+            }
+        } else if grandchild_count > 0 {
+            pending.visible_child_count += ts_parser__payload_visible_child_count(child);
+            pending.named_child_count += ts_parser__payload_named_child_count(child);
+        }
+
+        if ts_parser__payload_has_external_tokens(child) {
+            pending.flags |= PENDING_REDUCTION_HAS_EXTERNAL_TOKENS;
+        }
+
+        if ts_parser__payload_is_error(child) {
+            pending.flags |= PENDING_REDUCTION_FRAGILE_LEFT | PENDING_REDUCTION_FRAGILE_RIGHT;
+            pending.parse_state = TS_TREE_STATE_NONE;
+        }
+
+        if !ts_parser__payload_extra(child) {
+            structural_index += 1;
+        }
+    }
+
+    pending.lookahead_bytes = lookahead_end_byte - pending.size.bytes - pending.padding.bytes;
+
+    if pending.symbol == ts_builtin_sym_error || pending.symbol == ts_builtin_sym_error_repeat {
+        pending.error_cost += ERROR_COST_PER_RECOVERY
+            + ERROR_COST_PER_SKIPPED_CHAR * pending.size.bytes
+            + ERROR_COST_PER_SKIPPED_LINE * pending.size.extent.row;
+        pending.flags |= PENDING_REDUCTION_FRAGILE_LEFT | PENDING_REDUCTION_FRAGILE_RIGHT;
+    }
+
+    if pending.child_count > 0 {
+        let first_child = *pending.payload_children.contents;
+        let last_child = *pending
+            .payload_children
+            .contents
+            .add(pending.child_count as usize - 1);
+
+        pending.first_leaf_symbol = ts_parser__payload_leaf_symbol(first_child);
+        pending.first_leaf_parse_state = ts_parser__payload_leaf_parse_state(first_child);
+
+        if ts_parser__payload_fragile_left(first_child) {
+            pending.flags |= PENDING_REDUCTION_FRAGILE_LEFT;
+        }
+        if ts_parser__payload_fragile_right(last_child) {
+            pending.flags |= PENDING_REDUCTION_FRAGILE_RIGHT;
+        }
+
+        if pending.child_count >= 2
+            && pending.flags & (PENDING_REDUCTION_VISIBLE | PENDING_REDUCTION_NAMED) == 0
+            && ts_parser__payload_symbol(first_child) == pending.symbol
+        {
+            let first_depth = ts_parser__payload_repeat_depth(first_child);
+            let last_depth = ts_parser__payload_repeat_depth(last_child);
+            pending.repeat_depth = (first_depth.max(last_depth) + 1) as u16;
+        }
+    }
+
+    pending.node_count = pending.visible_descendant_count;
+    if pending.flags & PENDING_REDUCTION_VISIBLE != 0 {
+        pending.node_count += 1;
+    }
+    if pending.symbol == ts_builtin_sym_error_repeat {
+        pending.node_count += 1;
+    }
+}
+
 unsafe fn ts_parser__pending_reduction_new_from_children(
     self_: &mut TSParser,
     symbol: TSSymbol,
@@ -689,6 +1076,7 @@ unsafe fn ts_parser__pending_reduction_new_from_children(
     }
 
     array_init(subtree_array_as_array_mut(&mut pending_ref.children));
+    array_init(&mut pending_ref.payload_children);
     array_reserve(
         subtree_array_as_array_mut(&mut pending_ref.children),
         children.size,
@@ -700,6 +1088,57 @@ unsafe fn ts_parser__pending_reduction_new_from_children(
     }
 
     ts_parser__pending_reduction_summarize_children(pending_ref, self_.language);
+    pending_ref.dynamic_precedence += dynamic_precedence;
+    array_push(&mut self_.pending_reductions, pending);
+    pending
+}
+
+unsafe fn ts_parser__pending_reduction_new_from_payloads(
+    self_: &mut TSParser,
+    symbol: TSSymbol,
+    children: &Array<StackLinkPayload>,
+    production_id: u16,
+    parse_state: TSStateId,
+    extra: bool,
+    dynamic_precedence: i32,
+) -> *mut PendingReduction {
+    let metadata = ts_language_symbol_metadata(self_.language, symbol);
+    let fragile = symbol == ts_builtin_sym_error || symbol == ts_builtin_sym_error_repeat;
+    let pending = ts_calloc(1, std::mem::size_of::<PendingReduction>()).cast::<PendingReduction>();
+    let pending_ref = pending.as_mut().unwrap_unchecked();
+    pending_ref.ref_count = 1;
+    pending_ref.symbol = symbol;
+    pending_ref.production_id = production_id;
+    pending_ref.parse_state = if fragile {
+        TS_TREE_STATE_NONE
+    } else {
+        parse_state
+    };
+    pending_ref.materialized = NULL_SUBTREE;
+    pending_ref.flags = 0;
+    if metadata.visible {
+        pending_ref.flags |= PENDING_REDUCTION_VISIBLE;
+    }
+    if metadata.named {
+        pending_ref.flags |= PENDING_REDUCTION_NAMED;
+    }
+    if extra {
+        pending_ref.flags |= PENDING_REDUCTION_EXTRA;
+    }
+    if fragile {
+        pending_ref.flags |= PENDING_REDUCTION_FRAGILE_LEFT | PENDING_REDUCTION_FRAGILE_RIGHT;
+    }
+
+    array_init(subtree_array_as_array_mut(&mut pending_ref.children));
+    array_init(&mut pending_ref.payload_children);
+    array_reserve(&mut pending_ref.payload_children, children.size);
+    for i in 0..children.size {
+        let child = *children.contents.add(i as usize);
+        ts_stack_link_payload_retain(child);
+        array_push(&mut pending_ref.payload_children, child);
+    }
+
+    ts_parser__pending_reduction_summarize_payload_children(pending_ref, self_.language);
     pending_ref.dynamic_precedence += dynamic_precedence;
     array_push(&mut self_.pending_reductions, pending);
     pending

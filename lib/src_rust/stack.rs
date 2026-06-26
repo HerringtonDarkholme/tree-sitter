@@ -93,6 +93,7 @@ pub struct PendingReduction {
     pub parse_state: TSStateId,
     pub child_count: u32,
     pub children: SubtreeArray,
+    pub payload_children: StackLinkPayloadArray,
     pub padding: Length,
     pub size: Length,
     pub lookahead_bytes: u32,
@@ -621,6 +622,25 @@ const unsafe fn stack_link_payload_pending_reduction(
 }
 
 #[inline]
+pub const unsafe fn ts_stack_link_payload_is_pending_reduction(
+    payload: StackLinkPayload,
+) -> bool {
+    stack_link_payload_is_pending_reduction(payload)
+}
+
+#[inline]
+pub const unsafe fn ts_stack_link_payload_pending_reduction(
+    payload: StackLinkPayload,
+) -> *mut PendingReduction {
+    stack_link_payload_pending_reduction(payload)
+}
+
+#[inline]
+pub const unsafe fn ts_stack_link_payload_subtree(payload: StackLinkPayload) -> Subtree {
+    stack_link_payload_subtree(payload)
+}
+
+#[inline]
 unsafe fn stack_link_payload_is_null(payload: StackLinkPayload) -> bool {
     if stack_link_payload_is_pending_reduction(payload) {
         false
@@ -699,6 +719,19 @@ unsafe fn stack_link_payload_release(payload: StackLinkPayload, subtree_pool: &m
     } else {
         ts_subtree_release(subtree_pool, stack_link_payload_subtree(payload));
     }
+}
+
+#[inline]
+pub unsafe fn ts_stack_link_payload_retain(payload: StackLinkPayload) {
+    stack_link_payload_retain(payload);
+}
+
+#[inline]
+pub unsafe fn ts_stack_link_payload_release(
+    payload: StackLinkPayload,
+    subtree_pool: &mut SubtreePool,
+) {
+    stack_link_payload_release(payload, subtree_pool);
 }
 
 #[inline]
