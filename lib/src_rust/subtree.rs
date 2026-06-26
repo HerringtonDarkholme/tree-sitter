@@ -2450,3 +2450,59 @@ pub unsafe fn ts_subtree_print_dot_graph(
     ts_subtree__print_dot_graph(std::ptr::addr_of!(self_), 0, language, 0, f);
     fprintf(f, c"}\n".as_ptr().cast::<i8>());
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_node_owns_child_array_until_release() {
+        unsafe {
+            let mut pool = ts_subtree_pool_new(4);
+            let child1 = ts_subtree_new_error(
+                &mut pool,
+                b'a' as i32,
+                length_zero(),
+                length_zero(),
+                0,
+                0,
+                ptr::null(),
+            );
+            let child2 = ts_subtree_new_error(
+                &mut pool,
+                b'b' as i32,
+                length_zero(),
+                length_zero(),
+                0,
+                0,
+                ptr::null(),
+            );
+
+            let mut children = SubtreeArray {
+                contents: ptr::null_mut(),
+                size: 0,
+                capacity: 0,
+            };
+            array_push_subtree(&mut children, child1);
+            array_push_subtree(&mut children, child2);
+
+            let parent =
+                ts_subtree_new_node(ts_builtin_sym_error_repeat, &mut children, 0, ptr::null());
+            let parent_tree = ts_subtree_from_mut(parent);
+
+            assert_eq!(ts_subtree_child_count(parent_tree), 2);
+            assert_eq!(subtree_children(parent_tree).len(), 2);
+            assert_eq!(
+                ts_subtree_symbol(subtree_children(parent_tree)[0]),
+                ts_builtin_sym_error
+            );
+            assert_eq!(
+                ts_subtree_symbol(subtree_children(parent_tree)[1]),
+                ts_builtin_sym_error
+            );
+
+            ts_subtree_release(&mut pool, parent_tree);
+            ts_subtree_pool_delete(&mut pool);
+        }
+    }
+}
