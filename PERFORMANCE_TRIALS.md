@@ -82,6 +82,7 @@ the generated lexer/runtime contract.
 - C++ normal `cargo flamegraph` high-sample checkpoint
 - Stack-node link-count distribution probe
 - Descriptor lazy-candidate pressure counters
+- Linear-stack architecture coverage counters
 
 ### Closed: Summarization
 
@@ -308,6 +309,29 @@ Interpretation: not a universal win; likely noise plus code-layout effects.
 Do not continue descriptor wiring without first proving a complete ownership and
 materialization boundary.
 
+Linear-stack architecture coverage counters, temporary library-only
+instrumentation, normal `-r 1`:
+
+| Language | Reductions | Multi-Version | Multi-Slice | Pop Fallback | Max Versions | Merge Attempts | Merge Success |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| TypeScript | 65620 | 3325 (5.1%) | 271 (0.4%) | 271 (0.4%) | 4 | 4920 | 288 |
+| JavaScript | 101005 | 3272 (3.2%) | 1007 (1.0%) | 1007 (1.0%) | 4 | 5647 | 1005 |
+| Python | 59963 | 887 (1.5%) | 14 (0.0%) | 14 (0.0%) | 2 | 1124 | 28 |
+| Go | 59524 | 25874 (43.5%) | 4913 (8.3%) | 4913 (8.3%) | 8 | 50181 | 6422 |
+| Rust | 21182 | 0 (0.0%) | 0 (0.0%) | 0 (0.0%) | 1 | 0 | 0 |
+| C++ | 4581 | 1093 (23.9%) | 16 (0.3%) | 16 (0.3%) | 4 | 1904 | 92 |
+| Java | 1147 | 181 (15.8%) | 18 (1.6%) | 18 (1.6%) | 3 | 385 | 21 |
+
+Interpretation: direct child collection is already mostly linear for all target
+languages except Go, so replacing only stack-pop graph traversal cannot deliver
+a universal 20% gain. A useful linear-stack architecture must instead remove
+the whole persistent-node path for straight segments: stack-node allocation,
+link payload retain/release, version head updates, and reduce reinsertion. Go
+requires first-class branching support because multi-version reductions and
+merge attempts are common. Rust, Python, TypeScript, and JavaScript would be
+good validation cases for a segmented contiguous stack, but Go is the design
+gate for universality.
+
 ## Next Direction
 
 ### Observations
@@ -337,13 +361,16 @@ materialization boundary.
 
 Do not add more local fast paths. Rank future work by removed phase:
 
-1. **Linear-stack normal parser.** Keep the current persistent graph for forks,
-   recovery, reuse, and old-tree parsing, but use a contiguous frame stack for
-   fresh single-version normal parsing. A frame stores payload, state, position,
-   cost, precedence, node count, and external-token metadata. Reductions pop a
-   slice of frames directly; forks promote the current linear stack into the
-   graph. This attacks stack-node allocation, pointer chasing, graph traversal,
-   payload retain/release churn, and version-renumber work together.
+1. **Segmented linear-stack normal parser.** Keep the current persistent graph
+   for recovery, reuse, and hard ambiguity, but use contiguous frame segments
+   for fresh normal parsing. A frame stores payload, state, position, cost,
+   precedence, node count, and external-token metadata. Reductions pop a slice
+   of frames directly; forks share immutable segment prefixes and only promote
+   to graph nodes when merge/recovery requires full GLR semantics. This attacks
+   stack-node allocation, pointer chasing, graph traversal, payload
+   retain/release churn, and version-renumber work together. Go's high
+   multi-version/merge pressure makes shared segment prefixes mandatory; a
+   single-version-only linear path is not a universal plan.
 2. **Stack-native parse forest with final materialization.** Push
    `PendingReduction`/payload descriptors through normal parsing and build
    concrete `SubtreeHeapData` only at accept or at forced boundaries
