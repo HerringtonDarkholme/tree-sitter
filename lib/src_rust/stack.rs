@@ -197,17 +197,17 @@ pub(crate) unsafe fn array_clear<T>(arr: &mut Array<T>) {
     arr.size = 0;
 }
 
-pub(crate) unsafe fn array_reserve<T>(arr: *mut Array<T>, new_capacity: u32) {
-    if new_capacity > (*arr).capacity {
+pub(crate) unsafe fn array_reserve<T>(arr: &mut Array<T>, new_capacity: u32) {
+    if new_capacity > arr.capacity {
         let elem_size = std::mem::size_of::<T>();
-        if (*arr).contents.is_null() {
-            (*arr).contents = ts_malloc(new_capacity as usize * elem_size).cast::<T>();
+        if arr.contents.is_null() {
+            arr.contents = ts_malloc(new_capacity as usize * elem_size).cast::<T>();
         } else {
-            (*arr).contents =
-                ts_realloc((*arr).contents.cast::<c_void>(), new_capacity as usize * elem_size)
+            arr.contents =
+                ts_realloc(arr.contents.cast::<c_void>(), new_capacity as usize * elem_size)
                     .cast::<T>();
         }
-        (*arr).capacity = new_capacity;
+        arr.capacity = new_capacity;
     }
 }
 
@@ -221,7 +221,7 @@ pub(crate) unsafe fn array_grow<T>(arr: *mut Array<T>, count: u32) {
         if new_capacity < new_size {
             new_capacity = new_size;
         }
-        array_reserve(arr, new_capacity);
+        array_reserve(arr.as_mut().unwrap_unchecked(), new_capacity);
     }
 }
 
@@ -321,7 +321,7 @@ pub(crate) unsafe fn array_splice<T>(
     let new_end = index + new_count;
     debug_assert!(old_end <= (*arr).size);
 
-    array_reserve(arr, new_size);
+    array_reserve(arr.as_mut().unwrap_unchecked(), new_size);
 
     let contents = (*arr).contents;
     let count = ((*arr).size - old_end) as usize;
@@ -343,7 +343,7 @@ pub(crate) unsafe fn array_swap<T>(self_: &mut Array<T>, other: &mut Array<T>) {
 }
 
 pub(crate) unsafe fn array_assign<T>(self_: &mut Array<T>, other: &Array<T>) {
-    array_reserve(ptr::from_mut(self_), other.size);
+    array_reserve(self_, other.size);
     self_.size = other.size;
     if other.size > 0 {
         ptr::copy(other.contents, self_.contents, other.size as usize);
@@ -832,8 +832,9 @@ unsafe fn stack__iter(
     if let Some(goal_subtree_count) = goal_subtree_count {
         let reserve_count =
             ts_subtree_alloc_size(goal_subtree_count) / std::mem::size_of::<Subtree>();
+        let subtrees = &mut *ptr::addr_of_mut!(new_iterator.subtrees).cast::<Array<Subtree>>();
         array_reserve(
-            ptr::addr_of_mut!(new_iterator.subtrees).cast::<Array<Subtree>>(),
+            subtrees,
             u32::try_from(reserve_count).unwrap(),
         );
     }

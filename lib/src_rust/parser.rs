@@ -2749,7 +2749,7 @@ pub unsafe extern "C" fn ts_parser_new() -> *mut TSParser {
     let parser = parser_ptr_mut(self_);
     ts_lexer_init(&mut parser.lexer);
     array_init(&mut parser.reduce_actions);
-    array_reserve(std::ptr::addr_of_mut!(parser.reduce_actions), 4);
+    array_reserve(&mut parser.reduce_actions, 4);
     parser.tree_pool = ts_subtree_pool_new(32);
     parser.stack = ts_stack_new(&mut parser.tree_pool);
     parser.finished_tree = NULL_SUBTREE;
