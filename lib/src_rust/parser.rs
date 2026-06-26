@@ -21,8 +21,8 @@ use super::get_changed_ranges::{
 use super::language::{
     ts_language_actions, ts_language_copy, ts_language_delete, ts_language_enabled_external_tokens,
     ts_language_has_actions, ts_language_has_reduce_action, ts_language_is_reserved_word,
-    ts_language_lex_mode_for_state, ts_language_next_state, ts_language_symbol_name,
-    ts_language_table_entry, TSLanguageFull, TSLexer, TSLexerMode,
+    ts_language_lex_mode_for_state, ts_language_lookup, ts_language_next_state,
+    ts_language_symbol_name, ts_language_table_entry, TSLanguageFull, TSLexer, TSLexerMode,
     TSParseActionTypeAccept as TSPARSE_ACTION_TYPE_ACCEPT,
     TSParseActionTypeRecover as TSPARSE_ACTION_TYPE_RECOVER,
     TSParseActionTypeReduce as TSPARSE_ACTION_TYPE_REDUCE,
@@ -1631,7 +1631,14 @@ unsafe fn ts_parser__reduce(
         }
 
         let state = ts_stack_state(stack, slice_version);
-        let next_state = ts_language_next_state(self_.language, state, symbol);
+        let next_state = if symbol != ts_builtin_sym_error
+            && symbol != ts_builtin_sym_error_repeat
+            && u32::from(symbol) >= parser_language_full(self_.language).token_count
+        {
+            ts_language_lookup(self_.language, state, symbol)
+        } else {
+            ts_language_next_state(self_.language, state, symbol)
+        };
         if end_of_non_terminal_extra && next_state == state {
             (*parent.ptr).set_extra(true);
         }
