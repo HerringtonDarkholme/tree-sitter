@@ -134,9 +134,9 @@ pub unsafe fn reusable_node_reset(self_: &mut ReusableNode, tree: Subtree) {
 
 #[inline]
 unsafe fn reusable_node_subtree_child<'a>(parent: Subtree, index: u32) -> &'a Subtree {
-    std::slice::from_raw_parts(
-        ts_subtree_children(parent),
-        ts_subtree_child_count(parent) as usize,
-    )
-    .get_unchecked(index as usize)
+    debug_assert!(index < ts_subtree_child_count(parent));
+    ts_subtree_children(parent)
+        .add(index as usize)
+        .as_ref()
+        .unwrap_unchecked()
 }

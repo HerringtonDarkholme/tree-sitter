@@ -459,7 +459,11 @@ unsafe fn parser_language_full<'a>(language: *const TSLanguage) -> &'a TSLanguag
 
 #[inline]
 unsafe fn parser_subtree_child<'a>(parent: Subtree, index: u32) -> &'a Subtree {
-    parser_subtree_children(parent).get_unchecked(index as usize)
+    debug_assert!(index < ts_subtree_child_count(parent));
+    ts_subtree_children(parent)
+        .add(index as usize)
+        .as_ref()
+        .unwrap_unchecked()
 }
 
 #[inline]
