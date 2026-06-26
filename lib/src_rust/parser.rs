@@ -11,24 +11,25 @@ use crate::ffi::{
 
 use super::alloc::{ts_calloc, ts_free};
 use super::error_costs::{
-    ERROR_COST_PER_SKIPPED_CHAR, ERROR_COST_PER_SKIPPED_LINE, ERROR_COST_PER_SKIPPED_TREE,
-    ERROR_STATE,
+    ERROR_COST_PER_RECOVERY, ERROR_COST_PER_SKIPPED_CHAR, ERROR_COST_PER_SKIPPED_LINE,
+    ERROR_COST_PER_SKIPPED_TREE, ERROR_STATE,
 };
 use super::get_changed_ranges::{
     ts_range_array_get_changed_ranges_ref, ts_range_array_intersects_ref, ts_range_slice,
     TSRangeArray,
 };
 use super::language::{
-    ts_language_actions, ts_language_copy, ts_language_delete, ts_language_enabled_external_tokens,
-    ts_language_has_actions, ts_language_has_reduce_action, ts_language_is_reserved_word,
-    ts_language_lex_mode_for_state, ts_language_lookup, ts_language_next_state,
-    ts_language_symbol_name, ts_language_table_entry, TSLanguageFull, TSLexer, TSLexerMode,
+    ts_language_actions, ts_language_alias_sequence, ts_language_copy, ts_language_delete,
+    ts_language_enabled_external_tokens, ts_language_has_actions, ts_language_has_reduce_action,
+    ts_language_is_reserved_word, ts_language_lex_mode_for_state, ts_language_lookup,
+    ts_language_next_state, ts_language_symbol_metadata, ts_language_symbol_name,
+    ts_language_table_entry, TSLanguageFull, TSLexer, TSLexerMode,
     TSParseActionTypeAccept as TSPARSE_ACTION_TYPE_ACCEPT,
     TSParseActionTypeRecover as TSPARSE_ACTION_TYPE_RECOVER,
     TSParseActionTypeReduce as TSPARSE_ACTION_TYPE_REDUCE,
     TSParseActionTypeShift as TSPARSE_ACTION_TYPE_SHIFT, TableEntry,
 };
-use super::length::{length_sub, length_zero};
+use super::length::{length_add, length_sub, length_zero};
 use super::lexer::{
     ts_lexer_delete, ts_lexer_finish, ts_lexer_included_ranges, ts_lexer_init, ts_lexer_mark_end,
     ts_lexer_reset, ts_lexer_set_included_ranges, ts_lexer_set_input, ts_lexer_start, Lexer,
@@ -96,6 +97,14 @@ use super::stack::{
     StackPopBuilder,
     StackSliceSpan,
     StackVersion,
+    PENDING_REDUCTION_DEPENDS_ON_COLUMN,
+    PENDING_REDUCTION_EXTRA,
+    PENDING_REDUCTION_FRAGILE_LEFT,
+    PENDING_REDUCTION_FRAGILE_RIGHT,
+    PENDING_REDUCTION_HAS_EXTERNAL_SCANNER_STATE_CHANGE,
+    PENDING_REDUCTION_HAS_EXTERNAL_TOKENS,
+    PENDING_REDUCTION_NAMED,
+    PENDING_REDUCTION_VISIBLE,
     STACK_VERSION_NONE,
 };
 use super::subtree::{
@@ -113,11 +122,14 @@ use super::subtree::{
     ts_subtree_children,
     ts_subtree_compare,
     ts_subtree_compress,
+    ts_subtree_depends_on_column,
     ts_subtree_dynamic_precedence,
     ts_subtree_error_cost,
     ts_subtree_external_scanner_state,
     ts_subtree_external_scanner_state_eq,
     ts_subtree_extra,
+    ts_subtree_fragile_left,
+    ts_subtree_fragile_right,
     ts_subtree_from_mut,
     ts_subtree_has_changes,
     ts_subtree_has_external_scanner_state_change,
@@ -132,12 +144,15 @@ use super::subtree::{
     ts_subtree_lookahead_bytes,
     ts_subtree_make_mut,
     ts_subtree_missing,
+    ts_subtree_named,
+    ts_subtree_named_child_count,
     ts_subtree_new_error,
     ts_subtree_new_error_node,
     ts_subtree_new_leaf,
     ts_subtree_new_missing_leaf,
     ts_subtree_new_node,
     ts_subtree_new_node_in_arena,
+    ts_subtree_padding,
     ts_subtree_parse_state,
     ts_subtree_pool_delete,
     ts_subtree_pool_new,
@@ -152,6 +167,9 @@ use super::subtree::{
     ts_subtree_to_mut_unsafe,
     ts_subtree_total_bytes,
     ts_subtree_total_size,
+    ts_subtree_visible,
+    ts_subtree_visible_child_count,
+    ts_subtree_visible_descendant_count,
     ts_tree_arena_new,
     ts_tree_arena_release,
     ExternalScannerState,
@@ -485,6 +503,206 @@ unsafe fn ts_parser__clear_pending_reductions(self_: &mut TSParser) {
         ts_parser__pending_reduction_delete(self_, *array_get_ref(&self_.pending_reductions, i));
     }
     array_clear(&mut self_.pending_reductions);
+}
+
+unsafe fn ts_parser__pending_reduction_summarize_children(
+    pending: &mut PendingReduction,
+    language: *const TSLanguage,
+) {
+    pending.child_count = pending.children.size;
+    pending.named_child_count = 0;
+    pending.visible_child_count = 0;
+    pending.error_cost = 0;
+    pending.repeat_depth = 0;
+    pending.visible_descendant_count = 0;
+    pending.dynamic_precedence = 0;
+    pending.node_count = 0;
+    pending.padding = length_zero();
+    pending.size = length_zero();
+    pending.lookahead_bytes = 0;
+    pending.flags &= PENDING_REDUCTION_VISIBLE | PENDING_REDUCTION_NAMED | PENDING_REDUCTION_EXTRA;
+
+    let mut structural_index: u32 = 0;
+    let alias_sequence = ts_language_alias_sequence(language, u32::from(pending.production_id));
+    let mut lookahead_end_byte: u32 = 0;
+
+    for i in 0..pending.children.size {
+        let child = *pending.children.contents.add(i as usize);
+
+        if pending.size.extent.row == 0 && ts_subtree_depends_on_column(child) {
+            pending.flags |= PENDING_REDUCTION_DEPENDS_ON_COLUMN;
+        }
+
+        if ts_subtree_has_external_scanner_state_change(child) {
+            pending.flags |= PENDING_REDUCTION_HAS_EXTERNAL_SCANNER_STATE_CHANGE;
+        }
+
+        if i == 0 {
+            pending.padding = ts_subtree_padding(child);
+            pending.size = ts_subtree_size(child);
+        } else {
+            pending.size = length_add(pending.size, ts_subtree_total_size(child));
+        }
+
+        let child_lookahead_end_byte =
+            pending.padding.bytes + pending.size.bytes + ts_subtree_lookahead_bytes(child);
+        if child_lookahead_end_byte > lookahead_end_byte {
+            lookahead_end_byte = child_lookahead_end_byte;
+        }
+
+        if ts_subtree_symbol(child) != ts_builtin_sym_error_repeat {
+            pending.error_cost += ts_subtree_error_cost(child);
+        }
+
+        let grandchild_count = ts_subtree_child_count(child);
+        if (pending.symbol == ts_builtin_sym_error || pending.symbol == ts_builtin_sym_error_repeat)
+            && !ts_subtree_extra(child)
+            && !(ts_subtree_is_error(child) && grandchild_count == 0)
+        {
+            if ts_subtree_visible(child) {
+                pending.error_cost += ERROR_COST_PER_SKIPPED_TREE;
+            } else if grandchild_count > 0 {
+                pending.error_cost +=
+                    ERROR_COST_PER_SKIPPED_TREE * ts_subtree_visible_child_count(child);
+            }
+        }
+
+        pending.dynamic_precedence += ts_subtree_dynamic_precedence(child);
+        pending.visible_descendant_count += ts_subtree_visible_descendant_count(child);
+
+        if !ts_subtree_extra(child)
+            && ts_subtree_symbol(child) != 0
+            && !alias_sequence.is_null()
+            && *alias_sequence.add(structural_index as usize) != 0
+        {
+            pending.visible_descendant_count += 1;
+            pending.visible_child_count += 1;
+            if ts_language_symbol_metadata(language, *alias_sequence.add(structural_index as usize))
+                .named
+            {
+                pending.named_child_count += 1;
+            }
+        } else if ts_subtree_visible(child) {
+            pending.visible_descendant_count += 1;
+            pending.visible_child_count += 1;
+            if ts_subtree_named(child) {
+                pending.named_child_count += 1;
+            }
+        } else if grandchild_count > 0 {
+            pending.visible_child_count += ts_subtree_visible_child_count(child);
+            pending.named_child_count += ts_subtree_named_child_count(child);
+        }
+
+        if ts_subtree_has_external_tokens(child) {
+            pending.flags |= PENDING_REDUCTION_HAS_EXTERNAL_TOKENS;
+        }
+
+        if ts_subtree_is_error(child) {
+            pending.flags |= PENDING_REDUCTION_FRAGILE_LEFT | PENDING_REDUCTION_FRAGILE_RIGHT;
+            pending.parse_state = TS_TREE_STATE_NONE;
+        }
+
+        if !ts_subtree_extra(child) {
+            structural_index += 1;
+        }
+    }
+
+    pending.lookahead_bytes = lookahead_end_byte - pending.size.bytes - pending.padding.bytes;
+
+    if pending.symbol == ts_builtin_sym_error || pending.symbol == ts_builtin_sym_error_repeat {
+        pending.error_cost += ERROR_COST_PER_RECOVERY
+            + ERROR_COST_PER_SKIPPED_CHAR * pending.size.bytes
+            + ERROR_COST_PER_SKIPPED_LINE * pending.size.extent.row;
+        pending.flags |= PENDING_REDUCTION_FRAGILE_LEFT | PENDING_REDUCTION_FRAGILE_RIGHT;
+    }
+
+    if pending.child_count > 0 {
+        let first_child = *pending.children.contents;
+        let last_child = *pending
+            .children
+            .contents
+            .add(pending.child_count as usize - 1);
+
+        pending.first_leaf_symbol = ts_subtree_leaf_symbol(first_child);
+        pending.first_leaf_parse_state = ts_subtree_leaf_parse_state(first_child);
+
+        if ts_subtree_fragile_left(first_child) {
+            pending.flags |= PENDING_REDUCTION_FRAGILE_LEFT;
+        }
+        if ts_subtree_fragile_right(last_child) {
+            pending.flags |= PENDING_REDUCTION_FRAGILE_RIGHT;
+        }
+
+        if pending.child_count >= 2
+            && pending.flags & (PENDING_REDUCTION_VISIBLE | PENDING_REDUCTION_NAMED) == 0
+            && ts_subtree_symbol(first_child) == pending.symbol
+        {
+            let first_depth = ts_subtree_repeat_depth(first_child);
+            let last_depth = ts_subtree_repeat_depth(last_child);
+            pending.repeat_depth = (first_depth.max(last_depth) + 1) as u16;
+        }
+    }
+
+    pending.node_count = pending.visible_descendant_count;
+    if pending.flags & PENDING_REDUCTION_VISIBLE != 0 {
+        pending.node_count += 1;
+    }
+    if pending.symbol == ts_builtin_sym_error_repeat {
+        pending.node_count += 1;
+    }
+}
+
+unsafe fn ts_parser__pending_reduction_new_from_children(
+    self_: &mut TSParser,
+    symbol: TSSymbol,
+    children: &SubtreeArray,
+    production_id: u16,
+    parse_state: TSStateId,
+    extra: bool,
+    dynamic_precedence: i32,
+) -> *mut PendingReduction {
+    let metadata = ts_language_symbol_metadata(self_.language, symbol);
+    let fragile = symbol == ts_builtin_sym_error || symbol == ts_builtin_sym_error_repeat;
+    let pending = ts_calloc(1, std::mem::size_of::<PendingReduction>()).cast::<PendingReduction>();
+    let pending_ref = pending.as_mut().unwrap_unchecked();
+    pending_ref.ref_count = 1;
+    pending_ref.symbol = symbol;
+    pending_ref.production_id = production_id;
+    pending_ref.parse_state = if fragile {
+        TS_TREE_STATE_NONE
+    } else {
+        parse_state
+    };
+    pending_ref.materialized = NULL_SUBTREE;
+    pending_ref.flags = 0;
+    if metadata.visible {
+        pending_ref.flags |= PENDING_REDUCTION_VISIBLE;
+    }
+    if metadata.named {
+        pending_ref.flags |= PENDING_REDUCTION_NAMED;
+    }
+    if extra {
+        pending_ref.flags |= PENDING_REDUCTION_EXTRA;
+    }
+    if fragile {
+        pending_ref.flags |= PENDING_REDUCTION_FRAGILE_LEFT | PENDING_REDUCTION_FRAGILE_RIGHT;
+    }
+
+    array_init(subtree_array_as_array_mut(&mut pending_ref.children));
+    array_reserve(
+        subtree_array_as_array_mut(&mut pending_ref.children),
+        children.size,
+    );
+    for i in 0..children.size {
+        let child = *children.contents.add(i as usize);
+        ts_subtree_retain(child);
+        array_push(subtree_array_as_array_mut(&mut pending_ref.children), child);
+    }
+
+    ts_parser__pending_reduction_summarize_children(pending_ref, self_.language);
+    pending_ref.dynamic_precedence += dynamic_precedence;
+    array_push(&mut self_.pending_reductions, pending);
+    pending
 }
 
 // ---------------------------------------------------------------------------

@@ -36,7 +36,14 @@ const MAX_NODE_POOL_SIZE: u32 = 50;
 const MAX_ITERATOR_COUNT: u32 = 64;
 const STACK_LINK_PAYLOAD_IS_PENDING_LINK: u8 = 1 << 0;
 const STACK_LINK_PAYLOAD_IS_PENDING_REDUCTION: u8 = 1 << 1;
-const PENDING_REDUCTION_EXTRA: u16 = 1 << 0;
+pub const PENDING_REDUCTION_EXTRA: u16 = 1 << 0;
+pub const PENDING_REDUCTION_VISIBLE: u16 = 1 << 1;
+pub const PENDING_REDUCTION_NAMED: u16 = 1 << 2;
+pub const PENDING_REDUCTION_FRAGILE_LEFT: u16 = 1 << 3;
+pub const PENDING_REDUCTION_FRAGILE_RIGHT: u16 = 1 << 4;
+pub const PENDING_REDUCTION_HAS_EXTERNAL_TOKENS: u16 = 1 << 5;
+pub const PENDING_REDUCTION_HAS_EXTERNAL_SCANNER_STATE_CHANGE: u16 = 1 << 6;
+pub const PENDING_REDUCTION_DEPENDS_ON_COLUMN: u16 = 1 << 7;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -91,8 +98,13 @@ pub struct PendingReduction {
     pub lookahead_bytes: u32,
     pub error_cost: u32,
     pub node_count: u32,
+    pub visible_child_count: u32,
+    pub named_child_count: u32,
     pub visible_descendant_count: u32,
     pub dynamic_precedence: i32,
+    pub repeat_depth: u16,
+    pub first_leaf_symbol: TSSymbol,
+    pub first_leaf_parse_state: TSStateId,
     pub flags: u16,
     pub materialized: Subtree,
 }

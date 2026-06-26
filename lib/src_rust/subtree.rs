@@ -1222,6 +1222,15 @@ pub const unsafe fn ts_subtree_visible_child_count(self_: Subtree) -> u32 {
     }
 }
 
+#[inline]
+pub const unsafe fn ts_subtree_named_child_count(self_: Subtree) -> u32 {
+    if ts_subtree_child_count(self_) > 0 {
+        (*self_.ptr).data.children.named_child_count
+    } else {
+        0
+    }
+}
+
 // --- #29: error_cost ---
 
 #[inline]
