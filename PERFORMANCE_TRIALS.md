@@ -61,6 +61,7 @@ ts_parser__advance -> ts_parser__reduce
 - Reduce push/pop shape counters
 - Pending materialization pressure counters
 - Pending reduction lifetime counters
+- Payload-child foundation `-r 10` checkpoint
 
 ### Closed: Summarization
 
@@ -144,6 +145,26 @@ ts_parser__advance -> ts_parser__reduce
    phase, not just make one branch cheaper.
 3. Lexer work needs profile proof that reusable runtime code is the bottleneck;
    generated lexers and external scanners often dominate lexer samples.
+4. Descriptor foundation code is not itself a measured win. A current-vs-origin
+   `-r 10` checkpoint was mixed and noisy, with no universal gain. Continue only
+   with counters proving that reduce wiring avoids enough materialization.
+
+## Latest Checkpoint
+
+Payload-child foundation versus `origin/master`, normal `-r 10` average speed:
+
+| Language | Current | Origin | Delta |
+| --- | ---: | ---: | ---: |
+| TypeScript | 24955 | 25292 | -1.3% |
+| JavaScript | 20486 | 20884 | -1.9% |
+| Python | 10760 | 10950 | -1.7% |
+| Go | 18301 | 15740 | +16.3% |
+| Rust | 17820 | 18338 | -2.8% |
+| C++ | 7779 | 8193 | -5.1% |
+| Java | 13334 | 12924 | +3.2% |
+
+Interpretation: not a universal win; likely noise plus code-layout effects.
+Do not continue descriptor wiring without eligibility/materialization counters.
 
 ## Next Direction
 
