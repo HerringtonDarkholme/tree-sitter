@@ -454,25 +454,21 @@ allocation. The remaining cost is still phase-oriented:
      batching must reduce repeated metadata work, not just reorganize the same
      calls.
 
-### Next Algorithmic Triage
+### Algorithmic Triage Result
 
-The next code experiment should not start from the existing failed patches.
-Collect two measurements first:
+The reduce-shape counters below answered the two open questions:
 
-- Alias/error fallback rate for incremental summary:
-  count reductions by production id where `language_alias_sequence` is null,
-  symbol is not an error symbol, and child count is 1-3.
-- Trailing-extra distribution for final-storage reservation:
-  count total collected children versus non-extra prefix length per reduction.
+- Alias-free small reductions are broad but not universal. They cover `79.2%`
+  of `1-3` child candidates, but C++, JavaScript, TypeScript, and Go all have
+  enough alias candidates that summary fusion should not be the first revamp.
+- Trailing extras are rare and small. They are only `1.8%` of collected child
+  slots and appear in only `1.6%` of candidates, so one-pass arena reservation
+  with bounded holes is the next reduce-construction design to pursue.
 
-Use those counters to choose:
-
-- If alias/error fallback is low, try incremental summary after the builder
-  ownership protocol, because it removes a full child traversal.
-- If trailing extras are rare/small, try one-pass arena reservation with holes,
-  because it removes the builder-to-arena copy without a second stack walk.
-- If neither has broad coverage, stop reduce construction and investigate
-  lexer/runtime boundary or batched stack push.
+Decision: prioritize one-pass final-storage reduce construction. Keep
+incremental summary as a later layer only after final-storage ownership changes.
+If the storage design fails without a second stack walk, move to lexer/runtime
+boundary investigation before trying another reduce micro-design.
 
 ## Performance Trial Decision Process
 
@@ -670,37 +666,72 @@ target. A reduce-construction redesign must primarily remove work from the
 single-candidate path: retained child collection, builder-to-parent copying,
 summary/finalization, and parent/trailing-extra stack push.
 
+Temporary reduce algorithm triage instrumentation, removed before committing:
+
+| Language | Candidates | Alias candidates | 1-3 child candidates | No-alias 1-3 child candidates | Collected children | Non-extra prefix children | Trailing extras | Trailing-extra candidates |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| JavaScript | 102,012 | 23,694 | 96,791 | 74,871 | 180,897 | 177,717 | 3,180 | 2,230 |
+| TypeScript | 65,903 | 15,452 | 62,790 | 48,414 | 114,347 | 111,261 | 3,086 | 1,147 |
+| Python | 59,977 | 8,215 | 56,676 | 50,581 | 102,447 | 101,788 | 659 | 444 |
+| Go | 64,552 | 17,070 | 61,271 | 46,441 | 116,676 | 114,148 | 2,528 | 1,090 |
+| Rust | 21,182 | 4,320 | 19,862 | 16,412 | 35,947 | 35,098 | 849 | 311 |
+| C++ | 4,597 | 1,986 | 4,445 | 2,548 | 7,904 | 7,893 | 11 | 11 |
+| Java | 1,165 | 350 | 1,096 | 798 | 2,047 | 2,047 | 0 | 0 |
+| Total | 319,388 | 71,087 | 302,931 | 240,065 | 560,265 | 549,952 | 10,313 | 5,233 |
+
+Derived shape:
+
+- `1-3` child candidates are `302,931 / 319,388` = `94.8%`.
+- No-alias `1-3` child candidates are `240,065 / 302,931` = `79.2%`
+  of small candidates, but C++ has a materially higher alias share.
+- Trailing extras are `10,313 / 560,265` = `1.8%` of collected child slots.
+- Candidates with any trailing extras are `5,233 / 319,388` = `1.6%`.
+- Non-extra child-count buckets across the seven-language run: `0`: `0`,
+  `1`: `182,714`, `2`: `66,175`, `3`: `54,042`, `4+`: `16,457`.
+
+Algorithm implication: a one-pass final-storage design that over-reserves child
+slots and leaves bounded holes for trailing extras has broad evidence now. The
+hole cost is tiny in the measured normal cases, and it avoids the failed
+two-pass direct-finalization shape. Incremental summary is still plausible for
+the no-alias small majority, but C++, JavaScript, TypeScript, and Go have enough
+alias candidates that summary fusion should follow storage redesign, not lead
+it.
+
 ### Candidate Ranking
 
 | Rank | Direction | Decision |
 | ---: | --- | --- |
-| 1 | Full reduce-construction redesign | Still the top parser-core candidate. The fresh-reduce shape counters show normal parsing is almost entirely single-candidate, so the next version must target collection-to-final-parent construction for that path while preserving the old path for reparses and rare merged groups. It must not become buffer adoption or standalone merged-candidate selection. |
+| 1 | One-pass final-storage reduce construction | Still the top parser-core candidate. Fresh normal parsing is almost entirely single-candidate, and trailing extras are only `1.8%` of collected child slots, so the next version should target direct collection into reserved final storage with bounded holes. Preserve the old path for reparses and rare merged groups until equivalence is proven. It must not become buffer adoption, a two-pass linear-only stack walk, or standalone merged-candidate selection. |
 | 2 | Lexer/external scanner work | Now co-equal for C++ and material for all languages. Needs separate direction triage because generated grammar lexers may limit core-library leverage. |
 | 3 | Balancing/compress redesign | Important for Rust and moderate for JS/TS/Go/Python. Do not remove balancing; contains-repetition pruning and single-pass compression both regressed or failed to improve Rust. Only consider a correctness-preserving redesign with tree-shape evidence, not schedule tuning. |
 | 4 | Summarization during reduce construction | Only after a real builder changes selection/ownership. A direct arena copy-plus-summary loop regressed and is closed. |
 
 ### Next Direction Queue
 
-1. Reduce-construction protocol redesign.
-   - Goal: remove the repeated conversion pipeline from stack-pop materialization
-     to candidate parent construction to final arena parent construction.
+1. One-pass final-storage reduce construction.
+   - Goal: collect fresh single-candidate reductions into reserved tree-arena
+     child storage in one stack traversal, reverse the reserved range in place,
+     trim trailing extras by shortening the non-extra prefix, and place the
+     parent data immediately after that prefix.
    - Why first: it is the largest shared parser-owned hotspot after the kept
      stack-pop builder, and it covers allocation, child copying, candidate
      selection, summarization, stack push, and graph fallback together.
+     The new shape counters show the internal-hole cost from trailing extras is
+     bounded in normal parsing.
    - Tooling: `cargo flamegraph` for representative files, temporary
      parser-local counters for candidate counts and child-span bytes,
      same-session `cargo xtask benchmark --kind normal -r 10 --language` for
      the seven target languages, then `cargo test --all` outside the sandbox.
-   - First deliverable: a no-code equivalence map between the current
-     `StackSliceArray` path and the proposed reduce-builder protocol. Do not
-     start production code until ownership, candidate selection, trailing extras,
-     graph fallback, and reparse behavior are accounted for.
-   - Implementation shape if the design passes: add parser-private data types,
-     prove collection equivalence against `ts_stack_pop_count`, route collection
-     through the builder without changing final allocation, then move final
-     parent construction to consume selected spans directly.
-   - Reject if it becomes a linear-only fast path, buffer adoption, standalone
-     summarizer rewrite, or candidate-selection tweak.
+   - First deliverable: an arena reservation API design that can reserve
+     `Subtree` slots first, then initialize `SubtreeHeapData` after the final
+     non-extra prefix without requiring a second stack traversal.
+   - Implementation shape if the design passes: keep graph fallback, merged
+     candidates, and reparses on the conservative builder path; route only
+     proven fresh single-candidate reductions through the one-pass arena path;
+     then broaden after equivalence tests and benchmarks.
+   - Reject if it needs a second stack walk, if holes can escape arena ownership,
+     if trailing extras require per-candidate heap arrays, or if it becomes a
+     standalone summary/candidate-selection tweak.
 
 2. Lexer/runtime boundary investigation.
    - Goal: determine whether the core runtime has a real library-owned lexer
@@ -738,25 +769,27 @@ summary/finalization, and parent/trailing-extra stack push.
 
 ### Next Parser Trial
 
-The next trial should be a no-code equivalence and ownership design for the full
-reduce-construction redesign, then a review against closed history before any
-implementation:
+The next trial should design and then implement the smallest viable one-pass
+final-storage reduce path for fresh single-candidate reductions, while keeping
+graph fallback, merged candidates, and reparses on the conservative path:
 
-- Hypothesis: a full reduce-construction redesign is the only remaining
-  parser-core direction with enough shared leverage to pair with later lexer or
-  balancing work toward the 20% target.
+- Hypothesis: reserving final arena child storage during stack collection,
+  reversing that reserved range in place, and placing parent data after the
+  final non-extra prefix removes the builder-to-arena child copy without the
+  failed second stack walk.
 - History check: direct linear stack-pop, stack-pop buffer adoption, child-array
   adoption, summarizer micro-optimizations, combined copy-plus-summary, page-size
   tuning, refcount ordering, and allocation pools are closed.
-- Evidence status: collected for TypeScript, JavaScript, Python, Go, Rust, C++,
-  and Java.
-- Kill criteria: if the design collapses into a linear fast path, buffer
-  adoption, or isolated summarizer tweak, do not implement it.
-- Implementation boundary if evidence passes: redesign the reduce construction
-  protocol as a coherent replacement for the current single-candidate
-  `StackSliceArray` / `StackPopBuilder` to final-parent construction pipeline,
-  while keeping rare merged groups and reparses on the conservative path until
-  equivalence is proven.
+- Evidence status: seven-language counters show trailing extras are small enough
+  for bounded holes, and fresh normal reductions are overwhelmingly
+  single-candidate.
+- Kill criteria: if the design needs a second stack traversal, relies on
+  adopting malloc buffers, changes generated grammar code, or becomes an
+  isolated summarizer tweak, reject it.
+- Implementation boundary: add an arena reservation API and a parser-private
+  single-candidate collector; keep the existing `StackPopBuilder` path for
+  merged groups, graph fallback, and reparses until equivalence and benchmark
+  data justify broadening.
 
 ### Reduce-Construction Redesign Sketch
 
