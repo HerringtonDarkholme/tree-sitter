@@ -15,7 +15,8 @@ use super::length::{length_add, Length};
 use super::node::ts_node_new;
 use super::subtree::{
     ts_subtree_edit, ts_subtree_padding, ts_subtree_pool_delete, ts_subtree_pool_new,
-    ts_subtree_print_dot_graph, ts_subtree_release, ts_subtree_retain, Subtree,
+    ts_subtree_print_dot_graph, ts_subtree_release, ts_subtree_retain, ts_tree_arena_release,
+    ts_tree_arena_retain, Subtree, TreeArena,
 };
 use super::tree_cursor::{ts_tree_cursor_init_ref, TreeCursor, TreeCursorEntryArray};
 
@@ -54,6 +55,7 @@ pub struct TSTree {
     pub language: *const TSLanguage,
     pub included_ranges: *mut TSRange,
     pub included_range_count: u32,
+    pub arena: *mut TreeArena,
 }
 
 unsafe fn ts_tree_init_ref(
@@ -61,10 +63,12 @@ unsafe fn ts_tree_init_ref(
     root: Subtree,
     language: *const TSLanguage,
     included_ranges: &[TSRange],
+    arena: *mut TreeArena,
 ) {
     tree.root = root;
     tree.language = ts_language_copy(language);
     tree.included_range_count = included_ranges.len() as u32;
+    tree.arena = arena;
     tree.included_ranges =
         ts_calloc(included_ranges.len(), std::mem::size_of::<TSRange>()).cast::<TSRange>();
     if !included_ranges.is_empty() {
@@ -78,11 +82,13 @@ unsafe fn ts_tree_init_ref(
 
 unsafe fn ts_tree_copy_ref(tree: &TSTree) -> *mut TSTree {
     ts_subtree_retain(tree.root);
-    ts_tree_new(
+    ts_tree_arena_retain(tree.arena);
+    ts_tree_new_with_arena(
         tree.root,
         tree.language,
         tree.included_ranges,
         tree.included_range_count,
+        tree.arena,
     )
 }
 
@@ -90,6 +96,7 @@ unsafe fn ts_tree_delete_ref(tree: &mut TSTree) {
     let mut pool = ts_subtree_pool_new(0);
     ts_subtree_release(&mut pool, tree.root);
     ts_subtree_pool_delete(&mut pool);
+    ts_tree_arena_release(tree.arena);
     ts_language_delete(tree.language);
     ts_free(tree.included_ranges.cast::<c_void>());
 }
@@ -176,10 +183,26 @@ pub unsafe fn ts_tree_new(
     included_ranges: *const TSRange,
     included_range_count: u32,
 ) -> *mut TSTree {
+    ts_tree_new_with_arena(
+        root,
+        language,
+        included_ranges,
+        included_range_count,
+        std::ptr::null_mut(),
+    )
+}
+
+pub unsafe fn ts_tree_new_with_arena(
+    root: Subtree,
+    language: *const TSLanguage,
+    included_ranges: *const TSRange,
+    included_range_count: u32,
+    arena: *mut TreeArena,
+) -> *mut TSTree {
     let result = ts_malloc(std::mem::size_of::<TSTree>()).cast::<TSTree>();
     let tree = result.as_mut().unwrap_unchecked();
     let included_ranges = ts_range_slice(included_ranges, included_range_count);
-    ts_tree_init_ref(tree, root, language, included_ranges);
+    ts_tree_init_ref(tree, root, language, included_ranges, arena);
     result
 }
 
@@ -325,4 +348,62 @@ pub unsafe extern "C" fn ts_tree_print_dot_graph(self_: *const TSTree, file_desc
 pub unsafe extern "C" fn ts_tree_print_dot_graph(self_: *const TSTree, file_descriptor: i32) {
     let _ = self_;
     let _ = file_descriptor;
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ptr;
+
+    use super::*;
+    use crate::core_impl::length::length_zero;
+    use crate::core_impl::subtree::{
+        ts_builtin_sym_error_repeat, ts_subtree_child_count, ts_subtree_from_mut,
+        ts_subtree_new_error, ts_subtree_new_node_in_arena, ts_tree_arena_new,
+    };
+
+    #[test]
+    fn arena_tree_copy_delete_uses_tree_arena_lifetime() {
+        unsafe {
+            let mut pool = ts_subtree_pool_new(0);
+            let child1 = ts_subtree_new_error(
+                &mut pool,
+                b'a' as i32,
+                length_zero(),
+                length_zero(),
+                0,
+                0,
+                ptr::null(),
+            );
+            let child2 = ts_subtree_new_error(
+                &mut pool,
+                b'b' as i32,
+                length_zero(),
+                length_zero(),
+                0,
+                0,
+                ptr::null(),
+            );
+            let children = [child1, child2];
+
+            let arena = ts_tree_arena_new();
+            let root = ts_subtree_from_mut(ts_subtree_new_node_in_arena(
+                arena,
+                ts_builtin_sym_error_repeat,
+                children.as_ptr(),
+                children.len() as u32,
+                0,
+                ptr::null(),
+            ));
+
+            assert_eq!(ts_subtree_child_count(root), 2);
+            let tree = ts_tree_new_with_arena(root, ptr::null(), ptr::null(), 0, arena);
+            let copy = ts_tree_copy(tree);
+
+            assert_eq!((*tree).arena, arena);
+            assert_eq!((*copy).arena, arena);
+            ts_tree_delete(tree);
+            ts_tree_delete(copy);
+            ts_subtree_pool_delete(&mut pool);
+        }
+    }
 }

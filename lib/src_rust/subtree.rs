@@ -242,7 +242,7 @@ pub struct SubtreeHeapData {
     /// bit 0: `visible`, bit 1: `named`, bit 2: `extra`, bit 3: `fragile_left`,
     /// bit 4: `fragile_right`, bit 5: `has_changes`, bit 6: `has_external_tokens`,
     /// bit 7: `has_external_scanner_state_change`, bit 8: `depends_on_column`,
-    /// bit 9: `is_missing`, bit 10: `is_keyword`
+    /// bit 9: `is_missing`, bit 10: `is_keyword`, bit 11: `arena_owned`
     pub flags: u16,
     // 2 bytes padding here for 4-byte alignment of the union (inserted by repr(C))
 
@@ -262,6 +262,7 @@ const HEAP_HAS_EXTERNAL_SCANNER_STATE_CHANGE: u16 = 1 << 7;
 const HEAP_DEPENDS_ON_COLUMN: u16 = 1 << 8;
 const HEAP_IS_MISSING: u16 = 1 << 9;
 const HEAP_IS_KEYWORD: u16 = 1 << 10;
+const HEAP_ARENA_OWNED: u16 = 1 << 11;
 
 impl SubtreeHeapData {
     #[inline(always)]
@@ -307,6 +308,10 @@ impl SubtreeHeapData {
     #[inline(always)]
     pub const fn is_keyword(&self) -> bool {
         self.flags & HEAP_IS_KEYWORD != 0
+    }
+    #[inline(always)]
+    pub const fn arena_owned(&self) -> bool {
+        self.flags & HEAP_ARENA_OWNED != 0
     }
 
     #[inline(always)]
@@ -395,6 +400,14 @@ impl SubtreeHeapData {
             self.flags |= HEAP_IS_KEYWORD
         } else {
             self.flags &= !HEAP_IS_KEYWORD
+        }
+    }
+    #[inline(always)]
+    pub fn set_arena_owned(&mut self, v: bool) {
+        if v {
+            self.flags |= HEAP_ARENA_OWNED
+        } else {
+            self.flags &= !HEAP_ARENA_OWNED
         }
     }
 
@@ -507,6 +520,21 @@ pub struct MutableSubtreeArray {
 pub struct SubtreePool {
     pub free_trees: MutableSubtreeArray,
     pub tree_stack: MutableSubtreeArray,
+}
+
+#[repr(C)]
+pub struct TreeArena {
+    ref_count: AtomicU32,
+    pages: *mut TreeArenaPage,
+    current_page: *mut TreeArenaPage,
+}
+
+#[repr(C)]
+struct TreeArenaPage {
+    next: *mut TreeArenaPage,
+    contents: *mut u8,
+    size: usize,
+    capacity: usize,
 }
 
 // ---------------------------------------------------------------------------
@@ -796,6 +824,86 @@ unsafe fn mutable_array_reserve(arr: &mut MutableSubtreeArray, new_capacity: u32
         .cast::<MutableSubtree>();
         arr.capacity = new_capacity;
     }
+}
+
+// ===========================================================================
+// TreeArena functions
+// ===========================================================================
+
+const TREE_ARENA_PAGE_SIZE: usize = 16 * 1024;
+
+const fn align_up(value: usize, alignment: usize) -> usize {
+    debug_assert!(alignment.is_power_of_two());
+    (value + alignment - 1) & !(alignment - 1)
+}
+
+pub unsafe fn ts_tree_arena_new() -> *mut TreeArena {
+    let arena = ts_malloc(std::mem::size_of::<TreeArena>()).cast::<TreeArena>();
+    ptr::write(
+        arena,
+        TreeArena {
+            ref_count: AtomicU32::new(1),
+            pages: ptr::null_mut(),
+            current_page: ptr::null_mut(),
+        },
+    );
+    arena
+}
+
+pub unsafe fn ts_tree_arena_retain(arena: *mut TreeArena) {
+    if !arena.is_null() {
+        let prev = (*arena).ref_count.fetch_add(1, Ordering::SeqCst);
+        debug_assert!(prev.wrapping_add(1) != 0);
+    }
+}
+
+pub unsafe fn ts_tree_arena_release(arena: *mut TreeArena) {
+    if arena.is_null() {
+        return;
+    }
+
+    if (*arena).ref_count.fetch_sub(1, Ordering::SeqCst) != 1 {
+        return;
+    }
+
+    let mut page = (*arena).pages;
+    while !page.is_null() {
+        let next = (*page).next;
+        ts_free((*page).contents.cast::<c_void>());
+        ts_free(page.cast::<c_void>());
+        page = next;
+    }
+    ts_free(arena.cast::<c_void>());
+}
+
+unsafe fn ts_tree_arena_alloc(arena: *mut TreeArena, size: usize, alignment: usize) -> *mut c_void {
+    debug_assert!(!arena.is_null());
+    let arena = arena.as_mut().unwrap_unchecked();
+
+    if !arena.current_page.is_null() {
+        let page = arena.current_page.as_mut().unwrap_unchecked();
+        let offset = align_up(page.size, alignment);
+        if offset + size <= page.capacity {
+            page.size = offset + size;
+            return page.contents.add(offset).cast::<c_void>();
+        }
+    }
+
+    let capacity = TREE_ARENA_PAGE_SIZE.max(size + alignment);
+    let page = ts_malloc(std::mem::size_of::<TreeArenaPage>()).cast::<TreeArenaPage>();
+    let contents = ts_malloc(capacity).cast::<u8>();
+    ptr::write(
+        page,
+        TreeArenaPage {
+            next: arena.pages,
+            contents,
+            size: size,
+            capacity,
+        },
+    );
+    arena.pages = page;
+    arena.current_page = page;
+    contents.cast::<c_void>()
 }
 
 // ===========================================================================
@@ -1471,6 +1579,70 @@ pub unsafe fn ts_subtree_new_node(
     result
 }
 
+pub unsafe fn ts_subtree_new_node_in_arena(
+    arena: *mut TreeArena,
+    symbol: TSSymbol,
+    children: *const Subtree,
+    child_count: u32,
+    production_id: u32,
+    language: *const TSLanguage,
+) -> MutableSubtree {
+    let metadata = ts_language_symbol_metadata(language, symbol);
+    let fragile = symbol == ts_builtin_sym_error || symbol == ts_builtin_sym_error_repeat;
+    let byte_size = ts_subtree_alloc_size(child_count);
+    let allocation = ts_tree_arena_alloc(arena, byte_size, std::mem::align_of::<SubtreeHeapData>())
+        .cast::<Subtree>();
+
+    if child_count > 0 {
+        ptr::copy_nonoverlapping(children, allocation, child_count as usize);
+    }
+
+    let data = allocation
+        .add(child_count as usize)
+        .cast::<SubtreeHeapData>();
+    *data = SubtreeHeapData {
+        ref_count: 1,
+        padding: length_zero(),
+        size: length_zero(),
+        lookahead_bytes: 0,
+        error_cost: 0,
+        child_count,
+        symbol,
+        parse_state: 0,
+        flags: SubtreeHeapData::make_flags(
+            metadata.visible,
+            metadata.named,
+            false,
+            fragile,
+            fragile,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+        ) | HEAP_ARENA_OWNED,
+        data: SubtreeHeapDataContent {
+            children: SubtreeChildrenData {
+                visible_child_count: 0,
+                named_child_count: 0,
+                visible_descendant_count: 0,
+                dynamic_precedence: 0,
+                repeat_depth: 0,
+                production_id: production_id as u16,
+                first_leaf: FirstLeaf {
+                    symbol: 0,
+                    parse_state: 0,
+                },
+            },
+        },
+    };
+
+    let result = MutableSubtree { ptr: data };
+    ts_subtree_summarize_children(result, language);
+    result
+}
+
 // --- #38: new_error_node ---
 
 pub unsafe fn ts_subtree_new_error_node(
@@ -1592,7 +1764,9 @@ pub unsafe fn ts_subtree_release(pool: &mut SubtreePool, self_: Subtree) {
                     mutable_array_push(&mut pool.tree_stack, ts_subtree_to_mut_unsafe(child));
                 }
             }
-            ts_free(children.as_ptr().cast_mut().cast::<c_void>());
+            if !(*tree.ptr).arena_owned() {
+                ts_free(children.as_ptr().cast_mut().cast::<c_void>());
+            }
         } else {
             if (*tree.ptr).has_external_tokens() {
                 let external_scanner_state =
@@ -1602,7 +1776,9 @@ pub unsafe fn ts_subtree_release(pool: &mut SubtreePool, self_: Subtree) {
                     external_scanner_state,
                 ));
             }
-            ts_subtree_pool_free(pool, tree);
+            if !(*tree.ptr).arena_owned() {
+                ts_subtree_pool_free(pool, tree);
+            }
         }
     }
 }

@@ -76,8 +76,170 @@ There are two implementation options:
      code to handle arena-owned storage.
    - This has higher upside but larger compatibility and correctness risk.
 
-Start with build-and-compact. If the final compaction cost consumes most of the
-gain, move to arena-backed `TSTree`.
+Earlier small allocator experiments changed allocation counts without improving
+throughput. The next implementation should stop optimizing allocator call
+sites and move directly to an arena-backed tree design. Build-and-compact is
+still useful as a fallback, but it likely leaves too much work in the final
+copy pass to reach 20%.
+
+## Architecture Decision: Arena-Backed Normal Trees
+
+The primary implementation should make normal no-old-tree parses produce a
+`TSTree` whose internal nodes live in tree-owned pages. This is a real storage
+model change, not a slab allocator hidden behind `SubtreeArray`.
+
+The current public `Subtree` pointer shape can remain intact:
+
+```text
+[child Subtree; child_count][SubtreeHeapData]
+                               ^
+                               Subtree.ptr
+```
+
+For arena nodes, this block lives inside a page owned by the resulting
+`TSTree`. Child access still uses the existing pointer arithmetic, so `TSNode`,
+tree cursors, and most traversal code do not need a new child representation.
+
+Add a new internal tree storage owner:
+
+```text
+TreeArena {
+  ref_count
+  pages
+  current_page
+}
+
+ArenaPage {
+  next
+  size
+  capacity
+  data[]
+}
+```
+
+Extend `TSTree`:
+
+```text
+TSTree {
+  root: Subtree
+  language
+  included_ranges
+  included_range_count
+  arena: *mut TreeArena
+}
+```
+
+Arena ownership is explicit at the tree level. Do not encode ownership in
+`SubtreeArray.capacity`, and do not use global pools or global locks.
+
+### Arena Node Marking
+
+Use a dedicated internal heap flag, for example `HEAP_ARENA_OWNED`, to mark
+nodes allocated from a `TreeArena`. This is different from the rejected
+`SubtreeArray.capacity` marker:
+
+- the flag lives on the node being released
+- `child_count` still reconstructs the child block address
+- generic array code remains unaware of allocation ownership
+- release behavior is localized to subtree deletion paths
+
+### Release Semantics
+
+For arena-owned nodes, `ts_subtree_release` must still walk children so heap
+leaves, external scanner state, and reused old-tree nodes are released
+correctly. It must not call `ts_free` for the arena-owned node block.
+
+Tree deletion becomes:
+
+```text
+ts_tree_delete
+  -> release root children and non-arena descendants
+  -> decrement TreeArena ref_count
+  -> free all arena pages when the last tree copy is gone
+```
+
+Tree copy becomes:
+
+```text
+ts_tree_copy
+  -> retain root so children are released once after the last tree copy
+  -> increment TreeArena ref_count for arena trees
+```
+
+This keeps copied trees cheap without copying arena pages. The root subtree
+refcount and arena refcount are both needed: the subtree refcount controls when
+children are released, and the arena refcount controls when pages are freed.
+
+### Parser Fast Path Scope
+
+Only enable the arena path when all of these are true:
+
+- `old_tree` is null
+- included ranges are ordinary for the parse
+- parsing is not resuming canceled balancing
+- language is native, not wasm
+
+All reparse, node reuse, wasm, cancellation-resume, and unusual recovery paths
+can keep using the current `Subtree` allocation path until the normal path is
+correct and faster.
+
+### Stack Integration Required For 20%
+
+Arena-backed final trees alone are not enough if reductions still allocate a
+temporary `SubtreeArray` for every pop. The stack API needs a builder-oriented
+pop path:
+
+```text
+ts_stack_pop_count_into_builder(stack, version, count, builder)
+  -> walks the same stack graph
+  -> appends children into builder scratch storage
+  -> returns slice/version metadata
+```
+
+Then reduction becomes:
+
+```text
+children = builder.pop_children(...)
+remove trailing extras into parser scratch arrays
+parent = arena_new_node(children)
+summarize parent from the same child span
+push parent
+```
+
+The first milestone can keep the current `Subtree` value in `StackLink`. The
+node pointer still points at `SubtreeHeapData`; the difference is only where
+that block is owned. A later milestone can remove transient retain/release for
+arena-owned nodes on the stack.
+
+### Expected Wins
+
+This design attacks the measured costs directly:
+
+- no per-node allocator call for arena-owned internal nodes
+- no per-node free for arena-owned internal nodes
+- fewer child-array reallocations once stack pop writes into builder storage
+- less refcount traffic for parser-owned internal nodes
+- better locality for reductions, summarization, and balancing
+
+The target is not a 1-3% branch win. The target is removing the dominant
+construction data movement and allocator pressure from normal parsing.
+
+### First Implementation Slice
+
+1. Add `TreeArena` and arena page allocation utilities.
+2. Extend `TSTree` with an arena pointer and update copy/delete.
+3. Add `HEAP_ARENA_OWNED` and release logic that skips freeing arena blocks
+   while still releasing children.
+4. Add `ts_subtree_new_node_in_arena` and use it only after accept, guarded by
+   a parser flag, to validate tree ownership.
+5. Move reduction node creation to arena allocation for normal no-old-tree
+   parses.
+6. Replace `ts_stack_pop_count` allocation with a builder scratch pop path.
+7. Only after correctness and canaries pass, remove retain/release traffic for
+   arena-owned stack nodes.
+
+Each step must be independently testable. If any step regresses, revert that
+step rather than adding another micro fast path.
 
 ## Proposed Data Model
 
