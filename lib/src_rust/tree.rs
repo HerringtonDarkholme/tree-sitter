@@ -80,21 +80,20 @@ unsafe fn ts_tree_init_ref(
     tree: &mut TSTree,
     root: Subtree,
     language: *const TSLanguage,
-    included_ranges: *const TSRange,
-    included_range_count: u32,
+    included_ranges: &[TSRange],
 ) {
     tree.root = root;
     tree.language = ts_language_copy(language);
+    tree.included_range_count = included_ranges.len() as u32;
     tree.included_ranges =
-        ts_calloc(included_range_count as usize, std::mem::size_of::<TSRange>()).cast::<TSRange>();
-    if included_range_count > 0 {
+        ts_calloc(included_ranges.len(), std::mem::size_of::<TSRange>()).cast::<TSRange>();
+    if !included_ranges.is_empty() {
         std::ptr::copy_nonoverlapping(
-            included_ranges,
+            included_ranges.as_ptr(),
             tree.included_ranges,
-            included_range_count as usize,
+            included_ranges.len(),
         );
     }
-    tree.included_range_count = included_range_count;
 }
 
 unsafe fn ts_tree_copy_ref(tree: &TSTree) -> *mut TSTree {
@@ -165,6 +164,15 @@ unsafe fn tree_included_ranges_mut(tree: &mut TSTree) -> &mut [TSRange] {
     std::slice::from_raw_parts_mut(tree.included_ranges, tree.included_range_count as usize)
 }
 
+#[inline]
+unsafe fn included_range_slice<'a>(included_ranges: *const TSRange, count: u32) -> &'a [TSRange] {
+    if count == 0 {
+        &[]
+    } else {
+        std::slice::from_raw_parts(included_ranges, count as usize)
+    }
+}
+
 fn tree_cursor_empty() -> TreeCursor {
     TreeCursor {
         tree: std::ptr::null(),
@@ -205,7 +213,8 @@ pub unsafe fn ts_tree_new(
 ) -> *mut TSTree {
     let result = ts_malloc(std::mem::size_of::<TSTree>()).cast::<TSTree>();
     let tree = tree_mut(result);
-    ts_tree_init_ref(tree, root, language, included_ranges, included_range_count);
+    let included_ranges = included_range_slice(included_ranges, included_range_count);
+    ts_tree_init_ref(tree, root, language, included_ranges);
     result
 }
 
