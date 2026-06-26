@@ -178,10 +178,10 @@ extern "C" {
 // Array helper functions (generic, mirrors array.h)
 // ---------------------------------------------------------------------------
 
-pub(crate) unsafe fn array_init<T>(arr: *mut Array<T>) {
-    (*arr).size = 0;
-    (*arr).capacity = 0;
-    (*arr).contents = ptr::null_mut();
+pub(crate) unsafe fn array_init<T>(arr: &mut Array<T>) {
+    arr.size = 0;
+    arr.capacity = 0;
+    arr.contents = ptr::null_mut();
 }
 
 pub(crate) unsafe fn array_delete<T>(arr: *mut Array<T>) {
@@ -1301,7 +1301,7 @@ pub(crate) unsafe fn ts_stack_record_summary(
         summary: ts_malloc(std::mem::size_of::<StackSummary>()).cast::<StackSummary>(),
         max_depth,
     };
-    array_init(session.summary);
+    array_init(session.summary.as_mut().unwrap_unchecked());
     stack__iter(
         self_,
         version,
