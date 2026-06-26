@@ -149,6 +149,7 @@ may refer to these rows, but should not duplicate them as separate attempts.
 | Hoist reduce nonterminal check out of pop-slice loop | Reduce path | Retested after reduce lookup win; remained below baseline |
 | Specialized no-alias non-error subtree summarizer | Subtree summarize | Retested after reduce lookup win; remained below baseline |
 | Combine arena child copy with summary calculation | Reduce/node construction | Regressed JavaScript same-session canary: patched `17447` avg bytes/ms vs reverted baseline `18091`; too close to the closed raw-pointer summarizer direction |
+| Direct descriptor comparison for merged reduce candidates | Reduce/candidate selection | Mixed/rejected. JavaScript `-r 10` improved `18608` -> `18781` avg and Go `-r 5` improved `11531` -> `13017`, but TypeScript `-r 10` regressed `24076` -> `23567` avg and `20753` -> `20491` worst; large TypeScript `parser.ts` improved, but the aggregate gate failed |
 | Propagated contains-repetition flag for balancing | Balance/compress | Regressed Rust same-session canary: patched `13149` avg / `11290` worst bytes/ms vs reverted baseline `14124` avg / `12362` worst; metadata overhead outweighed traversal pruning |
 | 16-bit symbol inline leaf encoding | Subtree inline representation | Regressed JavaScript and did not reduce allocation counts |
 | Global mutex slab for `SubtreeHeapData + children` blocks | Subtree block allocation | JavaScript benchmark stalled; global lock path not viable |
@@ -188,6 +189,7 @@ result.
 | Refcount-one release fast path | Regressed JavaScript. |
 | Raw pointer summarizer loop | Regressed JS/TS/Go/Python. Existing iterator compiled better. |
 | Combined arena copy plus summarizer loop | Regressed JavaScript in same-session A/B. Do not retry summary-loop rewrites unless the full builder design changes the ownership/selection protocol first. |
+| Direct merged-candidate descriptor comparison | Mixed. It helped JavaScript/Go and the large TypeScript parser file, but regressed the TypeScript aggregate benchmark. Do not retry as a standalone replacement for temporary candidate parents. |
 | Broad inlining/caching/check-progress fast paths | Repeatedly regressed or stayed below baseline. |
 | Lexer ASCII/direct UTF-8 fast paths | Mixed or negative. |
 
@@ -387,7 +389,7 @@ Per-parse reduce-shape summary:
 
 | Rank | Direction | Decision |
 | ---: | --- | --- |
-| 1 | Full reduce-construction redesign | Still the top parser-core candidate. It targets `ts_parser__reduce`, node construction, child-array allocation/copying, summarization, and stack push as one pipeline. It must not be a linear-pop fast path or buffer-adoption variant. |
+| 1 | Full reduce-construction redesign | Still the top parser-core candidate. It targets `ts_parser__reduce`, node construction, child-array allocation/copying, summarization, and stack push as one pipeline. It must not be a linear-pop fast path, buffer-adoption variant, or standalone merged-candidate selection rewrite. |
 | 2 | Lexer/external scanner work | Now co-equal for C++ and material for all languages. Needs separate direction triage because generated grammar lexers may limit core-library leverage. |
 | 3 | Balancing/compress redesign | Important for Rust and moderate for JS/TS/Go/Python. Do not remove balancing; contains-repetition pruning regressed; only consider a correctness-preserving redesign that reduces compression cost without adding per-node metadata overhead. |
 | 4 | Summarization during reduce construction | Only after a real builder changes selection/ownership. A direct arena copy-plus-summary loop regressed and is closed. |
