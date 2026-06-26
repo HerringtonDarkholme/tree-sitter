@@ -82,6 +82,7 @@ the generated lexer/runtime contract.
 - Payload-child foundation `-r 10` checkpoint
 - C++ normal `cargo flamegraph` high-sample checkpoint
 - Stack-node link-count distribution probe
+- Stack extra-link page-packing benchmark
 - Descriptor lazy-candidate pressure counters
 - Linear-stack architecture coverage counters
 
@@ -128,6 +129,7 @@ the generated lexer/runtime contract.
 - Increase tree arena page size
 - Adopt stack-pop child arrays into tree arena
 - Embedded adopted-block headers
+- Page-backed extra stack links
 - Compact one-link stack-node layout with overflow links
 
 ### Closed: Refcount
@@ -243,6 +245,30 @@ Interpretation: node-size reduction alone does not buy a universal win. The
 extra indirection/allocation for branchy nodes regressed Go and did not move
 C++/TypeScript. Do not retry this as a local layout split unless multi-link
 overflow storage is eliminated or the whole stack representation changes.
+
+Follow-up trial kept the first `StackLink` inline but moved links 2-8 to
+stack-owned page storage instead of per-node overflow arrays. This shrank
+`StackNode` from 232 bytes to 72 bytes and avoided per-node overflow
+allocation. `cargo test --all` passed outside the sandbox. Same-session warmed
+normal `-r 10` benchmark against the segmented-storage baseline was still
+mixed:
+
+| Language | Page links | Baseline | Delta |
+| --- | ---: | ---: | ---: |
+| TypeScript | 25351 | 20632 | +22.9% |
+| JavaScript | 20176 | 20739 | -2.7% |
+| Python | 10433 | 9332 | +11.8% |
+| Go | 17056 | 17264 | -1.2% |
+| Rust | 16836 | 17547 | -4.1% |
+| C++ | 8006 | 6984 | +14.6% |
+| Java | 12663 | 12527 | +1.1% |
+
+Interpretation: page-backed extra links removed the old overflow-allocation
+problem, but did not produce a universal gain. The large linear fixtures for
+JavaScript, Go, and Rust still regressed, so the likely cost is extra field
+work and/or link indirection outweighing the smaller node body. Do not keep
+this as a standalone storage optimization. Future stack work should remove
+graph-node creation on the normal path, not just repack graph-node links.
 
 Payload-aware stack graph traversal primitive was added without enabling lazy
 reductions. `cargo test --all` passed outside the sandbox. Normal `-r 10`
