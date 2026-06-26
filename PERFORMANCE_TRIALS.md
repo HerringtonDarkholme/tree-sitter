@@ -141,6 +141,7 @@ may refer to these rows, but should not duplicate them as separate attempts.
 | C++ marker-index flamegraph | Profiling/design | `cargo flamegraph` on C++ `marker-index.h` with `/tmp/ts-raw-profile-harness-plain` produced `/tmp/tree-sitter-cpp-marker-current.svg`: reduce `27.81%`, `ts_lex` `21.93%`, keyword lex `5.88%`, new node in arena `9.63%`, summarize `8.56%`, stack pop into builder `5.88%`, stack push `5.35%` across visible frames, balance `3.74%`. Confirms C++ needs both reduce-construction and lexer/runtime-boundary work for a universal 20% target. |
 | Lexer/runtime boundary counters | Profiling/design | Temporary parser and lexer counters across the seven target languages showed included-range stepping is zero in normal parsing and chunk reads are tiny. External scanner calls are high for JavaScript/TypeScript/Python and moderate for Rust, but absent for Go/C++/Java. Core runtime lookahead/advance callbacks are broad, but prior single-range and UTF-8/ASCII fast paths already failed, so lexer work needs narrower boundary evidence before code. |
 | Reduce push/pop shape counters | Profiling/design | Temporary fresh-reduce counters showed trailing-extra stack pushes are too rare for batching to be a primary direction: `10,313` trailing pushes vs `319,371` parent pushes across the seven target languages. The broader signal is internal subtree churn: reductions popped `316,248` internal subtrees, almost one per reduction group. This supports pending/lazy reduction metadata as the next architecture design and deprioritizes parent-plus-extra push batching. |
+| Pending materialization pressure counters | Profiling/design | Temporary counters showed normal parsing rarely forces full tree comparison after reduce: `0` `ts_subtree_compare` calls across the seven-language run. Stack equivalence checked `9,678` links across `319,371` reduced parents, with Go contributing most of that. External-token metadata is the main required descriptor surface: `47,710` reduced parents had external tokens and `14,730` had external scanner state changes. |
 
 ### Rejected Or Closed
 
@@ -779,6 +780,36 @@ comparison, or final tree output. This is not a small special case. The design
 must introduce a stack-link payload abstraction or a descriptor-backed `Subtree`
 query layer; otherwise the first forced metadata query will materialize the node
 immediately and lose the intended phase removal.
+
+Temporary pending materialization pressure instrumentation, removed before
+committing:
+
+| Language | Reduced parents | External parents | External-state-change parents | Compare calls | Stack equivalence calls | Eq internal left | Eq internal right | Eq external-state checks |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| JavaScript | 102,012 | 19,167 | 0 | 0 | 1,050 | 716 | 716 | 927 |
+| TypeScript | 65,903 | 6,492 | 0 | 0 | 369 | 227 | 227 | 270 |
+| Python | 59,977 | 19,772 | 14,409 | 0 | 43 | 25 | 25 | 28 |
+| Go | 64,540 | 0 | 0 | 0 | 8,017 | 3,993 | 3,993 | 5,231 |
+| Rust | 21,182 | 2,279 | 321 | 0 | 0 | 0 | 0 | 0 |
+| C++ | 4,592 | 0 | 0 | 0 | 175 | 79 | 79 | 111 |
+| Java | 1,165 | 0 | 0 | 0 | 24 | 17 | 17 | 20 |
+| Total | 319,371 | 47,710 | 14,730 | 0 | 9,678 | 5,057 | 5,057 | 6,587 |
+
+Implications:
+
+- Normal parsing did not call `ts_subtree_compare` during this seven-language
+  run, reinforcing that merged-candidate tree comparison is not the common
+  materialization trigger.
+- Stack equivalence pressure is modest: `9,678 / 319,371` = `3.0%` as many
+  equivalence calls as reduced parents, with Go accounting for most calls.
+- External scanner metadata is the hard part for a descriptor. `47,710` parents
+  have external tokens, and Python contributes `14,409` state-change parents.
+  A pending descriptor must be able to expose/copy/compare external scanner
+  state without materializing children.
+- The next implementation slice should therefore define a pending-reduction
+  metadata object first, not a tree-storage rewrite. It needs cached summary
+  fields, external scanner metadata, child-span ownership, and a forced
+  materialization path.
 
 ### Candidate Ranking
 
