@@ -65,6 +65,7 @@ ts_parser__advance -> ts_parser__reduce
 - Pending reduction lifetime counters
 - Payload-child foundation `-r 10` checkpoint
 - C++ normal `cargo flamegraph` high-sample checkpoint
+- Stack-node link-count distribution probe
 
 ### Closed: Summarization
 
@@ -108,6 +109,7 @@ ts_parser__advance -> ts_parser__reduce
 - Increase tree arena page size
 - Adopt stack-pop child arrays into tree arena
 - Embedded adopted-block headers
+- Compact one-link stack-node layout with overflow links
 
 ### Closed: Refcount
 
@@ -185,6 +187,37 @@ construction. A universal 20% library-only gain is unlikely from reducer local
 tuning; it requires removing or deferring a full tree-construction phase, or a
 separate generated-lexer strategy outside reusable runtime code.
 
+Stack-node link-count probe, normal `-r 1`, showed mostly one-link nodes:
+
+| Language | One-link | Multi-link |
+| --- | ---: | ---: |
+| TypeScript | 114783 | 269 |
+| JavaScript | 179679 | 1005 |
+| Python | 102503 | 14 |
+| Go | 111874 | 4832 |
+| Rust | 35962 | 0 |
+| C++ | 7924 | 14 |
+| Java | 2062 | 18 |
+
+Follow-up trial replaced the fixed eight-link inline `StackNode` with one
+inline link plus lazy overflow links. `cargo test --all` passed outside the
+sandbox, but same-session normal `-r 10` benchmarks were mixed:
+
+| Language | Compact | Baseline | Delta |
+| --- | ---: | ---: | ---: |
+| TypeScript | 25978 | 26008 | -0.1% |
+| JavaScript | 20057 | 19557 | +2.6% |
+| Python | 10463 | 10373 | +0.9% |
+| Go | 16678 | 18286 | -8.8% |
+| Rust | 17400 | 17029 | +2.2% |
+| C++ | 7843 | 7924 | -1.0% |
+| Java | 12121 | 11870 | +2.1% |
+
+Interpretation: node-size reduction alone does not buy a universal win. The
+extra indirection/allocation for branchy nodes regressed Go and did not move
+C++/TypeScript. Do not retry this as a local layout split unless multi-link
+overflow storage is eliminated or the whole stack representation changes.
+
 Payload-child foundation versus `origin/master`, normal `-r 10` average speed:
 
 | Language | Current | Origin | Delta |
@@ -209,6 +242,11 @@ patch: either a separate parse-time node representation with one final tree
 lowering pass, or a fully descriptor-aware stack/recovery/merge/accept layer.
 Reject either direction unless it removes a full allocation/copy/summarization
 phase on normal parses and passes corpus tests before benchmarking.
+
+The compact stack-node layout trial rules out node-size reduction by itself as
+the big architecture path. Next work should focus above the stack storage
+level: reducing concrete subtree construction during parsing, or moving normal
+parse reductions into a compact parse-time tree that is lowered once at accept.
 
 ## Process Rules
 
