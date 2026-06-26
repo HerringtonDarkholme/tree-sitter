@@ -180,6 +180,7 @@ may refer to these rows, but should not duplicate them as separate attempts.
 | Fresh-parse direct graph builder collection | Reduce/stack pop | Rejected on Go warm same-session canary. Patched direct graph collection into `StackPopBuilder` avoided the old `StackSliceArray` conversion path for fresh reductions, but Go `-r 10` regressed from reverted baseline `18768` avg / `16707` worst bytes/ms to patched `17672` avg / `15865` worst. The graph fallback rate alone did not prove the conversion detour was worth replacing. |
 | Single-group reduce control-flow split | Reduce/finalization | Rejected on JavaScript warm same-session canary. TypeScript looked positive in an initial `-r 10` canary (`26287` avg), but JavaScript regressed from reverted baseline `20395` avg / `19617` worst bytes/ms to patched `19648` avg / `19276` worst. Separating single-candidate control flow without removing child collection, arena copy, or summary work is insufficient. |
 | Direct arena finalization for linear fresh reductions | Reduce/node construction | Rejected on JavaScript canary. The trial allocated an arena node block up front, filled it directly from the linear stack pop, removed trailing extras, and initialized the parent in place. TypeScript `-r 5` improved to `26333` avg / `22424` worst bytes/ms, but JavaScript `-r 10` regressed to `19811` avg / `18514` worst after a prior run at `20469` avg / `18584` worst. The second stack walk and branch/protocol overhead outweighed avoiding the builder-to-arena copy for JavaScript. |
+| One-pass final-storage linear collection | Reduce/node construction | Rejected after same-session seven-language matrix. The trial added an arena reservation/finalization primitive, collected linear stack-pop children directly into reserved final storage, reversed in place, trimmed trailing extras, and initialized parent data after the non-extra prefix. Patched vs baseline `-r 10` avg/worst bytes/ms: JavaScript `19902/18114` vs `19381/18353`, TypeScript `26594/22976` vs `24519/19013`, Python `10418/520` vs `10308/542`, Go `16236/15277` vs `16818/15983`, Rust `18091/14136` vs `18293/14266`, C++ `7939/6831` vs `6816/5662`, Java `12497/9842` vs `13459/10449`. Removing the builder-to-arena copy helped TypeScript and C++, but direct arena reservation/locality and fallback costs regressed Go, Rust, and Java. |
 | Propagated contains-repetition flag for balancing | Balance/compress | Regressed Rust same-session canary: patched `13149` avg / `11290` worst bytes/ms vs reverted baseline `14124` avg / `12362` worst; metadata overhead outweighed traversal pruning |
 | 16-bit symbol inline leaf encoding | Subtree inline representation | Regressed JavaScript and did not reduce allocation counts |
 | Global mutex slab for `SubtreeHeapData + children` blocks | Subtree block allocation | JavaScript benchmark stalled; global lock path not viable |
@@ -228,6 +229,7 @@ result.
 | Fresh-parse direct graph builder collection | Warm Go canary regressed despite the highest recorded graph fallback rate. Do not retry direct graph collection as an isolated `StackPopBuilder` completion; only revisit if a full reduce-construction protocol redesign removes more of the candidate materialization pipeline at the same time. |
 | Single-group reduce control-flow split | Warm JavaScript regressed. Do not retry single-candidate branching unless the change removes a material phase such as builder child collection, builder-to-arena copy, or summary/finalization work. |
 | Direct arena finalization for linear fresh reductions | JavaScript regressed even though TypeScript improved. Do not retry as a linear-only two-pass stack walk. A future direct-finalization design would need to collect directly in one pass without adding another stack traversal. |
+| One-pass final-storage linear collection | Mixed after same-session seven-language matrix. It removed the builder-to-arena child copy and helped TypeScript/C++, but regressed Go/Rust/Java. Do not retry direct collection into upfront arena reservations as a linear-only path. Reopen only with evidence that reservation/fallback locality costs are removed or that the protocol also eliminates summary, stack-push, or graph-candidate materialization work. |
 | Broad inlining/caching/check-progress fast paths | Repeatedly regressed or stayed below baseline. |
 | Lexer ASCII/direct UTF-8 fast paths | Mixed or negative. |
 
@@ -701,50 +703,38 @@ it.
 
 | Rank | Direction | Decision |
 | ---: | --- | --- |
-| 1 | One-pass final-storage reduce construction | Still the top parser-core candidate. Fresh normal parsing is almost entirely single-candidate, and trailing extras are only `1.8%` of collected child slots, so the next version should target direct collection into reserved final storage with bounded holes. Preserve the old path for reparses and rare merged groups until equivalence is proven. It must not become buffer adoption, a two-pass linear-only stack walk, or standalone merged-candidate selection. |
-| 2 | Lexer/external scanner work | Now co-equal for C++ and material for all languages. Needs separate direction triage because generated grammar lexers may limit core-library leverage. |
+| 1 | Lexer/runtime boundary investigation | Now the highest-priority measurement direction. C++ and JavaScript have large lexer/scanner shares, and one-pass final-storage reduce construction regressed Go/Rust/Java. Needs boundary evidence before code because generated grammar lexers and external scanners may limit core-library leverage. |
+| 2 | Multi-phase reduce protocol redesign | Still a parser-core candidate only if it removes more than the builder-to-arena copy. The rejected one-pass linear collection helped TypeScript/C++ but regressed Go/Rust/Java, so future reduce work must also eliminate summary, stack-push, or graph-candidate materialization costs. |
 | 3 | Balancing/compress redesign | Important for Rust and moderate for JS/TS/Go/Python. Do not remove balancing; contains-repetition pruning and single-pass compression both regressed or failed to improve Rust. Only consider a correctness-preserving redesign with tree-shape evidence, not schedule tuning. |
 | 4 | Summarization during reduce construction | Only after a real builder changes selection/ownership. A direct arena copy-plus-summary loop regressed and is closed. |
 
 ### Next Direction Queue
 
-1. One-pass final-storage reduce construction.
-   - Goal: collect fresh single-candidate reductions into reserved tree-arena
-     child storage in one stack traversal, reverse the reserved range in place,
-     trim trailing extras by shortening the non-extra prefix, and place the
-     parent data immediately after that prefix.
-   - Why first: it is the largest shared parser-owned hotspot after the kept
-     stack-pop builder, and it covers allocation, child copying, candidate
-     selection, summarization, stack push, and graph fallback together.
-     The new shape counters show the internal-hole cost from trailing extras is
-     bounded in normal parsing.
-   - Tooling: `cargo flamegraph` for representative files, temporary
-     parser-local counters for candidate counts and child-span bytes,
-     same-session `cargo xtask benchmark --kind normal -r 10 --language` for
-     the seven target languages, then `cargo test --all` outside the sandbox.
-   - First deliverable: an arena reservation API design that can reserve
-     `Subtree` slots first, then initialize `SubtreeHeapData` after the final
-     non-extra prefix without requiring a second stack traversal.
-   - Implementation shape if the design passes: keep graph fallback, merged
-     candidates, and reparses on the conservative builder path; route only
-     proven fresh single-candidate reductions through the one-pass arena path;
-     then broaden after equivalence tests and benchmarks.
-   - Reject if it needs a second stack walk, if holes can escape arena ownership,
-     if trailing extras require per-candidate heap arrays, or if it becomes a
-     standalone summary/candidate-selection tweak.
-
-2. Lexer/runtime boundary investigation.
+1. Lexer/runtime boundary investigation.
    - Goal: determine whether the core runtime has a real library-owned lexer
      optimization surface after generated lexer and external scanner costs are
      separated.
-   - Why second: C++ and JavaScript show large lexer/scanner shares, but prior
-     core lexer ASCII/direct UTF-8 fast paths failed. This needs boundary
-     evidence before code.
+   - Why first: C++ and JavaScript show large lexer/scanner shares, prior core
+     lexer ASCII/direct UTF-8 fast paths failed, and the latest reduce-storage
+     architecture trial was mixed. This needs boundary evidence before code.
    - Tooling: `cargo flamegraph`, temporary counters around
      `ts_lexer__get_lookahead`, `ts_lexer__do_advance`, included-range handling,
      generated `ts_lex`, and external scanner calls.
    - Reject if the remaining cost is dominated by generated grammar code or
      external scanners rather than reusable runtime code.
+
+2. Multi-phase reduce protocol redesign.
+   - Goal: remove multiple reduce phases together: candidate materialization,
+     builder-to-arena copying, separate child summarization, and repeated
+     parent/trailing-extra stack pushes.
+   - Why second: reduce is still the largest shared parser-owned frame, but
+     removing only the child copy regressed Go/Rust/Java. A useful redesign must
+     change more than storage.
+   - Tooling: `cargo flamegraph` for post-builder samples, temporary counters
+     for stack-push batches and summary fallback causes, same-session
+     seven-language benchmarks.
+   - Reject if it is a linear-only direct-storage path, buffer adoption, direct
+     graph collection, candidate-selection-only change, or summary-loop rewrite.
 
 3. Balance/compress redesign.
    - Goal: reduce post-parse tree balancing/compression cost without removing
@@ -769,27 +759,26 @@ it.
 
 ### Next Parser Trial
 
-The next trial should design and then implement the smallest viable one-pass
-final-storage reduce path for fresh single-candidate reductions, while keeping
-graph fallback, merged candidates, and reparses on the conservative path:
+The next trial should be lexer/runtime boundary instrumentation, not production
+code:
 
-- Hypothesis: reserving final arena child storage during stack collection,
-  reversing that reserved range in place, and placing parent data after the
-  final non-extra prefix removes the builder-to-arena child copy without the
-  failed second stack walk.
-- History check: direct linear stack-pop, stack-pop buffer adoption, child-array
-  adoption, summarizer micro-optimizations, combined copy-plus-summary, page-size
-  tuning, refcount ordering, and allocation pools are closed.
-- Evidence status: seven-language counters show trailing extras are small enough
-  for bounded holes, and fresh normal reductions are overwhelmingly
-  single-candidate.
-- Kill criteria: if the design needs a second stack traversal, relies on
-  adopting malloc buffers, changes generated grammar code, or becomes an
-  isolated summarizer tweak, reject it.
-- Implementation boundary: add an arena reservation API and a parser-private
-  single-candidate collector; keep the existing `StackPopBuilder` path for
-  merged groups, graph fallback, and reparses until equivalence and benchmark
-  data justify broadening.
+- Hypothesis: after reduce-storage copy removal proved mixed, the next broad
+  parser speedup is more likely at the lexer/runtime boundary or in a
+  multi-phase reduce redesign, not in direct arena storage alone.
+- History check: ASCII/direct UTF-8 lexer fast paths failed, and generated
+  grammar code must not be edited. Direct graph collection, direct arena
+  finalization, and one-pass linear final storage are closed as standalone
+  reduce directions.
+- Evidence status: C++ and JavaScript flamegraphs show large `ts_lex`,
+  keyword-lex, and external scanner shares, but the reusable runtime portion is
+  not yet isolated.
+- Kill criteria: if counters show the cost is mostly generated `ts_lex`,
+  keyword lexer tables, or external scanner implementation code, do not edit the
+  core runtime for this direction.
+- Implementation boundary if evidence passes: only optimize reusable runtime
+  work such as `ts_lexer__get_lookahead`, `ts_lexer__do_advance`,
+  included-range checks, mark/end bookkeeping, or external-scanner call
+  boundary overhead.
 
 ### Reduce-Construction Redesign Sketch
 
