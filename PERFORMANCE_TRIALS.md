@@ -52,6 +52,7 @@ ts_parser__advance -> ts_parser__reduce
 - Payload span access/release for reduce wiring
 - Pending descriptor payload-child ownership and summary
 - Pending descriptor recursive materialization boundary
+- Payload-aware stack graph traversal primitive
 
 ### Measurement
 
@@ -217,6 +218,26 @@ Interpretation: node-size reduction alone does not buy a universal win. The
 extra indirection/allocation for branchy nodes regressed Go and did not move
 C++/TypeScript. Do not retry this as a local layout split unless multi-link
 overflow storage is eliminated or the whole stack representation changes.
+
+Payload-aware stack graph traversal primitive was added without enabling lazy
+reductions. `cargo test --all` passed outside the sandbox. Normal `-r 10`
+checkpoint was mixed/no-win, as expected for infrastructure not yet on the hot
+reduce path:
+
+| Language | Speed |
+| --- | ---: |
+| TypeScript | 26470 |
+| JavaScript | 19903 |
+| Python | 9982 |
+| Go | 17905 |
+| Rust | 17236 |
+| C++ | 7804 |
+| Java | 12603 |
+
+Interpretation: this does not satisfy the performance target by itself. Its
+purpose is to close the correctness gap that made broad descriptor wiring
+unsafe: stack graph traversal can now collect retained `StackLinkPayload`s
+without pretending pending descriptors are concrete subtrees.
 
 Payload-child foundation versus `origin/master`, normal `-r 10` average speed:
 

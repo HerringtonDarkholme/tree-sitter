@@ -118,6 +118,13 @@ pub struct StackIterator {
     pub is_pending: bool,
 }
 
+#[repr(C)]
+struct StackPayloadIterator {
+    node: *mut StackNode,
+    payloads: StackLinkPayloadArray,
+    subtree_count: u32,
+}
+
 /// Generic dynamic array, mirrors C `Array(T)`.
 #[repr(C)]
 pub struct Array<T> {
@@ -1090,6 +1097,42 @@ unsafe fn stack_pop_builder_release_payloads(
     builder.payloads.size = start;
 }
 
+unsafe fn stack_payload_array_delete(
+    payloads: &mut StackLinkPayloadArray,
+    subtree_pool: &mut SubtreePool,
+) {
+    for i in 0..payloads.size {
+        stack_link_payload_release(*array_get_ref(payloads, i), subtree_pool);
+    }
+    if !payloads.contents.is_null() {
+        array_delete(payloads);
+    }
+}
+
+unsafe fn stack_payload_array_copy(
+    source: &StackLinkPayloadArray,
+    destination: &mut StackLinkPayloadArray,
+) {
+    array_reserve(destination, source.size);
+    if source.size > 0 {
+        ptr::copy_nonoverlapping(source.contents, destination.contents, source.size as usize);
+        for i in 0..source.size {
+            stack_link_payload_retain(*array_get_ref(destination, i));
+        }
+    }
+    destination.size = source.size;
+}
+
+unsafe fn stack_payload_array_reverse(payloads: &mut StackLinkPayloadArray) {
+    let limit = payloads.size / 2;
+    for i in 0..limit {
+        let reverse_index = payloads.size as usize - 1 - i as usize;
+        let a = payloads.contents.add(i as usize);
+        let b = payloads.contents.add(reverse_index);
+        ptr::swap(a, b);
+    }
+}
+
 pub unsafe fn ts_stack_pop_builder_payloads(
     builder: &StackPopBuilder,
     span: StackSliceSpan,
@@ -1231,7 +1274,19 @@ pub unsafe fn ts_stack_pop_count_payloads_into(
     builder: &mut StackPopBuilder,
 ) -> bool {
     ts_stack_pop_builder_clear(builder);
+    if stack_pop_count_payloads_linear_into(self_, version, count, builder) {
+        return true;
+    }
 
+    stack_pop_payloads_into(self_, version, builder, Some(count))
+}
+
+unsafe fn stack_pop_count_payloads_linear_into(
+    self_: &mut Stack,
+    version: StackVersion,
+    count: u32,
+    builder: &mut StackPopBuilder,
+) -> bool {
     let mut node = stack_head(self_, version).node;
     let mut subtree_count = 0;
     let start = builder.payloads.size;
@@ -1275,6 +1330,158 @@ pub unsafe fn ts_stack_pop_count_payloads_into(
     };
     stack_pop_builder_add_slice(self_, version, stack_node_mut(node), builder, slice);
     true
+}
+
+pub unsafe fn ts_stack_pop_all_payloads_into(
+    self_: &mut Stack,
+    version: StackVersion,
+    builder: &mut StackPopBuilder,
+) {
+    ts_stack_pop_builder_clear(builder);
+    stack_pop_payloads_into(self_, version, builder, None);
+}
+
+unsafe fn stack_pop_payloads_into(
+    stack: &mut Stack,
+    version: StackVersion,
+    builder: &mut StackPopBuilder,
+    goal_subtree_count: Option<u32>,
+) -> bool {
+    let mut iterators = Array::<StackPayloadIterator> {
+        contents: ptr::null_mut(),
+        size: 0,
+        capacity: 0,
+    };
+    array_reserve(&mut iterators, 4);
+
+    let mut new_iterator = StackPayloadIterator {
+        node: stack_head(stack, version).node,
+        payloads: StackLinkPayloadArray {
+            contents: ptr::null_mut(),
+            size: 0,
+            capacity: 0,
+        },
+        subtree_count: 0,
+    };
+
+    if let Some(goal_subtree_count) = goal_subtree_count {
+        let reserve_count =
+            ts_subtree_alloc_size(goal_subtree_count) / std::mem::size_of::<StackLinkPayload>();
+        array_reserve(
+            &mut new_iterator.payloads,
+            u32::try_from(reserve_count).unwrap(),
+        );
+    }
+
+    array_push(&mut iterators, new_iterator);
+
+    let mut popped = false;
+    while iterators.size > 0 {
+        let mut i: u32 = 0;
+        let mut size = iterators.size;
+        while i < size {
+            let iterator = array_get_ref(&iterators, i);
+            let node = iterator.node;
+            let should_pop = match goal_subtree_count {
+                Some(goal) => iterator.subtree_count == goal,
+                None => (*node).link_count == 0,
+            };
+            let should_stop = should_pop || (*node).link_count == 0;
+
+            if should_pop {
+                let mut payloads = ptr::read(&array_get_ref(&iterators, i).payloads);
+                stack_payload_array_reverse(&mut payloads);
+
+                let start = builder.payloads.size;
+                array_reserve(&mut builder.payloads, start + payloads.size);
+                if payloads.size > 0 {
+                    ptr::copy_nonoverlapping(
+                        payloads.contents,
+                        builder.payloads.contents.add(start as usize),
+                        payloads.size as usize,
+                    );
+                }
+                builder.payloads.size = start + payloads.size;
+                if !payloads.contents.is_null() {
+                    array_delete(&mut payloads);
+                }
+
+                let span = StackSliceSpan {
+                    start,
+                    size: builder.payloads.size - start,
+                    version: STACK_VERSION_NONE,
+                };
+                stack_pop_builder_add_slice(stack, version, stack_node_mut(node), builder, span);
+                popped = true;
+            }
+
+            if should_stop {
+                if !should_pop {
+                    let iter = array_get_mut(&mut iterators, i);
+                    stack_payload_array_delete(
+                        &mut iter.payloads,
+                        stack.subtree_pool.as_mut().unwrap_unchecked(),
+                    );
+                }
+                array_erase(&mut iterators, i);
+                i = i.wrapping_sub(1);
+                size -= 1;
+                i = i.wrapping_add(1);
+                continue;
+            }
+
+            let mut j: u32 = 1;
+            while j <= u32::from((*node).link_count) {
+                let next_iterator: &mut StackPayloadIterator;
+                let link: StackLink;
+                if j == u32::from((*node).link_count) {
+                    link = (*node).links[0];
+                    next_iterator = array_get_mut(&mut iterators, i);
+                } else {
+                    if iterators.size >= MAX_ITERATOR_COUNT {
+                        j += 1;
+                        continue;
+                    }
+                    link = (*node).links[j as usize];
+                    let current_iterator = ptr::read(array_get_ref(&iterators, i));
+                    let mut copied_iterator = StackPayloadIterator {
+                        node: current_iterator.node,
+                        payloads: StackLinkPayloadArray {
+                            contents: ptr::null_mut(),
+                            size: 0,
+                            capacity: 0,
+                        },
+                        subtree_count: current_iterator.subtree_count,
+                    };
+                    stack_payload_array_copy(
+                        &current_iterator.payloads,
+                        &mut copied_iterator.payloads,
+                    );
+                    array_push(&mut iterators, copied_iterator);
+                    next_iterator = array_back_mut(&mut iterators);
+                }
+
+                next_iterator.node = link.node;
+                if stack_link_payload_is_null(link.payload) {
+                    next_iterator.subtree_count += 1;
+                } else {
+                    array_push(&mut next_iterator.payloads, link.payload);
+                    stack_link_payload_retain(link.payload);
+
+                    if !stack_link_payload_extra(link.payload) {
+                        next_iterator.subtree_count += 1;
+                    }
+                }
+                j += 1;
+            }
+            i = i.wrapping_add(1);
+        }
+    }
+
+    if !iterators.contents.is_null() {
+        array_delete(&mut iterators);
+    }
+    popped
 }
 
 /// Core iteration function for walking the stack graph.
