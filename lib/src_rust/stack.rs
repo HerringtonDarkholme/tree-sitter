@@ -283,7 +283,7 @@ pub unsafe fn array_insert<T>(arr: &mut Array<T>, index: u32, element: T) {
             count,
         );
     }
-    *arr.contents.add(index as usize) = element;
+    ptr::write(arr.contents.add(index as usize), element);
     arr.size += 1;
 }
 
