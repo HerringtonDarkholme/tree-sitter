@@ -398,6 +398,14 @@ the same priority order: `ts_parser__reduce` `30.37%`,
 `ts_parser__balance_subtree` `4.05%`, `ts_lex` `22.90%`, and
 `ts_lex_keywords` `6.07%`.
 
+Refreshed JavaScript `jquery.js` sample after the kept parser-owned stack-pop
+builder still points at reduce construction as the largest parser-owned target:
+`ts_parser__reduce` `25.51%`, `ts_subtree_new_node_in_arena` `9.42%`,
+`ts_stack_pop_count_into` `7.29%`, `ts_subtree_summarize_children` `6.93%`,
+`ts_parser__balance_subtree` `6.31%`, `ts_subtree_compress` `4.71%`,
+`ts_lex` `13.07%`, external scanner scan `7.02%`, and
+`ts_lex_keywords` `5.51%`.
+
 Temporary reduce-shape instrumentation, removed before committing:
 
 | Language sample | Linear pop-count calls | Graph fallback calls | Dominant reduce child counts |
@@ -431,10 +439,68 @@ Per-parse reduce-shape summary:
 | 3 | Balancing/compress redesign | Important for Rust and moderate for JS/TS/Go/Python. Do not remove balancing; contains-repetition pruning and single-pass compression both regressed or failed to improve Rust. Only consider a correctness-preserving redesign with tree-shape evidence, not schedule tuning. |
 | 4 | Summarization during reduce construction | Only after a real builder changes selection/ownership. A direct arena copy-plus-summary loop regressed and is closed. |
 
+### Next Direction Queue
+
+1. Reduce-construction protocol redesign.
+   - Goal: remove the repeated conversion pipeline from stack-pop materialization
+     to candidate parent construction to final arena parent construction.
+   - Why first: it is the largest shared parser-owned hotspot after the kept
+     stack-pop builder, and it covers allocation, child copying, candidate
+     selection, summarization, stack push, and graph fallback together.
+   - Tooling: `cargo flamegraph` for representative files, temporary
+     parser-local counters for candidate counts and child-span bytes,
+     same-session `cargo xtask benchmark --kind normal -r 10 --language` for
+     the seven target languages, then `cargo test --all` outside the sandbox.
+   - First deliverable: a no-code equivalence map between the current
+     `StackSliceArray` path and the proposed reduce-builder protocol. Do not
+     start production code until ownership, candidate selection, trailing extras,
+     graph fallback, and reparse behavior are accounted for.
+   - Implementation shape if the design passes: add parser-private data types,
+     prove collection equivalence against `ts_stack_pop_count`, route collection
+     through the builder without changing final allocation, then move final
+     parent construction to consume selected spans directly.
+   - Reject if it becomes a linear-only fast path, buffer adoption, standalone
+     summarizer rewrite, or candidate-selection tweak.
+
+2. Lexer/runtime boundary investigation.
+   - Goal: determine whether the core runtime has a real library-owned lexer
+     optimization surface after generated lexer and external scanner costs are
+     separated.
+   - Why second: C++ and JavaScript show large lexer/scanner shares, but prior
+     core lexer ASCII/direct UTF-8 fast paths failed. This needs boundary
+     evidence before code.
+   - Tooling: `cargo flamegraph`, temporary counters around
+     `ts_lexer__get_lookahead`, `ts_lexer__do_advance`, included-range handling,
+     generated `ts_lex`, and external scanner calls.
+   - Reject if the remaining cost is dominated by generated grammar code or
+     external scanners rather than reusable runtime code.
+
+3. Balance/compress redesign.
+   - Goal: reduce post-parse tree balancing/compression cost without removing
+     correctness-preserving balancing.
+   - Why third: Rust has the largest balance share, but previous pruning and
+     schedule trials did not improve it.
+   - Tooling: temporary tree-shape counters for repeat depth, child counts,
+     compression depth, and balancing call outcomes; then Rust-first canaries
+     followed by the full seven-language benchmark matrix.
+   - Reject if the idea is only schedule tuning, branch pruning metadata, or
+     skipping balancing.
+
+4. Summary computation revisit.
+   - Goal: reduce child-summary cost only after the reduce-builder protocol
+     changes candidate ownership enough to avoid repeating closed loops.
+   - Why fourth: direct summary-loop rewrites and builder-specific copy plus
+     summary finalization already regressed at least one target language.
+   - Tooling: use flamegraph evidence from the accepted reduce-builder shape,
+     not the old `ts_subtree_new_node_in_arena` path.
+   - Reject unless the new builder eliminates candidate parent construction or
+     otherwise changes the ownership protocol materially.
+
 ### Next Parser Trial
 
-The next trial should be a design sketch for the full reduce-construction
-redesign, then a no-code review against closed history before implementation:
+The next trial should be a no-code equivalence and ownership design for the full
+reduce-construction redesign, then a review against closed history before any
+implementation:
 
 - Hypothesis: a full reduce-construction redesign is the only remaining
   parser-core direction with enough shared leverage to pair with later lexer or
