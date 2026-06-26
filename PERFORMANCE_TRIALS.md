@@ -125,6 +125,7 @@ may refer to these rows, but should not duplicate them as separate attempts.
 | ASCII fast path in `ts_lexer__get_lookahead` | Lexer decode | Neutral or negative |
 | Direct UTF-8 decode path avoiding decode function pointer | Lexer decode | Mixed or negative |
 | Single-range per-character lexer advance fast path | Lexer advance | Negative |
+| No-log lexer advance callback specialization | Lexer callback | Mixed/rejected. JavaScript average improved `18091` -> `18498`, but worst file regressed `17985` -> `16723`; C++ canary was noisy/inconclusive. |
 | Alias-sequence condition reorder | Subtree summarize alias handling | Negative |
 | Direct `as u8` casts replacing checked conversions in leaf creation | Leaf construction | Negative on JavaScript and Go |
 | `#[inline]` on `ts_subtree_retain` | Refcount helper | Negative |
