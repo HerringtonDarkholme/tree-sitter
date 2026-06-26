@@ -77,6 +77,7 @@ Keep one row per unique trial. Do not duplicate reruns.
 | Stack-link payload abstraction | Stack foundation | Kept pending-reduction foundation |
 | Descriptor-capable stack payload layout | Stack foundation | Kept; layout unchanged for hot stack nodes |
 | Pending descriptor metadata dispatch | Stack foundation | Kept; stack metadata helpers can read pending descriptor fields without materialization |
+| Parser-owned pending descriptor storage | Parser/stack foundation | Kept; descriptors now have parser-owned parse-lifetime storage and cleanup after stack release |
 
 ### Measurement And Design
 

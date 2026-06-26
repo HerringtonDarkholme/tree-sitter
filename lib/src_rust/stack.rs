@@ -85,6 +85,7 @@ pub struct PendingReduction {
     pub production_id: u16,
     pub parse_state: TSStateId,
     pub child_count: u32,
+    pub children: SubtreeArray,
     pub padding: Length,
     pub size: Length,
     pub lookahead_bytes: u32,
@@ -658,6 +659,7 @@ unsafe fn stack_link_payload_release(payload: StackLinkPayload, subtree_pool: &m
         (*pending).ref_count -= 1;
         if (*pending).ref_count == 0 && !(*pending).materialized.ptr.is_null() {
             ts_subtree_release(subtree_pool, (*pending).materialized);
+            (*pending).materialized = NULL_SUBTREE;
         }
     } else {
         ts_subtree_release(subtree_pool, stack_link_payload_subtree(payload));

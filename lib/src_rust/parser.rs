@@ -91,6 +91,7 @@ use super::stack::{
     ts_stack_swap_versions,
     ts_stack_version_count,
     Array,
+    PendingReduction,
     Stack,
     StackPopBuilder,
     StackSliceSpan,
@@ -361,6 +362,8 @@ struct ReduceAction {
 /// `ReduceActionSet` — Array(ReduceAction)
 type ReduceActionSet = Array<ReduceAction>;
 
+type PendingReductionArray = Array<*mut PendingReduction>;
+
 /// `TokenCache` — cached lookahead token
 #[repr(C)]
 struct TokenCache {
@@ -407,6 +410,7 @@ pub struct TSParser {
     reduce_actions: ReduceActionSet,
     finished_tree: Subtree,
     reduce_builder: StackPopBuilder,
+    pending_reductions: PendingReductionArray,
     trailing_extras: SubtreeArray,
     trailing_extras2: SubtreeArray,
     scratch_trees: SubtreeArray,
@@ -460,6 +464,27 @@ unsafe fn parser_language_full<'a>(language: *const TSLanguage) -> &'a TSLanguag
         .cast::<TSLanguageFull>()
         .as_ref()
         .unwrap_unchecked()
+}
+
+unsafe fn ts_parser__pending_reduction_delete(
+    self_: &mut TSParser,
+    pending: *mut PendingReduction,
+) {
+    let pending = pending.as_mut().unwrap_unchecked();
+    if !pending.materialized.ptr.is_null() {
+        ts_subtree_release(&mut self_.tree_pool, pending.materialized);
+        pending.materialized = NULL_SUBTREE;
+    } else if !pending.children.contents.is_null() {
+        ts_subtree_array_delete(&mut self_.tree_pool, &mut pending.children);
+    }
+    ts_free(ptr::from_mut(pending).cast::<c_void>());
+}
+
+unsafe fn ts_parser__clear_pending_reductions(self_: &mut TSParser) {
+    for i in 0..self_.pending_reductions.size {
+        ts_parser__pending_reduction_delete(self_, *array_get_ref(&self_.pending_reductions, i));
+    }
+    array_clear(&mut self_.pending_reductions);
 }
 
 // ---------------------------------------------------------------------------
@@ -3016,6 +3041,7 @@ pub unsafe extern "C" fn ts_parser_new() -> *mut TSParser {
     ts_lexer_init(&mut parser.lexer);
     array_init(&mut parser.reduce_actions);
     array_reserve(&mut parser.reduce_actions, 4);
+    array_init(&mut parser.pending_reductions);
     parser.tree_pool = ts_subtree_pool_new(32);
     parser.stack = ts_stack_new(&mut parser.tree_pool);
     parser.reduce_builder = ts_stack_pop_builder_new();
@@ -3050,8 +3076,12 @@ pub unsafe extern "C" fn ts_parser_delete(self_: *mut TSParser) {
     ts_parser_set_language(self_, ptr::null());
     let parser = self_.as_mut().unwrap_unchecked();
     ts_stack_delete(parser_stack_mut(parser.stack));
+    ts_parser__clear_pending_reductions(parser);
     if !parser.reduce_actions.contents.is_null() {
         array_delete(&mut parser.reduce_actions);
+    }
+    if !parser.pending_reductions.contents.is_null() {
+        array_delete(&mut parser.pending_reductions);
     }
     if !parser.included_range_differences.contents.is_null() {
         array_delete(ts_range_array_as_array_mut(
@@ -3189,6 +3219,7 @@ pub unsafe extern "C" fn ts_parser_reset(self_: *mut TSParser) {
     reusable_node_clear(&mut parser.reusable_node);
     ts_lexer_reset(&mut parser.lexer, length_zero());
     ts_stack_clear(parser_stack_mut(parser.stack));
+    ts_parser__clear_pending_reductions(parser);
     ts_parser__set_cached_token(parser, 0, NULL_SUBTREE, NULL_SUBTREE);
     if !parser.finished_tree.ptr.is_null() {
         ts_subtree_release(&mut parser.tree_pool, parser.finished_tree);
