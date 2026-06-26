@@ -3521,3 +3521,89 @@ Source-code analysis:
   noise rather than a stable source-level regression for this mechanical batch.
 - Full `cargo test --all` passed before every committed code change in this
   checkpoint.
+
+### 2026-06-25 23:01 EDT
+
+- Repo head: `12ef4dcd`
+- Batch base: `f08d0c20`
+- C core revision: `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Change batch: 10 small tier-3/reference and clippy cleanup commits:
+  `Use split slice for stack head pair` through
+  `fix clippy`.
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+Initial run:
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 25118.9 | 25443.4 | -1.28% |
+| TypeScript error parses | 32 | 1701.2 | 1685.4 | +0.94% |
+| JavaScript normal parses | 2 | 16110.0 | 16177.2 | -0.42% |
+| JavaScript error parses | 37 | 2134.3 | 1994.5 | +7.01% |
+| Overall parser throughput | 82 | 2365.7 | 2294.7 | +3.09% |
+
+Initial per-case regressions over 5%:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `typescript normal performanceCore.ts` | 17266.1 | 23290.9 | 25.87% |
+| `javascript error release.sh` | 614.6 | 712.4 | 13.72% |
+| `typescript normal builderStatePublic.ts` | 18833.5 | 20616.3 | 8.65% |
+| `javascript normal text-editor-component.js` | 16710.5 | 17784.4 | 6.04% |
+| `javascript error atom.sh` | 824.3 | 871.0 | 5.36% |
+| `typescript error update-authors.sh` | 527.5 | 556.2 | 5.16% |
+
+Rerun:
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 25025.3 | 25216.2 | -0.76% |
+| TypeScript error parses | 32 | 1695.1 | 1669.7 | +1.53% |
+| JavaScript normal parses | 2 | 18162.4 | 17004.7 | +6.81% |
+| JavaScript error parses | 37 | 2135.4 | 2042.6 | +4.54% |
+| Overall parser throughput | 82 | 2365.5 | 2303.9 | +2.67% |
+
+Rerun per-case regressions over 5%:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `typescript normal packageJsonCache.ts` | 17551.7 | 18966.1 | 7.46% |
+| `typescript error update-authors.sh` | 544.0 | 576.9 | 5.71% |
+| `typescript normal performance.ts` | 19650.2 | 20838.9 | 5.70% |
+
+Prior checkpoint at `f08d0c20` measured Rust overall throughput of 2386.3
+bytes/ms and a Rust-vs-C delta of +4.56%. This checkpoint's rerun measured
+2365.5 bytes/ms, so absolute Rust throughput moved by about -0.87%. C
+throughput moved from 2282.2 to 2303.9 bytes/ms, and the Rust-vs-C delta moved
+to +2.67%.
+
+Source-code analysis:
+
+- The batch contains no exported `#[no_mangle] extern "C"` signature changes,
+  no struct layout changes, no C header field changes, and no parser table or
+  parser action semantic changes.
+- The parser diff only adds slice conversion for included-range diffing on the
+  old-tree reuse path and marks a child-slice helper `const`. Normal initial
+  parse benchmarks do not exercise the old-tree included-range diff path, so
+  this does not explain the normal-parse per-case outliers.
+- The stack diff changes `stack_head_array_pair_mut` from two raw element
+  pointers to one mutable slice split with `split_at_mut`. This is the only
+  plausible hot-path codegen change in the batch, but the largest initial
+  outlier (`performanceCore.ts` at 25.87%) did not reproduce on the rerun, and
+  the rerun's per-case regressions were different and much smaller.
+- The tree, node, tree-cursor, and changed-range commits are internal
+  reference/slice boundary cleanups or visibility/clippy cleanups in a private
+  module. They do not change FFI layout, exported symbols, parser tables, or
+  generated language behavior.
+- Because aggregate Rust throughput remains faster than C overall in both runs
+  and the per-case slowdown list changed substantially between runs, this
+  checkpoint is treated as benchmark noise rather than a confirmed source-level
+  parser regression. The absolute Rust overall throughput moved by less than 1%
+  versus the prior checkpoint.
+- Full `cargo test --all` passed before every committed code change in this
+  checkpoint, and the current pushed HEAD `12ef4dcd` also passed a final full
+  `cargo test --all` after the clippy-fix commit landed.
