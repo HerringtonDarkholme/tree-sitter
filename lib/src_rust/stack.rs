@@ -126,6 +126,7 @@ pub struct Array<T> {
 }
 
 pub type StackNodeArray = Array<*mut StackNode>;
+pub type StackLinkPayloadArray = Array<StackLinkPayload>;
 
 #[repr(C)]
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -157,6 +158,7 @@ pub type StackSliceSpanArray = Array<StackSliceSpan>;
 pub struct StackPopBuilder {
     pub slices: StackSliceSpanArray,
     pub subtrees: SubtreeArray,
+    pub payloads: StackLinkPayloadArray,
 }
 
 #[repr(C)]
@@ -420,6 +422,7 @@ pub const unsafe fn ts_stack_pop_builder_new() -> StackPopBuilder {
             size: 0,
             capacity: 0,
         },
+        payloads: array_new(),
     }
 }
 
@@ -430,11 +433,15 @@ pub unsafe fn ts_stack_pop_builder_delete(self_: &mut StackPopBuilder) {
     if !self_.subtrees.contents.is_null() {
         array_delete(subtree_array_as_array_mut(&mut self_.subtrees));
     }
+    if !self_.payloads.contents.is_null() {
+        array_delete(&mut self_.payloads);
+    }
 }
 
 unsafe fn ts_stack_pop_builder_clear(self_: &mut StackPopBuilder) {
     self_.slices.size = 0;
     self_.subtrees.size = 0;
+    self_.payloads.size = 0;
 }
 
 #[inline]
@@ -968,6 +975,16 @@ unsafe fn stack_pop_builder_reverse_subtrees(builder: &mut StackPopBuilder, star
     }
 }
 
+unsafe fn stack_pop_builder_reverse_payloads(builder: &mut StackPopBuilder, start: u32, size: u32) {
+    let limit = size / 2;
+    for i in 0..limit {
+        let reverse_index = start as usize + size as usize - 1 - i as usize;
+        let a = builder.payloads.contents.add(start as usize + i as usize);
+        let b = builder.payloads.contents.add(reverse_index);
+        ptr::swap(a, b);
+    }
+}
+
 unsafe fn stack_pop_builder_append_subtrees(
     builder: &mut StackPopBuilder,
     subtrees: &SubtreeArray,
@@ -1027,6 +1044,17 @@ unsafe fn stack_pop_builder_add_slice(
 
     slice.version = ts_stack__add_version(self_, original_version, node);
     array_push(&mut builder.slices, slice);
+}
+
+unsafe fn stack_pop_builder_release_payloads(
+    builder: &mut StackPopBuilder,
+    subtree_pool: &mut SubtreePool,
+    start: u32,
+) {
+    for i in start..builder.payloads.size {
+        stack_link_payload_release(*array_get_ref(&builder.payloads, i), subtree_pool);
+    }
+    builder.payloads.size = start;
 }
 
 unsafe fn ts_stack_pop_count_linear(
@@ -1125,6 +1153,59 @@ unsafe fn ts_stack_pop_count_linear_into(
 
     let size = builder.subtrees.size - start;
     stack_pop_builder_reverse_subtrees(builder, start, size);
+    let slice = StackSliceSpan {
+        start,
+        size,
+        version: STACK_VERSION_NONE,
+    };
+    stack_pop_builder_add_slice(self_, version, stack_node_mut(node), builder, slice);
+    true
+}
+
+pub unsafe fn ts_stack_pop_count_payloads_into(
+    self_: &mut Stack,
+    version: StackVersion,
+    count: u32,
+    builder: &mut StackPopBuilder,
+) -> bool {
+    ts_stack_pop_builder_clear(builder);
+
+    let mut node = stack_head(self_, version).node;
+    let mut subtree_count = 0;
+    let start = builder.payloads.size;
+    let reserve_count = ts_subtree_alloc_size(count) / std::mem::size_of::<StackLinkPayload>();
+    array_reserve(
+        &mut builder.payloads,
+        start + u32::try_from(reserve_count).unwrap(),
+    );
+
+    while subtree_count < count {
+        let current_node = node.as_ref().unwrap_unchecked();
+        if current_node.link_count != 1 {
+            stack_pop_builder_release_payloads(
+                builder,
+                self_.subtree_pool.as_mut().unwrap_unchecked(),
+                start,
+            );
+            return false;
+        }
+
+        let link = current_node.links[0];
+        node = link.node;
+        if stack_link_payload_is_null(link.payload) {
+            subtree_count += 1;
+        } else {
+            array_push(&mut builder.payloads, link.payload);
+            stack_link_payload_retain(link.payload);
+
+            if !stack_link_payload_extra(link.payload) {
+                subtree_count += 1;
+            }
+        }
+    }
+
+    let size = builder.payloads.size - start;
+    stack_pop_builder_reverse_payloads(builder, start, size);
     let slice = StackSliceSpan {
         start,
         size,
