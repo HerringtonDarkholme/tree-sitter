@@ -445,6 +445,14 @@ unsafe fn subtree_array_as_array(self_: &SubtreeArray) -> &Array<Subtree> {
 }
 
 #[inline]
+unsafe fn subtree_array_as_array_mut(self_: &mut SubtreeArray) -> &mut Array<Subtree> {
+    ptr::from_mut(self_)
+        .cast::<Array<Subtree>>()
+        .as_mut()
+        .unwrap_unchecked()
+}
+
+#[inline]
 unsafe fn stack_node_pool_get(self_: &Array<*mut StackNode>, index: u32) -> *mut StackNode {
     *array_get_ref(self_, index)
 }
@@ -828,7 +836,7 @@ unsafe fn stack__iter(
     if let Some(goal_subtree_count) = goal_subtree_count {
         let reserve_count =
             ts_subtree_alloc_size(goal_subtree_count) / std::mem::size_of::<Subtree>();
-        let subtrees = &mut *ptr::addr_of_mut!(new_iterator.subtrees).cast::<Array<Subtree>>();
+        let subtrees = subtree_array_as_array_mut(&mut new_iterator.subtrees);
         array_reserve(
             subtrees,
             u32::try_from(reserve_count).unwrap(),
@@ -901,8 +909,7 @@ unsafe fn stack__iter(
                     next_iterator.is_pending = false;
                 } else {
                     if include_subtrees {
-                        let subtrees = &mut *ptr::addr_of_mut!(next_iterator.subtrees)
-                            .cast::<Array<Subtree>>();
+                        let subtrees = subtree_array_as_array_mut(&mut next_iterator.subtrees);
                         array_push(subtrees, link.subtree);
                         ts_subtree_retain(link.subtree);
                     }
