@@ -112,6 +112,15 @@ unsafe fn range_array_slice_mut(arr: &mut TSRangeArray) -> &mut [TSRange] {
     std::slice::from_raw_parts_mut(arr.contents, arr.size as usize)
 }
 
+#[inline]
+pub(crate) unsafe fn ts_range_slice<'a>(ranges: *const TSRange, count: u32) -> &'a [TSRange] {
+    if count == 0 {
+        &[]
+    } else {
+        std::slice::from_raw_parts(ranges, count as usize)
+    }
+}
+
 unsafe fn array_grow_range(arr: &mut TSRangeArray, count: u32) {
     let new_size = arr.size + count;
     if new_size > arr.capacity {
@@ -595,34 +604,33 @@ pub unsafe fn ts_range_array_intersects(
 }
 
 pub(crate) unsafe fn ts_range_array_get_changed_ranges_ref(
-    old_ranges: *const TSRange,
-    old_range_count: u32,
-    new_ranges: *const TSRange,
-    new_range_count: u32,
+    old_ranges: &[TSRange],
+    new_ranges: &[TSRange],
     differences: &mut TSRangeArray,
 ) {
-    let mut new_index: u32 = 0;
-    let mut old_index: u32 = 0;
+    let mut new_index = 0;
+    let mut old_index = 0;
     let mut current_position = length_zero();
     let mut in_old_range = false;
     let mut in_new_range = false;
 
-    while old_index < old_range_count || new_index < new_range_count {
-        let old_range = old_ranges.add(old_index as usize);
-        let new_range = new_ranges.add(new_index as usize);
-
+    while old_index < old_ranges.len() || new_index < new_ranges.len() {
         let next_old_position = if in_old_range {
-            Length { bytes: (*old_range).end_byte, extent: (*old_range).end_point }
-        } else if old_index < old_range_count {
-            Length { bytes: (*old_range).start_byte, extent: (*old_range).start_point }
+            let old_range = old_ranges.get_unchecked(old_index);
+            Length { bytes: old_range.end_byte, extent: old_range.end_point }
+        } else if old_index < old_ranges.len() {
+            let old_range = old_ranges.get_unchecked(old_index);
+            Length { bytes: old_range.start_byte, extent: old_range.start_point }
         } else {
             LENGTH_MAX
         };
 
         let next_new_position = if in_new_range {
-            Length { bytes: (*new_range).end_byte, extent: (*new_range).end_point }
-        } else if new_index < new_range_count {
-            Length { bytes: (*new_range).start_byte, extent: (*new_range).start_point }
+            let new_range = new_ranges.get_unchecked(new_index);
+            Length { bytes: new_range.end_byte, extent: new_range.end_point }
+        } else if new_index < new_ranges.len() {
+            let new_range = new_ranges.get_unchecked(new_index);
+            Length { bytes: new_range.start_byte, extent: new_range.start_point }
         } else {
             LENGTH_MAX
         };

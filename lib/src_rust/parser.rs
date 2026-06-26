@@ -16,7 +16,8 @@ use super::error_costs::{
     ERROR_COST_PER_SKIPPED_TREE, ERROR_STATE,
 };
 use super::get_changed_ranges::{
-    ts_range_array_get_changed_ranges_ref, ts_range_array_intersects, TSRangeArray,
+    ts_range_array_get_changed_ranges_ref, ts_range_array_intersects, ts_range_slice,
+    TSRangeArray,
 };
 use super::language::{
     ts_language_actions, ts_language_enabled_external_tokens,
@@ -3016,11 +3017,13 @@ pub unsafe extern "C" fn ts_parser_parse(
         if let Some(old_tree) = old_tree.as_ref() {
             ts_subtree_retain(old_tree.root);
             parser.old_tree = old_tree.root;
+            let old_included_ranges =
+                ts_range_slice(old_tree.included_ranges, old_tree.included_range_count);
+            let new_included_ranges =
+                ts_range_slice(parser.lexer.included_ranges, parser.lexer.included_range_count);
             ts_range_array_get_changed_ranges_ref(
-                old_tree.included_ranges,
-                old_tree.included_range_count,
-                parser.lexer.included_ranges,
-                parser.lexer.included_range_count,
+                old_included_ranges,
+                new_included_ranges,
                 &mut parser.included_range_differences,
             );
             reusable_node_reset(&mut parser.reusable_node, old_tree.root);

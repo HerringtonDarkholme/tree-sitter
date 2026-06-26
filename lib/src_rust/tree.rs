@@ -7,8 +7,8 @@ use crate::ffi::{TSLanguage, TSNode, TSPoint, TSRange, TSSymbol};
 
 use super::alloc::{ts_calloc, ts_free, ts_malloc};
 use super::get_changed_ranges::{
-    ts_range_array_get_changed_ranges_ref, ts_range_edit_ref, ts_subtree_get_changed_ranges_ref,
-    TSRangeArray,
+    ts_range_array_get_changed_ranges_ref, ts_range_edit_ref, ts_range_slice,
+    ts_subtree_get_changed_ranges_ref, TSRangeArray,
 };
 use super::language::{ts_language_copy, ts_language_delete};
 use super::length::{length_add, Length};
@@ -302,11 +302,17 @@ pub unsafe extern "C" fn ts_tree_get_changed_ranges(
         size: 0,
         capacity: 0,
     };
-    ts_range_array_get_changed_ranges_ref(
+    let old_included_ranges = ts_range_slice(
         old_tree_ref.included_ranges,
         old_tree_ref.included_range_count,
+    );
+    let new_included_ranges = ts_range_slice(
         new_tree_ref.included_ranges,
         new_tree_ref.included_range_count,
+    );
+    ts_range_array_get_changed_ranges_ref(
+        old_included_ranges,
+        new_included_ranges,
         &mut included_range_differences,
     );
 
