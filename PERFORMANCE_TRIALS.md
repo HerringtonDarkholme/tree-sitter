@@ -90,6 +90,7 @@ ts_parser__advance -> ts_parser__reduce
 - Guard halted-version scans in reduce
 - Guard zero dynamic-precedence writes
 - Hoist reduce nonterminal check
+- Broad descriptor reduce/accept stack traversal wiring
 
 ### Closed: Allocation And Storage
 
@@ -149,6 +150,11 @@ ts_parser__advance -> ts_parser__reduce
 4. Descriptor foundation code is not itself a measured win. A current-vs-origin
    `-r 10` checkpoint was mixed and noisy, with no universal gain. Continue only
    with counters proving that reduce wiring avoids enough materialization.
+5. Broad descriptor wiring is incomplete as an incremental patch. Letting
+   pending descriptors enter normal stack traversal exposed concrete-subtree
+   assumptions in reduce, recovery, accept, merge, and final materialization.
+   This failed before benchmarking with allocator traps and subtree metadata
+   panics, so it was backed out instead of being tuned.
 
 ## Latest Checkpoint
 
@@ -165,18 +171,17 @@ Payload-child foundation versus `origin/master`, normal `-r 10` average speed:
 | Java | 13334 | 12924 | +3.2% |
 
 Interpretation: not a universal win; likely noise plus code-layout effects.
-Do not continue descriptor wiring without eligibility/materialization counters.
+Do not continue descriptor wiring without first proving a complete ownership and
+materialization boundary.
 
 ## Next Direction
 
-Pending-reduction descriptor forest: stack payloads hold materialized `Subtree`
-or pending descriptors; hot metadata queries read descriptors; fresh reductions
-push descriptors; later reductions consume descriptor children without forced
-conversion; materialization happens only at tree output, reparsing, comparison,
-mutation, public child iteration, or unsupported metadata boundaries.
-
-Reject this direction if normal reduce pop, stack push, stack merge, or stack
-metadata updates force broad materialization.
+Do not add more reduce fast paths. The next viable architecture work should be
+designed as a complete representation boundary, not a partial stack payload
+patch: either a separate parse-time node representation with one final tree
+lowering pass, or a fully descriptor-aware stack/recovery/merge/accept layer.
+Reject either direction unless it removes a full allocation/copy/summarization
+phase on normal parses and passes corpus tests before benchmarking.
 
 ## Process Rules
 
