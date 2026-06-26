@@ -173,6 +173,7 @@ may refer to these rows, but should not duplicate them as separate attempts.
 | Hoist reduce nonterminal check out of pop-slice loop | Reduce path | Retested after reduce lookup win; remained below baseline |
 | Specialized no-alias non-error subtree summarizer | Subtree summarize | Retested after reduce lookup win; remained below baseline |
 | Combine arena child copy with summary calculation | Reduce/node construction | Regressed JavaScript same-session canary: patched `17447` avg bytes/ms vs reverted baseline `18091`; too close to the closed raw-pointer summarizer direction |
+| Builder-specific copy plus summary finalization | Reduce/node construction | Mixed/rejected after parser-owned builder. JavaScript improved `20127` -> `21099` avg and TypeScript improved `25684` -> `26371`, but Python regressed `11361` -> `10754` avg and large grammar files regressed; not universal |
 | Direct descriptor comparison for merged reduce candidates | Reduce/candidate selection | Mixed/rejected. JavaScript `-r 10` improved `18608` -> `18781` avg and Go `-r 5` improved `11531` -> `13017`, but TypeScript `-r 10` regressed `24076` -> `23567` avg and `20753` -> `20491` worst; large TypeScript `parser.ts` improved, but the aggregate gate failed |
 | Propagated contains-repetition flag for balancing | Balance/compress | Regressed Rust same-session canary: patched `13149` avg / `11290` worst bytes/ms vs reverted baseline `14124` avg / `12362` worst; metadata overhead outweighed traversal pruning |
 | 16-bit symbol inline leaf encoding | Subtree inline representation | Regressed JavaScript and did not reduce allocation counts |
@@ -217,6 +218,7 @@ result.
 | Refcount-one release fast path | Regressed JavaScript. |
 | Raw pointer summarizer loop | Regressed JS/TS/Go/Python. Existing iterator compiled better. |
 | Combined arena copy plus summarizer loop | Regressed JavaScript in same-session A/B. Do not retry summary-loop rewrites unless the full builder design changes the ownership/selection protocol first. |
+| Builder-specific copy plus summary finalization | Rejected after the builder protocol existed. It helped JS/TS but regressed Python, including large grammar files; do not retry summary-loop fusion without new Python-specific evidence. |
 | Direct merged-candidate descriptor comparison | Mixed. It helped JavaScript/Go and the large TypeScript parser file, but regressed the TypeScript aggregate benchmark. Do not retry as a standalone replacement for temporary candidate parents. |
 | Broad inlining/caching/check-progress fast paths | Repeatedly regressed or stayed below baseline. |
 | Lexer ASCII/direct UTF-8 fast paths | Mixed or negative. |
