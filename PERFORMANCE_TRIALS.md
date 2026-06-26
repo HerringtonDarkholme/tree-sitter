@@ -167,6 +167,7 @@ Same-session canary result for `329f8b08`:
 | Use `ts_malloc` instead of `ts_realloc(NULL, size)` in subtree array allocation | Subtree allocation | JS/TS/Go/Python canaries regressed; allocator-call simplification did not overcome codegen/layout effects |
 | Parser `SubtreePool` free lists for 1-4 child node blocks | Subtree block allocation | Allocation calls dropped by ~1.8k/parse on JS, but harness and JS/TS/Go canaries regressed; per-release pool bookkeeping outweighed reuse |
 | Arena-backed heap leaves during lexing | Subtree allocation | JavaScript/TypeScript/Python improved, but Go regressed to 14165 avg bytes/ms and Rust regressed to 13219 avg bytes/ms; not viable as a universal normal-parse optimization |
+| Increase `TREE_ARENA_PAGE_SIZE` from 16 KiB to 64 KiB | Tree arena page layout | JavaScript canary regressed to 17256 avg bytes/ms from 18072, so fewer page allocations did not offset worse locality/cache behavior |
 
 ## Non-Library Trial Removed
 
