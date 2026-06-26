@@ -57,8 +57,8 @@ pub struct TSTree {
 }
 
 #[inline]
-pub const unsafe fn tree_ref<'a>(tree: *const TSTree) -> &'a TSTree {
-    &*tree
+pub unsafe fn tree_ref<'a>(tree: *const TSTree) -> &'a TSTree {
+    tree.as_ref().unwrap_unchecked()
 }
 
 #[inline]
@@ -259,7 +259,7 @@ pub unsafe extern "C" fn ts_tree_root_node_with_offset(
 }
 
 #[no_mangle]
-pub const unsafe extern "C" fn ts_tree_language(self_: *const TSTree) -> *const TSLanguage {
+pub unsafe extern "C" fn ts_tree_language(self_: *const TSTree) -> *const TSLanguage {
     let tree = tree_ref(self_);
     ts_tree_language_ref(tree)
 }
