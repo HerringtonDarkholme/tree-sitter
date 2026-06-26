@@ -236,19 +236,16 @@ pub unsafe fn array_pop<T>(arr: &mut Array<T>) -> T {
     ptr::read(arr.contents.add(arr.size as usize))
 }
 
-pub unsafe fn array_get<T>(arr: &Array<T>, index: u32) -> *mut T {
-    debug_assert!(index < arr.size);
-    arr.contents.add(index as usize)
-}
-
 #[inline]
 pub unsafe fn array_get_ref<T>(arr: &Array<T>, index: u32) -> &T {
-    array_get(arr, index).as_ref().unwrap_unchecked()
+    debug_assert!(index < arr.size);
+    arr.contents.add(index as usize).as_ref().unwrap_unchecked()
 }
 
 #[inline]
 pub unsafe fn array_get_mut<T>(arr: &mut Array<T>, index: u32) -> &mut T {
-    array_get(arr, index).as_mut().unwrap_unchecked()
+    debug_assert!(index < arr.size);
+    arr.contents.add(index as usize).as_mut().unwrap_unchecked()
 }
 
 #[inline]
@@ -374,7 +371,8 @@ unsafe fn stack_head_array_write(
     version: StackVersion,
     head: StackHead,
 ) {
-    ptr::write(array_get(self_, version), head);
+    debug_assert!(version < self_.size);
+    ptr::write(self_.contents.add(version as usize), head);
 }
 
 #[inline]
