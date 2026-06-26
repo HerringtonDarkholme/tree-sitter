@@ -76,6 +76,9 @@ struct Benchmark {
     /// The number of times to parse each sample (default is 5).
     #[arg(long, short, default_value = "5")]
     repetition_count: u32,
+    /// Benchmark case kind to run: query, normal, error, or all.
+    #[arg(long, default_value = "all")]
+    kind: String,
     /// Whether to run the benchmarks in debug mode.
     #[arg(long, short = 'g')]
     debug: bool,

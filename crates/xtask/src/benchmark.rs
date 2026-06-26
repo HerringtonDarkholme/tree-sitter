@@ -20,6 +20,8 @@ pub fn run(args: &Benchmark) -> Result<()> {
         };
     }
 
+    unsafe { std::env::set_var("TREE_SITTER_BENCHMARK_KIND_FILTER", &args.kind) };
+
     if args.debug {
         let output = std::process::Command::new("cargo")
             .arg("bench")
