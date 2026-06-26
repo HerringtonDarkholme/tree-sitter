@@ -149,6 +149,7 @@ may refer to these rows, but should not duplicate them as separate attempts.
 | Hoist reduce nonterminal check out of pop-slice loop | Reduce path | Retested after reduce lookup win; remained below baseline |
 | Specialized no-alias non-error subtree summarizer | Subtree summarize | Retested after reduce lookup win; remained below baseline |
 | Combine arena child copy with summary calculation | Reduce/node construction | Regressed JavaScript same-session canary: patched `17447` avg bytes/ms vs reverted baseline `18091`; too close to the closed raw-pointer summarizer direction |
+| Propagated contains-repetition flag for balancing | Balance/compress | Regressed Rust same-session canary: patched `13149` avg / `11290` worst bytes/ms vs reverted baseline `14124` avg / `12362` worst; metadata overhead outweighed traversal pruning |
 | 16-bit symbol inline leaf encoding | Subtree inline representation | Regressed JavaScript and did not reduce allocation counts |
 | Global mutex slab for `SubtreeHeapData + children` blocks | Subtree block allocation | JavaScript benchmark stalled; global lock path not viable |
 | Atomic global slab with `SubtreeArray.capacity` slab marker | Subtree block allocation | JavaScript benchmark stalled; ownership marker was too fragile |
@@ -181,6 +182,7 @@ result.
 | Stack-pop malloc-buffer adoption into `TreeArena` | Both metadata and embedded-header versions were mixed. JavaScript was flat/regressed while TypeScript moved differently. This is not a real builder path. |
 | Direct linear reduce-pop scratch buffer | Closed before benchmarking. It is not identical to stack-pop buffer adoption, but it is still an incremental linear stack-pop fast path, not the requested architecture change. |
 | Skipping/deferring all balancing | JavaScript improved to `18728`, but TypeScript regressed to `22339` avg and `17610` worst bytes/ms. |
+| Contains-repetition summary bit for balance pruning | Regressed Rust in same-session A/B. Do not retry branch-pruning balance metadata unless profiles show traversal overhead exceeds the metadata propagation cost. |
 | Subtree allocation pools/slabs | Reduced some allocator counts, but bookkeeping, locking, or locality costs regressed benchmarks. |
 | `TS_MAX_TREE_POOL_SIZE` tuning | Allocation counts were unchanged and benchmarks got noisier/slower. |
 | Refcount-one release fast path | Regressed JavaScript. |
@@ -387,7 +389,7 @@ Per-parse reduce-shape summary:
 | ---: | --- | --- |
 | 1 | Full reduce-construction redesign | Still the top parser-core candidate. It targets `ts_parser__reduce`, node construction, child-array allocation/copying, summarization, and stack push as one pipeline. It must not be a linear-pop fast path or buffer-adoption variant. |
 | 2 | Lexer/external scanner work | Now co-equal for C++ and material for all languages. Needs separate direction triage because generated grammar lexers may limit core-library leverage. |
-| 3 | Balancing/compress redesign | Important for Rust and moderate for JS/TS/Go/Python. Do not remove balancing; only consider a correctness-preserving redesign. |
+| 3 | Balancing/compress redesign | Important for Rust and moderate for JS/TS/Go/Python. Do not remove balancing; contains-repetition pruning regressed; only consider a correctness-preserving redesign that reduces compression cost without adding per-node metadata overhead. |
 | 4 | Summarization during reduce construction | Only after a real builder changes selection/ownership. A direct arena copy-plus-summary loop regressed and is closed. |
 
 ### Next Parser Trial
