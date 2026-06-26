@@ -236,23 +236,19 @@ pub(crate) unsafe fn array_pop<T>(arr: &mut Array<T>) -> T {
     ptr::read(arr.contents.add(arr.size as usize))
 }
 
-pub(crate) unsafe fn array_get<T>(arr: *const Array<T>, index: u32) -> *mut T {
-    debug_assert!(index < (*arr).size);
-    (*arr).contents.add(index as usize)
+pub(crate) unsafe fn array_get<T>(arr: &Array<T>, index: u32) -> *mut T {
+    debug_assert!(index < arr.size);
+    arr.contents.add(index as usize)
 }
 
 #[inline]
 pub(crate) unsafe fn array_get_ref<T>(arr: &Array<T>, index: u32) -> &T {
-    array_get(ptr::from_ref(arr), index)
-        .as_ref()
-        .unwrap_unchecked()
+    array_get(arr, index).as_ref().unwrap_unchecked()
 }
 
 #[inline]
 pub(crate) unsafe fn array_get_mut<T>(arr: &mut Array<T>, index: u32) -> &mut T {
-    array_get(ptr::from_mut(arr), index)
-        .as_mut()
-        .unwrap_unchecked()
+    array_get(arr, index).as_mut().unwrap_unchecked()
 }
 
 pub(crate) unsafe fn array_back<T>(arr: &Array<T>) -> *mut T {
@@ -297,7 +293,7 @@ pub(crate) unsafe fn array_insert<T>(arr: &mut Array<T>, index: u32, element: T)
     arr.size += 1;
 }
 
-pub(crate) unsafe fn array_front<T>(arr: *const Array<T>) -> *mut T {
+pub(crate) unsafe fn array_front<T>(arr: &Array<T>) -> *mut T {
     array_get(arr, 0)
 }
 
