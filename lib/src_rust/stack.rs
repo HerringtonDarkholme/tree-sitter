@@ -392,13 +392,23 @@ unsafe fn stack_head_array_pair_mut(
     second: StackVersion,
 ) -> (&mut StackHead, &mut StackHead) {
     debug_assert_ne!(first, second);
-    let first_head = array_get(self_, first);
-    let second_head = array_get(self_, second);
-    debug_assert_ne!(first_head, second_head);
-    (
-        first_head.as_mut().unwrap_unchecked(),
-        second_head.as_mut().unwrap_unchecked(),
-    )
+    debug_assert!(first < self_.size);
+    debug_assert!(second < self_.size);
+
+    let heads = std::slice::from_raw_parts_mut(self_.contents, self_.size as usize);
+    let (lower, upper) = if first < second {
+        (first as usize, second as usize)
+    } else {
+        (second as usize, first as usize)
+    };
+    let (left, right) = heads.split_at_mut(upper);
+    let lower_head = left.get_unchecked_mut(lower);
+    let upper_head = right.get_unchecked_mut(0);
+    if first < second {
+        (lower_head, upper_head)
+    } else {
+        (upper_head, lower_head)
+    }
 }
 
 #[inline]
