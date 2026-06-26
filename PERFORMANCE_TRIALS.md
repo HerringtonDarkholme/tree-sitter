@@ -156,6 +156,7 @@ may refer to these rows, but should not duplicate them as separate attempts.
 | Increase `TREE_ARENA_PAGE_SIZE` from 16 KiB to 64 KiB | Tree arena page layout | JavaScript regressed to `17256` avg bytes/ms |
 | Adopt stack-pop child arrays into `TreeArena` instead of copying into arena pages | Reduce/node construction | JavaScript roughly flat; TypeScript regressed |
 | Embedded adopted-block headers in stack-pop arrays | Reduce/node construction | TypeScript improved, but JavaScript slipped; not universal |
+| Direct linear reduce pop into parser scratch storage | Reduce/stack pop | Abandoned before benchmarking after history triage; too close to prior linear stack-pop and stack-pop adoption attempts |
 | Skip post-parse subtree balancing entirely | Balance/compress upper bound | JavaScript improved, TypeScript regressed badly |
 | Reset benchmark allocator for raw parsing | Benchmark harness | Removed because benchmark source changes are out of scope |
 
@@ -170,6 +171,7 @@ result.
 | Larger tree arena pages | 64 KiB pages regressed JavaScript to `17256` avg bytes/ms. Fewer page allocations did not offset worse locality/cache behavior. |
 | Arena-backed lexer leaves | Helped JavaScript/TypeScript/Python but regressed Go to `14165` and Rust to `13219` avg bytes/ms. Not universal. |
 | Stack-pop malloc-buffer adoption into `TreeArena` | Both metadata and embedded-header versions were mixed. JavaScript was flat/regressed while TypeScript moved differently. This is not a real builder path. |
+| Direct linear reduce-pop scratch buffer | Closed before benchmarking. It is not identical to stack-pop buffer adoption, but it is still an incremental linear stack-pop fast path, not the requested architecture change. |
 | Skipping/deferring all balancing | JavaScript improved to `18728`, but TypeScript regressed to `22339` avg and `17610` worst bytes/ms. |
 | Subtree allocation pools/slabs | Reduced some allocator counts, but bookkeeping, locking, or locality costs regressed benchmarks. |
 | `TS_MAX_TREE_POOL_SIZE` tuning | Allocation counts were unchanged and benchmarks got noisier/slower. |
@@ -216,9 +218,41 @@ Main lesson:
 
 ## Next Directions
 
+### 0. History Triage Gate
+
+Before writing any optimization code:
+
+- Search this file for the target area, using terms from the proposed change
+  and nearby implementation names.
+- Search the commit history for the same area.
+- Write down whether the idea is new, a repeat, or only a variant of a closed
+  direction.
+- If it is a repeat or near-repeat, stop unless there is new profiler evidence
+  that directly contradicts the recorded result.
+
+Minimum searches for reduce/stack/tree-storage work:
+
+```sh
+rg -n "stack-pop|stack pop|linear|adopt|builder|SubtreeArray|reduce builder|scratch|child arrays" PERFORMANCE_TRIALS.md
+git log --oneline --all --grep='stack' --grep='arena' --grep='builder' --grep='linear' --grep='adopt' --grep='reduce'
+```
+
+The `2026-06-26` direct linear reduce-pop scratch-buffer sketch failed this
+gate. It was reverted before benchmarking because it was too close to recorded
+linear stack-pop and stack-pop adoption attempts.
+
 ### 1. Measure Stack-Pop Shape Before Coding
 
-Before implementing another builder/storage change, collect:
+Collected on `2026-06-26` with temporary local instrumentation only:
+
+| Language sample | Linear pop-count calls | Graph fallback calls | Dominant reduce child counts |
+| --- | ---: | ---: | --- |
+| JavaScript `jquery.js` | `12,582,400` | `180,600` | 1-3 |
+| TypeScript `parser.ts` | `11,850,400` | `46,800` | 1-3 |
+| Go `proc.go` | `6,079,200` | `500,000` | 1-3 |
+| Rust `ast.rs` | `3,542,800` | `0` | 1-3 |
+
+If implementing another builder/storage change, first collect or refresh:
 
 - reduce child-count distribution
 - `ts_stack_pop_count` linear vs graph fallback rates
@@ -329,6 +363,10 @@ Validation must run outside the sandbox.
 
 - Do not edit benchmark source code.
 - Do not use `cargo check` as validation.
+- Check this trial history and relevant commit history before writing any
+  optimization code.
+- Do not implement near-duplicate attempts unless new profiler evidence directly
+  contradicts the old result.
 - Commit each kept optimization separately.
 - Push after every 10 additional commits, unless explicitly asked otherwise.
 - After every 10 performance attempts, write a reflection before the next code
