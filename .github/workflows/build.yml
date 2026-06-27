@@ -219,7 +219,16 @@ jobs:
 
     - name: Run main tests
       if: inputs.run-test && !matrix.no-run
-      run: cargo test --target='${{ matrix.target }}' --features='${{ matrix.features }}'
+      # Under qemu (cross targets) an unoptimized Rust core is far slower than
+      # upstream's -O0 C core and overshoots the tight timing bound in
+      # test_parsing_with_a_timeout. Optimize just the core crate for this CI run
+      # only (via --config, not Cargo.toml) so local debug builds stay unoptimized.
+      run: |
+        config=()
+        if [[ -n "${{ matrix.cross }}" ]]; then
+          config=(--config 'profile.dev.package."tree-sitter".opt-level=3')
+        fi
+        cargo test --target='${{ matrix.target }}' --features='${{ matrix.features }}' "${config[@]}"
 
     - name: Run Wasm tests
       if: inputs.run-test && !matrix.no-run && contains(matrix.features, 'wasm')
