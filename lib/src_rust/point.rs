@@ -77,6 +77,18 @@ pub fn point_edit(point: &mut TSPoint, byte: &mut u32, edit: &TSInputEdit) {
     }
 }
 
+#[inline]
+unsafe fn ptr_ref<'a, T>(ptr: *const T) -> &'a T {
+    debug_assert!(!ptr.is_null());
+    ptr.as_ref().unwrap_unchecked()
+}
+
+#[inline]
+unsafe fn ptr_mut<'a, T>(ptr: *mut T) -> &'a mut T {
+    debug_assert!(!ptr.is_null());
+    ptr.as_mut().unwrap_unchecked()
+}
+
 /// C-compatible `ts_point_edit` — exported for use by remaining C code (node.c).
 ///
 /// # Safety
@@ -87,9 +99,9 @@ pub unsafe extern "C" fn ts_point_edit(
     byte: *mut u32,
     edit: *const TSInputEdit,
 ) {
-    let point = point.as_mut().unwrap_unchecked();
-    let byte = byte.as_mut().unwrap_unchecked();
-    let edit = edit.as_ref().unwrap_unchecked();
+    let point = ptr_mut(point);
+    let byte = ptr_mut(byte);
+    let edit = ptr_ref(edit);
 
     point_edit(point, byte, edit);
 }

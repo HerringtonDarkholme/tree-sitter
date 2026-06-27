@@ -554,6 +554,14 @@ pub struct MutableSubtreeArray {
     pub capacity: u32,
 }
 
+pub const fn subtree_array_new() -> SubtreeArray {
+    SubtreeArray {
+        contents: ptr::null_mut(),
+        size: 0,
+        capacity: 0,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // SubtreePool
 // ---------------------------------------------------------------------------
@@ -2761,11 +2769,7 @@ mod tests {
                 ptr::null(),
             );
 
-            let mut children = SubtreeArray {
-                contents: ptr::null_mut(),
-                size: 0,
-                capacity: 0,
-            };
+            let mut children = subtree_array_new();
             array_push_subtree(&mut children, child1);
             array_push_subtree(&mut children, child2);
 

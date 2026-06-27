@@ -70,6 +70,18 @@ const fn node_tree(self_: TSNode) -> *const TSTree {
 }
 
 #[inline]
+unsafe fn ptr_ref<'a, T>(ptr: *const T) -> &'a T {
+    debug_assert!(!ptr.is_null());
+    ptr.as_ref().unwrap_unchecked()
+}
+
+#[inline]
+unsafe fn ptr_mut<'a, T>(ptr: *mut T) -> &'a mut T {
+    debug_assert!(!ptr.is_null());
+    ptr.as_mut().unwrap_unchecked()
+}
+
+#[inline]
 const unsafe fn node_language(self_: TSNode) -> *const TSLanguage {
     (*node_tree(self_)).language
 }
@@ -807,7 +819,7 @@ pub const unsafe extern "C" fn ts_node_named_child_count(self_: TSNode) -> u32 {
 #[no_mangle]
 pub unsafe extern "C" fn ts_node_parent(self_: TSNode) -> TSNode {
     let tree = node_tree(self_);
-    let mut node = tree_root_node_ref(tree, tree.as_ref().unwrap_unchecked());
+    let mut node = tree_root_node_ref(tree, ptr_ref(tree));
     if node.id == self_.id {
         return node__null();
     }
@@ -1153,8 +1165,8 @@ pub unsafe extern "C" fn ts_node_field_name_for_named_child(
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_node_edit(self_: *mut TSNode, edit: *const TSInputEdit) {
-    let self_ = self_.as_mut().unwrap_unchecked();
-    let edit = edit.as_ref().unwrap_unchecked();
+    let self_ = ptr_mut(self_);
+    let edit = ptr_ref(edit);
     let mut start_byte = node_start_byte(*self_);
     let mut start_point = node_start_point(*self_);
 

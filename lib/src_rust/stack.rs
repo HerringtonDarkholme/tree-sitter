@@ -12,12 +12,12 @@ use std::ptr;
 
 use crate::ffi::{TSLanguage, TSStateId, TSSymbol};
 
-use super::alloc::{calloc, free, malloc, realloc};
+use super::alloc::{free, malloc, realloc};
 use super::error_costs::{ERROR_COST_PER_RECOVERY, ERROR_STATE};
 use super::language::language_write_symbol_as_dot_string;
 use super::length::{length_add, length_zero, Length};
 use super::subtree::{
-    external_scanner_state_data, subtree_alloc_size, subtree_child_count,
+    external_scanner_state_data, subtree_alloc_size, subtree_array_new, subtree_child_count,
     subtree_dynamic_precedence, subtree_error_cost, subtree_external_scanner_state,
     subtree_external_scanner_state_eq, subtree_extra, subtree_is_error, subtree_named,
     subtree_padding, subtree_release, subtree_retain, subtree_size, subtree_symbol,
@@ -544,11 +544,7 @@ pub unsafe fn array_assign<T>(self_: &mut Array<T>, other: &Array<T>) {
 pub const fn stack_pop_builder_new() -> StackPopBuilder {
     StackPopBuilder {
         slices: array_new(),
-        subtrees: SubtreeArray {
-            contents: ptr::null_mut(),
-            size: 0,
-            capacity: 0,
-        },
+        subtrees: subtree_array_new(),
         payloads: array_new(),
     }
 }
@@ -1333,11 +1329,7 @@ unsafe fn stack_pop_count_linear(
 
     let mut node = stack_head(self_, version).node;
     let mut subtree_count = 0;
-    let mut subtrees = SubtreeArray {
-        contents: ptr::null_mut(),
-        size: 0,
-        capacity: 0,
-    };
+    let mut subtrees = subtree_array_new();
     let reserve_count = subtree_alloc_size(count) / std::mem::size_of::<Subtree>();
     array_reserve(
         subtree_array_as_array_mut(&mut subtrees),
@@ -1505,20 +1497,12 @@ unsafe fn stack_pop_payloads_into(
     builder: &mut StackPopBuilder,
     goal_subtree_count: u32,
 ) -> bool {
-    let mut iterators = Array::<StackPayloadIterator> {
-        contents: ptr::null_mut(),
-        size: 0,
-        capacity: 0,
-    };
+    let mut iterators: Array<StackPayloadIterator> = array_new();
     array_reserve(&mut iterators, 4);
 
     let mut new_iterator = StackPayloadIterator {
         node: stack_head(stack, version).node,
-        payloads: StackLinkPayloadArray {
-            contents: ptr::null_mut(),
-            size: 0,
-            capacity: 0,
-        },
+        payloads: array_new(),
         subtree_count: 0,
     };
 
@@ -1599,11 +1583,7 @@ unsafe fn stack_pop_payloads_into(
                     let current_iterator = ptr::read(array_get_ref(&iterators, i));
                     let mut copied_iterator = StackPayloadIterator {
                         node: current_iterator.node,
-                        payloads: StackLinkPayloadArray {
-                            contents: ptr::null_mut(),
-                            size: 0,
-                            capacity: 0,
-                        },
+                        payloads: array_new(),
                         subtree_count: current_iterator.subtree_count,
                     };
                     stack_payload_array_copy(
@@ -1651,11 +1631,7 @@ unsafe fn stack__iter(
     let head = stack_head(stack, version);
     let mut new_iterator = StackIterator {
         node: head.node,
-        subtrees: SubtreeArray {
-            contents: ptr::null_mut(),
-            size: 0,
-            capacity: 0,
-        },
+        subtrees: subtree_array_new(),
         subtree_count: 0,
         is_pending: true,
     };
@@ -1844,15 +1820,22 @@ unsafe fn summarize_stack_callback(payload: *mut c_void, iterator: &StackIterato
 
 /// Create a new parse stack.
 pub unsafe fn stack_new(subtree_pool: &mut SubtreePool) -> *mut Stack {
-    let self_ = calloc(1, std::mem::size_of::<Stack>()).cast::<Stack>();
+    let self_ = malloc(std::mem::size_of::<Stack>()).cast::<Stack>();
+    ptr::write(
+        self_,
+        Stack {
+            heads: array_new(),
+            segments: array_new(),
+            frames: array_new(),
+            slices: array_new(),
+            iterators: array_new(),
+            node_pool: array_new(),
+            base_node: ptr::null_mut(),
+            subtree_pool,
+        },
+    );
     let stack = self_.as_mut().unwrap_unchecked();
 
-    array_init(&mut stack.heads);
-    array_init(&mut stack.segments);
-    array_init(&mut stack.frames);
-    array_init(&mut stack.slices);
-    array_init(&mut stack.iterators);
-    array_init(&mut stack.node_pool);
     array_reserve(&mut stack.heads, 4);
     array_reserve(&mut stack.segments, 4);
     array_reserve(&mut stack.frames, 32);
@@ -2098,11 +2081,7 @@ pub unsafe fn stack_pop_error(self_: &mut Stack, version: StackVersion) -> Subtr
             break;
         }
     }
-    SubtreeArray {
-        contents: ptr::null_mut(),
-        size: 0,
-        capacity: 0,
-    }
+    subtree_array_new()
 }
 
 /// Pop pending entries from a version.
@@ -2366,11 +2345,7 @@ pub unsafe fn stack_print_dot_graph(
     fprintf(f, c"rankdir=\"RL\";\n".as_ptr().cast::<i8>());
     fprintf(f, c"edge [arrowhead=none]\n".as_ptr().cast::<i8>());
 
-    let mut visited_nodes: Array<*mut StackNode> = Array {
-        contents: ptr::null_mut(),
-        size: 0,
-        capacity: 0,
-    };
+    let mut visited_nodes: Array<*mut StackNode> = array_new();
 
     array_clear(&mut stack.iterators);
     for i in 0..stack.heads.size {
@@ -2432,11 +2407,7 @@ pub unsafe fn stack_print_dot_graph(
 
         let iter = StackIterator {
             node: head.node,
-            subtrees: SubtreeArray {
-                contents: ptr::null_mut(),
-                size: 0,
-                capacity: 0,
-            },
+            subtrees: subtree_array_new(),
             subtree_count: 0,
             is_pending: false,
         };

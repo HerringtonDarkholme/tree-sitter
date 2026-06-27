@@ -34,6 +34,26 @@ pub struct TSRangeArray {
     pub capacity: u32,
 }
 
+pub const fn range_array_new() -> TSRangeArray {
+    TSRangeArray {
+        contents: ptr::null_mut(),
+        size: 0,
+        capacity: 0,
+    }
+}
+
+#[inline]
+unsafe fn ptr_ref<'a, T>(ptr: *const T) -> &'a T {
+    debug_assert!(!ptr.is_null());
+    ptr.as_ref().unwrap_unchecked()
+}
+
+#[inline]
+unsafe fn ptr_mut<'a, T>(ptr: *mut T) -> &'a mut T {
+    debug_assert!(!ptr.is_null());
+    ptr.as_mut().unwrap_unchecked()
+}
+
 /// Cursor used when diffing two syntax trees.
 ///
 /// The iterator walks visible syntax ranges in source order. It can also stop
@@ -671,8 +691,8 @@ pub unsafe fn range_array_get_changed_ranges_ref(
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_range_edit(range: *mut TSRange, edit: *const TSInputEdit) {
-    let range = range.as_mut().unwrap_unchecked();
-    let edit = edit.as_ref().unwrap_unchecked();
+    let range = ptr_mut(range);
+    let edit = ptr_ref(edit);
 
     range_edit_ref(range, edit);
 }
@@ -795,11 +815,7 @@ pub unsafe fn subtree_get_changed_ranges_ref(
     // Walk both trees in lockstep. Matching subtrees can be skipped wholesale;
     // maybe-matching subtrees are descended into; differing subtrees emit one
     // changed range and advance both iterators past the differing span.
-    let mut results = TSRangeArray {
-        contents: ptr::null_mut(),
-        size: 0,
-        capacity: 0,
-    };
+    let mut results = range_array_new();
 
     let mut old_iter = iterator_new(old_cursor, old_tree, language);
     let mut new_iter = iterator_new(new_cursor, new_tree, language);

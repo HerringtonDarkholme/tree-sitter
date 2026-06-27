@@ -33,6 +33,12 @@ pub type TSSymbolType = u32;
 pub const TSSymbolTypeRegular: TSSymbolType = 0;
 pub const TSSymbolTypeAnonymous: TSSymbolType = 1;
 pub const TSSymbolTypeSupertype: TSSymbolType = 2;
+
+#[inline]
+unsafe fn ptr_mut<'a, T>(ptr: *mut T) -> &'a mut T {
+    debug_assert!(!ptr.is_null());
+    ptr.as_mut().unwrap_unchecked()
+}
 pub const TSSymbolTypeAuxiliary: TSSymbolType = 3;
 
 // ---------------------------------------------------------------------------
@@ -1003,7 +1009,7 @@ pub unsafe extern "C" fn ts_lookahead_iterator_new(
         return ptr::null_mut();
     }
     let iterator = malloc(std::mem::size_of::<LookaheadIterator>()).cast::<LookaheadIterator>();
-    *iterator = language_lookaheads(self_, state);
+    ptr::write(iterator, language_lookaheads(self_, state));
     iterator
 }
 
@@ -1046,7 +1052,7 @@ pub unsafe extern "C" fn ts_lookahead_iterator_reset(
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_lookahead_iterator_next(self_: *mut LookaheadIterator) -> bool {
-    lookahead_iterator__next(self_.as_mut().unwrap_unchecked())
+    lookahead_iterator__next(ptr_mut(self_))
 }
 
 #[no_mangle]
