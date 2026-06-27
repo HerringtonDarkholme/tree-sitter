@@ -18,7 +18,7 @@ use super::language::language_write_symbol_as_dot_string;
 use super::length::{length_add, length_zero, Length};
 use super::raw_pointer::{ptr_mut, ptr_ref};
 use super::subtree::{
-    external_scanner_state_data, subtree_alloc_size, subtree_array_new, subtree_child_count,
+    external_scanner_state_data, subtree_alloc_size, subtree_child_count,
     subtree_dynamic_precedence, subtree_error_cost, subtree_external_scanner_state,
     subtree_external_scanner_state_eq, subtree_extra, subtree_is_error, subtree_named,
     subtree_padding, subtree_release, subtree_retain, subtree_size, subtree_symbol,
@@ -554,7 +554,7 @@ pub unsafe fn array_assign<T>(self_: &mut Array<T>, other: &Array<T>) {
 pub const fn stack_pop_builder_new() -> StackPopBuilder {
     StackPopBuilder {
         slices: array_new(),
-        subtrees: subtree_array_new(),
+        subtrees: array_new(),
         payloads: array_new(),
     }
 }
@@ -1322,7 +1322,7 @@ unsafe fn stack_pop_count_linear(
 
     let mut node = stack_head(self_, version).node;
     let mut subtree_count = 0;
-    let mut subtrees = subtree_array_new();
+    let mut subtrees = array_new();
     let reserve_count = subtree_alloc_size(count) / std::mem::size_of::<Subtree>();
     array_reserve(&mut subtrees, u32::try_from(reserve_count).unwrap());
 
@@ -1608,7 +1608,7 @@ unsafe fn stack__iter(
     let head = stack_head(stack, version);
     let mut new_iterator = StackIterator {
         node: head.node,
-        subtrees: subtree_array_new(),
+        subtrees: array_new(),
         subtree_count: 0,
         is_pending: true,
     };
@@ -2039,7 +2039,7 @@ pub unsafe fn stack_pop_error(self_: &mut Stack, version: StackVersion) -> Subtr
             break;
         }
     }
-    subtree_array_new()
+    array_new()
 }
 
 /// Pop pending entries from a version.
@@ -2363,7 +2363,7 @@ pub unsafe fn stack_print_dot_graph(
 
         let iter = StackIterator {
             node: head.node,
-            subtrees: subtree_array_new(),
+            subtrees: array_new(),
             subtree_count: 0,
             is_pending: false,
         };

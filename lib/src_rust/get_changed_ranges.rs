@@ -11,17 +11,14 @@ use super::language::language_alias_at;
 use super::length::{length_add, length_min, length_zero, Length, LENGTH_MAX};
 use super::point::{point_add, point_sub, POINT_MAX};
 use super::raw_pointer::{ptr_mut, ptr_ref};
-use super::stack::{array_new, array_push, Array};
+use super::stack::{array_clear, array_new, array_pop, array_push, Array};
 use super::subtree::{
     subtree_child, subtree_child_count, subtree_error_cost, subtree_external_scanner_state_eq,
     subtree_extra, subtree_has_changes, subtree_has_external_tokens, subtree_last_external_token,
     subtree_padding, subtree_parse_state, subtree_size, subtree_symbol, subtree_total_size,
     subtree_visible, ts_builtin_sym_error, Subtree, NULL_SUBTREE, TS_TREE_STATE_NONE,
 };
-use super::tree_cursor::{
-    tree_cursor_entry_array_clear, tree_cursor_entry_array_pop, tree_cursor_entry_array_push,
-    tree_cursor_entry_slice, TreeCursor, TreeCursorEntry,
-};
+use super::tree_cursor::{tree_cursor_entry_slice, TreeCursor, TreeCursorEntry};
 
 // ---------------------------------------------------------------------------
 // Types
@@ -29,10 +26,6 @@ use super::tree_cursor::{
 
 /// Growable array of changed ranges.
 pub type TSRangeArray = Array<TSRange>;
-
-pub const fn range_array_new() -> TSRangeArray {
-    array_new()
-}
 
 /// Cursor used when diffing two syntax trees.
 ///
@@ -175,8 +168,8 @@ unsafe fn range_array_add(arr: &mut TSRangeArray, start: Length, end: Length) {
 impl DiffIterator {
     /// Create a diff iterator rooted at a subtree.
     unsafe fn new(cursor: &mut TreeCursor, tree: &Subtree, language: *const TSLanguage) -> Self {
-        tree_cursor_entry_array_clear(&mut cursor.stack);
-        tree_cursor_entry_array_push(
+        array_clear(&mut cursor.stack);
+        array_push(
             &mut cursor.stack,
             TreeCursorEntry {
                 subtree: tree,
@@ -337,7 +330,7 @@ impl DiffIterator {
                 let child_right = length_add(child_left, subtree_size(*child));
 
                 if child_right.bytes > goal_position {
-                    tree_cursor_entry_array_push(
+                    array_push(
                         &mut self.cursor.stack,
                         TreeCursorEntry {
                             subtree: std::ptr::from_ref::<Subtree>(child),
@@ -394,7 +387,7 @@ impl DiffIterator {
             if self.tree_is_visible() {
                 self.visible_depth -= 1;
             }
-            let entry = tree_cursor_entry_array_pop(&mut self.cursor.stack);
+            let entry = array_pop(&mut self.cursor.stack);
             if self.done() {
                 return;
             }
@@ -416,7 +409,7 @@ impl DiffIterator {
                 }
                 let next_child = subtree_child(*parent, child_index);
 
-                tree_cursor_entry_array_push(
+                array_push(
                     &mut self.cursor.stack,
                     TreeCursorEntry {
                         subtree: std::ptr::from_ref::<Subtree>(next_child),
@@ -710,7 +703,7 @@ pub unsafe fn subtree_get_changed_ranges_ref(
     // Walk both trees in lockstep. Matching subtrees can be skipped wholesale;
     // maybe-matching subtrees are descended into; differing subtrees emit one
     // changed range and advance both iterators past the differing span.
-    let mut results = range_array_new();
+    let mut results = array_new();
 
     let mut old_iter = DiffIterator::new(old_cursor, old_tree, language);
     let mut new_iter = DiffIterator::new(new_cursor, new_tree, language);

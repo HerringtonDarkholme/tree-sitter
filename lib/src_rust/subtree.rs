@@ -538,10 +538,6 @@ const _: () = assert!(std::mem::size_of::<FirstLeaf>() == 4);
 pub type SubtreeArray = Array<Subtree>;
 pub type MutableSubtreeArray = Array<MutableSubtree>;
 
-pub const fn subtree_array_new() -> SubtreeArray {
-    array_new()
-}
-
 // ---------------------------------------------------------------------------
 // SubtreePool
 // ---------------------------------------------------------------------------
@@ -2540,7 +2536,7 @@ mod tests {
                 ptr::null(),
             );
 
-            let mut children = subtree_array_new();
+            let mut children = array_new();
             array_push(&mut children, child1);
             array_push(&mut children, child2);
 

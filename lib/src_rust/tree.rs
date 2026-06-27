@@ -7,18 +7,18 @@ use crate::ffi::{TSLanguage, TSNode, TSPoint, TSRange, TSSymbol};
 
 use super::alloc::{calloc, free, malloc};
 use super::get_changed_ranges::{
-    range_array_get_changed_ranges_ref, range_array_new, range_edit_ref, range_slice,
-    subtree_get_changed_ranges_ref,
+    range_array_get_changed_ranges_ref, range_edit_ref, range_slice, subtree_get_changed_ranges_ref,
 };
 use super::language::{ts_language_copy, ts_language_delete};
 use super::length::{length_add, Length};
 use super::node::node_new;
 use super::raw_pointer::{ptr_mut, ptr_ref};
+use super::stack::array_new;
 use super::subtree::{
     subtree_edit, subtree_padding, subtree_pool_delete, subtree_pool_new, subtree_print_dot_graph,
     subtree_release, subtree_retain, tree_arena_release, tree_arena_retain, Subtree, TreeArena,
 };
-use super::tree_cursor::{tree_cursor_entry_array_new, tree_cursor_init_ref, TreeCursor};
+use super::tree_cursor::{tree_cursor_init_ref, TreeCursor};
 
 // ---------------------------------------------------------------------------
 // Extern C functions (still in C or other Rust modules)
@@ -165,7 +165,7 @@ unsafe fn tree_included_ranges_ref(tree: &TSTree, length: &mut u32) -> *mut TSRa
 const fn tree_cursor_empty() -> TreeCursor {
     TreeCursor {
         tree: std::ptr::null(),
-        stack: tree_cursor_entry_array_new(),
+        stack: array_new(),
         root_alias_symbol: 0,
     }
 }
@@ -308,7 +308,7 @@ pub unsafe extern "C" fn ts_tree_get_changed_ranges(
     tree_cursor_init_ref(&mut cursor1, tree_root_node_ref(old_tree, old_tree_ref));
     tree_cursor_init_ref(&mut cursor2, tree_root_node_ref(new_tree, new_tree_ref));
 
-    let mut included_range_differences = range_array_new();
+    let mut included_range_differences = array_new();
     let old_included_ranges = range_slice(
         old_tree_ref.included_ranges,
         old_tree_ref.included_range_count,

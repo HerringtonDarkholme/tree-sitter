@@ -15,8 +15,7 @@ use super::error_costs::{
     ERROR_COST_PER_SKIPPED_TREE, ERROR_STATE,
 };
 use super::get_changed_ranges::{
-    range_array_get_changed_ranges_ref, range_array_intersects_ref, range_array_new, range_slice,
-    TSRangeArray,
+    range_array_get_changed_ranges_ref, range_array_intersects_ref, range_slice, TSRangeArray,
 };
 use super::language::{
     language_actions, language_alias_sequence, language_enabled_external_tokens, language_full,
@@ -116,7 +115,6 @@ use super::subtree::{
     external_scanner_state_init,
     subtree_array_clear,
     subtree_array_delete,
-    subtree_array_new,
     subtree_array_remove_trailing_extras,
     subtree_child,
     subtree_child_count,
@@ -424,7 +422,7 @@ const fn pending_reduction_new_empty(
             parse_state
         },
         child_count: 0,
-        children: subtree_array_new(),
+        children: array_new(),
         payload_children: array_new(),
         padding: length_zero(),
         size: length_zero(),
@@ -1232,7 +1230,7 @@ unsafe fn parser__materialize_pending_reduction(
         return pending_ref.materialized;
     }
 
-    let mut children = subtree_array_new();
+    let mut children = array_new();
 
     if !pending_ref.payload_children.contents.is_null() {
         array_reserve(&mut children, pending_ref.payload_children.size);
@@ -1260,7 +1258,7 @@ unsafe fn parser__materialize_pending_reduction(
         array_delete(&mut pending_ref.payload_children);
     } else {
         children = ptr::read(&pending_ref.children);
-        pending_ref.children = subtree_array_new();
+        pending_ref.children = array_new();
     }
 
     let result = parser__new_node(
@@ -2464,7 +2462,7 @@ unsafe fn parser__new_node_from_builder_span(
     production_id: u32,
 ) -> MutableSubtree {
     if self_.tree_arena.is_null() {
-        let mut owned_children = subtree_array_new();
+        let mut owned_children = array_new();
         array_reserve(&mut owned_children, children.size);
         if children.size > 0 {
             ptr::copy_nonoverlapping(
@@ -3177,7 +3175,7 @@ unsafe fn parser__recover(self_: &mut TSParser, version: StackVersion, mut looka
     // EOF: wrap everything and terminate
     if subtree_is_eof(lookahead) {
         LOG!(parser, c"recover_eof".as_ptr().cast::<i8>());
-        let mut children: SubtreeArray = subtree_array_new();
+        let mut children: SubtreeArray = array_new();
         let parent = subtree_new_error_node(&mut children, false, self_.language);
         stack_push(stack, version, parent, false, 1);
         parser__accept(self_, version, lookahead);
@@ -3225,7 +3223,7 @@ unsafe fn parser__recover(self_: &mut TSParser, version: StackVersion, mut looka
         c"skip_token symbol:%s".as_ptr().cast::<i8>(),
         SYM_NAME!(parser, subtree_symbol(lookahead))
     );
-    let mut children: SubtreeArray = subtree_array_new();
+    let mut children: SubtreeArray = array_new();
     array_reserve(&mut children, 1);
     array_push(&mut children, lookahead);
     let mut error_repeat = parser__new_node(self_, ts_builtin_sym_error_repeat, &mut children, 0);
@@ -3885,9 +3883,9 @@ pub unsafe extern "C" fn ts_parser_new() -> *mut TSParser {
             finished_tree: NULL_SUBTREE,
             reduce_builder: stack_pop_builder_new(),
             pending_reductions: array_new(),
-            trailing_extras: subtree_array_new(),
-            trailing_extras2: subtree_array_new(),
-            scratch_trees: subtree_array_new(),
+            trailing_extras: array_new(),
+            trailing_extras2: array_new(),
+            scratch_trees: array_new(),
             token_cache: TokenCache {
                 token: NULL_SUBTREE,
                 last_external_token: NULL_SUBTREE,
@@ -3900,7 +3898,7 @@ pub unsafe extern "C" fn ts_parser_new() -> *mut TSParser {
             accept_count: 0,
             operation_count: 0,
             old_tree: NULL_SUBTREE,
-            included_range_differences: range_array_new(),
+            included_range_differences: array_new(),
             parse_options: parse_options_none(),
             parse_state: parse_state_empty(),
             included_range_difference_index: 0,
