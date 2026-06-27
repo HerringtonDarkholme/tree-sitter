@@ -12,7 +12,7 @@
 //! with function pointers to static functions in this module, so generated
 //! parsers can call them without linking against this library.
 
-use std::ffi::c_void;
+use std::ffi::{c_char, c_void};
 use std::ptr;
 
 use crate::ffi::{
@@ -80,7 +80,7 @@ pub struct Lexer {
     /// Sorted ranges that should be visible to this parse.
     pub included_ranges: *mut TSRange,
     /// Borrowed chunk returned by `TSInput::read`; owned by the caller.
-    pub chunk: *const i8,
+    pub chunk: *const c_char,
     /// Source reader and encoding callbacks.
     pub input: TSInput,
     /// Optional logging callback.

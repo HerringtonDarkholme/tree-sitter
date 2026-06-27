@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 #![allow(non_snake_case)]
 
-use core::ffi::c_void;
+use core::ffi::{c_char, c_void};
 use std::ptr;
 
 use crate::ffi::{
@@ -484,7 +484,7 @@ enum ErrorComparison {
 /// `TSStringInput` — for string-based parsing
 #[repr(C)]
 struct TSStringInput {
-    string: *const i8,
+    string: *const c_char,
     length: u32,
 }
 
@@ -1295,11 +1295,11 @@ unsafe extern "C" fn ts_string_input_read(
     byte: u32,
     _point: TSPoint,
     length: *mut u32,
-) -> *const i8 {
+) -> *const c_char {
     let input = ptr_ref(payload.cast::<TSStringInput>());
     if byte >= input.length {
         *length = 0;
-        c"".as_ptr().cast::<i8>()
+        c"".as_ptr()
     } else {
         *length = input.length - byte;
         input.string.add(byte as usize)
@@ -1315,7 +1315,7 @@ unsafe fn parser__log(self_: &mut TSParser) {
         log_fn(
             self_.lexer.logger.payload,
             TSLogTypeParse,
-            self_.lexer.debug_buffer.as_ptr().cast::<i8>(),
+            self_.lexer.debug_buffer.as_ptr().cast::<c_char>(),
         );
     }
 
@@ -4269,7 +4269,10 @@ pub unsafe extern "C" fn ts_parser_parse_string_encoding(
     length: u32,
     encoding: TSInputEncoding,
 ) -> *mut TSTree {
-    let input = TSStringInput { string, length };
+    let input = TSStringInput {
+        string: string.cast::<c_char>(),
+        length,
+    };
     ts_parser_parse(
         self_,
         old_tree,
