@@ -91,7 +91,7 @@ const ARCH_OS: Result<&str, LoaderError> = Err(LoaderError::WasiSDKPlatform);
 pub fn run_wasm(args: &BuildWasm) -> Result<()> {
     // The parser engine now lives in Rust. Build it as an emscripten staticlib
     // so emcc can link it with the binding glue, in place of lib/src/lib.c.
-    let core_staticlib = build_core_staticlib(args)?;
+    let core_staticlib = build_core_staticlib()?;
     let core_staticlib = core_staticlib
         .to_str()
         .ok_or_else(|| anyhow!("core staticlib path is not valid UTF-8"))?;
@@ -273,15 +273,21 @@ pub fn run_wasm(args: &BuildWasm) -> Result<()> {
 /// Build the Rust core as a `wasm32-unknown-emscripten` staticlib.
 ///
 /// This replaces the former `lib/src/lib.c` amalgamation: the parser engine
-/// lives in Rust now, so emcc links this archive (which also contains the
-/// `ts_lexer__log_shim` C shim, compiled by emcc via the crate's build script)
-/// together with the binding glue. Requires `emcc` on `PATH` and the
-/// `wasm32-unknown-emscripten` target installed.
-fn build_core_staticlib(args: &BuildWasm) -> Result<PathBuf> {
-    let profile = if args.debug { "debug" } else { "release" };
+/// lives in Rust now, so emcc links this archive together with the binding glue
+/// and the C shims (see `run_wasm`). Requires the `wasm32-unknown-emscripten`
+/// target and the `llvm-tools` component installed; no emscripten toolchain is
+/// needed to build the archive itself.
+///
+/// The core is always built optimized, even for the debug web build: unoptimized
+/// rustc emits the `#[no_mangle]` allocator-hook statics (`ts_current_malloc`,
+/// ...) as *local* symbols, so the C glue cannot resolve them. The debug web
+/// build still gets debug emscripten glue and runtime assertions; only the Rust
+/// core (a stable dependency) is optimized.
+fn build_core_staticlib() -> Result<PathBuf> {
     let mut cmd = Command::new("cargo");
     cmd.args([
         "rustc",
+        "--release",
         "--package",
         "tree-sitter",
         "--target",
@@ -289,16 +295,11 @@ fn build_core_staticlib(args: &BuildWasm) -> Result<PathBuf> {
         "--crate-type",
         "staticlib",
     ]);
-    if !args.debug {
-        cmd.arg("--release");
-    }
     bail_on_err(
         &cmd.output()?,
         "Failed to build the Tree-sitter core as a wasm32-unknown-emscripten staticlib",
     )?;
-    let staticlib = PathBuf::from(format!(
-        "target/wasm32-unknown-emscripten/{profile}/libtree_sitter.a"
-    ));
+    let staticlib = PathBuf::from("target/wasm32-unknown-emscripten/release/libtree_sitter.a");
     // Strip debug info from the archive: the precompiled Rust std bundled into it
     // carries DWARF referencing /rustc/... paths, which makes emcc emit a source
     // map that crashes wasm-opt. Use rust-objcopy (from the llvm-tools component,
