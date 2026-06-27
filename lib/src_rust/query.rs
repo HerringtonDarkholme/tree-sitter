@@ -22,25 +22,25 @@
 use crate::ffi::{
     TSFieldId, TSLanguage, TSQuantifier, TSQuantifierOne, TSQuantifierOneOrMore, TSQuantifierZero,
     TSQuantifierZeroOrMore, TSQuantifierZeroOrOne, TSQueryCapture, TSQueryCursorOptions,
-    TSQueryCursorState, TSQueryError, TSQueryErrorCapture, TSQueryErrorField, TSQueryErrorNodeType,
-    TSQueryErrorNone, TSQueryErrorStructure, TSQueryErrorSyntax, TSQueryPredicateStep,
-    TSQueryPredicateStepTypeCapture, TSQueryPredicateStepTypeDone, TSQueryPredicateStepTypeString,
-    TSRange, TSStateId, TSSymbol,
+    TSQueryCursorState, TSQueryError, TSQueryErrorCapture, TSQueryErrorField, TSQueryErrorLanguage,
+    TSQueryErrorNodeType, TSQueryErrorNone, TSQueryErrorStructure, TSQueryErrorSyntax,
+    TSQueryPredicateStep, TSQueryPredicateStepTypeCapture, TSQueryPredicateStepTypeDone,
+    TSQueryPredicateStepTypeString, TSRange, TSStateId, TSSymbol,
 };
 
 use super::alloc::{calloc, free, malloc};
 use super::language::{
     language_alias_at, language_aliases_for_symbol, language_field_map, language_lookaheads,
     language_public_symbol, language_state_is_primary, language_symbol_count, language_token_count,
-    lookahead_iterator__next, ts_language_abi_version, ts_language_field_id_for_name,
-    ts_language_state_count, ts_language_subtypes, ts_language_symbol_for_name,
-    ts_language_symbol_metadata, TSParseActionTypeReduce, TSParseActionTypeShift,
-    LANGUAGE_VERSION_WITH_RESERVED_WORDS,
+    lookahead_iterator__next, ts_language_abi_version, ts_language_copy, ts_language_delete,
+    ts_language_field_id_for_name, ts_language_state_count, ts_language_subtypes,
+    ts_language_symbol_for_name, ts_language_symbol_metadata, TSParseActionTypeReduce,
+    TSParseActionTypeShift, LANGUAGE_VERSION_WITH_RESERVED_WORDS,
 };
 use super::stack::{
-    array_assign, array_back_ref, array_clear, array_delete, array_erase, array_get_mut,
-    array_get_ref, array_grow_by, array_init, array_insert, array_new, array_pop, array_push,
-    array_splice, Array,
+    array_assign, array_back_mut, array_back_ref, array_clear, array_delete, array_erase,
+    array_get_mut, array_get_ref, array_grow_by, array_init, array_insert, array_new, array_pop,
+    array_push, array_splice, Array,
 };
 use super::subtree::{ts_builtin_sym_error, TSFieldMapEntry};
 use super::tree_cursor::TreeCursor;
@@ -66,6 +66,11 @@ const PATTERN_DONE_MARKER: u16 = u16::MAX;
 const NONE: u16 = u16::MAX;
 const WILDCARD_SYMBOL: TSSymbol = 0;
 const OP_COUNT_PER_QUERY_CALLBACK_CHECK: u32 = 100;
+
+// ABI version bounds, mirroring the `tree_sitter/api.h` macros visible to each
+// translation unit.
+const TREE_SITTER_LANGUAGE_VERSION: u32 = 15;
+const TREE_SITTER_MIN_COMPATIBLE_LANGUAGE_VERSION: u32 = 13;
 
 // Sentinel returned by `parse_pattern` when it hits a closing `)`/`]` belonging
 // to the parent. Mirrors `static const TSQueryError PARENT_DONE = -1;`.
@@ -2813,4 +2818,348 @@ unsafe fn ts_query_analyze_patterns(self_: &mut TSQuery, error_offset: &mut u32)
     array_delete(&mut parent_step_indices);
 
     all_patterns_are_valid
+}
+
+// ---------------------------------------------------------------------------
+// Public query API
+// ---------------------------------------------------------------------------
+//
+// These are written as `extern "C"` but without `#[no_mangle]` while `query.c`
+// is still the live implementation (adding `#[no_mangle]` now would collide
+// with the C symbols at link time). Tier 5 adds `#[no_mangle]` and removes
+// `query.c` in a single atomic step.
+
+pub unsafe extern "C" fn ts_query_new(
+    language: *const TSLanguage,
+    source: *const i8,
+    source_len: u32,
+    error_offset: *mut u32,
+    error_type: *mut TSQueryError,
+) -> *mut TSQuery {
+    if language.is_null()
+        || ts_language_abi_version(language) > TREE_SITTER_LANGUAGE_VERSION
+        || ts_language_abi_version(language) < TREE_SITTER_MIN_COMPATIBLE_LANGUAGE_VERSION
+    {
+        *error_type = TSQueryErrorLanguage;
+        return core::ptr::null_mut();
+    }
+
+    let self_ = malloc(size_of::<TSQuery>()).cast::<TSQuery>();
+    core::ptr::write(
+        self_,
+        TSQuery {
+            steps: array_new(),
+            pattern_map: array_new(),
+            captures: symbol_table_new(),
+            capture_quantifiers: array_new(),
+            predicate_values: symbol_table_new(),
+            predicate_steps: array_new(),
+            patterns: array_new(),
+            step_offsets: array_new(),
+            negated_fields: array_new(),
+            string_buffer: array_new(),
+            repeat_symbols_with_rootless_patterns: array_new(),
+            language: ts_language_copy(language),
+            wildcard_root_pattern_count: 0,
+        },
+    );
+    let query = &mut *self_;
+
+    array_push(&mut query.negated_fields, 0);
+
+    // Parse all of the S-expressions in the given string.
+    let mut stream = stream_new(source.cast::<u8>(), source_len);
+    stream_skip_whitespace(&mut stream);
+    while stream.input < stream.end {
+        let pattern_index = query.patterns.size;
+        let start_step_index = query.steps.size;
+        let start_predicate_step_index = query.predicate_steps.size;
+        array_push(
+            &mut query.patterns,
+            QueryPattern {
+                steps: Slice {
+                    offset: start_step_index,
+                    length: 0,
+                },
+                predicate_steps: Slice {
+                    offset: start_predicate_step_index,
+                    length: 0,
+                },
+                start_byte: stream_offset(&stream),
+                end_byte: 0,
+                is_non_local: false,
+            },
+        );
+        let mut capture_quantifiers = capture_quantifiers_new();
+        *error_type =
+            ts_query_parse_pattern(query, &mut stream, 0, false, &mut capture_quantifiers);
+        array_push(
+            &mut query.steps,
+            query_step_new(0, PATTERN_DONE_MARKER, false),
+        );
+
+        let steps_size = query.steps.size;
+        let predicate_steps_size = query.predicate_steps.size;
+        let end_byte = stream_offset(&stream);
+        {
+            let pattern = array_back_mut(&mut query.patterns);
+            pattern.steps.length = steps_size - start_step_index;
+            pattern.predicate_steps.length = predicate_steps_size - start_predicate_step_index;
+            pattern.end_byte = end_byte;
+        }
+
+        // If any pattern could not be parsed, report the error and terminate.
+        if *error_type != TSQueryErrorNone {
+            if *error_type == PARENT_DONE {
+                *error_type = TSQueryErrorSyntax;
+            }
+            *error_offset = stream_offset(&stream);
+            capture_quantifiers_delete(&mut capture_quantifiers);
+            ts_query_delete(self_);
+            return core::ptr::null_mut();
+        }
+
+        // Maintain a list of capture quantifiers for each pattern.
+        array_push(&mut query.capture_quantifiers, capture_quantifiers);
+
+        // Maintain a map that can look up patterns for a given root symbol.
+        let mut wildcard_root_alternative_index = NONE;
+        let mut start_step_index = start_step_index;
+        loop {
+            let step = *array_get_ref(&query.steps, start_step_index);
+
+            // If a pattern has a wildcard at its root but a non-wildcard child,
+            // skip matching the wildcard (the cursor checks for a parent later).
+            if step.symbol == WILDCARD_SYMBOL && step.depth == 0 && step.field == 0 {
+                let second_step = *array_get_ref(&query.steps, start_step_index + 1);
+                if second_step.symbol != WILDCARD_SYMBOL
+                    && second_step.depth == 1
+                    && !second_step.is_immediate
+                {
+                    wildcard_root_alternative_index = step.alternative_index;
+                    start_step_index += 1;
+                }
+            }
+
+            let step = *array_get_ref(&query.steps, start_step_index);
+
+            // Determine whether the pattern has a single root node.
+            let start_depth = step.depth;
+            let mut is_rooted = start_depth == 0;
+            for step_index in (start_step_index + 1)..query.steps.size {
+                let child_step = *array_get_ref(&query.steps, step_index);
+                if child_step.is_dead_end {
+                    break;
+                }
+                if child_step.depth == start_depth {
+                    is_rooted = false;
+                    break;
+                }
+            }
+
+            ts_query_pattern_map_insert(
+                query,
+                step.symbol,
+                PatternEntry {
+                    step_index: start_step_index as u16,
+                    pattern_index: pattern_index as u16,
+                    is_rooted,
+                },
+            );
+            if step.symbol == WILDCARD_SYMBOL {
+                query.wildcard_root_pattern_count += 1;
+            }
+
+            // If there are alternatives or options at the root, add multiple
+            // entries to the pattern map.
+            if step.alternative_index != NONE {
+                start_step_index = u32::from(step.alternative_index);
+            } else if wildcard_root_alternative_index != NONE {
+                start_step_index = u32::from(wildcard_root_alternative_index);
+                wildcard_root_alternative_index = NONE;
+            } else {
+                break;
+            }
+        }
+    }
+
+    if !ts_query_analyze_patterns(query, &mut *error_offset) {
+        *error_type = TSQueryErrorStructure;
+        ts_query_delete(self_);
+        return core::ptr::null_mut();
+    }
+
+    array_delete(&mut query.string_buffer);
+    self_
+}
+
+pub unsafe extern "C" fn ts_query_delete(self_: *mut TSQuery) {
+    if self_.is_null() {
+        return;
+    }
+    let query = &mut *self_;
+    array_delete(&mut query.steps);
+    array_delete(&mut query.pattern_map);
+    array_delete(&mut query.predicate_steps);
+    array_delete(&mut query.patterns);
+    array_delete(&mut query.step_offsets);
+    array_delete(&mut query.string_buffer);
+    array_delete(&mut query.negated_fields);
+    array_delete(&mut query.repeat_symbols_with_rootless_patterns);
+    ts_language_delete(query.language);
+    symbol_table_delete(&mut query.captures);
+    symbol_table_delete(&mut query.predicate_values);
+    for index in 0..query.capture_quantifiers.size {
+        capture_quantifiers_delete(array_get_mut(&mut query.capture_quantifiers, index));
+    }
+    array_delete(&mut query.capture_quantifiers);
+    free(self_.cast::<c_void>());
+}
+
+pub const unsafe extern "C" fn ts_query_pattern_count(self_: *const TSQuery) -> u32 {
+    (*self_).patterns.size
+}
+
+pub const unsafe extern "C" fn ts_query_capture_count(self_: *const TSQuery) -> u32 {
+    (*self_).captures.slices.size
+}
+
+pub const unsafe extern "C" fn ts_query_string_count(self_: *const TSQuery) -> u32 {
+    (*self_).predicate_values.slices.size
+}
+
+pub unsafe extern "C" fn ts_query_capture_name_for_id(
+    self_: *const TSQuery,
+    index: u32,
+    length: *mut u32,
+) -> *const i8 {
+    symbol_table_name_for_id(&(*self_).captures, index as u16, &mut *length).cast::<i8>()
+}
+
+pub unsafe extern "C" fn ts_query_capture_quantifier_for_id(
+    self_: *const TSQuery,
+    pattern_index: u32,
+    capture_index: u32,
+) -> TSQuantifier {
+    let capture_quantifiers = array_get_ref(&(*self_).capture_quantifiers, pattern_index);
+    capture_quantifier_for_id(capture_quantifiers, capture_index as u16)
+}
+
+pub unsafe extern "C" fn ts_query_string_value_for_id(
+    self_: *const TSQuery,
+    index: u32,
+    length: *mut u32,
+) -> *const i8 {
+    symbol_table_name_for_id(&(*self_).predicate_values, index as u16, &mut *length).cast::<i8>()
+}
+
+pub unsafe extern "C" fn ts_query_predicates_for_pattern(
+    self_: *const TSQuery,
+    pattern_index: u32,
+    step_count: *mut u32,
+) -> *const TSQueryPredicateStep {
+    let slice = array_get_ref(&(*self_).patterns, pattern_index).predicate_steps;
+    *step_count = slice.length;
+    if slice.length == 0 {
+        return core::ptr::null();
+    }
+    core::ptr::from_ref(array_get_ref(&(*self_).predicate_steps, slice.offset))
+}
+
+pub unsafe extern "C" fn ts_query_start_byte_for_pattern(
+    self_: *const TSQuery,
+    pattern_index: u32,
+) -> u32 {
+    array_get_ref(&(*self_).patterns, pattern_index).start_byte
+}
+
+pub unsafe extern "C" fn ts_query_end_byte_for_pattern(
+    self_: *const TSQuery,
+    pattern_index: u32,
+) -> u32 {
+    array_get_ref(&(*self_).patterns, pattern_index).end_byte
+}
+
+pub unsafe extern "C" fn ts_query_is_pattern_rooted(
+    self_: *const TSQuery,
+    pattern_index: u32,
+) -> bool {
+    for i in 0..(*self_).pattern_map.size {
+        let entry = array_get_ref(&(*self_).pattern_map, i);
+        if u32::from(entry.pattern_index) == pattern_index && !entry.is_rooted {
+            return false;
+        }
+    }
+    true
+}
+
+pub unsafe extern "C" fn ts_query_is_pattern_non_local(
+    self_: *const TSQuery,
+    pattern_index: u32,
+) -> bool {
+    if pattern_index < (*self_).patterns.size {
+        array_get_ref(&(*self_).patterns, pattern_index).is_non_local
+    } else {
+        false
+    }
+}
+
+pub unsafe extern "C" fn ts_query_is_pattern_guaranteed_at_step(
+    self_: *const TSQuery,
+    byte_offset: u32,
+) -> bool {
+    let mut step_index = u32::MAX;
+    for i in 0..(*self_).step_offsets.size {
+        let step_offset = array_get_ref(&(*self_).step_offsets, i);
+        if step_offset.byte_offset > byte_offset {
+            break;
+        }
+        step_index = u32::from(step_offset.step_index);
+    }
+    if step_index < (*self_).steps.size {
+        array_get_ref(&(*self_).steps, step_index).root_pattern_guaranteed
+    } else {
+        false
+    }
+}
+
+/// Whether the step at `step_index` could fail to match (internal; `static` in
+/// C). Used by the query cursor.
+unsafe fn ts_query_step_is_fallible(self_: &TSQuery, step_index: u16) -> bool {
+    debug_assert!(u32::from(step_index) + 1 < self_.steps.size);
+    let step = array_get_ref(&self_.steps, u32::from(step_index));
+    let next_step = array_get_ref(&self_.steps, u32::from(step_index) + 1);
+    next_step.depth != PATTERN_DONE_MARKER
+        && next_step.depth > step.depth
+        && (!next_step.parent_pattern_guaranteed || step.symbol == WILDCARD_SYMBOL)
+}
+
+pub unsafe extern "C" fn ts_query_disable_capture(
+    self_: *mut TSQuery,
+    name: *const i8,
+    length: u32,
+) {
+    // Remove capture information for any pattern step that previously captured
+    // with the given name.
+    let query = &mut *self_;
+    let id = symbol_table_id_for_name(&query.captures, name.cast::<u8>(), length);
+    if id != -1 {
+        for i in 0..query.steps.size {
+            query_step_remove_capture(array_get_mut(&mut query.steps, i), id as u16);
+        }
+    }
+}
+
+pub unsafe extern "C" fn ts_query_disable_pattern(self_: *mut TSQuery, pattern_index: u32) {
+    // Remove the given pattern from the pattern map. Its steps remain in the
+    // `steps` array but will never be read.
+    let query = &mut *self_;
+    let mut i = 0u32;
+    while i < query.pattern_map.size {
+        if u32::from(array_get_ref(&query.pattern_map, i).pattern_index) == pattern_index {
+            array_erase(&mut query.pattern_map, i);
+        } else {
+            i += 1;
+        }
+    }
 }
