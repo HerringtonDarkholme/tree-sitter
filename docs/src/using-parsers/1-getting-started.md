@@ -2,20 +2,19 @@
 
 ## Building the Library
 
-To build the library on a POSIX system, just run `make` in the Tree-sitter directory. This will create a static library
-called `libtree-sitter.a` as well as dynamic libraries.
+Tree-sitter's core is implemented in Rust (exposed through a C ABI), so the library is built with Cargo. From the
+Tree-sitter directory, run:
 
-Alternatively, you can incorporate the library in a larger project's build system by adding one source file to the build.
-This source file needs two directories to be in the include path when compiled:
+```sh
+cargo build --release --package tree-sitter
+```
 
-**source file:**
+This produces a static library (`libtree_sitter.a`) and a dynamic library in `target/release/`, both exposing the C
+API declared in `tree-sitter/lib/include/tree_sitter/api.h`. To use the library in a larger project, link against one
+of those files and add the `tree-sitter/lib/include` directory to your include path.
 
-- `tree-sitter/lib/src/lib.c`
-
-**include directories:**
-
-- `tree-sitter/lib/src`
-- `tree-sitter/lib/include`
+> The former pure-C build (compiling `lib/src/lib.c` directly, or via `make`/CMake) has been retired now that the core
+> lives in Rust.
 
 ## The Basic Objects
 

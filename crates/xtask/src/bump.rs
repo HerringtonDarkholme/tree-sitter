@@ -68,11 +68,8 @@ pub fn run(args: BumpVersion) -> Result<()> {
 
     println!("Bumping from {current_version} to {next_version}");
     update_crates(&current_version, &next_version)?;
-    update_makefile(&next_version)?;
-    update_cmake(&next_version)?;
     update_nix(&next_version)?;
     update_npm(&next_version)?;
-    update_zig(&next_version)?;
     tag_next_version(&next_version)?;
 
     Ok(())
@@ -84,8 +81,6 @@ fn tag_next_version(next_version: &Version) -> Result<()> {
         &[
             "Cargo.lock",
             "Cargo.toml",
-            "Makefile",
-            "build.zig.zon",
             "flake.nix",
             "crates/cli/Cargo.toml",
             "crates/cli/npm/package.json",
@@ -94,7 +89,6 @@ fn tag_next_version(next_version: &Version) -> Result<()> {
             "crates/highlight/Cargo.toml",
             "crates/loader/Cargo.toml",
             "crates/tags/Cargo.toml",
-            "CMakeLists.txt",
             "lib/Cargo.toml",
             "lib/binding_web/package.json",
             "lib/binding_web/package-lock.json",
@@ -120,52 +114,6 @@ fn tag_next_version(next_version: &Version) -> Result<()> {
     }
 
     println!("Tagged commit {commit_sha} with tag v{next_version}");
-
-    Ok(())
-}
-
-fn update_makefile(next_version: &Version) -> Result<()> {
-    let makefile = std::fs::read_to_string("Makefile")?;
-    let makefile = makefile
-        .lines()
-        .map(|line| {
-            if line.starts_with("VERSION") {
-                format!("VERSION := {next_version}")
-            } else {
-                line.to_string()
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-        + "\n";
-
-    std::fs::write("Makefile", makefile)?;
-
-    Ok(())
-}
-
-fn update_cmake(next_version: &Version) -> Result<()> {
-    let cmake = std::fs::read_to_string("CMakeLists.txt")?;
-    let cmake = cmake
-        .lines()
-        .map(|line| {
-            if line.contains(" VERSION") {
-                let start_quote = line.find('"').unwrap();
-                let end_quote = line.rfind('"').unwrap();
-                format!(
-                    "{}{next_version}{}",
-                    &line[..=start_quote],
-                    &line[end_quote..]
-                )
-            } else {
-                line.to_string()
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-        + "\n";
-
-    std::fs::write("CMakeLists.txt", cmake)?;
 
     Ok(())
 }
@@ -258,25 +206,6 @@ fn update_npm(next_version: &Version) -> Result<()> {
             ));
         }
     }
-
-    Ok(())
-}
-
-fn update_zig(next_version: &Version) -> Result<()> {
-    let zig = std::fs::read_to_string("build.zig.zon")?
-        .lines()
-        .map(|line| {
-            if line.starts_with("    .version") {
-                format!("    .version = \"{next_version}\",")
-            } else {
-                line.to_string()
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-        + "\n";
-
-    std::fs::write("build.zig.zon", zig)?;
 
     Ok(())
 }

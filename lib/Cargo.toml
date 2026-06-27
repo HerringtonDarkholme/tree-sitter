@@ -67,3 +67,6 @@ serde_json.workspace = true
 
 [lib]
 path = "binding_rust/lib.rs"
+# rlib for Rust consumers (the workspace crates); staticlib + cdylib so the
+# Rust-cored library can be built and shipped as a C library (libtree-sitter).
+crate-type = ["staticlib", "cdylib", "rlib"]

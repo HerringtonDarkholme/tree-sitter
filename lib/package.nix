@@ -1,36 +1,82 @@
 {
-  stdenv,
-  cmake,
-  pkg-config,
+  lib,
   src,
   version,
-  lib,
+  rustPlatform,
+  stdenv,
 }:
-stdenv.mkDerivation {
-  inherit src version;
+# The tree-sitter core now lives in Rust (lib/src_rust). The C library is built
+# by cargo: the `tree-sitter` crate's `crate-type` includes `staticlib` and
+# `cdylib`, so cargo emits libtree_sitter.{a,so,dylib} (Rust core + the
+# wasm_store.c shim). This derivation builds that crate and installs the C
+# library, public header, and pkg-config file.
+#
+# NOTE: this replaced the former CMake-based build; the install layout below
+# (esp. the shared-library soname/install_name handling) should be verified on
+# a Nix builder.
+rustPlatform.buildRustPackage {
   pname = "tree-sitter";
+  inherit src version;
 
-  nativeBuildInputs = [
-    cmake
-    pkg-config
+  cargoLock.lockFile = ../Cargo.lock;
+
+  # Build only the library crate.
+  cargoBuildFlags = [
+    "--package"
+    "tree-sitter"
   ];
 
-  sourceRoot = "source";
+  doCheck = false;
 
-  cmakeFlags = [
-    "-DBUILD_SHARED_LIBS=ON"
-    "-DCMAKE_INSTALL_LIBDIR=lib"
-    "-DCMAKE_INSTALL_INCLUDEDIR=include"
-    "-DTREE_SITTER_FEATURE_WASM=OFF"
-  ];
+  # buildRustPackage's default installer only handles binaries, so install the
+  # C library artifacts by hand.
+  installPhase =
+    let
+      soext = stdenv.hostPlatform.extensions.sharedLibrary; # ".so" / ".dylib"
+      major = lib.versions.major version;
+      minor = lib.versions.minor version;
+    in
+    ''
+      runHook preInstall
 
-  enableParallelBuilding = true;
+      mkdir -p $out/lib/pkgconfig $out/include/tree_sitter
 
-  postInstall = ''
-    mkdir -p $out/{lib/pkgconfig,share/tree-sitter}
-    substituteInPlace $out/lib/pkgconfig/tree-sitter.pc \
-      --replace-fail "\''${prefix}" "$out" 2>/dev/null
-  '';
+      # The release dir differs between native and cross builds; locate it.
+      releaseDir=$(dirname "$(find target -name 'libtree_sitter.a' -print -quit)")
+
+      install -m644 lib/include/tree_sitter/api.h $out/include/tree_sitter/api.h
+      install -m644 "$releaseDir/libtree_sitter.a" $out/lib/libtree-sitter.a
+
+      sharedSrc="$releaseDir/libtree_sitter${soext}"
+      if [ -f "$sharedSrc" ]; then
+    ''
+    + (
+      if stdenv.hostPlatform.isDarwin then
+        ''
+          install -m755 "$sharedSrc" "$out/lib/libtree-sitter.${major}.${minor}${soext}"
+          ln -sf "libtree-sitter.${major}.${minor}${soext}" "$out/lib/libtree-sitter.${major}${soext}"
+          ln -sf "libtree-sitter.${major}${soext}" "$out/lib/libtree-sitter${soext}"
+        ''
+      else
+        ''
+          install -m755 "$sharedSrc" "$out/lib/libtree-sitter${soext}.${major}.${minor}"
+          ln -sf "libtree-sitter${soext}.${major}.${minor}" "$out/lib/libtree-sitter${soext}.${major}"
+          ln -sf "libtree-sitter${soext}.${major}" "$out/lib/libtree-sitter${soext}"
+        ''
+    )
+    + ''
+      fi
+
+      substitute lib/tree-sitter.pc.in $out/lib/pkgconfig/tree-sitter.pc \
+        --replace-fail "@CMAKE_INSTALL_PREFIX@" "$out" \
+        --replace-fail "@CMAKE_INSTALL_LIBDIR@" "lib" \
+        --replace-fail "@CMAKE_INSTALL_INCLUDEDIR@" "include" \
+        --replace-fail "@PROJECT_VERSION@" "${version}" \
+        --replace-fail "@PROJECT_DESCRIPTION@" "An incremental parsing system for programming tools" \
+        --replace-fail "@PROJECT_HOMEPAGE_URL@" "https://tree-sitter.github.io/tree-sitter/"
+
+      runHook postInstall
+    '';
 
   meta = {
     description = "Tree-sitter incremental parsing library";
@@ -38,7 +84,8 @@ stdenv.mkDerivation {
       Tree-sitter is a parser generator tool and an incremental parsing library.
       It can build a concrete syntax tree for a source file and efficiently update
       the syntax tree as the source file is edited. This package provides the core
-      C library that can be used to parse source code using Tree-sitter grammars.
+      library (Rust core with a C ABI) that can be used to parse source code using
+      Tree-sitter grammars.
     '';
     homepage = "https://tree-sitter.github.io/tree-sitter";
     changelog = "https://github.com/tree-sitter/tree-sitter/releases/tag/v${version}";

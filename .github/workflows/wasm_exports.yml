@@ -11,7 +11,6 @@ on:
     paths:
       - lib/include/tree_sitter/api.h
       - lib/binding_rust/bindings.rs
-      - CMakeLists.txt
 
 jobs:
   check-wasm-exports:
@@ -27,11 +26,6 @@ jobs:
 
       - name: Install wasm-objdump
         run: sudo apt-get update -y && sudo apt-get install -y wabt
-
-      - name: Build C library (make)
-        run: make -j CFLAGS="$CFLAGS"
-        env:
-          CFLAGS: -g -Werror -Wall -Wextra -Wshadow -Wpedantic -Werror=incompatible-pointer-types
 
       - name: Build Wasm Library
         working-directory: lib/binding_web
