@@ -51,7 +51,7 @@ pub const fn range_array_new() -> TSRangeArray {
 /// The iterator walks visible syntax ranges in source order. It can also stop
 /// on a node's padding so edits in leading whitespace are reported separately
 /// from edits in the node's content.
-struct Iterator {
+struct DiffIterator {
     /// Cursor stack pointing at the current subtree.
     cursor: TreeCursor,
     /// Language metadata used for alias visibility.
@@ -216,7 +216,7 @@ unsafe fn iterator_new(
     cursor: &mut TreeCursor,
     tree: &Subtree,
     language: *const TSLanguage,
-) -> Iterator {
+) -> DiffIterator {
     tree_cursor_entry_array_clear(&mut cursor.stack);
     tree_cursor_entry_array_push(
         &mut cursor.stack,
@@ -228,7 +228,7 @@ unsafe fn iterator_new(
             descendant_index: 0,
         },
     );
-    Iterator {
+    DiffIterator {
         cursor: ptr::read(cursor),
         language,
         visible_depth: 1,
@@ -238,7 +238,7 @@ unsafe fn iterator_new(
 }
 
 #[inline]
-const fn iterator_done(self_: &Iterator) -> bool {
+const fn iterator_done(self_: &DiffIterator) -> bool {
     self_.cursor.stack.size == 0
 }
 
@@ -246,7 +246,7 @@ const fn iterator_done(self_: &Iterator) -> bool {
 ///
 /// For padding items this is the parent entry position. For node-content items,
 /// it is the position after leading padding.
-unsafe fn iterator_start_position(self_: &Iterator) -> Length {
+unsafe fn iterator_start_position(self_: &DiffIterator) -> Length {
     let entry = tree_cursor_entry_slice(&self_.cursor.stack)
         .last()
         .unwrap_unchecked();
@@ -258,7 +258,7 @@ unsafe fn iterator_start_position(self_: &Iterator) -> Length {
 }
 
 /// Return the current item's end position.
-unsafe fn iterator_end_position(self_: &Iterator) -> Length {
+unsafe fn iterator_end_position(self_: &DiffIterator) -> Length {
     let entry = tree_cursor_entry_slice(&self_.cursor.stack)
         .last()
         .unwrap_unchecked();
@@ -274,7 +274,7 @@ unsafe fn iterator_end_position(self_: &Iterator) -> Length {
 ///
 /// Hidden grammar nodes can still be visible through aliases, so this must check
 /// the parent production's alias sequence in addition to subtree visibility.
-unsafe fn iterator_tree_is_visible(self_: &Iterator) -> bool {
+unsafe fn iterator_tree_is_visible(self_: &DiffIterator) -> bool {
     let entries = tree_cursor_entry_slice(&self_.cursor.stack);
     let entry = entries.last().unwrap_unchecked();
     if subtree_visible(*entry.subtree) {
@@ -293,7 +293,7 @@ unsafe fn iterator_tree_is_visible(self_: &Iterator) -> bool {
 }
 
 /// Find the nearest visible state at or above the iterator position.
-unsafe fn iterator_get_visible_state(self_: &Iterator) -> VisibleState {
+unsafe fn iterator_get_visible_state(self_: &DiffIterator) -> VisibleState {
     let mut result = VisibleState {
         tree: NULL_SUBTREE,
         alias_symbol: 0,
@@ -336,7 +336,7 @@ unsafe fn iterator_get_visible_state(self_: &Iterator) -> VisibleState {
 }
 
 /// Move one level up in the diff cursor.
-unsafe fn iterator_ascend(self_: &mut Iterator) {
+unsafe fn iterator_ascend(self_: &mut DiffIterator) {
     if iterator_done(self_) {
         return;
     }
@@ -359,7 +359,7 @@ unsafe fn iterator_ascend(self_: &mut Iterator) {
 /// If the child is visible and its padding starts after the goal, the iterator
 /// stops in padding. Otherwise it stops on the child content or keeps descending
 /// through hidden children.
-unsafe fn iterator_descend(self_: &mut Iterator, goal_position: u32) -> bool {
+unsafe fn iterator_descend(self_: &mut DiffIterator, goal_position: u32) -> bool {
     if self_.in_padding {
         return false;
     }
@@ -421,7 +421,7 @@ unsafe fn iterator_descend(self_: &mut Iterator, goal_position: u32) -> bool {
 }
 
 /// Advance to the next visible range or padding range in source order.
-unsafe fn iterator_advance(self_: &mut Iterator) {
+unsafe fn iterator_advance(self_: &mut DiffIterator) {
     if self_.in_padding {
         self_.in_padding = false;
         if iterator_tree_is_visible(self_) {
@@ -488,7 +488,7 @@ unsafe fn iterator_advance(self_: &mut Iterator) {
 /// Definite differences can be reported immediately. "May differ" asks the diff
 /// loop to descend because external scanner state, parse states, edit flags, or
 /// error metadata prevent treating the whole subtree as identical.
-unsafe fn iterator_compare(old_iter: &Iterator, new_iter: &Iterator) -> IteratorComparison {
+unsafe fn iterator_compare(old_iter: &DiffIterator, new_iter: &DiffIterator) -> IteratorComparison {
     let old_visible = iterator_get_visible_state(old_iter);
     let new_visible = iterator_get_visible_state(new_iter);
     let old_tree = old_visible.tree;
