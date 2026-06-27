@@ -99,7 +99,11 @@ impl CoreImpl {
 
     const fn library_source(self) -> &'static str {
         match self {
-            Self::Rust => "remaining_lib.c",
+            // The Rust core provides everything except the still-C wasm store,
+            // which is compiled directly (no amalgamation wrapper needed).
+            Self::Rust => "wasm_store.c",
+            // The C core builds from a pre-rewrite source dir (see source_path);
+            // that historical tree still has its amalgamated lib.c.
             Self::C => "lib.c",
         }
     }

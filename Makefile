@@ -9,15 +9,8 @@ LIBDIR ?= $(PREFIX)/lib
 BINDIR ?= $(PREFIX)/bin
 PCLIBDIR ?= $(LIBDIR)/pkgconfig
 
-# collect sources
-ifneq ($(AMALGAMATED),1)
-	SRC := $(wildcard lib/src/*.c)
-	# do not double-include amalgamation
-	SRC := $(filter-out lib/src/lib.c,$(SRC))
-else
-	# use amalgamated build
-	SRC := lib/src/lib.c
-endif
+# collect sources (the core now lives in lib/src_rust; only C shims remain here)
+SRC := $(wildcard lib/src/*.c)
 OBJ := $(SRC:.c=.o)
 
 # define default flags, and override to append mandatory flags
