@@ -10,8 +10,6 @@ use super::error_costs::ERROR_STATE;
 use super::language::language_alias_at;
 use super::length::{length_add, length_min, length_zero, Length, LENGTH_MAX};
 use super::point::{point_add, point_sub, POINT_MAX};
-use super::raw_pointer::{ptr_mut, ptr_ref};
-use super::stack::{array_clear, array_new, array_pop, array_push, Array};
 use super::subtree::{
     subtree_child, subtree_child_count, subtree_error_cost, subtree_external_scanner_state_eq,
     subtree_extra, subtree_has_changes, subtree_has_external_tokens, subtree_last_external_token,
@@ -19,6 +17,8 @@ use super::subtree::{
     subtree_visible, ts_builtin_sym_error, Subtree, NULL_SUBTREE, TS_TREE_STATE_NONE,
 };
 use super::tree_cursor::{tree_cursor_entry_slice, TreeCursor, TreeCursorEntry};
+use super::utils::{array_clear, array_new, array_pop, array_push, Array};
+use super::utils::{ptr_mut, ptr_ref};
 
 // ---------------------------------------------------------------------------
 // Types

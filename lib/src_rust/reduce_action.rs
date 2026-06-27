@@ -1,41 +1,33 @@
-#![allow(dead_code)]
-
-// Reduce action deduplication.
-
 use crate::ffi::TSSymbol;
 
-/// Compact reduce-action identity used while gathering recovery candidates.
-#[derive(Clone, Copy, Debug)]
+use super::utils::{array_get_ref, array_push, Array};
+
+/// Candidate reduction used while searching recovery actions.
+///
+/// Recovery can scan many lookahead symbols for a parse state. This compact
+/// record deduplicates equivalent reduce actions before applying them.
+#[repr(C)]
+#[derive(Clone, Copy)]
 pub struct ReduceAction {
-    /// Number of stack entries consumed.
+    /// Number of stack entries consumed by the reduce action.
     pub count: u32,
-    /// Symbol produced by the reduction.
+    /// Grammar symbol produced by the reduction.
     pub symbol: TSSymbol,
-    /// Dynamic precedence delta.
+    /// Dynamic precedence delta for conflict resolution.
     pub dynamic_precedence: i32,
-    /// Production id for fields/aliases.
+    /// Production id used for alias/field metadata on the new subtree.
     pub production_id: u16,
 }
 
-/// Small growable set that deduplicates equivalent reduce actions.
-#[derive(Default)]
-pub struct ReduceActionSet {
-    /// Stored unique actions.
-    pub actions: Vec<ReduceAction>,
-}
+/// `ReduceActionSet` — Array(ReduceAction)
+pub type ReduceActionSet = Array<ReduceAction>;
 
-impl ReduceActionSet {
-    /// Add `new_action` unless an action with the same symbol/count exists.
-    pub fn add(&mut self, new_action: ReduceAction) {
-        for action in &self.actions {
-            if action.symbol == new_action.symbol && action.count == new_action.count {
-                return;
-            }
+pub unsafe fn reduce_action_set_add(self_: &mut ReduceActionSet, new_action: ReduceAction) {
+    for i in 0..self_.size {
+        let action = array_get_ref(self_, i);
+        if action.symbol == new_action.symbol && action.count == new_action.count {
+            return;
         }
-        self.actions.push(new_action);
     }
-
-    pub fn clear(&mut self) {
-        self.actions.clear();
-    }
+    array_push(self_, new_action);
 }

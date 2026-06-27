@@ -12,7 +12,6 @@ use super::language::{
 };
 use super::length::{length_add, length_zero, Length};
 use super::point::{point_add, point_edit, point_eq, point_gt, point_lt, point_lte};
-use super::raw_pointer::{ptr_mut, ptr_ref};
 use super::subtree::subtree_parse_state;
 use super::subtree::{
     subtree_child, subtree_child_count, subtree_error_cost, subtree_extra, subtree_has_changes,
@@ -21,6 +20,7 @@ use super::subtree::{
     Subtree, TSFieldMapEntry, NULL_SUBTREE, TS_TREE_STATE_NONE,
 };
 use super::tree::{tree_root_node_ref, TSTree};
+use super::utils::{ptr_mut, ptr_ref};
 
 // ---------------------------------------------------------------------------
 // Types

@@ -11,16 +11,16 @@ use super::language::{
 use super::length::{length_add, length_is_undefined, length_zero, Length, LENGTH_UNDEFINED};
 use super::node::{node_new, ts_node_start_byte, ts_node_start_point};
 use super::point::point_gt;
-use super::raw_pointer::{ptr_mut, ptr_ref};
-use super::stack::{
-    array_assign, array_clear, array_delete, array_init, array_pop, array_push, Array,
-};
 use super::subtree::{
     subtree_child, subtree_child_count, subtree_children_slice, subtree_extra, subtree_padding,
     subtree_size, subtree_symbol, subtree_total_size, subtree_visible, subtree_visible_child_count,
     subtree_visible_descendant_count, Subtree, TSFieldMapEntry, NULL_SUBTREE,
 };
 use super::tree::TSTree;
+use super::utils::{
+    array_assign, array_clear, array_delete, array_init, array_pop, array_push, Array,
+};
+use super::utils::{ptr_mut, ptr_ref};
 
 use crate::ffi::TSPoint as POINT_ZERO_TYPE;
 const POINT_ZERO: POINT_ZERO_TYPE = POINT_ZERO_TYPE { row: 0, column: 0 };

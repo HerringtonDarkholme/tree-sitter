@@ -1,11 +1,11 @@
 #![allow(dead_code)]
 
-use super::stack::{
-    array_back_ref, array_clear, array_delete, array_new, array_pop, array_push, Array,
-};
 use super::subtree::{
     subtree_child, subtree_child_count, subtree_has_external_tokens, subtree_last_external_token,
     subtree_total_bytes, Subtree, NULL_SUBTREE,
+};
+use super::utils::{
+    array_back_ref, array_clear, array_delete, array_new, array_pop, array_push, Array,
 };
 
 /// One frame in the old-tree reuse cursor.

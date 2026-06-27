@@ -17,8 +17,8 @@ use crate::ffi::{TSFieldId, TSLanguage, TSStateId, TSSymbol};
 
 // Re-use types already defined in subtree.rs
 use super::alloc::{free, malloc};
-use super::raw_pointer::ptr_mut;
 use super::subtree::TSSymbolMetadata;
+use super::utils::ptr_mut;
 
 // ---------------------------------------------------------------------------
 // Constants

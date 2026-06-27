@@ -20,8 +20,8 @@ use super::language::{
     language_write_symbol_as_dot_string, ts_language_symbol_metadata, ts_language_symbol_name,
 };
 use super::length::{length_add, length_saturating_sub, length_sub, length_zero, Length};
-use super::raw_pointer::{ptr_mut, ptr_ref};
-use super::stack::{array_delete, array_new, array_pop, array_push, array_reserve, Array};
+use super::utils::{array_delete, array_new, array_pop, array_push, array_reserve, Array};
+use super::utils::{ptr_mut, ptr_ref};
 
 // ---------------------------------------------------------------------------
 // Constants

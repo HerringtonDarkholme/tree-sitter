@@ -17,6 +17,7 @@ pub mod error_costs;
 pub mod length;
 pub mod point;
 pub mod unicode;
+pub mod utils;
 
 // Tier 1 — Core data structure
 pub mod subtree;
@@ -38,6 +39,5 @@ pub mod parser;
 pub mod query;
 
 // Internal helpers (no corresponding .c file)
-mod raw_pointer;
-pub mod reduce_action;
+mod reduce_action;
 mod reusable_node;

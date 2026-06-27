@@ -23,8 +23,8 @@ use crate::ffi::{
 use super::alloc::{free, realloc};
 use super::language::TSLexer;
 use super::length::{length_is_undefined, Length, LENGTH_UNDEFINED};
-use super::raw_pointer::{ptr_mut, ptr_ref};
 use super::unicode::{ts_decode_utf16_be, ts_decode_utf16_le, ts_decode_utf8, TS_DECODE_ERROR};
+use super::utils::{ptr_mut, ptr_ref};
 
 // ---------------------------------------------------------------------------
 // Constants

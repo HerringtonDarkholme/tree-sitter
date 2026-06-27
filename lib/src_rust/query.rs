@@ -43,11 +43,6 @@ use super::node::{
     ts_node_is_named, ts_node_is_null, ts_node_start_byte, ts_node_start_point, ts_node_symbol,
 };
 use super::point::{point_eq, point_gt, point_gte, point_lt, point_lte, POINT_MAX};
-use super::stack::{
-    array_assign, array_back_mut, array_back_ref, array_clear, array_delete, array_erase,
-    array_get_mut, array_get_ref, array_grow_by, array_init, array_insert, array_new, array_pop,
-    array_push, array_reserve, array_splice, Array,
-};
 use super::subtree::{
     subtree_is_repetition, subtree_symbol, ts_builtin_sym_error, Subtree, TSFieldMapEntry,
 };
@@ -58,6 +53,11 @@ use super::tree_cursor::{
     ts_tree_cursor_parent_node, ts_tree_cursor_reset, TreeCursor, TreeCursorStep,
 };
 use super::unicode::ts_decode_utf8;
+use super::utils::{
+    array_assign, array_back_mut, array_back_ref, array_clear, array_delete, array_erase,
+    array_get_mut, array_get_ref, array_grow_by, array_init, array_insert, array_new, array_pop,
+    array_push, array_reserve, array_splice, Array,
+};
 use core::ffi::c_void;
 use core::mem::size_of;
 

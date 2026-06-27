@@ -2,7 +2,7 @@
 
 use crate::ffi::{TSInputEdit, TSPoint};
 
-use super::raw_pointer::{ptr_mut, ptr_ref};
+use super::utils::{ptr_mut, ptr_ref};
 
 pub const POINT_ZERO: TSPoint = TSPoint { row: 0, column: 0 };
 pub const POINT_MAX: TSPoint = TSPoint {

@@ -33,22 +33,9 @@ use super::lexer::{
     lexer_delete, lexer_finish, lexer_included_ranges, lexer_mark_end, lexer_new, lexer_reset,
     lexer_set_included_ranges, lexer_set_input, lexer_start, Lexer,
 };
-use super::raw_pointer::{ptr_mut, ptr_ref};
+use super::reduce_action::{reduce_action_set_add, ReduceAction, ReduceActionSet};
 use super::reusable_node::ReusableNode;
 use super::stack::{
-    array_assign,
-    array_back_ref,
-    array_clear,
-    array_delete,
-    array_erase,
-    array_get_mut,
-    array_get_ref,
-    array_new,
-    array_pop,
-    array_push,
-    array_reserve,
-    array_splice,
-    array_swap,
     // Stack functions (now Rust-only)
     stack_can_merge,
     stack_clear,
@@ -91,7 +78,6 @@ use super::stack::{
     stack_state,
     stack_swap_versions,
     stack_version_count,
-    Array,
     PendingReduction,
     Stack,
     StackLinkPayload,
@@ -183,6 +169,12 @@ use super::subtree::{
     TS_TREE_STATE_NONE,
 };
 use super::tree::{tree_new_with_arena, TSTree};
+use super::utils::{
+    array_assign, array_back_ref, array_clear, array_delete, array_erase, array_get_mut,
+    array_get_ref, array_new, array_pop, array_push, array_reserve, array_splice, array_swap,
+    Array,
+};
+use super::utils::{ptr_mut, ptr_ref};
 
 // ---------------------------------------------------------------------------
 // Extern C functions
@@ -366,26 +358,6 @@ macro_rules! TREE_NAME {
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-/// Candidate reduction used while searching recovery actions.
-///
-/// Recovery can scan many lookahead symbols for a parse state. This compact
-/// record deduplicates equivalent reduce actions before applying them.
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct ReduceAction {
-    /// Number of stack entries consumed by the reduce action.
-    count: u32,
-    /// Grammar symbol produced by the reduction.
-    symbol: TSSymbol,
-    /// Dynamic precedence delta for conflict resolution.
-    dynamic_precedence: i32,
-    /// Production id used for alias/field metadata on the new subtree.
-    production_id: u16,
-}
-
-/// `ReduceActionSet` — Array(ReduceAction)
-type ReduceActionSet = Array<ReduceAction>;
 
 type PendingReductionArray = Array<*mut PendingReduction>;
 
@@ -1274,16 +1246,6 @@ unsafe fn parser__materialize_pending_reduction(
     pending_ref.materialized = subtree_from_mut(result);
     subtree_retain(pending_ref.materialized);
     pending_ref.materialized
-}
-
-unsafe fn reduce_action_set_add(self_: &mut ReduceActionSet, new_action: ReduceAction) {
-    for i in 0..self_.size {
-        let action = array_get_ref(self_, i);
-        if action.symbol == new_action.symbol && action.count == new_action.count {
-            return;
-        }
-    }
-    array_push(self_, new_action);
 }
 
 // ---------------------------------------------------------------------------
