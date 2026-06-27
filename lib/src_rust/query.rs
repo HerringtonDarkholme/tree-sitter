@@ -22,12 +22,19 @@
 use crate::ffi::{
     TSFieldId, TSLanguage, TSQuantifier, TSQuantifierOne, TSQuantifierOneOrMore, TSQuantifierZero,
     TSQuantifierZeroOrMore, TSQuantifierZeroOrOne, TSQueryCapture, TSQueryCursorOptions,
-    TSQueryCursorState, TSQueryPredicateStep, TSRange, TSStateId, TSSymbol,
+    TSQueryCursorState, TSQueryError, TSQueryErrorCapture, TSQueryErrorField, TSQueryErrorNodeType,
+    TSQueryErrorNone, TSQueryErrorStructure, TSQueryErrorSyntax, TSQueryPredicateStep,
+    TSQueryPredicateStepTypeCapture, TSQueryPredicateStepTypeDone, TSQueryPredicateStepTypeString,
+    TSRange, TSStateId, TSSymbol,
 };
 
+use super::language::{
+    ts_language_abi_version, ts_language_field_id_for_name, ts_language_subtypes,
+    ts_language_symbol_for_name, ts_language_symbol_metadata, LANGUAGE_VERSION_WITH_RESERVED_WORDS,
+};
 use super::stack::{
-    array_clear, array_delete, array_get_mut, array_get_ref, array_grow_by, array_init, array_new,
-    array_push, array_splice, Array,
+    array_back_ref, array_clear, array_delete, array_get_mut, array_get_ref, array_grow_by,
+    array_init, array_new, array_pop, array_push, array_splice, Array,
 };
 use super::tree_cursor::TreeCursor;
 use super::unicode::ts_decode_utf8;
@@ -50,6 +57,10 @@ const PATTERN_DONE_MARKER: u16 = u16::MAX;
 const NONE: u16 = u16::MAX;
 const WILDCARD_SYMBOL: TSSymbol = 0;
 const OP_COUNT_PER_QUERY_CALLBACK_CHECK: u32 = 100;
+
+// Sentinel returned by `parse_pattern` when it hits a closing `)`/`]` belonging
+// to the parent. Mirrors `static const TSQueryError PARENT_DONE = -1;`.
+const PARENT_DONE: TSQueryError = u32::MAX;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -704,4 +715,856 @@ fn query_step_remove_capture(self_: &mut QueryStep, capture_id: u16) {
             break;
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Query parsing
+// ---------------------------------------------------------------------------
+
+/// Record a negated-field assertion for `step_index`, reusing an existing field
+/// list in `negated_fields` when one matches exactly.
+///
+/// The negated-fields array stores a sequence of field lists separated by zero
+/// terminators.
+unsafe fn ts_query_add_negated_fields(
+    self_: &mut TSQuery,
+    step_index: u16,
+    field_ids: *const TSFieldId,
+    field_count: u16,
+) {
+    // Try to find the start index of an existing list that matches this new one.
+    let mut failed_match = false;
+    let mut match_count: u32 = 0;
+    let mut start_i: u32 = 0;
+    let mut i = 0;
+    while i < self_.negated_fields.size {
+        let existing_field_id = *array_get_ref(&self_.negated_fields, i);
+
+        // At each zero value, terminate the match attempt. If we've exactly
+        // matched the new field list, reuse this index; otherwise start over.
+        if existing_field_id == 0 {
+            if match_count == u32::from(field_count) {
+                array_get_mut(&mut self_.steps, u32::from(step_index)).negated_field_list_id =
+                    start_i as u16;
+                return;
+            }
+            start_i = i + 1;
+            match_count = 0;
+            failed_match = false;
+        }
+        // If the existing list matches our new list so far, advance to the next
+        // element of the new list.
+        else if match_count < u32::from(field_count)
+            && existing_field_id == *field_ids.add(match_count as usize)
+            && !failed_match
+        {
+            match_count += 1;
+        }
+        // Otherwise, this existing list has failed to match.
+        else {
+            match_count = 0;
+            failed_match = true;
+        }
+        i += 1;
+    }
+
+    let neg_size = self_.negated_fields.size;
+    array_get_mut(&mut self_.steps, u32::from(step_index)).negated_field_list_id = neg_size as u16;
+    array_splice(
+        &mut self_.negated_fields,
+        neg_size,
+        0,
+        u32::from(field_count),
+        field_ids,
+    );
+    array_push(&mut self_.negated_fields, 0);
+}
+
+/// Parse a double-quoted string literal at the stream position into
+/// `self_.string_buffer`, handling backslash escapes.
+unsafe fn ts_query_parse_string_literal(self_: &mut TSQuery, stream: &mut Stream) -> TSQueryError {
+    let string_start = stream.input;
+    if stream.next != i32::from(b'"') {
+        return TSQueryErrorSyntax;
+    }
+    stream_advance(stream);
+    let mut prev_position = stream.input;
+
+    let mut is_escaped = false;
+    array_clear(&mut self_.string_buffer);
+    loop {
+        if is_escaped {
+            is_escaped = false;
+            if stream.next == i32::from(b'n') {
+                array_push(&mut self_.string_buffer, b'\n');
+            } else if stream.next == i32::from(b'r') {
+                array_push(&mut self_.string_buffer, b'\r');
+            } else if stream.next == i32::from(b't') {
+                array_push(&mut self_.string_buffer, b'\t');
+            } else if stream.next == i32::from(b'0') {
+                array_push(&mut self_.string_buffer, b'\0');
+            } else {
+                let size = self_.string_buffer.size;
+                array_splice(
+                    &mut self_.string_buffer,
+                    size,
+                    0,
+                    u32::from(stream.next_size),
+                    stream.input,
+                );
+            }
+            prev_position = stream.input.add(stream.next_size as usize);
+        } else if stream.next == i32::from(b'\\') {
+            let count = (stream.input as usize - prev_position as usize) as u32;
+            let size = self_.string_buffer.size;
+            array_splice(&mut self_.string_buffer, size, 0, count, prev_position);
+            prev_position = stream.input.add(1);
+            is_escaped = true;
+        } else if stream.next == i32::from(b'"') {
+            let count = (stream.input as usize - prev_position as usize) as u32;
+            let size = self_.string_buffer.size;
+            array_splice(&mut self_.string_buffer, size, 0, count, prev_position);
+            stream_advance(stream);
+            return TSQueryErrorNone;
+        } else if stream.next == i32::from(b'\n') {
+            stream_reset(stream, string_start);
+            return TSQueryErrorSyntax;
+        }
+        if !stream_advance(stream) {
+            stream_reset(stream, string_start);
+            return TSQueryErrorSyntax;
+        }
+    }
+}
+
+/// Parse a single predicate, adding it to the query's `predicate_steps`.
+///
+/// Predicates are arbitrary S-expressions handled at a higher level (the
+/// Rust/JS bindings); they may contain `@`-prefixed capture names,
+/// double-quoted strings, and bare symbols.
+unsafe fn ts_query_parse_predicate(self_: &mut TSQuery, stream: &mut Stream) -> TSQueryError {
+    if !stream_is_ident_start(stream) {
+        return TSQueryErrorSyntax;
+    }
+    let predicate_name = stream.input;
+    stream_scan_identifier(stream);
+    if stream.next != i32::from(b'?') && stream.next != i32::from(b'!') {
+        return TSQueryErrorSyntax;
+    }
+    stream_advance(stream);
+    let length = (stream.input as usize - predicate_name as usize) as u32;
+    let id = symbol_table_insert_name(&mut self_.predicate_values, predicate_name, length);
+    array_push(
+        &mut self_.predicate_steps,
+        TSQueryPredicateStep {
+            type_: TSQueryPredicateStepTypeString,
+            value_id: u32::from(id),
+        },
+    );
+    stream_skip_whitespace(stream);
+
+    loop {
+        if stream.next == i32::from(b')') {
+            stream_advance(stream);
+            stream_skip_whitespace(stream);
+            array_push(
+                &mut self_.predicate_steps,
+                TSQueryPredicateStep {
+                    type_: TSQueryPredicateStepTypeDone,
+                    value_id: 0,
+                },
+            );
+            break;
+        }
+        // Parse an '@'-prefixed capture name.
+        else if stream.next == i32::from(b'@') {
+            stream_advance(stream);
+            if !stream_is_ident_start(stream) {
+                return TSQueryErrorSyntax;
+            }
+            let capture_name = stream.input;
+            stream_scan_identifier(stream);
+            let capture_length = (stream.input as usize - capture_name as usize) as u32;
+            let capture_id =
+                symbol_table_id_for_name(&self_.captures, capture_name, capture_length);
+            if capture_id == -1 {
+                stream_reset(stream, capture_name);
+                return TSQueryErrorCapture;
+            }
+            array_push(
+                &mut self_.predicate_steps,
+                TSQueryPredicateStep {
+                    type_: TSQueryPredicateStepTypeCapture,
+                    value_id: capture_id as u32,
+                },
+            );
+        }
+        // Parse a string literal.
+        else if stream.next == i32::from(b'"') {
+            let e = ts_query_parse_string_literal(self_, stream);
+            if e != TSQueryErrorNone {
+                return e;
+            }
+            let query_id = symbol_table_insert_name(
+                &mut self_.predicate_values,
+                self_.string_buffer.contents,
+                self_.string_buffer.size,
+            );
+            array_push(
+                &mut self_.predicate_steps,
+                TSQueryPredicateStep {
+                    type_: TSQueryPredicateStepTypeString,
+                    value_id: u32::from(query_id),
+                },
+            );
+        }
+        // Parse a bare symbol.
+        else if stream_is_ident_start(stream) {
+            let symbol_start = stream.input;
+            stream_scan_identifier(stream);
+            let symbol_length = (stream.input as usize - symbol_start as usize) as u32;
+            let query_id =
+                symbol_table_insert_name(&mut self_.predicate_values, symbol_start, symbol_length);
+            array_push(
+                &mut self_.predicate_steps,
+                TSQueryPredicateStep {
+                    type_: TSQueryPredicateStepTypeString,
+                    value_id: u32::from(query_id),
+                },
+            );
+        } else {
+            return TSQueryErrorSyntax;
+        }
+
+        stream_skip_whitespace(stream);
+    }
+
+    TSQueryErrorNone
+}
+
+/// Read one S-expression pattern from the stream and incorporate it into the
+/// query's step representation. Recurses for nested patterns.
+///
+/// The caller must pass a dedicated `capture_quantifiers`; it must not be shared
+/// between calls.
+unsafe fn ts_query_parse_pattern(
+    self_: &mut TSQuery,
+    stream: &mut Stream,
+    depth: u32,
+    is_immediate: bool,
+    capture_quantifiers: &mut CaptureQuantifiers,
+) -> TSQueryError {
+    if stream.next == 0 {
+        return TSQueryErrorSyntax;
+    }
+    if stream.next == i32::from(b')') || stream.next == i32::from(b']') {
+        return PARENT_DONE;
+    }
+
+    let starting_step_index = self_.steps.size;
+
+    // Store the byte offset of each step in the query.
+    if self_.step_offsets.size == 0
+        || array_back_ref(&self_.step_offsets).step_index != starting_step_index as u16
+    {
+        array_push(
+            &mut self_.step_offsets,
+            StepOffset {
+                step_index: starting_step_index as u16,
+                byte_offset: stream_offset(stream),
+            },
+        );
+    }
+
+    // An open bracket is the start of an alternation.
+    if stream.next == i32::from(b'[') {
+        stream_advance(stream);
+        stream_skip_whitespace(stream);
+
+        // Parse each branch, adding a placeholder step in between the branches.
+        let mut branch_step_indices: Array<u32> = array_new();
+        let mut branch_capture_quantifiers = capture_quantifiers_new();
+        loop {
+            let start_index = self_.steps.size;
+            let mut e = ts_query_parse_pattern(
+                self_,
+                stream,
+                depth,
+                is_immediate,
+                &mut branch_capture_quantifiers,
+            );
+
+            if e == PARENT_DONE {
+                if stream.next == i32::from(b']') && branch_step_indices.size > 0 {
+                    stream_advance(stream);
+                    break;
+                }
+                e = TSQueryErrorSyntax;
+            }
+            if e != TSQueryErrorNone {
+                capture_quantifiers_delete(&mut branch_capture_quantifiers);
+                array_delete(&mut branch_step_indices);
+                return e;
+            }
+
+            if start_index == starting_step_index {
+                capture_quantifiers_replace(capture_quantifiers, &branch_capture_quantifiers);
+            } else {
+                capture_quantifiers_join_all(capture_quantifiers, &branch_capture_quantifiers);
+            }
+
+            array_push(&mut branch_step_indices, start_index);
+            array_push(&mut self_.steps, query_step_new(0, depth as u16, false));
+            capture_quantifiers_clear(&mut branch_capture_quantifiers);
+        }
+        let _ = array_pop(&mut self_.steps);
+
+        // For all branches except the last, add the subsequent branch as an
+        // alternative and link the end of the branch to the current step end.
+        for i in 0..branch_step_indices.size - 1 {
+            let step_index = *array_get_ref(&branch_step_indices, i);
+            let next_step_index = *array_get_ref(&branch_step_indices, i + 1);
+            let steps_size = self_.steps.size;
+            array_get_mut(&mut self_.steps, step_index).alternative_index = next_step_index as u16;
+            let end_step = array_get_mut(&mut self_.steps, next_step_index - 1);
+            end_step.alternative_index = steps_size as u16;
+            end_step.is_dead_end = true;
+        }
+
+        capture_quantifiers_delete(&mut branch_capture_quantifiers);
+        array_delete(&mut branch_step_indices);
+    }
+    // An open parenthesis can start a grouped sequence, a predicate, or a node.
+    else if stream.next == i32::from(b'(') {
+        stream_advance(stream);
+        stream_skip_whitespace(stream);
+
+        // Followed by a node: a grouped sequence.
+        if stream.next == i32::from(b'(')
+            || stream.next == i32::from(b'"')
+            || stream.next == i32::from(b'[')
+        {
+            let mut child_is_immediate = is_immediate;
+            let mut child_capture_quantifiers = capture_quantifiers_new();
+            loop {
+                if stream.next == i32::from(b'.') {
+                    child_is_immediate = true;
+                    stream_advance(stream);
+                    stream_skip_whitespace(stream);
+                }
+                let mut e = ts_query_parse_pattern(
+                    self_,
+                    stream,
+                    depth,
+                    child_is_immediate,
+                    &mut child_capture_quantifiers,
+                );
+                if e == PARENT_DONE {
+                    if stream.next == i32::from(b')') {
+                        stream_advance(stream);
+                        break;
+                    }
+                    e = TSQueryErrorSyntax;
+                }
+                if e != TSQueryErrorNone {
+                    capture_quantifiers_delete(&mut child_capture_quantifiers);
+                    return e;
+                }
+
+                capture_quantifiers_add_all(capture_quantifiers, &child_capture_quantifiers);
+                capture_quantifiers_clear(&mut child_capture_quantifiers);
+                child_is_immediate = false;
+            }
+
+            capture_quantifiers_delete(&mut child_capture_quantifiers);
+        }
+        // A dot/pound character indicates the start of a predicate.
+        else if stream.next == i32::from(b'.') || stream.next == i32::from(b'#') {
+            stream_advance(stream);
+            return ts_query_parse_predicate(self_, stream);
+        }
+        // Otherwise, the start of a named node.
+        else {
+            let symbol: TSSymbol;
+            let mut is_missing = false;
+            let node_name = stream.input;
+
+            // Parse a normal node name.
+            if stream_is_ident_start(stream) {
+                stream_scan_identifier(stream);
+                let length = (stream.input as usize - node_name as usize) as u32;
+                let node_slice = core::slice::from_raw_parts(node_name, length as usize);
+
+                // Parse the wildcard symbol.
+                if length == 1 && *node_name == b'_' {
+                    symbol = WILDCARD_SYMBOL;
+                } else if b"MISSING".starts_with(node_slice) {
+                    is_missing = true;
+                    stream_skip_whitespace(stream);
+
+                    if stream_is_ident_start(stream) {
+                        let missing_node_name = stream.input;
+                        stream_scan_identifier(stream);
+                        let missing_node_length =
+                            (stream.input as usize - missing_node_name as usize) as u32;
+                        symbol = ts_language_symbol_for_name(
+                            self_.language,
+                            missing_node_name.cast::<i8>(),
+                            missing_node_length,
+                            true,
+                        );
+                        if symbol == 0 {
+                            stream_reset(stream, missing_node_name);
+                            return TSQueryErrorNodeType;
+                        }
+                    } else if stream.next == i32::from(b'"') {
+                        let string_start = stream.input;
+                        let e = ts_query_parse_string_literal(self_, stream);
+                        if e != TSQueryErrorNone {
+                            return e;
+                        }
+                        symbol = ts_language_symbol_for_name(
+                            self_.language,
+                            self_.string_buffer.contents.cast::<i8>(),
+                            self_.string_buffer.size,
+                            false,
+                        );
+                        if symbol == 0 {
+                            stream_reset(stream, string_start.add(1));
+                            return TSQueryErrorNodeType;
+                        }
+                    } else if stream.next == i32::from(b')') {
+                        symbol = WILDCARD_SYMBOL;
+                    } else {
+                        stream_reset(stream, stream.input);
+                        return TSQueryErrorSyntax;
+                    }
+                } else {
+                    symbol = ts_language_symbol_for_name(
+                        self_.language,
+                        node_name.cast::<i8>(),
+                        length,
+                        true,
+                    );
+                    if symbol == 0 {
+                        stream_reset(stream, node_name);
+                        return TSQueryErrorNodeType;
+                    }
+                }
+            } else {
+                return TSQueryErrorSyntax;
+            }
+
+            // Add a step for the node.
+            array_push(
+                &mut self_.steps,
+                query_step_new(symbol, depth as u16, is_immediate),
+            );
+            let step_index = self_.steps.size - 1;
+            let is_supertype = ts_language_symbol_metadata(self_.language, symbol).supertype;
+            {
+                let step = array_get_mut(&mut self_.steps, step_index);
+                if is_supertype {
+                    step.supertype_symbol = step.symbol;
+                    step.symbol = WILDCARD_SYMBOL;
+                }
+                if is_missing {
+                    step.is_missing = true;
+                }
+                if symbol == WILDCARD_SYMBOL {
+                    step.is_named = true;
+                }
+            }
+
+            // Parse a supertype symbol.
+            if stream.next == i32::from(b'/') {
+                if array_get_ref(&self_.steps, step_index).supertype_symbol == 0 {
+                    stream_reset(stream, node_name.sub(1)); // start of the node
+                    return TSQueryErrorStructure;
+                }
+
+                stream_advance(stream);
+
+                let subtype_node_name = stream.input;
+                let new_symbol;
+                if stream_is_ident_start(stream) {
+                    // Named node.
+                    stream_scan_identifier(stream);
+                    let length = (stream.input as usize - subtype_node_name as usize) as u32;
+                    new_symbol = ts_language_symbol_for_name(
+                        self_.language,
+                        subtype_node_name.cast::<i8>(),
+                        length,
+                        true,
+                    );
+                } else if stream.next == i32::from(b'"') {
+                    // Anonymous leaf node.
+                    let e = ts_query_parse_string_literal(self_, stream);
+                    if e != TSQueryErrorNone {
+                        return e;
+                    }
+                    new_symbol = ts_language_symbol_for_name(
+                        self_.language,
+                        self_.string_buffer.contents.cast::<i8>(),
+                        self_.string_buffer.size,
+                        false,
+                    );
+                } else {
+                    return TSQueryErrorSyntax;
+                }
+                array_get_mut(&mut self_.steps, step_index).symbol = new_symbol;
+
+                if new_symbol == 0 {
+                    stream_reset(stream, subtype_node_name);
+                    return TSQueryErrorNodeType;
+                }
+
+                // Get all the possible subtypes for the given supertype and
+                // check whether the given subtype is valid.
+                if ts_language_abi_version(self_.language) >= LANGUAGE_VERSION_WITH_RESERVED_WORDS {
+                    let supertype_symbol = array_get_ref(&self_.steps, step_index).supertype_symbol;
+                    let mut subtype_length: u32 = 0;
+                    let subtypes =
+                        ts_language_subtypes(self_.language, supertype_symbol, &mut subtype_length);
+
+                    let mut subtype_is_valid = false;
+                    for i in 0..subtype_length {
+                        if *subtypes.add(i as usize)
+                            == array_get_ref(&self_.steps, step_index).symbol
+                        {
+                            subtype_is_valid = true;
+                            break;
+                        }
+                    }
+
+                    // This subtype is not valid for the given supertype.
+                    if !subtype_is_valid {
+                        stream_reset(stream, node_name.sub(1)); // start of the node
+                        return TSQueryErrorStructure;
+                    }
+                }
+            }
+
+            stream_skip_whitespace(stream);
+
+            // Parse the child patterns.
+            let mut child_is_immediate = false;
+            let mut last_child_step_index: u16 = 0;
+            let mut negated_field_count: u16 = 0;
+            let mut negated_field_ids: [TSFieldId; MAX_NEGATED_FIELD_COUNT] =
+                [0; MAX_NEGATED_FIELD_COUNT];
+            let mut child_capture_quantifiers = capture_quantifiers_new();
+            loop {
+                // Parse a negated field assertion.
+                if stream.next == i32::from(b'!') {
+                    stream_advance(stream);
+                    stream_skip_whitespace(stream);
+                    if !stream_is_ident_start(stream) {
+                        capture_quantifiers_delete(&mut child_capture_quantifiers);
+                        return TSQueryErrorSyntax;
+                    }
+                    let field_name = stream.input;
+                    stream_scan_identifier(stream);
+                    let length = (stream.input as usize - field_name as usize) as u32;
+                    stream_skip_whitespace(stream);
+
+                    let field_id = ts_language_field_id_for_name(
+                        self_.language,
+                        field_name.cast::<i8>(),
+                        length,
+                    );
+                    if field_id == 0 {
+                        stream.input = field_name;
+                        capture_quantifiers_delete(&mut child_capture_quantifiers);
+                        return TSQueryErrorField;
+                    }
+
+                    // Keep the field ids sorted.
+                    if (negated_field_count as usize) < MAX_NEGATED_FIELD_COUNT {
+                        negated_field_ids[negated_field_count as usize] = field_id;
+                        negated_field_count += 1;
+                    }
+
+                    continue;
+                }
+
+                // Parse a sibling anchor.
+                if stream.next == i32::from(b'.') {
+                    child_is_immediate = true;
+                    stream_advance(stream);
+                    stream_skip_whitespace(stream);
+                }
+
+                let mut step_index = self_.steps.size as u16;
+                let mut e = ts_query_parse_pattern(
+                    self_,
+                    stream,
+                    depth + 1,
+                    child_is_immediate,
+                    &mut child_capture_quantifiers,
+                );
+                // If we only parsed a predicate (no new steps), step back one so
+                // we don't index past the end of the array.
+                if u32::from(step_index) == self_.steps.size {
+                    step_index -= 1;
+                }
+                if e == PARENT_DONE {
+                    if stream.next == i32::from(b')') {
+                        if child_is_immediate {
+                            if last_child_step_index == 0 {
+                                capture_quantifiers_delete(&mut child_capture_quantifiers);
+                                return TSQueryErrorSyntax;
+                            }
+                            // Mark this step *and* its alternatives as the last
+                            // child of the parent.
+                            array_get_mut(&mut self_.steps, u32::from(last_child_step_index))
+                                .is_last_child = true;
+                            let mut alt =
+                                array_get_ref(&self_.steps, u32::from(last_child_step_index))
+                                    .alternative_index;
+                            if alt != NONE && u32::from(alt) < self_.steps.size {
+                                array_get_mut(&mut self_.steps, u32::from(alt)).is_last_child =
+                                    true;
+                                loop {
+                                    let next_alt = array_get_ref(&self_.steps, u32::from(alt))
+                                        .alternative_index;
+                                    if next_alt != NONE && u32::from(next_alt) < self_.steps.size {
+                                        alt = next_alt;
+                                        array_get_mut(&mut self_.steps, u32::from(alt))
+                                            .is_last_child = true;
+                                    } else {
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+
+                        if negated_field_count != 0 {
+                            ts_query_add_negated_fields(
+                                self_,
+                                starting_step_index as u16,
+                                negated_field_ids.as_ptr(),
+                                negated_field_count,
+                            );
+                        }
+
+                        stream_advance(stream);
+                        break;
+                    }
+                    e = TSQueryErrorSyntax;
+                }
+                if e != TSQueryErrorNone {
+                    capture_quantifiers_delete(&mut child_capture_quantifiers);
+                    return e;
+                }
+
+                capture_quantifiers_add_all(capture_quantifiers, &child_capture_quantifiers);
+
+                last_child_step_index = step_index;
+                child_is_immediate = false;
+                capture_quantifiers_clear(&mut child_capture_quantifiers);
+            }
+            capture_quantifiers_delete(&mut child_capture_quantifiers);
+        }
+    }
+    // Parse a wildcard pattern.
+    else if stream.next == i32::from(b'_') {
+        stream_advance(stream);
+        stream_skip_whitespace(stream);
+
+        // Add a step that matches any kind of node.
+        array_push(
+            &mut self_.steps,
+            query_step_new(WILDCARD_SYMBOL, depth as u16, is_immediate),
+        );
+    }
+    // Parse a double-quoted anonymous leaf node expression.
+    else if stream.next == i32::from(b'"') {
+        let string_start = stream.input;
+        let e = ts_query_parse_string_literal(self_, stream);
+        if e != TSQueryErrorNone {
+            return e;
+        }
+
+        // Add a step for the node.
+        let symbol = ts_language_symbol_for_name(
+            self_.language,
+            self_.string_buffer.contents.cast::<i8>(),
+            self_.string_buffer.size,
+            false,
+        );
+        if symbol == 0 {
+            stream_reset(stream, string_start.add(1));
+            return TSQueryErrorNodeType;
+        }
+        array_push(
+            &mut self_.steps,
+            query_step_new(symbol, depth as u16, is_immediate),
+        );
+    }
+    // Parse a field-prefixed pattern.
+    else if stream_is_ident_start(stream) {
+        // Parse the field name.
+        let field_name = stream.input;
+        stream_scan_identifier(stream);
+        let length = (stream.input as usize - field_name as usize) as u32;
+        stream_skip_whitespace(stream);
+
+        if stream.next != i32::from(b':') {
+            stream_reset(stream, field_name);
+            return TSQueryErrorSyntax;
+        }
+        stream_advance(stream);
+        stream_skip_whitespace(stream);
+
+        // Parse the pattern.
+        let mut field_capture_quantifiers = capture_quantifiers_new();
+        let mut e = ts_query_parse_pattern(
+            self_,
+            stream,
+            depth,
+            is_immediate,
+            &mut field_capture_quantifiers,
+        );
+        if e != TSQueryErrorNone {
+            capture_quantifiers_delete(&mut field_capture_quantifiers);
+            if e == PARENT_DONE {
+                e = TSQueryErrorSyntax;
+            }
+            return e;
+        }
+
+        // Add the field name to the first step of the pattern.
+        let field_id =
+            ts_language_field_id_for_name(self_.language, field_name.cast::<i8>(), length);
+        if field_id == 0 {
+            stream.input = field_name;
+            capture_quantifiers_delete(&mut field_capture_quantifiers);
+            return TSQueryErrorField;
+        }
+
+        let mut step_index = starting_step_index;
+        loop {
+            array_get_mut(&mut self_.steps, step_index).field = field_id;
+            let alt = array_get_ref(&self_.steps, step_index).alternative_index;
+            let steps_size = self_.steps.size;
+            if alt != NONE && u32::from(alt) > step_index && u32::from(alt) < steps_size {
+                step_index = u32::from(alt);
+            } else {
+                break;
+            }
+        }
+
+        capture_quantifiers_add_all(capture_quantifiers, &field_capture_quantifiers);
+        capture_quantifiers_delete(&mut field_capture_quantifiers);
+    } else {
+        return TSQueryErrorSyntax;
+    }
+
+    stream_skip_whitespace(stream);
+
+    // Parse suffix modifiers for this pattern.
+    let mut quantifier = TSQuantifierOne;
+    loop {
+        // One-or-more operator.
+        if stream.next == i32::from(b'+') {
+            quantifier = quantifier_join(TSQuantifierOneOrMore, quantifier);
+            stream_advance(stream);
+            stream_skip_whitespace(stream);
+        }
+        // Zero-or-more repetition operator.
+        else if stream.next == i32::from(b'*') {
+            quantifier = quantifier_join(TSQuantifierZeroOrMore, quantifier);
+            stream_advance(stream);
+            stream_skip_whitespace(stream);
+        }
+        // Optional operator.
+        else if stream.next == i32::from(b'?') {
+            quantifier = quantifier_join(TSQuantifierZeroOrOne, quantifier);
+            stream_advance(stream);
+            stream_skip_whitespace(stream);
+        }
+        // An '@'-prefixed capture pattern.
+        else if stream.next == i32::from(b'@') {
+            stream_advance(stream);
+            if !stream_is_ident_start(stream) {
+                return TSQueryErrorSyntax;
+            }
+            let capture_name = stream.input;
+            stream_scan_identifier(stream);
+            let length = (stream.input as usize - capture_name as usize) as u32;
+            stream_skip_whitespace(stream);
+
+            // Add the capture id to the first step of the pattern.
+            let capture_id = symbol_table_insert_name(&mut self_.captures, capture_name, length);
+
+            // Add the capture quantifier.
+            capture_quantifiers_add_for_id(capture_quantifiers, capture_id, TSQuantifierOne);
+
+            let mut step_index = starting_step_index;
+            loop {
+                query_step_add_capture(array_get_mut(&mut self_.steps, step_index), capture_id);
+                let alt = array_get_ref(&self_.steps, step_index).alternative_index;
+                let steps_size = self_.steps.size;
+                if alt != NONE && u32::from(alt) > step_index && u32::from(alt) < steps_size {
+                    step_index = u32::from(alt);
+                } else {
+                    break;
+                }
+            }
+        }
+        // No more suffix modifiers.
+        else {
+            break;
+        }
+    }
+
+    match quantifier {
+        TSQuantifierOneOrMore => {
+            let mut repeat_step = query_step_new(WILDCARD_SYMBOL, depth as u16, false);
+            repeat_step.alternative_index = starting_step_index as u16;
+            repeat_step.is_pass_through = true;
+            repeat_step.alternative_is_immediate = true;
+            array_push(&mut self_.steps, repeat_step);
+        }
+        TSQuantifierZeroOrMore => {
+            let mut repeat_step = query_step_new(WILDCARD_SYMBOL, depth as u16, false);
+            repeat_step.alternative_index = starting_step_index as u16;
+            repeat_step.is_pass_through = true;
+            repeat_step.alternative_is_immediate = true;
+            array_push(&mut self_.steps, repeat_step);
+
+            // Stop when `alternative_index` is `NONE` or points to `repeat_step`
+            // (just pushed at `steps.size - 1`) or beyond.
+            let mut step_index = starting_step_index;
+            loop {
+                let alt = array_get_ref(&self_.steps, step_index).alternative_index;
+                if alt != NONE && u32::from(alt) < self_.steps.size - 1 {
+                    step_index = u32::from(alt);
+                } else {
+                    break;
+                }
+            }
+            let size = self_.steps.size;
+            array_get_mut(&mut self_.steps, step_index).alternative_index = size as u16;
+        }
+        TSQuantifierZeroOrOne => {
+            let mut step_index = starting_step_index;
+            loop {
+                let alt = array_get_ref(&self_.steps, step_index).alternative_index;
+                if alt != NONE && u32::from(alt) < self_.steps.size {
+                    step_index = u32::from(alt);
+                } else {
+                    break;
+                }
+            }
+            let size = self_.steps.size;
+            array_get_mut(&mut self_.steps, step_index).alternative_index = size as u16;
+        }
+        _ => {}
+    }
+
+    capture_quantifiers_mul(capture_quantifiers, quantifier);
+
+    TSQueryErrorNone
 }
