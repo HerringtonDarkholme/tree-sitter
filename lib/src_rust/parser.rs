@@ -172,7 +172,6 @@ use super::subtree::{
     subtree_visible,
     subtree_visible_child_count,
     subtree_visible_descendant_count,
-    tree_arena_new,
     tree_arena_release,
     ts_builtin_sym_end,
     ts_builtin_sym_error,
@@ -4221,7 +4220,12 @@ pub unsafe extern "C" fn ts_parser_parse(
             ts_parser_reset(self_);
             return result;
         }
-        parser.tree_arena = tree_arena_new();
+        // Reused subtrees can point into the old tree's arena. A returned tree
+        // currently stores only one arena pointer, so mixing a fresh arena with
+        // reused old-arena nodes can leave dangling pointers after the old tree
+        // is dropped. Keep parser-created nodes heap-backed until returned
+        // trees can retain all arenas they reference.
+        parser.tree_arena = ptr::null_mut();
 
         if let Some(old_tree) = old_tree.as_ref() {
             subtree_retain(old_tree.root);

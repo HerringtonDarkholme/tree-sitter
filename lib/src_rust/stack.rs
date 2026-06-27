@@ -883,9 +883,22 @@ unsafe fn stack_node_new_with_payload(
         malloc(std::mem::size_of::<StackNode>()).cast::<StackNode>()
     };
 
-    (*node).ref_count = 1;
-    (*node).link_count = 0;
-    (*node).state = state;
+    ptr::write(
+        node,
+        StackNode {
+            state,
+            position: length_zero(),
+            links: [StackLink {
+                node: ptr::null_mut(),
+                payload: stack_link_payload_new(NULL_SUBTREE, false),
+            }; MAX_LINK_COUNT],
+            link_count: 0,
+            ref_count: 1,
+            error_cost: 0,
+            node_count: 0,
+            dynamic_precedence: 0,
+        },
+    );
 
     if !previous_node.is_null() {
         (*node).link_count = 1;
@@ -905,9 +918,6 @@ unsafe fn stack_node_new_with_payload(
             (*node).node_count += stack_link_payload_node_count(payload);
             (*node).dynamic_precedence += stack_link_payload_dynamic_precedence(payload);
         }
-    } else {
-        (*node).position = length_zero();
-        (*node).error_cost = 0;
     }
 
     node
