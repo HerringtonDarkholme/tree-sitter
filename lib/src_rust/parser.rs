@@ -9,7 +9,7 @@ use crate::ffi::{
     TSParseOptions, TSParseState, TSPoint, TSRange, TSStateId, TSSymbol, TSWasmStore,
 };
 
-use super::alloc::{calloc, free};
+use super::alloc::{calloc, free, malloc};
 use super::error_costs::{
     ERROR_COST_PER_RECOVERY, ERROR_COST_PER_SKIPPED_CHAR, ERROR_COST_PER_SKIPPED_LINE,
     ERROR_COST_PER_SKIPPED_TREE, ERROR_STATE,
@@ -392,6 +392,66 @@ struct ReduceAction {
 type ReduceActionSet = Array<ReduceAction>;
 
 type PendingReductionArray = Array<*mut PendingReduction>;
+
+fn pending_reduction_new_empty(
+    symbol: TSSymbol,
+    production_id: u16,
+    parse_state: TSStateId,
+    visible: bool,
+    named: bool,
+    extra: bool,
+    fragile: bool,
+) -> PendingReduction {
+    let mut flags = 0;
+    if visible {
+        flags |= PENDING_REDUCTION_VISIBLE;
+    }
+    if named {
+        flags |= PENDING_REDUCTION_NAMED;
+    }
+    if extra {
+        flags |= PENDING_REDUCTION_EXTRA;
+    }
+    if fragile {
+        flags |= PENDING_REDUCTION_FRAGILE_LEFT | PENDING_REDUCTION_FRAGILE_RIGHT;
+    }
+
+    PendingReduction {
+        ref_count: 1,
+        symbol,
+        production_id,
+        parse_state: if fragile {
+            TS_TREE_STATE_NONE
+        } else {
+            parse_state
+        },
+        child_count: 0,
+        children: SubtreeArray {
+            contents: ptr::null_mut(),
+            size: 0,
+            capacity: 0,
+        },
+        payload_children: Array {
+            contents: ptr::null_mut(),
+            size: 0,
+            capacity: 0,
+        },
+        padding: length_zero(),
+        size: length_zero(),
+        lookahead_bytes: 0,
+        error_cost: 0,
+        node_count: 0,
+        visible_child_count: 0,
+        named_child_count: 0,
+        visible_descendant_count: 0,
+        dynamic_precedence: 0,
+        repeat_depth: 0,
+        first_leaf_symbol: 0,
+        first_leaf_parse_state: 0,
+        flags,
+        materialized: NULL_SUBTREE,
+    }
+}
 
 /// One-token cache shared by stack versions at the same byte offset.
 ///
@@ -1093,33 +1153,21 @@ unsafe fn parser__pending_reduction_new_from_children(
 ) -> *mut PendingReduction {
     let metadata = ts_language_symbol_metadata(self_.language, symbol);
     let fragile = symbol == ts_builtin_sym_error || symbol == ts_builtin_sym_error_repeat;
-    let pending = calloc(1, std::mem::size_of::<PendingReduction>()).cast::<PendingReduction>();
+    let pending = malloc(std::mem::size_of::<PendingReduction>()).cast::<PendingReduction>();
+    ptr::write(
+        pending,
+        pending_reduction_new_empty(
+            symbol,
+            production_id,
+            parse_state,
+            metadata.visible,
+            metadata.named,
+            extra,
+            fragile,
+        ),
+    );
     let pending_ref = pending.as_mut().unwrap_unchecked();
-    pending_ref.ref_count = 1;
-    pending_ref.symbol = symbol;
-    pending_ref.production_id = production_id;
-    pending_ref.parse_state = if fragile {
-        TS_TREE_STATE_NONE
-    } else {
-        parse_state
-    };
-    pending_ref.materialized = NULL_SUBTREE;
-    pending_ref.flags = 0;
-    if metadata.visible {
-        pending_ref.flags |= PENDING_REDUCTION_VISIBLE;
-    }
-    if metadata.named {
-        pending_ref.flags |= PENDING_REDUCTION_NAMED;
-    }
-    if extra {
-        pending_ref.flags |= PENDING_REDUCTION_EXTRA;
-    }
-    if fragile {
-        pending_ref.flags |= PENDING_REDUCTION_FRAGILE_LEFT | PENDING_REDUCTION_FRAGILE_RIGHT;
-    }
 
-    array_init(subtree_array_as_array_mut(&mut pending_ref.children));
-    array_init(&mut pending_ref.payload_children);
     array_reserve(
         subtree_array_as_array_mut(&mut pending_ref.children),
         children.size,
@@ -1147,33 +1195,21 @@ unsafe fn parser__pending_reduction_new_from_payloads(
 ) -> *mut PendingReduction {
     let metadata = ts_language_symbol_metadata(self_.language, symbol);
     let fragile = symbol == ts_builtin_sym_error || symbol == ts_builtin_sym_error_repeat;
-    let pending = calloc(1, std::mem::size_of::<PendingReduction>()).cast::<PendingReduction>();
+    let pending = malloc(std::mem::size_of::<PendingReduction>()).cast::<PendingReduction>();
+    ptr::write(
+        pending,
+        pending_reduction_new_empty(
+            symbol,
+            production_id,
+            parse_state,
+            metadata.visible,
+            metadata.named,
+            extra,
+            fragile,
+        ),
+    );
     let pending_ref = pending.as_mut().unwrap_unchecked();
-    pending_ref.ref_count = 1;
-    pending_ref.symbol = symbol;
-    pending_ref.production_id = production_id;
-    pending_ref.parse_state = if fragile {
-        TS_TREE_STATE_NONE
-    } else {
-        parse_state
-    };
-    pending_ref.materialized = NULL_SUBTREE;
-    pending_ref.flags = 0;
-    if metadata.visible {
-        pending_ref.flags |= PENDING_REDUCTION_VISIBLE;
-    }
-    if metadata.named {
-        pending_ref.flags |= PENDING_REDUCTION_NAMED;
-    }
-    if extra {
-        pending_ref.flags |= PENDING_REDUCTION_EXTRA;
-    }
-    if fragile {
-        pending_ref.flags |= PENDING_REDUCTION_FRAGILE_LEFT | PENDING_REDUCTION_FRAGILE_RIGHT;
-    }
 
-    array_init(subtree_array_as_array_mut(&mut pending_ref.children));
-    array_init(&mut pending_ref.payload_children);
     array_reserve(&mut pending_ref.payload_children, children.size);
     for i in 0..children.size {
         let child = *children.contents.add(i as usize);
