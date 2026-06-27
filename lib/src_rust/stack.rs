@@ -1279,7 +1279,7 @@ unsafe fn stack_payload_array_reverse(payloads: &mut StackLinkPayloadArray) {
     }
 }
 
-pub unsafe fn stack_pop_builder_payloads(
+pub const unsafe fn stack_pop_builder_payloads(
     builder: &StackPopBuilder,
     span: StackSliceSpan,
 ) -> StackLinkPayloadArray {

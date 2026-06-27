@@ -176,66 +176,66 @@ impl SubtreeInlineData {
     #[inline(always)]
     pub fn set_is_inline(&mut self, v: bool) {
         if v {
-            self.flags |= INLINE_IS_INLINE
+            self.flags |= INLINE_IS_INLINE;
         } else {
-            self.flags &= !INLINE_IS_INLINE
+            self.flags &= !INLINE_IS_INLINE;
         }
     }
     #[inline(always)]
     pub fn set_visible(&mut self, v: bool) {
         if v {
-            self.flags |= INLINE_VISIBLE
+            self.flags |= INLINE_VISIBLE;
         } else {
-            self.flags &= !INLINE_VISIBLE
+            self.flags &= !INLINE_VISIBLE;
         }
     }
     #[inline(always)]
     pub fn set_named(&mut self, v: bool) {
         if v {
-            self.flags |= INLINE_NAMED
+            self.flags |= INLINE_NAMED;
         } else {
-            self.flags &= !INLINE_NAMED
+            self.flags &= !INLINE_NAMED;
         }
     }
     #[inline(always)]
     pub fn set_extra(&mut self, v: bool) {
         if v {
-            self.flags |= INLINE_EXTRA
+            self.flags |= INLINE_EXTRA;
         } else {
-            self.flags &= !INLINE_EXTRA
+            self.flags &= !INLINE_EXTRA;
         }
     }
     #[inline(always)]
     pub fn set_has_changes(&mut self, v: bool) {
         if v {
-            self.flags |= INLINE_HAS_CHANGES
+            self.flags |= INLINE_HAS_CHANGES;
         } else {
-            self.flags &= !INLINE_HAS_CHANGES
+            self.flags &= !INLINE_HAS_CHANGES;
         }
     }
     #[inline(always)]
     pub fn set_is_missing(&mut self, v: bool) {
         if v {
-            self.flags |= INLINE_IS_MISSING
+            self.flags |= INLINE_IS_MISSING;
         } else {
-            self.flags &= !INLINE_IS_MISSING
+            self.flags &= !INLINE_IS_MISSING;
         }
     }
     #[inline(always)]
     pub fn set_is_keyword(&mut self, v: bool) {
         if v {
-            self.flags |= INLINE_IS_KEYWORD
+            self.flags |= INLINE_IS_KEYWORD;
         } else {
-            self.flags &= !INLINE_IS_KEYWORD
+            self.flags &= !INLINE_IS_KEYWORD;
         }
     }
     #[inline(always)]
     pub fn set_padding_rows(&mut self, v: u8) {
-        self.rows_and_lookahead = (self.rows_and_lookahead & 0xF0) | (v & 0x0F)
+        self.rows_and_lookahead = (self.rows_and_lookahead & 0xF0) | (v & 0x0F);
     }
     #[inline(always)]
     pub fn set_lookahead_bytes(&mut self, v: u8) {
-        self.rows_and_lookahead = (self.rows_and_lookahead & 0x0F) | ((v & 0x0F) << 4)
+        self.rows_and_lookahead = (self.rows_and_lookahead & 0x0F) | ((v & 0x0F) << 4);
     }
 }
 
@@ -341,97 +341,97 @@ impl SubtreeHeapData {
     #[inline(always)]
     pub fn set_visible(&mut self, v: bool) {
         if v {
-            self.flags |= HEAP_VISIBLE
+            self.flags |= HEAP_VISIBLE;
         } else {
-            self.flags &= !HEAP_VISIBLE
+            self.flags &= !HEAP_VISIBLE;
         }
     }
     #[inline(always)]
     pub fn set_named(&mut self, v: bool) {
         if v {
-            self.flags |= HEAP_NAMED
+            self.flags |= HEAP_NAMED;
         } else {
-            self.flags &= !HEAP_NAMED
+            self.flags &= !HEAP_NAMED;
         }
     }
     #[inline(always)]
     pub fn set_extra(&mut self, v: bool) {
         if v {
-            self.flags |= HEAP_EXTRA
+            self.flags |= HEAP_EXTRA;
         } else {
-            self.flags &= !HEAP_EXTRA
+            self.flags &= !HEAP_EXTRA;
         }
     }
     #[inline(always)]
     pub fn set_fragile_left(&mut self, v: bool) {
         if v {
-            self.flags |= HEAP_FRAGILE_LEFT
+            self.flags |= HEAP_FRAGILE_LEFT;
         } else {
-            self.flags &= !HEAP_FRAGILE_LEFT
+            self.flags &= !HEAP_FRAGILE_LEFT;
         }
     }
     #[inline(always)]
     pub fn set_fragile_right(&mut self, v: bool) {
         if v {
-            self.flags |= HEAP_FRAGILE_RIGHT
+            self.flags |= HEAP_FRAGILE_RIGHT;
         } else {
-            self.flags &= !HEAP_FRAGILE_RIGHT
+            self.flags &= !HEAP_FRAGILE_RIGHT;
         }
     }
     #[inline(always)]
     pub fn set_has_changes(&mut self, v: bool) {
         if v {
-            self.flags |= HEAP_HAS_CHANGES
+            self.flags |= HEAP_HAS_CHANGES;
         } else {
-            self.flags &= !HEAP_HAS_CHANGES
+            self.flags &= !HEAP_HAS_CHANGES;
         }
     }
     #[inline(always)]
     pub fn set_has_external_tokens(&mut self, v: bool) {
         if v {
-            self.flags |= HEAP_HAS_EXTERNAL_TOKENS
+            self.flags |= HEAP_HAS_EXTERNAL_TOKENS;
         } else {
-            self.flags &= !HEAP_HAS_EXTERNAL_TOKENS
+            self.flags &= !HEAP_HAS_EXTERNAL_TOKENS;
         }
     }
     #[inline(always)]
     pub fn set_has_external_scanner_state_change(&mut self, v: bool) {
         if v {
-            self.flags |= HEAP_HAS_EXTERNAL_SCANNER_STATE_CHANGE
+            self.flags |= HEAP_HAS_EXTERNAL_SCANNER_STATE_CHANGE;
         } else {
-            self.flags &= !HEAP_HAS_EXTERNAL_SCANNER_STATE_CHANGE
+            self.flags &= !HEAP_HAS_EXTERNAL_SCANNER_STATE_CHANGE;
         }
     }
     #[inline(always)]
     pub fn set_depends_on_column(&mut self, v: bool) {
         if v {
-            self.flags |= HEAP_DEPENDS_ON_COLUMN
+            self.flags |= HEAP_DEPENDS_ON_COLUMN;
         } else {
-            self.flags &= !HEAP_DEPENDS_ON_COLUMN
+            self.flags &= !HEAP_DEPENDS_ON_COLUMN;
         }
     }
     #[inline(always)]
     pub fn set_is_missing(&mut self, v: bool) {
         if v {
-            self.flags |= HEAP_IS_MISSING
+            self.flags |= HEAP_IS_MISSING;
         } else {
-            self.flags &= !HEAP_IS_MISSING
+            self.flags &= !HEAP_IS_MISSING;
         }
     }
     #[inline(always)]
     pub fn set_is_keyword(&mut self, v: bool) {
         if v {
-            self.flags |= HEAP_IS_KEYWORD
+            self.flags |= HEAP_IS_KEYWORD;
         } else {
-            self.flags &= !HEAP_IS_KEYWORD
+            self.flags &= !HEAP_IS_KEYWORD;
         }
     }
     #[inline(always)]
     pub fn set_arena_owned(&mut self, v: bool) {
         if v {
-            self.flags |= HEAP_ARENA_OWNED
+            self.flags |= HEAP_ARENA_OWNED;
         } else {
-            self.flags &= !HEAP_ARENA_OWNED
+            self.flags &= !HEAP_ARENA_OWNED;
         }
     }
 
@@ -596,7 +596,7 @@ pub struct TreeArena {
 #[repr(C)]
 struct TreeArenaPage {
     /// Next older page in the arena list.
-    next: *mut TreeArenaPage,
+    next: *mut Self,
     /// Bump allocation buffer.
     contents: *mut u8,
     /// Bytes currently used in `contents`.
@@ -931,7 +931,7 @@ unsafe fn tree_arena_alloc_new_page(
         TreeArenaPage {
             next: arena.pages,
             contents,
-            size: size,
+            size,
             capacity,
         },
     );

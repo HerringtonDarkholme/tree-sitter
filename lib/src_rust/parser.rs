@@ -396,7 +396,7 @@ type ReduceActionSet = Array<ReduceAction>;
 
 type PendingReductionArray = Array<*mut PendingReduction>;
 
-fn pending_reduction_new_empty(
+const fn pending_reduction_new_empty(
     symbol: TSSymbol,
     production_id: u16,
     parse_state: TSStateId,
@@ -2501,7 +2501,7 @@ unsafe fn parser__new_node(
     }
 }
 
-unsafe fn parser__builder_span_subtrees(
+const unsafe fn parser__builder_span_subtrees(
     builder: &StackPopBuilder,
     span: StackSliceSpan,
 ) -> SubtreeArray {

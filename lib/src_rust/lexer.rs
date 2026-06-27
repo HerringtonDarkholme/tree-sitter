@@ -200,7 +200,7 @@ unsafe extern "C" fn ts_lexer__eof(lexer: *const TSLexer) -> bool {
 }
 
 #[inline]
-fn lexer__is_eof(self_: &Lexer) -> bool {
+const fn lexer__is_eof(self_: &Lexer) -> bool {
     self_.current_included_range_index == self_.included_range_count
 }
 
