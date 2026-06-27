@@ -19,11 +19,11 @@ use super::get_changed_ranges::{
     TSRangeArray,
 };
 use super::language::{
-    language_actions, language_alias_sequence, language_enabled_external_tokens,
+    language_actions, language_alias_sequence, language_enabled_external_tokens, language_full,
     language_has_actions, language_has_reduce_action, language_is_reserved_word,
     language_lex_mode_for_state, language_lookup, language_table_entry, ts_language_copy,
     ts_language_delete, ts_language_next_state, ts_language_symbol_metadata,
-    ts_language_symbol_name, TSLanguageFull, TSLexer, TSLexerMode,
+    ts_language_symbol_name, TSLexer, TSLexerMode,
     TSParseActionTypeAccept as TSPARSE_ACTION_TYPE_ACCEPT,
     TSParseActionTypeRecover as TSPARSE_ACTION_TYPE_RECOVER,
     TSParseActionTypeReduce as TSPARSE_ACTION_TYPE_REDUCE,
@@ -582,11 +582,6 @@ unsafe fn parser_stack_mut<'a>(stack: *mut Stack) -> &'a mut Stack {
 #[inline]
 unsafe fn parser_stack_ref<'a>(stack: *const Stack) -> &'a Stack {
     ptr_ref(stack)
-}
-
-#[inline]
-unsafe fn parser_language_full<'a>(language: *const TSLanguage) -> &'a TSLanguageFull {
-    ptr_ref(language.cast::<TSLanguageFull>())
 }
 
 #[inline]
@@ -1630,10 +1625,7 @@ unsafe fn parser__call_main_lex_fn(self_: &mut TSParser, lex_mode: TSLexerMode) 
     if ts_language_is_wasm(self_.language) {
         ts_wasm_store_call_lex_main(self_.wasm_store, lex_mode.lex_state)
     } else {
-        (parser_language_full(self_.language).lex_fn.unwrap())(
-            &mut self_.lexer.data,
-            lex_mode.lex_state,
-        )
+        (language_full(self_.language).lex_fn.unwrap())(&mut self_.lexer.data, lex_mode.lex_state)
     }
 }
 
@@ -1641,7 +1633,7 @@ unsafe fn parser__call_keyword_lex_fn(self_: &mut TSParser) -> bool {
     if ts_language_is_wasm(self_.language) {
         ts_wasm_store_call_lex_keyword(self_.wasm_store, 0)
     } else {
-        (parser_language_full(self_.language).keyword_lex_fn.unwrap())(&mut self_.lexer.data, 0)
+        (language_full(self_.language).keyword_lex_fn.unwrap())(&mut self_.lexer.data, 0)
     }
 }
 
@@ -1651,7 +1643,7 @@ unsafe fn parser__call_keyword_lex_fn(self_: &mut TSParser) -> bool {
 
 unsafe fn parser__external_scanner_create(self_: &mut TSParser) {
     if !self_.language.is_null() {
-        let lang = parser_language_full(self_.language);
+        let lang = language_full(self_.language);
         if lang.external_scanner.states.is_null() {
             return;
         }
@@ -1673,7 +1665,7 @@ unsafe fn parser__external_scanner_destroy(self_: &mut TSParser) {
         && !self_.external_scanner_payload.is_null()
         && !ts_language_is_wasm(self_.language)
     {
-        let lang = parser_language_full(self_.language);
+        let lang = language_full(self_.language);
         if let Some(destroy_fn) = lang.external_scanner.destroy {
             destroy_fn(self_.external_scanner_payload);
         }
@@ -1693,7 +1685,7 @@ unsafe fn parser__external_scanner_serialize(self_: &mut TSParser) -> u32 {
             self_.has_scanner_error = true;
         }
     } else {
-        length = (parser_language_full(self_.language)
+        length = (language_full(self_.language)
             .external_scanner
             .serialize
             .unwrap())(
@@ -1724,7 +1716,7 @@ unsafe fn parser__external_scanner_deserialize(self_: &mut TSParser, external_to
             self_.has_scanner_error = true;
         }
     } else {
-        (parser_language_full(self_.language)
+        (language_full(self_.language)
             .external_scanner
             .deserialize
             .unwrap())(self_.external_scanner_payload, data.cast::<i8>(), length);
@@ -1735,7 +1727,7 @@ unsafe fn parser__external_scanner_scan(
     self_: &mut TSParser,
     external_lex_state: TSStateId,
 ) -> bool {
-    let lang = parser_language_full(self_.language);
+    let lang = language_full(self_.language);
     if ts_language_is_wasm(self_.language) {
         let result = ts_wasm_store_call_scanner_scan(
             self_.wasm_store,
@@ -1785,7 +1777,7 @@ unsafe fn parser__can_reuse_first_leaf(
             && leaf_lex_mode.external_lex_state == current_lex_mode.external_lex_state
             && leaf_lex_mode.reserved_word_set_id == current_lex_mode.reserved_word_set_id
         {
-            let lang = parser_language_full(self_.language);
+            let lang = language_full(self_.language);
             if leaf_symbol != lang.keyword_capture_token
                 || (!subtree_is_keyword(tree) && subtree_parse_state(tree) == state)
             {
@@ -1838,7 +1830,7 @@ unsafe fn parser__resolve_lexed_symbol(
     parse_state: TSStateId,
     found_external_token: bool,
 ) -> (TSSymbol, bool) {
-    let lang = parser_language_full(self_.language);
+    let lang = language_full(self_.language);
     let mut symbol = self_.lexer.data.result_symbol;
     let mut is_keyword = false;
 
@@ -1931,7 +1923,7 @@ unsafe fn parser__lex(
     parse_state: TSStateId,
 ) -> Subtree {
     let parser = ptr::from_mut(self_);
-    let lang = parser_language_full(self_.language);
+    let lang = language_full(self_.language);
     let mut lex_mode = language_lex_mode_for_state(self_.language, parse_state);
     if lex_mode.lex_state == u16::MAX {
         LOG!(
@@ -2735,7 +2727,7 @@ unsafe fn parser__reduce(
         let state = stack_state(stack, slice_version);
         let next_state = if symbol != ts_builtin_sym_error
             && symbol != ts_builtin_sym_error_repeat
-            && u32::from(symbol) >= parser_language_full(self_.language).token_count
+            && u32::from(symbol) >= language_full(self_.language).token_count
         {
             language_lookup(self_.language, state, symbol)
         } else {
@@ -2887,7 +2879,7 @@ unsafe fn parser__reduce_with_slices(
         let state = stack_state(stack, slice_version);
         let next_state = if symbol != ts_builtin_sym_error
             && symbol != ts_builtin_sym_error_repeat
-            && u32::from(symbol) >= parser_language_full(self_.language).token_count
+            && u32::from(symbol) >= language_full(self_.language).token_count
         {
             language_lookup(self_.language, state, symbol)
         } else {
@@ -3009,7 +3001,7 @@ unsafe fn parser__do_all_potential_reductions(
     starting_version: StackVersion,
     lookahead_symbol: TSSymbol,
 ) -> bool {
-    let lang = parser_language_full(self_.language);
+    let lang = language_full(self_.language);
     let initial_version_count = stack_version_count(parser_stack_ref(self_.stack));
 
     let mut can_shift_lookahead_symbol = false;
@@ -3384,7 +3376,7 @@ unsafe fn parser__handle_error(self_: &mut TSParser, version: StackVersion, look
     while v < version_count {
         if !did_insert_missing_token {
             let state = stack_state(parser_stack_ref(self_.stack), v);
-            let language = parser_language_full(self_.language);
+            let language = language_full(self_.language);
             let mut missing_symbol: TSSymbol = 1;
             while u32::from(missing_symbol) < language.token_count {
                 let state_after_missing_symbol =
@@ -3707,7 +3699,7 @@ unsafe fn parser__advance(
         // If the current lookahead token is a keyword that is not valid, but the
         // default word token *is* valid, then treat the lookahead token as the word
         // token instead.
-        let keyword_capture_token = parser_language_full(self_.language).keyword_capture_token;
+        let keyword_capture_token = language_full(self_.language).keyword_capture_token;
         if subtree_is_keyword(lookahead)
             && subtree_symbol(lookahead) != keyword_capture_token
             && !language_is_reserved_word(self_.language, state, subtree_symbol(lookahead))
@@ -4073,9 +4065,9 @@ pub unsafe extern "C" fn ts_parser_set_language(
     parser.language = ptr::null();
 
     if !language.is_null() {
-        let language_full = parser_language_full(language);
-        if language_full.abi_version > TREE_SITTER_LANGUAGE_VERSION
-            || language_full.abi_version < TREE_SITTER_MIN_COMPATIBLE_LANGUAGE_VERSION
+        let language_data = language_full(language);
+        if language_data.abi_version > TREE_SITTER_LANGUAGE_VERSION
+            || language_data.abi_version < TREE_SITTER_MIN_COMPATIBLE_LANGUAGE_VERSION
         {
             return false;
         }

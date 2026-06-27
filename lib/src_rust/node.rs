@@ -6,9 +6,9 @@ use std::ptr;
 use crate::ffi::{TSFieldId, TSInputEdit, TSLanguage, TSNode, TSPoint, TSStateId, TSSymbol};
 
 use super::language::{
-    language_alias_sequence, language_field_map, language_public_symbol,
+    language_alias_sequence, language_field_map, language_full, language_public_symbol,
     ts_language_field_id_for_name, ts_language_next_state, ts_language_symbol_metadata,
-    ts_language_symbol_name, TSLanguageFull,
+    ts_language_symbol_name,
 };
 use super::length::{length_add, length_zero, Length};
 use super::point::{point_add, point_edit, point_eq, point_gt, point_lt, point_lte};
@@ -627,10 +627,10 @@ unsafe fn node__field_name_from_language(self_: TSNode, structural_child_index: 
         &mut field_map,
         &mut field_map_end,
     );
-    let lang = node_language(self_).cast::<TSLanguageFull>();
+    let lang = language_full(node_language(self_));
     while field_map != field_map_end {
         if !(*field_map).inherited && (*field_map).child_index == structural_child_index as u8 {
-            return *(*lang).field_names.add((*field_map).field_id as usize);
+            return *lang.field_names.add((*field_map).field_id as usize);
         }
         field_map = field_map.add(1);
     }

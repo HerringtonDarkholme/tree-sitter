@@ -43,7 +43,7 @@ pub const TSSymbolTypeAuxiliary: TSSymbolType = 3;
 //
 // TSLanguage is defined in parser.h (C) and generated parsers emit it.
 // We must read its fields at known offsets. We define a full repr(C) mirror
-// struct here so we can cast `*const TSLanguage` → `*const TSLanguageFull`
+// struct here so we can cast `*const TSLanguage` → `TSLanguageFull`
 // and access every field.
 //
 // This replaces the partial `TSLanguageData` in subtree.rs.
@@ -338,8 +338,13 @@ const _: () = assert!(std::mem::size_of::<LookaheadIterator>() == 56);
 // ---------------------------------------------------------------------------
 
 #[inline(always)]
-const unsafe fn lang<'a>(self_: *const TSLanguage) -> &'a TSLanguageFull {
+pub const unsafe fn language_full<'a>(self_: *const TSLanguage) -> &'a TSLanguageFull {
     &*self_.cast::<TSLanguageFull>()
+}
+
+#[inline(always)]
+const unsafe fn lang<'a>(self_: *const TSLanguage) -> &'a TSLanguageFull {
+    language_full(self_)
 }
 
 #[inline]

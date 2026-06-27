@@ -7,8 +7,8 @@ use crate::ffi::{TSFieldId, TSNode, TSPoint, TSSymbol, TSTreeCursor};
 
 use super::alloc::{calloc, free, realloc};
 use super::language::{
-    language_alias_at, language_alias_sequence, language_field_map, ts_language_symbol_metadata,
-    TSLanguageFull,
+    language_alias_at, language_alias_sequence, language_field_map, language_full,
+    ts_language_symbol_metadata,
 };
 use super::length::{length_add, length_is_undefined, length_zero, Length, LENGTH_UNDEFINED};
 use super::node::{node_new, ts_node_start_byte, ts_node_start_point};
@@ -1051,8 +1051,8 @@ pub unsafe extern "C" fn ts_tree_cursor_current_field_name(
     let id = ts_tree_cursor_current_field_id(self_);
     if id != 0 {
         let cursor = cursor_ref(self_);
-        let lang = (*cursor.tree).language.cast::<TSLanguageFull>();
-        return *(*lang).field_names.add(id as usize);
+        let lang = language_full((*cursor.tree).language);
+        return *lang.field_names.add(id as usize);
     }
     ptr::null()
 }
