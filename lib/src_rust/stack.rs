@@ -564,7 +564,7 @@ pub unsafe fn stack_pop_builder_delete(self_: &mut StackPopBuilder) {
         array_delete(&mut self_.slices);
     }
     if !self_.subtrees.contents.is_null() {
-        array_delete(subtree_array_as_array_mut(&mut self_.subtrees));
+        array_delete(&mut self_.subtrees);
     }
     if !self_.payloads.contents.is_null() {
         array_delete(&mut self_.payloads);
@@ -611,22 +611,6 @@ unsafe fn stack_head_array_pair_mut(
     } else {
         (upper_head, lower_head)
     }
-}
-
-#[inline]
-unsafe fn subtree_array_as_array(self_: &SubtreeArray) -> &Array<Subtree> {
-    ptr::from_ref(self_)
-        .cast::<Array<Subtree>>()
-        .as_ref()
-        .unwrap_unchecked()
-}
-
-#[inline]
-unsafe fn subtree_array_as_array_mut(self_: &mut SubtreeArray) -> &mut Array<Subtree> {
-    ptr::from_mut(self_)
-        .cast::<Array<Subtree>>()
-        .as_mut()
-        .unwrap_unchecked()
 }
 
 // ---------------------------------------------------------------------------
@@ -1187,7 +1171,7 @@ unsafe fn stack_pop_builder_append_subtrees_with_order(
     reverse: bool,
 ) -> StackSliceSpan {
     let start = builder.subtrees.size;
-    let dest = subtree_array_as_array_mut(&mut builder.subtrees);
+    let dest = &mut builder.subtrees;
     array_reserve(dest, start + subtrees.size);
     if subtrees.size > 0 {
         ptr::copy_nonoverlapping(
@@ -1340,10 +1324,7 @@ unsafe fn stack_pop_count_linear(
     let mut subtree_count = 0;
     let mut subtrees = subtree_array_new();
     let reserve_count = subtree_alloc_size(count) / std::mem::size_of::<Subtree>();
-    array_reserve(
-        subtree_array_as_array_mut(&mut subtrees),
-        u32::try_from(reserve_count).unwrap(),
-    );
+    array_reserve(&mut subtrees, u32::try_from(reserve_count).unwrap());
 
     while subtree_count < count {
         let current_node = ptr_ref(node);
@@ -1358,7 +1339,7 @@ unsafe fn stack_pop_count_linear(
         if stack_link_payload_is_null(link.payload) {
             subtree_count += 1;
         } else {
-            array_push(subtree_array_as_array_mut(&mut subtrees), subtree);
+            array_push(&mut subtrees, subtree);
             stack_link_payload_retain(link.payload);
 
             if !stack_link_payload_extra(link.payload) {
@@ -1388,14 +1369,14 @@ unsafe fn stack_pop_count_linear_into(
     let start = builder.subtrees.size;
     let reserve_count = subtree_alloc_size(count) / std::mem::size_of::<Subtree>();
     array_reserve(
-        subtree_array_as_array_mut(&mut builder.subtrees),
+        &mut builder.subtrees,
         start + u32::try_from(reserve_count).unwrap(),
     );
 
     while subtree_count < count {
         let current_node = ptr_ref(node);
         if current_node.link_count != 1 {
-            let subtrees = subtree_array_as_array_mut(&mut builder.subtrees);
+            let subtrees = &mut builder.subtrees;
             for i in start..subtrees.size {
                 subtree_release(ptr_mut(self_.subtree_pool), *array_get_ref(subtrees, i));
             }
@@ -1409,7 +1390,7 @@ unsafe fn stack_pop_count_linear_into(
         if stack_link_payload_is_null(link.payload) {
             subtree_count += 1;
         } else {
-            array_push(subtree_array_as_array_mut(&mut builder.subtrees), subtree);
+            array_push(&mut builder.subtrees, subtree);
             stack_link_payload_retain(link.payload);
 
             if !stack_link_payload_extra(link.payload) {
@@ -1634,7 +1615,7 @@ unsafe fn stack__iter(
 
     if let Some(goal_subtree_count) = goal_subtree_count {
         let reserve_count = subtree_alloc_size(goal_subtree_count) / std::mem::size_of::<Subtree>();
-        let subtrees = subtree_array_as_array_mut(&mut new_iterator.subtrees);
+        let subtrees = &mut new_iterator.subtrees;
         array_reserve(subtrees, u32::try_from(reserve_count).unwrap());
     }
     let include_subtrees = goal_subtree_count.is_some();
@@ -1701,7 +1682,7 @@ unsafe fn stack__iter(
                     next_iterator.is_pending = false;
                 } else {
                     if include_subtrees {
-                        let subtrees = subtree_array_as_array_mut(&mut next_iterator.subtrees);
+                        let subtrees = &mut next_iterator.subtrees;
                         array_push(subtrees, subtree);
                         stack_link_payload_retain(link.payload);
                     }
@@ -1750,12 +1731,7 @@ const unsafe fn pop_pending_callback(
 unsafe fn pop_error_callback(payload: *mut c_void, iterator: &StackIterator) -> StackAction {
     if iterator.subtrees.size > 0 {
         let found_error = ptr_mut(payload.cast::<bool>());
-        if !*found_error
-            && subtree_is_error(*array_get_ref(
-                subtree_array_as_array(&iterator.subtrees),
-                0,
-            ))
-        {
+        if !*found_error && subtree_is_error(*array_get_ref(&iterator.subtrees, 0)) {
             *found_error = true;
             StackActionPop | StackActionStop
         } else {
@@ -2035,7 +2011,7 @@ pub unsafe fn stack_pop_count_into(
         let mut span = stack_pop_builder_append_subtrees_in_order(builder, &slice.subtrees);
         span.version = slice.version;
         array_push(&mut builder.slices, span);
-        array_delete(subtree_array_as_array_mut(&mut slice.subtrees));
+        array_delete(&mut slice.subtrees);
     }
 }
 

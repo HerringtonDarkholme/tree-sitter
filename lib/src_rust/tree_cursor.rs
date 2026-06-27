@@ -1,11 +1,9 @@
 #![allow(non_snake_case)]
 
-use core::ffi::c_void;
 use std::ptr;
 
 use crate::ffi::{TSFieldId, TSNode, TSPoint, TSSymbol, TSTreeCursor};
 
-use super::alloc::{calloc, free, realloc};
 use super::language::{
     language_alias_at, language_alias_sequence, language_field_map, language_full,
     ts_language_symbol_metadata,
@@ -14,6 +12,10 @@ use super::length::{length_add, length_is_undefined, length_zero, Length, LENGTH
 use super::node::{node_new, ts_node_start_byte, ts_node_start_point};
 use super::point::point_gt;
 use super::raw_pointer::{ptr_mut, ptr_ref};
+use super::stack::{
+    array_clear, array_delete, array_grow, array_init, array_new, array_pop, array_push,
+    array_reserve, Array,
+};
 use super::subtree::{
     subtree_child, subtree_child_count, subtree_children_slice, subtree_extra, subtree_padding,
     subtree_size, subtree_symbol, subtree_total_size, subtree_visible, subtree_visible_child_count,
@@ -61,23 +63,10 @@ impl TreeCursorEntry {
     }
 }
 
-/// Inline `Array(TreeCursorEntry)` representation.
-#[repr(C)]
-pub struct TreeCursorEntryArray {
-    /// Backing storage for cursor stack entries.
-    pub contents: *mut TreeCursorEntry,
-    /// Number of initialized entries.
-    pub size: u32,
-    /// Allocated entry capacity.
-    pub capacity: u32,
-}
+pub type TreeCursorEntryArray = Array<TreeCursorEntry>;
 
 pub const fn tree_cursor_entry_array_new() -> TreeCursorEntryArray {
-    TreeCursorEntryArray {
-        contents: ptr::null_mut(),
-        size: 0,
-        capacity: 0,
-    }
+    array_new()
 }
 
 /// Internal cursor representation cast to/from public `TSTreeCursor`.
@@ -150,63 +139,31 @@ pub const unsafe fn tree_cursor_entry_slice(arr: &TreeCursorEntryArray) -> &[Tre
 
 #[inline]
 pub fn tree_cursor_entry_array_clear(arr: &mut TreeCursorEntryArray) {
-    arr.size = 0;
+    array_clear(arr);
 }
 
 pub unsafe fn tree_cursor_entry_array_reserve(arr: &mut TreeCursorEntryArray, new_capacity: u32) {
-    if new_capacity > arr.capacity {
-        if arr.contents.is_null() {
-            arr.contents = calloc(
-                new_capacity as usize,
-                std::mem::size_of::<TreeCursorEntry>(),
-            )
-            .cast::<TreeCursorEntry>();
-        } else {
-            arr.contents = realloc(
-                arr.contents.cast::<c_void>(),
-                new_capacity as usize * std::mem::size_of::<TreeCursorEntry>(),
-            )
-            .cast::<TreeCursorEntry>();
-        }
-        arr.capacity = new_capacity;
-    }
+    array_reserve(arr, new_capacity);
 }
 
 pub unsafe fn tree_cursor_entry_array_grow(arr: &mut TreeCursorEntryArray, count: u32) {
-    let new_size = arr.size + count;
-    if new_size > arr.capacity {
-        let mut new_capacity = if arr.capacity > 0 { arr.capacity } else { 8 };
-        while new_capacity < new_size {
-            new_capacity *= 2;
-        }
-        tree_cursor_entry_array_reserve(arr, new_capacity);
-    }
+    array_grow(arr, count);
 }
 
 pub unsafe fn tree_cursor_entry_array_push(arr: &mut TreeCursorEntryArray, entry: TreeCursorEntry) {
-    tree_cursor_entry_array_grow(arr, 1);
-    ptr::write(arr.contents.add(arr.size as usize), entry);
-    arr.size += 1;
+    array_push(arr, entry);
 }
 
 pub unsafe fn tree_cursor_entry_array_pop(arr: &mut TreeCursorEntryArray) -> TreeCursorEntry {
-    arr.size -= 1;
-    ptr::read(arr.contents.add(arr.size as usize))
+    array_pop(arr)
 }
 
 pub unsafe fn tree_cursor_entry_array_delete(arr: &mut TreeCursorEntryArray) {
-    if !arr.contents.is_null() {
-        free(arr.contents.cast::<c_void>());
-    }
-    arr.contents = ptr::null_mut();
-    arr.size = 0;
-    arr.capacity = 0;
+    array_delete(arr);
 }
 
 pub fn tree_cursor_entry_array_init(arr: &mut TreeCursorEntryArray) {
-    arr.contents = ptr::null_mut();
-    arr.size = 0;
-    arr.capacity = 0;
+    array_init(arr);
 }
 
 pub unsafe fn tree_cursor_entry_array_push_all(

@@ -1,17 +1,17 @@
 #![allow(dead_code)]
 #![allow(non_snake_case)]
 
-use core::{cmp::Ordering, ffi::c_void};
+use core::cmp::Ordering;
 use std::ptr;
 
 use crate::ffi::{TSInputEdit, TSLanguage, TSRange, TSSymbol};
 
-use super::alloc::{calloc, realloc};
 use super::error_costs::ERROR_STATE;
 use super::language::language_alias_at;
 use super::length::{length_add, length_min, length_zero, Length, LENGTH_MAX};
 use super::point::{point_add, point_sub, POINT_MAX};
 use super::raw_pointer::{ptr_mut, ptr_ref};
+use super::stack::{array_new, array_push, Array};
 use super::subtree::{
     subtree_child, subtree_child_count, subtree_error_cost, subtree_external_scanner_state_eq,
     subtree_extra, subtree_has_changes, subtree_has_external_tokens, subtree_last_external_token,
@@ -28,22 +28,10 @@ use super::tree_cursor::{
 // ---------------------------------------------------------------------------
 
 /// Growable array of changed ranges.
-#[repr(C)]
-pub struct TSRangeArray {
-    /// Backing range storage.
-    pub contents: *mut TSRange,
-    /// Number of initialized ranges.
-    pub size: u32,
-    /// Allocated range capacity.
-    pub capacity: u32,
-}
+pub type TSRangeArray = Array<TSRange>;
 
 pub const fn range_array_new() -> TSRangeArray {
-    TSRangeArray {
-        contents: ptr::null_mut(),
-        size: 0,
-        capacity: 0,
-    }
+    array_new()
 }
 
 /// Cursor used when diffing two syntax trees.
@@ -101,33 +89,6 @@ pub const unsafe fn range_slice<'a>(ranges: *const TSRange, count: u32) -> &'a [
     } else {
         std::slice::from_raw_parts(ranges, count as usize)
     }
-}
-
-unsafe fn array_grow_range(arr: &mut TSRangeArray, count: u32) {
-    let new_size = arr.size + count;
-    if new_size > arr.capacity {
-        let mut new_capacity = if arr.capacity > 0 { arr.capacity } else { 8 };
-        while new_capacity < new_size {
-            new_capacity *= 2;
-        }
-        if arr.contents.is_null() {
-            arr.contents =
-                calloc(new_capacity as usize, std::mem::size_of::<TSRange>()).cast::<TSRange>();
-        } else {
-            arr.contents = realloc(
-                arr.contents.cast::<c_void>(),
-                new_capacity as usize * std::mem::size_of::<TSRange>(),
-            )
-            .cast::<TSRange>();
-        }
-        arr.capacity = new_capacity;
-    }
-}
-
-unsafe fn array_push_range(arr: &mut TSRangeArray, range: TSRange) {
-    array_grow_range(arr, 1);
-    ptr::write(arr.contents.add(arr.size as usize), range);
-    arr.size += 1;
 }
 
 pub fn range_edit_ref(range: &mut TSRange, edit: &TSInputEdit) {
@@ -207,7 +168,7 @@ unsafe fn range_array_add(arr: &mut TSRangeArray, start: Length, end: Length) {
             start_byte: start.bytes,
             end_byte: end.bytes,
         };
-        array_push_range(arr, range);
+        array_push(arr, range);
     }
 }
 

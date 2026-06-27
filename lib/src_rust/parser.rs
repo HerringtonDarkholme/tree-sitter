@@ -177,7 +177,6 @@ use super::subtree::{
     ts_builtin_sym_error_repeat,
     ExternalScannerState,
     MutableSubtree,
-    MutableSubtreeArray,
     Subtree,
     SubtreeArray,
     SubtreePool,
@@ -1171,14 +1170,11 @@ unsafe fn parser__pending_reduction_new_from_children(
     );
     let pending_ref = ptr_mut(pending);
 
-    array_reserve(
-        subtree_array_as_array_mut(&mut pending_ref.children),
-        children.size,
-    );
+    array_reserve(&mut pending_ref.children, children.size);
     for i in 0..children.size {
         let child = *children.contents.add(i as usize);
         subtree_retain(child);
-        array_push(subtree_array_as_array_mut(&mut pending_ref.children), child);
+        array_push(&mut pending_ref.children, child);
     }
 
     parser__pending_reduction_summarize_children(pending_ref, self_.language);
@@ -1239,10 +1235,7 @@ unsafe fn parser__materialize_pending_reduction(
     let mut children = subtree_array_new();
 
     if !pending_ref.payload_children.contents.is_null() {
-        array_reserve(
-            subtree_array_as_array_mut(&mut children),
-            pending_ref.payload_children.size,
-        );
+        array_reserve(&mut children, pending_ref.payload_children.size);
         for i in 0..pending_ref.payload_children.size {
             let payload = *array_get_ref(&pending_ref.payload_children, i);
             let child = if stack_link_payload_is_pending_reduction(payload) {
@@ -1255,7 +1248,7 @@ unsafe fn parser__materialize_pending_reduction(
                 subtree_retain(child);
                 child
             };
-            array_push(subtree_array_as_array_mut(&mut children), child);
+            array_push(&mut children, child);
         }
 
         for i in 0..pending_ref.payload_children.size {
@@ -1303,54 +1296,6 @@ unsafe fn parser__materialize_pending_reduction(
     pending_ref.materialized = subtree_from_mut(result);
     subtree_retain(pending_ref.materialized);
     pending_ref.materialized
-}
-
-// ---------------------------------------------------------------------------
-// ReduceActionSet helper
-// ---------------------------------------------------------------------------
-
-unsafe fn subtree_array_as_array(self_: &SubtreeArray) -> &Array<Subtree> {
-    ptr::from_ref(self_)
-        .cast::<Array<Subtree>>()
-        .as_ref()
-        .unwrap_unchecked()
-}
-
-unsafe fn subtree_array_as_array_mut(self_: &mut SubtreeArray) -> &mut Array<Subtree> {
-    ptr::from_mut(self_)
-        .cast::<Array<Subtree>>()
-        .as_mut()
-        .unwrap_unchecked()
-}
-
-unsafe fn mutable_subtree_array_as_array(self_: &MutableSubtreeArray) -> &Array<MutableSubtree> {
-    ptr::from_ref(self_)
-        .cast::<Array<MutableSubtree>>()
-        .as_ref()
-        .unwrap_unchecked()
-}
-
-unsafe fn mutable_subtree_array_as_array_mut(
-    self_: &mut MutableSubtreeArray,
-) -> &mut Array<MutableSubtree> {
-    ptr::from_mut(self_)
-        .cast::<Array<MutableSubtree>>()
-        .as_mut()
-        .unwrap_unchecked()
-}
-
-unsafe fn range_array_as_array(self_: &TSRangeArray) -> &Array<TSRange> {
-    ptr::from_ref(self_)
-        .cast::<Array<TSRange>>()
-        .as_ref()
-        .unwrap_unchecked()
-}
-
-unsafe fn range_array_as_array_mut(self_: &mut TSRangeArray) -> &mut Array<TSRange> {
-    ptr::from_mut(self_)
-        .cast::<Array<TSRange>>()
-        .as_mut()
-        .unwrap_unchecked()
 }
 
 unsafe fn reduce_action_set_add(self_: &mut ReduceActionSet, new_action: ReduceAction) {
@@ -1427,7 +1372,7 @@ unsafe fn parser__breakdown_top_of_stack(self_: &mut TSParser, version: StackVer
         for i in 0..pop.size {
             let mut slice = ptr::read(array_get_ref(&pop, i));
             let mut state = stack_state(parser_stack_ref(self_.stack), slice.version);
-            let parent = *array_get_ref(subtree_array_as_array(&slice.subtrees), 0);
+            let parent = *array_get_ref(&slice.subtrees, 0);
 
             let n = subtree_child_count(parent);
             for j in 0..n {
@@ -1451,7 +1396,7 @@ unsafe fn parser__breakdown_top_of_stack(self_: &mut TSParser, version: StackVer
             }
 
             for j in 1..slice.subtrees.size {
-                let tree = *array_get_ref(subtree_array_as_array(&slice.subtrees), j);
+                let tree = *array_get_ref(&slice.subtrees, j);
                 stack_push(
                     parser_stack_mut(self_.stack),
                     slice.version,
@@ -1462,7 +1407,7 @@ unsafe fn parser__breakdown_top_of_stack(self_: &mut TSParser, version: StackVer
             }
 
             subtree_release(&mut self_.tree_pool, parent);
-            array_delete(subtree_array_as_array_mut(&mut slice.subtrees));
+            array_delete(&mut slice.subtrees);
 
             let parser = ptr::from_mut(self_);
             LOG!(
@@ -2461,8 +2406,8 @@ unsafe fn parser__select_children(
     left: Subtree,
     children: &SubtreeArray,
 ) -> bool {
-    let scratch_trees = subtree_array_as_array_mut(&mut self_.scratch_trees);
-    let children = subtree_array_as_array(children);
+    let scratch_trees = &mut self_.scratch_trees;
+    let children = children;
     array_assign(scratch_trees, children);
 
     let scratch_tree = subtree_new_node(
@@ -2492,7 +2437,7 @@ unsafe fn parser__new_node(
             production_id,
             self_.language,
         );
-        array_delete(subtree_array_as_array_mut(children));
+        array_delete(children);
         result
     }
 }
@@ -2520,10 +2465,7 @@ unsafe fn parser__new_node_from_builder_span(
 ) -> MutableSubtree {
     if self_.tree_arena.is_null() {
         let mut owned_children = subtree_array_new();
-        array_reserve(
-            subtree_array_as_array_mut(&mut owned_children),
-            children.size,
-        );
+        array_reserve(&mut owned_children, children.size);
         if children.size > 0 {
             ptr::copy_nonoverlapping(
                 children.contents,
@@ -2698,10 +2640,7 @@ unsafe fn parser__reduce(
             if parser__select_children(self_, subtree_from_mut(parent), &next_slice_children) {
                 subtree_array_clear(&mut self_.tree_pool, &mut self_.trailing_extras);
                 subtree_release(&mut self_.tree_pool, subtree_from_mut(parent));
-                array_swap(
-                    subtree_array_as_array_mut(&mut self_.trailing_extras),
-                    subtree_array_as_array_mut(&mut self_.trailing_extras2),
-                );
+                array_swap(&mut self_.trailing_extras, &mut self_.trailing_extras2);
                 parent = parser__new_node_from_builder_span(
                     self_,
                     symbol,
@@ -2709,7 +2648,7 @@ unsafe fn parser__reduce(
                     u32::from(production_id),
                 );
             } else {
-                array_clear(subtree_array_as_array_mut(&mut self_.trailing_extras2));
+                array_clear(&mut self_.trailing_extras2);
                 parser__release_builder_span(self_, next_span);
             }
         }
@@ -2747,7 +2686,7 @@ unsafe fn parser__reduce(
             stack_push(
                 stack,
                 slice_version,
-                *array_get_ref(subtree_array_as_array(&self_.trailing_extras), j),
+                *array_get_ref(&self_.trailing_extras, j),
                 false,
                 next_state,
             );
@@ -2850,10 +2789,7 @@ unsafe fn parser__reduce_with_slices(
             if parser__select_children(self_, subtree_from_mut(parent), &next_slice_children) {
                 subtree_array_clear(&mut self_.tree_pool, &mut self_.trailing_extras);
                 subtree_release(&mut self_.tree_pool, subtree_from_mut(parent));
-                array_swap(
-                    subtree_array_as_array_mut(&mut self_.trailing_extras),
-                    subtree_array_as_array_mut(&mut self_.trailing_extras2),
-                );
+                array_swap(&mut self_.trailing_extras, &mut self_.trailing_extras2);
                 parent = parser__new_node(
                     self_,
                     symbol,
@@ -2861,7 +2797,7 @@ unsafe fn parser__reduce_with_slices(
                     u32::from(production_id),
                 );
             } else {
-                array_clear(subtree_array_as_array_mut(&mut self_.trailing_extras2));
+                array_clear(&mut self_.trailing_extras2);
                 subtree_array_delete(&mut self_.tree_pool, &mut next_slice.subtrees);
             }
         }
@@ -2898,7 +2834,7 @@ unsafe fn parser__reduce_with_slices(
             stack_push(
                 stack,
                 slice_version,
-                *array_get_ref(subtree_array_as_array(&self_.trailing_extras), j),
+                *array_get_ref(&self_.trailing_extras, j),
                 false,
                 next_state,
             );
@@ -2936,7 +2872,7 @@ unsafe fn parser__accept(self_: &mut TSParser, version: StackVersion, lookahead:
         let mut root = NULL_SUBTREE;
         let mut j = i64::from(trees.size) - 1;
         while j >= 0 {
-            let tree = *array_get_ref(subtree_array_as_array(&trees), j as u32);
+            let tree = *array_get_ref(&trees, j as u32);
             if !subtree_extra(tree) {
                 debug_assert!(!tree.data.is_inline());
                 let child_count = subtree_child_count(tree);
@@ -2944,13 +2880,7 @@ unsafe fn parser__accept(self_: &mut TSParser, version: StackVersion, lookahead:
                 for child in children {
                     subtree_retain(*child);
                 }
-                array_splice(
-                    subtree_array_as_array_mut(&mut trees),
-                    j as u32,
-                    1,
-                    child_count,
-                    children.as_ptr(),
-                );
+                array_splice(&mut trees, j as u32, 1, child_count, children.as_ptr());
                 root = subtree_from_mut(parser__new_node(
                     self_,
                     subtree_symbol(tree),
@@ -3126,7 +3056,7 @@ unsafe fn parser__recover_to_state(
             if error_child_count > 0 {
                 let error_children = subtree_children_slice(error_tree);
                 array_splice(
-                    subtree_array_as_array_mut(&mut slice.subtrees),
+                    &mut slice.subtrees,
                     0,
                     0,
                     error_child_count,
@@ -3145,11 +3075,11 @@ unsafe fn parser__recover_to_state(
             let error = subtree_new_error_node(&mut slice.subtrees, true, self_.language);
             stack_push(stack, slice.version, error, false, goal_state);
         } else {
-            array_delete(subtree_array_as_array_mut(&mut slice.subtrees));
+            array_delete(&mut slice.subtrees);
         }
 
         for j in 0..self_.trailing_extras.size {
-            let tree = *array_get_ref(subtree_array_as_array(&self_.trailing_extras), j);
+            let tree = *array_get_ref(&self_.trailing_extras, j);
             stack_push(stack, slice.version, tree, false, goal_state);
         }
 
@@ -3296,8 +3226,8 @@ unsafe fn parser__recover(self_: &mut TSParser, version: StackVersion, mut looka
         SYM_NAME!(parser, subtree_symbol(lookahead))
     );
     let mut children: SubtreeArray = subtree_array_new();
-    array_reserve(subtree_array_as_array_mut(&mut children), 1);
-    array_push(subtree_array_as_array_mut(&mut children), lookahead);
+    array_reserve(&mut children, 1);
+    array_push(&mut children, lookahead);
     let mut error_repeat = parser__new_node(self_, ts_builtin_sym_error_repeat, &mut children, 0);
 
     // Merge with existing error on top of stack
@@ -3318,10 +3248,7 @@ unsafe fn parser__recover(self_: &mut TSParser, version: StackVersion, mut looka
 
         stack_renumber_version(stack, array_get_ref(&pop, 0).version, version);
         let slot = &mut array_get_mut(&mut pop, 0).subtrees;
-        array_push(
-            subtree_array_as_array_mut(slot),
-            subtree_from_mut(error_repeat),
-        );
+        array_push(slot, subtree_from_mut(error_repeat));
         error_repeat = parser__new_node(self_, ts_builtin_sym_error_repeat, slot, 0);
     }
 
@@ -3859,12 +3786,10 @@ unsafe fn parser__balance_subtree(self_: &mut TSParser) -> bool {
     // push the initial finished tree onto it. Otherwise, if we're resuming balancing after a
     // cancellation, we don't want to clear the tree stack.
     if !self_.canceled_balancing {
-        array_clear(mutable_subtree_array_as_array_mut(
-            &mut self_.tree_pool.tree_stack,
-        ));
+        array_clear(&mut self_.tree_pool.tree_stack);
         if subtree_child_count(finished_tree) > 0 && (*finished_tree.ptr).ref_count == 1 {
             array_push(
-                mutable_subtree_array_as_array_mut(&mut self_.tree_pool.tree_stack),
+                &mut self_.tree_pool.tree_stack,
                 subtree_to_mut_unsafe(finished_tree),
             );
         }
@@ -3875,7 +3800,7 @@ unsafe fn parser__balance_subtree(self_: &mut TSParser) -> bool {
             return false;
         }
 
-        let tree = *array_back_ref(mutable_subtree_array_as_array(&self_.tree_pool.tree_stack));
+        let tree = *array_back_ref(&self_.tree_pool.tree_stack);
 
         if (*tree.ptr).data.children.repeat_depth > 0 {
             let tree_subtree = subtree_from_mut(tree);
@@ -3903,16 +3828,14 @@ unsafe fn parser__balance_subtree(self_: &mut TSParser) -> bool {
             }
         }
 
-        array_pop(mutable_subtree_array_as_array_mut(
-            &mut self_.tree_pool.tree_stack,
-        ));
+        array_pop(&mut self_.tree_pool.tree_stack);
 
         for i in 0..(*tree.ptr).child_count {
             let tree_subtree = subtree_from_mut(tree);
             let child = *subtree_child(tree_subtree, i);
             if subtree_child_count(child) > 0 && (*child.ptr).ref_count == 1 {
                 array_push(
-                    mutable_subtree_array_as_array_mut(&mut self_.tree_pool.tree_stack),
+                    &mut self_.tree_pool.tree_stack,
                     subtree_to_mut_unsafe(child),
                 );
             }
@@ -4010,9 +3933,7 @@ pub unsafe extern "C" fn ts_parser_delete(self_: *mut TSParser) {
         array_delete(&mut parser.pending_reductions);
     }
     if !parser.included_range_differences.contents.is_null() {
-        array_delete(range_array_as_array_mut(
-            &mut parser.included_range_differences,
-        ));
+        array_delete(&mut parser.included_range_differences);
     }
     if !parser.old_tree.ptr.is_null() {
         subtree_release(&mut parser.tree_pool, parser.old_tree);
@@ -4028,9 +3949,9 @@ pub unsafe extern "C" fn ts_parser_delete(self_: *mut TSParser) {
     subtree_pool_delete(&mut parser.tree_pool);
     parser.reusable_node.delete();
     stack_pop_builder_delete(&mut parser.reduce_builder);
-    array_delete(subtree_array_as_array_mut(&mut parser.trailing_extras));
-    array_delete(subtree_array_as_array_mut(&mut parser.trailing_extras2));
-    array_delete(subtree_array_as_array_mut(&mut parser.scratch_trees));
+    array_delete(&mut parser.trailing_extras);
+    array_delete(&mut parser.trailing_extras2);
+    array_delete(&mut parser.scratch_trees);
     free(self_.cast::<c_void>());
 }
 
@@ -4199,9 +4120,7 @@ pub unsafe extern "C" fn ts_parser_parse(
     }
 
     lexer_set_input(&mut parser.lexer, input);
-    array_clear(range_array_as_array_mut(
-        &mut parser.included_range_differences,
-    ));
+    array_clear(&mut parser.included_range_differences);
     parser.included_range_difference_index = 0;
 
     parser.operation_count = 0;
@@ -4257,8 +4176,7 @@ pub unsafe extern "C" fn ts_parser_parse(
             LOG!(self_, c"parse_after_edit".as_ptr().cast::<i8>());
             LOG_TREE!(self_, parser.old_tree);
             for i in 0..parser.included_range_differences.size {
-                let range =
-                    array_get_ref(range_array_as_array(&parser.included_range_differences), i);
+                let range = array_get_ref(&parser.included_range_differences, i);
                 LOG!(
                     self_,
                     c"different_included_range %u - %u".as_ptr().cast::<i8>(),
@@ -4338,7 +4256,7 @@ pub unsafe extern "C" fn ts_parser_parse(
 
         while parser.included_range_difference_index < parser.included_range_differences.size {
             let range = array_get_ref(
-                range_array_as_array(&parser.included_range_differences),
+                &parser.included_range_differences,
                 parser.included_range_difference_index,
             );
             if range.end_byte <= position {

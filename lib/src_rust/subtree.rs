@@ -21,6 +21,7 @@ use super::language::{
 };
 use super::length::{length_add, length_saturating_sub, length_sub, length_zero, Length};
 use super::raw_pointer::{ptr_mut, ptr_ref};
+use super::stack::{array_delete, array_new, array_pop, array_push, array_reserve, Array};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -534,36 +535,11 @@ const _: () = assert!(std::mem::size_of::<MutableSubtree>() == 8);
 const _: () = assert!(std::mem::size_of::<ExternalScannerState>() == 32);
 const _: () = assert!(std::mem::size_of::<FirstLeaf>() == 4);
 
-// ---------------------------------------------------------------------------
-// SubtreeArray / MutableSubtreeArray (replaces Array(Subtree))
-// ---------------------------------------------------------------------------
-
-#[repr(C)]
-pub struct SubtreeArray {
-    /// Child storage.
-    pub contents: *mut Subtree,
-    /// Number of initialized children.
-    pub size: u32,
-    /// Allocated child capacity.
-    pub capacity: u32,
-}
-
-#[repr(C)]
-pub struct MutableSubtreeArray {
-    /// Mutable subtree storage.
-    pub contents: *mut MutableSubtree,
-    /// Number of initialized entries.
-    pub size: u32,
-    /// Allocated entry capacity.
-    pub capacity: u32,
-}
+pub type SubtreeArray = Array<Subtree>;
+pub type MutableSubtreeArray = Array<MutableSubtree>;
 
 pub const fn subtree_array_new() -> SubtreeArray {
-    SubtreeArray {
-        contents: ptr::null_mut(),
-        size: 0,
-        capacity: 0,
-    }
+    array_new()
 }
 
 // ---------------------------------------------------------------------------
@@ -696,37 +672,6 @@ pub unsafe fn external_scanner_state_eq(
 }
 
 // ===========================================================================
-// SubtreeArray helpers (replaces array.h macros)
-// ===========================================================================
-
-/// Grow array capacity if needed to fit `count` more elements.
-unsafe fn array_grow(arr: &mut SubtreeArray, count: u32) {
-    let new_size = arr.size + count;
-    if new_size > arr.capacity {
-        let mut new_capacity = arr.capacity * 2;
-        if new_capacity < 8 {
-            new_capacity = 8;
-        }
-        if new_capacity < new_size {
-            new_capacity = new_size;
-        }
-        arr.contents = realloc(
-            arr.contents.cast::<c_void>(),
-            new_capacity as usize * std::mem::size_of::<Subtree>(),
-        )
-        .cast::<Subtree>();
-        arr.capacity = new_capacity;
-    }
-}
-
-/// Push a subtree onto the end of the array.
-unsafe fn array_push_subtree(arr: &mut SubtreeArray, element: Subtree) {
-    array_grow(arr, 1);
-    ptr::write(arr.contents.add(arr.size as usize), element);
-    arr.size += 1;
-}
-
-// ===========================================================================
 // SubtreeArray functions
 // ===========================================================================
 
@@ -770,7 +715,7 @@ pub unsafe fn subtree_array_remove_trailing_extras(
         let last = *self_.contents.add(self_.size as usize - 1);
         if subtree_extra(last) {
             self_.size -= 1;
-            array_push_subtree(destination, last);
+            array_push(destination, last);
         } else {
             break;
         }
@@ -785,68 +730,6 @@ pub unsafe fn subtree_array_reverse(self_: &mut SubtreeArray) {
         let a = self_.contents.add(i as usize);
         let b = self_.contents.add(reverse_index);
         ptr::swap(a, b);
-    }
-}
-
-// ===========================================================================
-// MutableSubtreeArray helpers
-// ===========================================================================
-
-unsafe fn mutable_array_grow(arr: &mut MutableSubtreeArray, count: u32) {
-    let new_size = arr.size + count;
-    if new_size > arr.capacity {
-        let mut new_capacity = arr.capacity * 2;
-        if new_capacity < 8 {
-            new_capacity = 8;
-        }
-        if new_capacity < new_size {
-            new_capacity = new_size;
-        }
-        arr.contents = realloc(
-            arr.contents.cast::<c_void>(),
-            new_capacity as usize * std::mem::size_of::<MutableSubtree>(),
-        )
-        .cast::<MutableSubtree>();
-        arr.capacity = new_capacity;
-    }
-}
-
-pub unsafe fn mutable_array_push(arr: &mut MutableSubtreeArray, element: MutableSubtree) {
-    mutable_array_grow(arr, 1);
-    ptr::write(arr.contents.add(arr.size as usize), element);
-    arr.size += 1;
-}
-
-unsafe fn mutable_array_pop(arr: &mut MutableSubtreeArray) -> MutableSubtree {
-    arr.size -= 1;
-    ptr::read(arr.contents.add(arr.size as usize))
-}
-
-unsafe fn mutable_array_delete(arr: &mut MutableSubtreeArray) {
-    if !arr.contents.is_null() {
-        free(arr.contents.cast::<c_void>());
-    }
-    arr.contents = ptr::null_mut();
-    arr.size = 0;
-    arr.capacity = 0;
-}
-
-const fn mutable_array_new() -> MutableSubtreeArray {
-    MutableSubtreeArray {
-        contents: ptr::null_mut(),
-        size: 0,
-        capacity: 0,
-    }
-}
-
-unsafe fn mutable_array_reserve(arr: &mut MutableSubtreeArray, new_capacity: u32) {
-    if new_capacity > arr.capacity {
-        arr.contents = realloc(
-            arr.contents.cast::<c_void>(),
-            new_capacity as usize * std::mem::size_of::<MutableSubtree>(),
-        )
-        .cast::<MutableSubtree>();
-        arr.capacity = new_capacity;
     }
 }
 
@@ -963,10 +846,10 @@ unsafe fn tree_arena_alloc(arena: *mut TreeArena, size: usize, alignment: usize)
 
 pub unsafe fn subtree_pool_new(capacity: u32) -> SubtreePool {
     let mut pool = SubtreePool {
-        free_trees: mutable_array_new(),
-        tree_stack: mutable_array_new(),
+        free_trees: array_new(),
+        tree_stack: array_new(),
     };
-    mutable_array_reserve(&mut pool.free_trees, capacity);
+    array_reserve(&mut pool.free_trees, capacity);
     pool
 }
 
@@ -976,16 +859,16 @@ pub unsafe fn subtree_pool_delete(self_: &mut SubtreePool) {
             let tree = *self_.free_trees.contents.add(i as usize);
             free(tree.ptr.cast::<c_void>());
         }
-        mutable_array_delete(&mut self_.free_trees);
+        array_delete(&mut self_.free_trees);
     }
     if !self_.tree_stack.contents.is_null() {
-        mutable_array_delete(&mut self_.tree_stack);
+        array_delete(&mut self_.tree_stack);
     }
 }
 
 unsafe fn subtree_pool_allocate(self_: &mut SubtreePool) -> *mut SubtreeHeapData {
     if self_.free_trees.size > 0 {
-        mutable_array_pop(&mut self_.free_trees).ptr
+        array_pop(&mut self_.free_trees).ptr
     } else {
         malloc(std::mem::size_of::<SubtreeHeapData>()).cast::<SubtreeHeapData>()
     }
@@ -993,7 +876,7 @@ unsafe fn subtree_pool_allocate(self_: &mut SubtreePool) -> *mut SubtreeHeapData
 
 unsafe fn subtree_pool_free(self_: &mut SubtreePool, tree: MutableSubtree) {
     if self_.free_trees.capacity > 0 && self_.free_trees.size < TS_MAX_TREE_POOL_SIZE {
-        mutable_array_push(&mut self_.free_trees, tree);
+        array_push(&mut self_.free_trees, tree);
     } else {
         free(tree.ptr.cast::<c_void>());
     }
@@ -1807,11 +1690,11 @@ pub unsafe fn subtree_release(pool: &mut SubtreePool, self_: Subtree) {
     debug_assert!((*self_.ptr).ref_count > 0);
     let ref_count = ptr::addr_of!((*self_.ptr).ref_count).cast::<AtomicU32>();
     if (*ref_count).fetch_sub(1, Ordering::SeqCst) == 1 {
-        mutable_array_push(&mut pool.tree_stack, subtree_to_mut_unsafe(self_));
+        array_push(&mut pool.tree_stack, subtree_to_mut_unsafe(self_));
     }
 
     while pool.tree_stack.size > 0 {
-        let tree = mutable_array_pop(&mut pool.tree_stack);
+        let tree = array_pop(&mut pool.tree_stack);
         if (*tree.ptr).child_count > 0 {
             let children = subtree_children_slice(subtree_from_mut(tree));
             for child in children {
@@ -1822,7 +1705,7 @@ pub unsafe fn subtree_release(pool: &mut SubtreePool, self_: Subtree) {
                 debug_assert!((*child.ptr).ref_count > 0);
                 let child_ref = ptr::addr_of!((*child.ptr).ref_count).cast::<AtomicU32>();
                 if (*child_ref).fetch_sub(1, Ordering::SeqCst) == 1 {
-                    mutable_array_push(&mut pool.tree_stack, subtree_to_mut_unsafe(child));
+                    array_push(&mut pool.tree_stack, subtree_to_mut_unsafe(child));
                 }
             }
             if !(*tree.ptr).arena_owned() {
@@ -1884,12 +1767,12 @@ pub unsafe fn subtree_compress(
         *mutable_subtree_child_mut(tree, 0) = subtree_from_mut(grandchild);
         *mutable_subtree_child_mut(child, 0) = mutable_subtree_child(grandchild, gc_last);
         *mutable_subtree_child_mut(grandchild, gc_last) = subtree_from_mut(child);
-        mutable_array_push(stack, tree);
+        array_push(stack, tree);
         tree = grandchild;
     }
 
     while stack.size > initial_stack_size {
-        tree = mutable_array_pop(stack);
+        tree = array_pop(stack);
         let child = subtree_to_mut_unsafe(mutable_subtree_child(tree, 0));
         let grandchild = subtree_to_mut_unsafe(mutable_subtree_child(
             child,
@@ -2045,12 +1928,12 @@ pub unsafe fn subtree_summarize_children(self_: MutableSubtree, language: *const
 // ===========================================================================
 
 pub unsafe fn subtree_compare(left: Subtree, right: Subtree, pool: &mut SubtreePool) -> i32 {
-    mutable_array_push(&mut pool.tree_stack, subtree_to_mut_unsafe(left));
-    mutable_array_push(&mut pool.tree_stack, subtree_to_mut_unsafe(right));
+    array_push(&mut pool.tree_stack, subtree_to_mut_unsafe(left));
+    array_push(&mut pool.tree_stack, subtree_to_mut_unsafe(right));
 
     while pool.tree_stack.size > 0 {
-        let right = subtree_from_mut(mutable_array_pop(&mut pool.tree_stack));
-        let left = subtree_from_mut(mutable_array_pop(&mut pool.tree_stack));
+        let right = subtree_from_mut(array_pop(&mut pool.tree_stack));
+        let left = subtree_from_mut(array_pop(&mut pool.tree_stack));
 
         let mut result = 0i32;
         if subtree_symbol(left) < subtree_symbol(right) {
@@ -2075,8 +1958,8 @@ pub unsafe fn subtree_compare(left: Subtree, right: Subtree, pool: &mut SubtreeP
             i -= 1;
             let left_child = *left_children.get_unchecked(i as usize);
             let right_child = *right_children.get_unchecked(i as usize);
-            mutable_array_push(&mut pool.tree_stack, subtree_to_mut_unsafe(left_child));
-            mutable_array_push(&mut pool.tree_stack, subtree_to_mut_unsafe(right_child));
+            array_push(&mut pool.tree_stack, subtree_to_mut_unsafe(left_child));
+            array_push(&mut pool.tree_stack, subtree_to_mut_unsafe(right_child));
         }
     }
 
@@ -2658,8 +2541,8 @@ mod tests {
             );
 
             let mut children = subtree_array_new();
-            array_push_subtree(&mut children, child1);
-            array_push_subtree(&mut children, child2);
+            array_push(&mut children, child1);
+            array_push(&mut children, child2);
 
             let parent =
                 subtree_new_node(ts_builtin_sym_error_repeat, &mut children, 0, ptr::null());
