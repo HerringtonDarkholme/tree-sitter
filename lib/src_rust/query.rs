@@ -4103,6 +4103,11 @@ unsafe fn ts_query_cursor_advance(self_: *mut TSQueryCursor, stop_on_definite_st
 
                     if (*state).dead {
                         array_erase(&mut (*self_).states, j);
+                        // C does `j--; continue;`, hitting the `j += 1 + copy_count`
+                        // loop step for a net `j += copy_count`; this skips over the
+                        // split copy that was inserted at j+1 (and shifted into j by
+                        // the erase), so it is not re-matched against the current node.
+                        j += copy_count;
                         continue;
                     }
 
