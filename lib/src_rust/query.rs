@@ -541,27 +541,6 @@ const fn quantifier_add(left: TSQuantifier, right: TSQuantifier) -> TSQuantifier
     }
 }
 
-const fn capture_quantifiers_new() -> CaptureQuantifiers {
-    array_new()
-}
-
-unsafe fn capture_quantifiers_delete(self_: &mut CaptureQuantifiers) {
-    array_delete(self_);
-}
-
-fn capture_quantifiers_clear(self_: &mut CaptureQuantifiers) {
-    array_clear(self_);
-}
-
-/// Replace capture quantifiers with the given quantifiers.
-unsafe fn capture_quantifiers_replace(
-    self_: &mut CaptureQuantifiers,
-    quantifiers: &CaptureQuantifiers,
-) {
-    array_clear(self_);
-    array_splice(self_, self_.size, 0, quantifiers.size, quantifiers.contents);
-}
-
 fn capture_quantifier_for_id(self_: &CaptureQuantifiers, id: u16) -> TSQuantifier {
     if self_.size <= u32::from(id) {
         TSQuantifierZero
@@ -1010,7 +989,7 @@ unsafe fn ts_query_parse_pattern(
 
         // Parse each branch, adding a placeholder step in between the branches.
         let mut branch_step_indices: Array<u32> = array_new();
-        let mut branch_capture_quantifiers = capture_quantifiers_new();
+        let mut branch_capture_quantifiers = array_new();
         loop {
             let start_index = self_.steps.size;
             let mut e = ts_query_parse_pattern(
@@ -1029,20 +1008,20 @@ unsafe fn ts_query_parse_pattern(
                 e = TSQueryErrorSyntax;
             }
             if e != TSQueryErrorNone {
-                capture_quantifiers_delete(&mut branch_capture_quantifiers);
+                array_delete(&mut branch_capture_quantifiers);
                 array_delete(&mut branch_step_indices);
                 return e;
             }
 
             if start_index == starting_step_index {
-                capture_quantifiers_replace(capture_quantifiers, &branch_capture_quantifiers);
+                array_assign(capture_quantifiers, &branch_capture_quantifiers);
             } else {
                 capture_quantifiers_join_all(capture_quantifiers, &branch_capture_quantifiers);
             }
 
             array_push(&mut branch_step_indices, start_index);
             array_push(&mut self_.steps, query_step_new(0, depth as u16, false));
-            capture_quantifiers_clear(&mut branch_capture_quantifiers);
+            array_clear(&mut branch_capture_quantifiers);
         }
         let _ = array_pop(&mut self_.steps);
 
@@ -1058,7 +1037,7 @@ unsafe fn ts_query_parse_pattern(
             end_step.is_dead_end = true;
         }
 
-        capture_quantifiers_delete(&mut branch_capture_quantifiers);
+        array_delete(&mut branch_capture_quantifiers);
         array_delete(&mut branch_step_indices);
     }
     // An open parenthesis can start a grouped sequence, a predicate, or a node.
@@ -1072,7 +1051,7 @@ unsafe fn ts_query_parse_pattern(
             || stream.next == i32::from(b'[')
         {
             let mut child_is_immediate = is_immediate;
-            let mut child_capture_quantifiers = capture_quantifiers_new();
+            let mut child_capture_quantifiers = array_new();
             loop {
                 if stream.next == i32::from(b'.') {
                     child_is_immediate = true;
@@ -1094,16 +1073,16 @@ unsafe fn ts_query_parse_pattern(
                     e = TSQueryErrorSyntax;
                 }
                 if e != TSQueryErrorNone {
-                    capture_quantifiers_delete(&mut child_capture_quantifiers);
+                    array_delete(&mut child_capture_quantifiers);
                     return e;
                 }
 
                 capture_quantifiers_add_all(capture_quantifiers, &child_capture_quantifiers);
-                capture_quantifiers_clear(&mut child_capture_quantifiers);
+                array_clear(&mut child_capture_quantifiers);
                 child_is_immediate = false;
             }
 
-            capture_quantifiers_delete(&mut child_capture_quantifiers);
+            array_delete(&mut child_capture_quantifiers);
         }
         // A dot/pound character indicates the start of a predicate.
         else if stream.next == i32::from(b'.') || stream.next == i32::from(b'#') {
@@ -1280,14 +1259,14 @@ unsafe fn ts_query_parse_pattern(
             let mut negated_field_count: u16 = 0;
             let mut negated_field_ids: [TSFieldId; MAX_NEGATED_FIELD_COUNT] =
                 [0; MAX_NEGATED_FIELD_COUNT];
-            let mut child_capture_quantifiers = capture_quantifiers_new();
+            let mut child_capture_quantifiers = array_new();
             loop {
                 // Parse a negated field assertion.
                 if stream.next == i32::from(b'!') {
                     stream_advance(stream);
                     stream_skip_whitespace(stream);
                     if !stream_is_ident_start(stream) {
-                        capture_quantifiers_delete(&mut child_capture_quantifiers);
+                        array_delete(&mut child_capture_quantifiers);
                         return TSQueryErrorSyntax;
                     }
                     let field_name = stream.input;
@@ -1302,7 +1281,7 @@ unsafe fn ts_query_parse_pattern(
                     );
                     if field_id == 0 {
                         stream.input = field_name;
-                        capture_quantifiers_delete(&mut child_capture_quantifiers);
+                        array_delete(&mut child_capture_quantifiers);
                         return TSQueryErrorField;
                     }
 
@@ -1339,7 +1318,7 @@ unsafe fn ts_query_parse_pattern(
                     if stream.next == i32::from(b')') {
                         if child_is_immediate {
                             if last_child_step_index == 0 {
-                                capture_quantifiers_delete(&mut child_capture_quantifiers);
+                                array_delete(&mut child_capture_quantifiers);
                                 return TSQueryErrorSyntax;
                             }
                             // Mark this step *and* its alternatives as the last
@@ -1381,7 +1360,7 @@ unsafe fn ts_query_parse_pattern(
                     e = TSQueryErrorSyntax;
                 }
                 if e != TSQueryErrorNone {
-                    capture_quantifiers_delete(&mut child_capture_quantifiers);
+                    array_delete(&mut child_capture_quantifiers);
                     return e;
                 }
 
@@ -1389,9 +1368,9 @@ unsafe fn ts_query_parse_pattern(
 
                 last_child_step_index = step_index;
                 child_is_immediate = false;
-                capture_quantifiers_clear(&mut child_capture_quantifiers);
+                array_clear(&mut child_capture_quantifiers);
             }
-            capture_quantifiers_delete(&mut child_capture_quantifiers);
+            array_delete(&mut child_capture_quantifiers);
         }
     }
     // Parse a wildcard pattern.
@@ -1445,7 +1424,7 @@ unsafe fn ts_query_parse_pattern(
         stream_skip_whitespace(stream);
 
         // Parse the pattern.
-        let mut field_capture_quantifiers = capture_quantifiers_new();
+        let mut field_capture_quantifiers = array_new();
         let mut e = ts_query_parse_pattern(
             self_,
             stream,
@@ -1454,7 +1433,7 @@ unsafe fn ts_query_parse_pattern(
             &mut field_capture_quantifiers,
         );
         if e != TSQueryErrorNone {
-            capture_quantifiers_delete(&mut field_capture_quantifiers);
+            array_delete(&mut field_capture_quantifiers);
             if e == PARENT_DONE {
                 e = TSQueryErrorSyntax;
             }
@@ -1466,7 +1445,7 @@ unsafe fn ts_query_parse_pattern(
             ts_language_field_id_for_name(self_.language, field_name.cast::<i8>(), length);
         if field_id == 0 {
             stream.input = field_name;
-            capture_quantifiers_delete(&mut field_capture_quantifiers);
+            array_delete(&mut field_capture_quantifiers);
             return TSQueryErrorField;
         }
 
@@ -1483,7 +1462,7 @@ unsafe fn ts_query_parse_pattern(
         }
 
         capture_quantifiers_add_all(capture_quantifiers, &field_capture_quantifiers);
-        capture_quantifiers_delete(&mut field_capture_quantifiers);
+        array_delete(&mut field_capture_quantifiers);
     } else {
         return TSQueryErrorSyntax;
     }
@@ -2904,7 +2883,7 @@ pub unsafe extern "C" fn ts_query_new(
                 is_non_local: false,
             },
         );
-        let mut capture_quantifiers = capture_quantifiers_new();
+        let mut capture_quantifiers = array_new();
         *error_type =
             ts_query_parse_pattern(query, &mut stream, 0, false, &mut capture_quantifiers);
         array_push(
@@ -2928,7 +2907,7 @@ pub unsafe extern "C" fn ts_query_new(
                 *error_type = TSQueryErrorSyntax;
             }
             *error_offset = stream_offset(&stream);
-            capture_quantifiers_delete(&mut capture_quantifiers);
+            array_delete(&mut capture_quantifiers);
             ts_query_delete(self_);
             return core::ptr::null_mut();
         }
@@ -3025,7 +3004,7 @@ pub unsafe extern "C" fn ts_query_delete(self_: *mut TSQuery) {
     symbol_table_delete(&mut query.captures);
     symbol_table_delete(&mut query.predicate_values);
     for index in 0..query.capture_quantifiers.size {
-        capture_quantifiers_delete(array_get_mut(&mut query.capture_quantifiers, index));
+        array_delete(array_get_mut(&mut query.capture_quantifiers, index));
     }
     array_delete(&mut query.capture_quantifiers);
     free(self_.cast::<c_void>());
