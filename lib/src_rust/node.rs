@@ -6,21 +6,20 @@ use std::ptr;
 use crate::ffi::{TSFieldId, TSInputEdit, TSLanguage, TSNode, TSPoint, TSStateId, TSSymbol};
 
 use super::language::{
-    ts_language_alias_sequence, ts_language_field_id_for_name, ts_language_field_map,
-    ts_language_next_state, ts_language_public_symbol, ts_language_symbol_metadata,
+    language_alias_sequence, language_field_map, language_public_symbol,
+    ts_language_field_id_for_name, ts_language_next_state, ts_language_symbol_metadata,
     ts_language_symbol_name, TSLanguageFull,
 };
 use super::length::{length_add, length_zero, Length};
 use super::point::{point_add, point_edit, point_eq, point_gt, point_lt, point_lte};
-use super::subtree::ts_subtree_parse_state;
+use super::subtree::subtree_parse_state;
 use super::subtree::{
-    ts_builtin_sym_error, ts_subtree_child_count, ts_subtree_children, ts_subtree_error_cost,
-    ts_subtree_extra, ts_subtree_has_changes, ts_subtree_missing, ts_subtree_named,
-    ts_subtree_padding, ts_subtree_size, ts_subtree_string, ts_subtree_symbol,
-    ts_subtree_total_bytes, ts_subtree_visible, ts_subtree_visible_descendant_count, Subtree,
-    TSFieldMapEntry, NULL_SUBTREE, TS_TREE_STATE_NONE,
+    subtree_child_count, subtree_children, subtree_error_cost, subtree_extra, subtree_has_changes,
+    subtree_missing, subtree_named, subtree_padding, subtree_size, subtree_string, subtree_symbol,
+    subtree_total_bytes, subtree_visible, subtree_visible_descendant_count, ts_builtin_sym_error,
+    Subtree, TSFieldMapEntry, NULL_SUBTREE, TS_TREE_STATE_NONE,
 };
-use super::tree::{ts_tree_root_node_ref, TSTree};
+use super::tree::{tree_root_node_ref, TSTree};
 
 // ---------------------------------------------------------------------------
 // Types
@@ -51,17 +50,17 @@ struct NodeChildIterator {
 // ---------------------------------------------------------------------------
 
 #[inline]
-unsafe fn ts_node__null() -> TSNode {
-    ts_node_new(ptr::null(), ptr::null(), length_zero(), 0)
+unsafe fn node__null() -> TSNode {
+    node_new(ptr::null(), ptr::null(), length_zero(), 0)
 }
 
 #[inline]
-const unsafe fn ts_node__alias(self_: &TSNode) -> u32 {
+const unsafe fn node__alias(self_: &TSNode) -> u32 {
     self_.context[3]
 }
 
 #[inline]
-const unsafe fn ts_node__subtree(self_: TSNode) -> Subtree {
+const unsafe fn node__subtree(self_: TSNode) -> Subtree {
     *self_.id.cast::<Subtree>()
 }
 
@@ -82,8 +81,8 @@ fn node_is_null(self_: TSNode) -> bool {
 
 #[inline]
 const unsafe fn node_child_count(self_: TSNode) -> u32 {
-    let tree = ts_node__subtree(self_);
-    if ts_subtree_child_count(tree) > 0 {
+    let tree = node__subtree(self_);
+    if subtree_child_count(tree) > 0 {
         (*tree.ptr).data.children.visible_child_count
     } else {
         0
@@ -92,8 +91,8 @@ const unsafe fn node_child_count(self_: TSNode) -> u32 {
 
 #[inline]
 const unsafe fn node_named_child_count(self_: TSNode) -> u32 {
-    let tree = ts_node__subtree(self_);
-    if ts_subtree_child_count(tree) > 0 {
+    let tree = node__subtree(self_);
+    if subtree_child_count(tree) > 0 {
         (*tree.ptr).data.children.named_child_count
     } else {
         0
@@ -115,31 +114,31 @@ const fn node_start_point(self_: TSNode) -> TSPoint {
 
 #[inline]
 unsafe fn node_end_byte(self_: TSNode) -> u32 {
-    node_start_byte(self_) + ts_subtree_size(ts_node__subtree(self_)).bytes
+    node_start_byte(self_) + subtree_size(node__subtree(self_)).bytes
 }
 
 #[inline]
 unsafe fn node_end_point(self_: TSNode) -> TSPoint {
     point_add(
         node_start_point(self_),
-        ts_subtree_size(ts_node__subtree(self_)).extent,
+        subtree_size(node__subtree(self_)).extent,
     )
 }
 
 #[inline]
 unsafe fn node_symbol(self_: TSNode) -> TSSymbol {
-    let mut symbol = ts_node__alias(&self_) as TSSymbol;
+    let mut symbol = node__alias(&self_) as TSSymbol;
     if symbol == 0 {
-        symbol = ts_subtree_symbol(ts_node__subtree(self_));
+        symbol = subtree_symbol(node__subtree(self_));
     }
-    ts_language_public_symbol(node_language(self_), symbol)
+    language_public_symbol(node_language(self_), symbol)
 }
 
 #[inline]
 unsafe fn node_type(self_: TSNode) -> *const i8 {
-    let mut symbol = ts_node__alias(&self_) as TSSymbol;
+    let mut symbol = node__alias(&self_) as TSSymbol;
     if symbol == 0 {
-        symbol = ts_subtree_symbol(ts_node__subtree(self_));
+        symbol = subtree_symbol(node__subtree(self_));
     }
     ts_language_symbol_name(node_language(self_), symbol)
 }
@@ -149,9 +148,9 @@ unsafe fn node_type(self_: TSNode) -> *const i8 {
 // ---------------------------------------------------------------------------
 
 #[inline]
-unsafe fn ts_node_iterate_children(node: &TSNode) -> NodeChildIterator {
-    let subtree = ts_node__subtree(*node);
-    if ts_subtree_child_count(subtree) == 0 {
+unsafe fn node_iterate_children(node: &TSNode) -> NodeChildIterator {
+    let subtree = node__subtree(*node);
+    if subtree_child_count(subtree) == 0 {
         return NodeChildIterator {
             parent: NULL_SUBTREE,
             tree: node_tree(*node),
@@ -161,7 +160,7 @@ unsafe fn ts_node_iterate_children(node: &TSNode) -> NodeChildIterator {
             alias_sequence: ptr::null(),
         };
     }
-    let alias_sequence = ts_language_alias_sequence(
+    let alias_sequence = language_alias_sequence(
         node_language(*node),
         u32::from((*subtree.ptr).data.children.production_id),
     );
@@ -186,8 +185,8 @@ unsafe fn node_child<'a>(parent: Subtree, index: u32) -> &'a Subtree {
 #[inline]
 const unsafe fn node_children<'a>(parent: Subtree) -> &'a [Subtree] {
     std::slice::from_raw_parts(
-        ts_subtree_children(parent),
-        ts_subtree_child_count(parent) as usize,
+        subtree_children(parent),
+        subtree_child_count(parent) as usize,
     )
 }
 
@@ -196,13 +195,13 @@ const unsafe fn node_children<'a>(parent: Subtree) -> &'a [Subtree] {
 /// The iterator applies padding before each non-first child, resolves aliases
 /// from the production's alias sequence, and leaves `position` at the child's
 /// end after returning.
-unsafe fn ts_node_child_iterator_next(self_: &mut NodeChildIterator, result: &mut TSNode) -> bool {
+unsafe fn node_child_iterator_next(self_: &mut NodeChildIterator, result: &mut TSNode) -> bool {
     if self_.parent.ptr.is_null() || self_.child_index == (*self_.parent.ptr).child_count {
         return false;
     }
     let child = node_child(self_.parent, self_.child_index);
     let mut alias_symbol: TSSymbol = 0;
-    if !ts_subtree_extra(*child) {
+    if !subtree_extra(*child) {
         if !self_.alias_sequence.is_null() {
             alias_symbol = *self_
                 .alias_sequence
@@ -211,15 +210,15 @@ unsafe fn ts_node_child_iterator_next(self_: &mut NodeChildIterator, result: &mu
         self_.structural_child_index += 1;
     }
     if self_.child_index > 0 {
-        self_.position = length_add(self_.position, ts_subtree_padding(*child));
+        self_.position = length_add(self_.position, subtree_padding(*child));
     }
-    *result = ts_node_new(
+    *result = node_new(
         self_.tree,
         std::ptr::from_ref::<Subtree>(child),
         self_.position,
         alias_symbol,
     );
-    self_.position = length_add(self_.position, ts_subtree_size(*child));
+    self_.position = length_add(self_.position, subtree_size(*child));
     self_.child_index += 1;
     true
 }
@@ -229,24 +228,24 @@ unsafe fn ts_node_child_iterator_next(self_: &mut NodeChildIterator, result: &mu
 // ---------------------------------------------------------------------------
 
 #[inline]
-const unsafe fn ts_node__is_relevant(self_: TSNode, include_anonymous: bool) -> bool {
-    let tree = ts_node__subtree(self_);
+const unsafe fn node__is_relevant(self_: TSNode, include_anonymous: bool) -> bool {
+    let tree = node__subtree(self_);
     if include_anonymous {
-        ts_subtree_visible(tree) || ts_node__alias(&self_) != 0
+        subtree_visible(tree) || node__alias(&self_) != 0
     } else {
-        let alias = ts_node__alias(&self_) as TSSymbol;
+        let alias = node__alias(&self_) as TSSymbol;
         if alias != 0 {
             ts_language_symbol_metadata(node_language(self_), alias).named
         } else {
-            ts_subtree_visible(tree) && ts_subtree_named(tree)
+            subtree_visible(tree) && subtree_named(tree)
         }
     }
 }
 
 #[inline]
-const unsafe fn ts_node__relevant_child_count(self_: TSNode, include_anonymous: bool) -> u32 {
-    let tree = ts_node__subtree(self_);
-    if ts_subtree_child_count(tree) > 0 {
+const unsafe fn node__relevant_child_count(self_: TSNode, include_anonymous: bool) -> u32 {
+    let tree = node__subtree(self_);
+    if subtree_child_count(tree) > 0 {
         if include_anonymous {
             (*tree.ptr).data.children.visible_child_count
         } else {
@@ -261,24 +260,24 @@ const unsafe fn ts_node__relevant_child_count(self_: TSNode, include_anonymous: 
 // Internal helpers — navigation
 // ---------------------------------------------------------------------------
 
-unsafe fn ts_node__child(self_: TSNode, mut child_index: u32, include_anonymous: bool) -> TSNode {
+unsafe fn node__child(self_: TSNode, mut child_index: u32, include_anonymous: bool) -> TSNode {
     let mut result = self_;
 
     loop {
         let mut did_descend = false;
 
-        let mut child = ts_node__null();
+        let mut child = node__null();
         let mut index: u32 = 0;
-        let mut iterator = ts_node_iterate_children(&result);
-        while ts_node_child_iterator_next(&mut iterator, &mut child) {
-            if ts_node__is_relevant(child, include_anonymous) {
+        let mut iterator = node_iterate_children(&result);
+        while node_child_iterator_next(&mut iterator, &mut child) {
+            if node__is_relevant(child, include_anonymous) {
                 if index == child_index {
                     return child;
                 }
                 index += 1;
             } else {
                 let grandchild_index = child_index - index;
-                let grandchild_count = ts_node__relevant_child_count(child, include_anonymous);
+                let grandchild_count = node__relevant_child_count(child, include_anonymous);
                 if grandchild_index < grandchild_count {
                     did_descend = true;
                     result = child;
@@ -293,7 +292,7 @@ unsafe fn ts_node__child(self_: TSNode, mut child_index: u32, include_anonymous:
         }
     }
 
-    ts_node__null()
+    node__null()
 }
 
 /// Check whether an empty descendant at the end of a subtree aliases `other`.
@@ -301,18 +300,18 @@ unsafe fn ts_node__child(self_: TSNode, mut child_index: u32, include_anonymous:
 /// Empty nodes make sibling navigation ambiguous because multiple nodes can end
 /// at the same byte. This recursive check lets previous-sibling logic decide
 /// whether an equal end byte means "inside this child" or "before this child".
-unsafe fn ts_subtree_has_trailing_empty_descendant(self_: Subtree, other: Subtree) -> bool {
-    let count = ts_subtree_child_count(self_);
+unsafe fn subtree_has_trailing_empty_descendant(self_: Subtree, other: Subtree) -> bool {
+    let count = subtree_child_count(self_);
     if count == 0 {
         return false;
     }
     let mut i = count - 1;
     loop {
         let child = *node_child(self_, i);
-        if ts_subtree_total_bytes(child) > 0 {
+        if subtree_total_bytes(child) > 0 {
             break;
         }
-        if child.ptr == other.ptr || ts_subtree_has_trailing_empty_descendant(child, other) {
+        if child.ptr == other.ptr || subtree_has_trailing_empty_descendant(child, other) {
             return true;
         }
         if i == 0 {
@@ -328,23 +327,23 @@ unsafe fn ts_subtree_has_trailing_empty_descendant(self_: Subtree, other: Subtre
 /// The search walks upward through parents and keeps the nearest earlier
 /// relevant candidate. Hidden nodes with relevant descendants are entered so
 /// sibling APIs skip implementation-only nodes while preserving source order.
-unsafe fn ts_node__prev_sibling(self_: TSNode, include_anonymous: bool) -> TSNode {
-    let self_subtree = ts_node__subtree(self_);
-    let self_is_empty = ts_subtree_total_bytes(self_subtree) == 0;
+unsafe fn node__prev_sibling(self_: TSNode, include_anonymous: bool) -> TSNode {
+    let self_subtree = node__subtree(self_);
+    let self_is_empty = subtree_total_bytes(self_subtree) == 0;
     let target_end_byte = node_end_byte(self_);
 
     let mut node = ts_node_parent(self_);
-    let mut earlier_node = ts_node__null();
+    let mut earlier_node = node__null();
     let mut earlier_node_is_relevant = false;
 
     while !node_is_null(node) {
-        let mut earlier_child = ts_node__null();
+        let mut earlier_child = node__null();
         let mut earlier_child_is_relevant = false;
         let mut found_child_containing_target = false;
 
-        let mut child = ts_node__null();
-        let mut iterator = ts_node_iterate_children(&node);
-        while ts_node_child_iterator_next(&mut iterator, &mut child) {
+        let mut child = node__null();
+        let mut iterator = node_iterate_children(&node);
+        while node_child_iterator_next(&mut iterator, &mut child) {
             if child.id == self_.id {
                 break;
             }
@@ -355,19 +354,16 @@ unsafe fn ts_node__prev_sibling(self_: TSNode, include_anonymous: bool) -> TSNod
 
             if iterator.position.bytes == target_end_byte
                 && (!self_is_empty
-                    || ts_subtree_has_trailing_empty_descendant(
-                        ts_node__subtree(child),
-                        self_subtree,
-                    ))
+                    || subtree_has_trailing_empty_descendant(node__subtree(child), self_subtree))
             {
                 found_child_containing_target = true;
                 break;
             }
 
-            if ts_node__is_relevant(child, include_anonymous) {
+            if node__is_relevant(child, include_anonymous) {
                 earlier_child = child;
                 earlier_child_is_relevant = true;
-            } else if ts_node__relevant_child_count(child, include_anonymous) > 0 {
+            } else if node__relevant_child_count(child, include_anonymous) > 0 {
                 earlier_child = child;
                 earlier_child_is_relevant = false;
             }
@@ -387,33 +383,33 @@ unsafe fn ts_node__prev_sibling(self_: TSNode, include_anonymous: bool) -> TSNod
             return earlier_node;
         } else {
             node = earlier_node;
-            earlier_node = ts_node__null();
+            earlier_node = node__null();
             earlier_node_is_relevant = false;
         }
     }
 
-    ts_node__null()
+    node__null()
 }
 
 /// Find the next visible/named sibling.
 ///
-/// This mirrors `ts_node__prev_sibling`, but tracks the nearest later candidate
+/// This mirrors `node__prev_sibling`, but tracks the nearest later candidate
 /// while walking through hidden nodes that contain the original target.
-unsafe fn ts_node__next_sibling(self_: TSNode, include_anonymous: bool) -> TSNode {
+unsafe fn node__next_sibling(self_: TSNode, include_anonymous: bool) -> TSNode {
     let target_end_byte = node_end_byte(self_);
 
     let mut node = ts_node_parent(self_);
-    let mut later_node = ts_node__null();
+    let mut later_node = node__null();
     let mut later_node_is_relevant = false;
 
     while !node_is_null(node) {
-        let mut later_child = ts_node__null();
+        let mut later_child = node__null();
         let mut later_child_is_relevant = false;
-        let mut child_containing_target = ts_node__null();
+        let mut child_containing_target = node__null();
 
-        let mut child = ts_node__null();
-        let mut iterator = ts_node_iterate_children(&node);
-        while ts_node_child_iterator_next(&mut iterator, &mut child) {
+        let mut child = node__null();
+        let mut iterator = node_iterate_children(&node);
+        while node_child_iterator_next(&mut iterator, &mut child) {
             if iterator.position.bytes <= target_end_byte {
                 continue;
             }
@@ -428,14 +424,14 @@ unsafe fn ts_node__next_sibling(self_: TSNode, include_anonymous: bool) -> TSNod
             };
 
             if contains_target {
-                if ts_node__subtree(child).ptr != ts_node__subtree(self_).ptr {
+                if node__subtree(child).ptr != node__subtree(self_).ptr {
                     child_containing_target = child;
                 }
-            } else if ts_node__is_relevant(child, include_anonymous) {
+            } else if node__is_relevant(child, include_anonymous) {
                 later_child = child;
                 later_child_is_relevant = true;
                 break;
-            } else if ts_node__relevant_child_count(child, include_anonymous) > 0 {
+            } else if node__relevant_child_count(child, include_anonymous) > 0 {
                 later_child = child;
                 later_child_is_relevant = false;
                 break;
@@ -459,7 +455,7 @@ unsafe fn ts_node__next_sibling(self_: TSNode, include_anonymous: bool) -> TSNod
         }
     }
 
-    ts_node__null()
+    node__null()
 }
 
 /// Find the first visible/named child whose end byte is after `goal`.
@@ -467,11 +463,7 @@ unsafe fn ts_node__next_sibling(self_: TSNode, include_anonymous: bool) -> TSNod
 /// Hidden children are searched recursively. A saved iterator lets the search
 /// resume at the original depth after exploring a hidden child that did not
 /// produce a match.
-unsafe fn ts_node__first_child_for_byte(
-    self_: TSNode,
-    goal: u32,
-    include_anonymous: bool,
-) -> TSNode {
+unsafe fn node__first_child_for_byte(self_: TSNode, goal: u32, include_anonymous: bool) -> TSNode {
     let mut node = self_;
 
     let mut last_iterator: Option<NodeChildIterator> = None;
@@ -479,16 +471,16 @@ unsafe fn ts_node__first_child_for_byte(
     loop {
         let mut did_descend = false;
 
-        let mut child = ts_node__null();
-        let mut iterator = ts_node_iterate_children(&node);
+        let mut child = node__null();
+        let mut iterator = node_iterate_children(&node);
         // labeled loop replaces C's "goto loop"
         'outer: loop {
-            while ts_node_child_iterator_next(&mut iterator, &mut child) {
+            while node_child_iterator_next(&mut iterator, &mut child) {
                 if node_end_byte(child) > goal {
-                    if ts_node__is_relevant(child, include_anonymous) {
+                    if node__is_relevant(child, include_anonymous) {
                         return child;
                     } else if node_child_count(child) > 0 {
-                        if iterator.child_index < ts_subtree_child_count(ts_node__subtree(child)) {
+                        if iterator.child_index < subtree_child_count(node__subtree(child)) {
                             last_iterator = Some(iterator);
                         }
                         did_descend = true;
@@ -511,7 +503,7 @@ unsafe fn ts_node__first_child_for_byte(
         }
     }
 
-    ts_node__null()
+    node__null()
 }
 
 /// Find the smallest visible/named descendant covering a byte range.
@@ -519,14 +511,14 @@ unsafe fn ts_node__first_child_for_byte(
 /// The search descends while a child fully contains the target range and keeps
 /// the last relevant node seen, so hidden implementation nodes are skipped in
 /// the returned result.
-unsafe fn ts_node__descendant_for_byte_range(
+unsafe fn node__descendant_for_byte_range(
     self_: TSNode,
     range_start: u32,
     range_end: u32,
     include_anonymous: bool,
 ) -> TSNode {
     if range_start > range_end {
-        return ts_node__null();
+        return node__null();
     }
     let mut node = self_;
     let mut last_visible_node = self_;
@@ -534,9 +526,9 @@ unsafe fn ts_node__descendant_for_byte_range(
     loop {
         let mut did_descend = false;
 
-        let mut child = ts_node__null();
-        let mut iterator = ts_node_iterate_children(&node);
-        while ts_node_child_iterator_next(&mut iterator, &mut child) {
+        let mut child = node__null();
+        let mut iterator = node_iterate_children(&node);
+        while node_child_iterator_next(&mut iterator, &mut child) {
             let node_end = iterator.position.bytes;
 
             if node_end < range_end {
@@ -557,7 +549,7 @@ unsafe fn ts_node__descendant_for_byte_range(
             }
 
             node = child;
-            if ts_node__is_relevant(node, include_anonymous) {
+            if node__is_relevant(node, include_anonymous) {
                 last_visible_node = node;
             }
             did_descend = true;
@@ -571,15 +563,15 @@ unsafe fn ts_node__descendant_for_byte_range(
     last_visible_node
 }
 
-/// Point-coordinate variant of `ts_node__descendant_for_byte_range`.
-unsafe fn ts_node__descendant_for_point_range(
+/// Point-coordinate variant of `node__descendant_for_byte_range`.
+unsafe fn node__descendant_for_point_range(
     self_: TSNode,
     range_start: TSPoint,
     range_end: TSPoint,
     include_anonymous: bool,
 ) -> TSNode {
     if point_gt(range_start, range_end) {
-        return ts_node__null();
+        return node__null();
     }
     let mut node = self_;
     let mut last_visible_node = self_;
@@ -587,9 +579,9 @@ unsafe fn ts_node__descendant_for_point_range(
     loop {
         let mut did_descend = false;
 
-        let mut child = ts_node__null();
-        let mut iterator = ts_node_iterate_children(&node);
-        while ts_node_child_iterator_next(&mut iterator, &mut child) {
+        let mut child = node__null();
+        let mut iterator = node_iterate_children(&node);
+        while node_child_iterator_next(&mut iterator, &mut child) {
             let node_end = iterator.position.extent;
 
             if point_lt(node_end, range_end) {
@@ -610,7 +602,7 @@ unsafe fn ts_node__descendant_for_point_range(
             }
 
             node = child;
-            if ts_node__is_relevant(node, include_anonymous) {
+            if node__is_relevant(node, include_anonymous) {
                 last_visible_node = node;
             }
             did_descend = true;
@@ -625,15 +617,12 @@ unsafe fn ts_node__descendant_for_point_range(
 }
 
 #[inline]
-unsafe fn ts_node__field_name_from_language(
-    self_: TSNode,
-    structural_child_index: u32,
-) -> *const i8 {
+unsafe fn node__field_name_from_language(self_: TSNode, structural_child_index: u32) -> *const i8 {
     let mut field_map: *const TSFieldMapEntry = ptr::null();
     let mut field_map_end: *const TSFieldMapEntry = ptr::null();
-    ts_language_field_map(
+    language_field_map(
         node_language(self_),
-        u32::from((*ts_node__subtree(self_).ptr).data.children.production_id),
+        u32::from((*node__subtree(self_).ptr).data.children.production_id),
         &mut field_map,
         &mut field_map_end,
     );
@@ -651,7 +640,7 @@ unsafe fn ts_node__field_name_from_language(
 // Internal constructors
 // ---------------------------------------------------------------------------
 
-pub unsafe fn ts_node_new(
+pub unsafe fn node_new(
     tree: *const TSTree,
     subtree: *const Subtree,
     position: Length,
@@ -710,23 +699,20 @@ pub const unsafe extern "C" fn ts_node_language(self_: TSNode) -> *const TSLangu
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_node_grammar_symbol(self_: TSNode) -> TSSymbol {
-    ts_subtree_symbol(ts_node__subtree(self_))
+    subtree_symbol(node__subtree(self_))
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_node_grammar_type(self_: TSNode) -> *const i8 {
-    ts_language_symbol_name(
-        node_language(self_),
-        ts_subtree_symbol(ts_node__subtree(self_)),
-    )
+    ts_language_symbol_name(node_language(self_), subtree_symbol(node__subtree(self_)))
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_node_string(self_: TSNode) -> *mut i8 {
-    let alias_symbol = ts_node__alias(&self_) as TSSymbol;
+    let alias_symbol = node__alias(&self_) as TSSymbol;
     let language = node_language(self_);
-    ts_subtree_string(
-        ts_node__subtree(self_),
+    subtree_string(
+        node__subtree(self_),
         alias_symbol,
         ts_language_symbol_metadata(language, alias_symbol).visible,
         language,
@@ -746,32 +732,32 @@ pub unsafe extern "C" fn ts_node_is_null(self_: TSNode) -> bool {
 
 #[no_mangle]
 pub const unsafe extern "C" fn ts_node_is_extra(self_: TSNode) -> bool {
-    ts_subtree_extra(ts_node__subtree(self_))
+    subtree_extra(node__subtree(self_))
 }
 
 #[no_mangle]
 pub const unsafe extern "C" fn ts_node_is_named(self_: TSNode) -> bool {
-    let alias = ts_node__alias(&self_) as TSSymbol;
+    let alias = node__alias(&self_) as TSSymbol;
     if alias != 0 {
         ts_language_symbol_metadata(node_language(self_), alias).named
     } else {
-        ts_subtree_named(ts_node__subtree(self_))
+        subtree_named(node__subtree(self_))
     }
 }
 
 #[no_mangle]
 pub const unsafe extern "C" fn ts_node_is_missing(self_: TSNode) -> bool {
-    ts_subtree_missing(ts_node__subtree(self_))
+    subtree_missing(node__subtree(self_))
 }
 
 #[no_mangle]
 pub const unsafe extern "C" fn ts_node_has_changes(self_: TSNode) -> bool {
-    ts_subtree_has_changes(ts_node__subtree(self_))
+    subtree_has_changes(node__subtree(self_))
 }
 
 #[no_mangle]
 pub const unsafe extern "C" fn ts_node_has_error(self_: TSNode) -> bool {
-    ts_subtree_error_cost(ts_node__subtree(self_)) > 0
+    subtree_error_cost(node__subtree(self_)) > 0
 }
 
 #[no_mangle]
@@ -781,22 +767,22 @@ pub unsafe extern "C" fn ts_node_is_error(self_: TSNode) -> bool {
 
 #[no_mangle]
 pub const unsafe extern "C" fn ts_node_descendant_count(self_: TSNode) -> u32 {
-    ts_subtree_visible_descendant_count(ts_node__subtree(self_)) + 1
+    subtree_visible_descendant_count(node__subtree(self_)) + 1
 }
 
 #[no_mangle]
 pub const unsafe extern "C" fn ts_node_parse_state(self_: TSNode) -> TSStateId {
-    ts_subtree_parse_state(ts_node__subtree(self_))
+    subtree_parse_state(node__subtree(self_))
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_node_next_parse_state(self_: TSNode) -> TSStateId {
-    let subtree = ts_node__subtree(self_);
-    let state = ts_subtree_parse_state(subtree);
+    let subtree = node__subtree(self_);
+    let state = subtree_parse_state(subtree);
     if state == TS_TREE_STATE_NONE {
         return TS_TREE_STATE_NONE;
     }
-    let symbol = ts_subtree_symbol(subtree);
+    let symbol = subtree_symbol(subtree);
     ts_language_next_state(node_language(self_), state, symbol)
 }
 
@@ -821,9 +807,9 @@ pub const unsafe extern "C" fn ts_node_named_child_count(self_: TSNode) -> u32 {
 #[no_mangle]
 pub unsafe extern "C" fn ts_node_parent(self_: TSNode) -> TSNode {
     let tree = node_tree(self_);
-    let mut node = ts_tree_root_node_ref(tree, tree.as_ref().unwrap_unchecked());
+    let mut node = tree_root_node_ref(tree, tree.as_ref().unwrap_unchecked());
     if node.id == self_.id {
-        return ts_node__null();
+        return node__null();
     }
 
     loop {
@@ -847,12 +833,12 @@ pub unsafe extern "C" fn ts_node_child_with_descendant(
     let is_empty = start_byte == end_byte;
 
     loop {
-        let mut iter = ts_node_iterate_children(&self_);
+        let mut iter = node_iterate_children(&self_);
         loop {
-            if !ts_node_child_iterator_next(&mut iter, &mut self_)
+            if !node_child_iterator_next(&mut iter, &mut self_)
                 || node_start_byte(self_) > start_byte
             {
-                return ts_node__null();
+                return node__null();
             }
             if self_.id == descendant.id {
                 return self_;
@@ -863,7 +849,7 @@ pub unsafe extern "C" fn ts_node_child_with_descendant(
             if is_empty && iter.position.bytes >= end_byte && node_child_count(self_) > 0 {
                 let child = ts_node_child_with_descendant(self_, descendant);
                 if !node_is_null(child) {
-                    return if ts_node__is_relevant(self_, true) {
+                    return if node__is_relevant(self_, true) {
                         self_
                     } else {
                         child
@@ -880,7 +866,7 @@ pub unsafe extern "C" fn ts_node_child_with_descendant(
                 break;
             }
         }
-        if ts_node__is_relevant(self_, true) {
+        if node__is_relevant(self_, true) {
             break;
         }
     }
@@ -890,12 +876,12 @@ pub unsafe extern "C" fn ts_node_child_with_descendant(
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_node_child(self_: TSNode, child_index: u32) -> TSNode {
-    ts_node__child(self_, child_index, true)
+    node__child(self_, child_index, true)
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_node_named_child(self_: TSNode, child_index: u32) -> TSNode {
-    ts_node__child(self_, child_index, false)
+    node__child(self_, child_index, false)
 }
 
 #[no_mangle]
@@ -906,39 +892,39 @@ pub unsafe extern "C" fn ts_node_child_by_field_id(
     // Loop replaces C's "goto recur" tail-call pattern
     'recur: loop {
         if field_id == 0 || node_child_count(self_) == 0 {
-            return ts_node__null();
+            return node__null();
         }
 
         let mut field_map: *const TSFieldMapEntry = ptr::null();
         let mut field_map_end: *const TSFieldMapEntry = ptr::null();
-        ts_language_field_map(
+        language_field_map(
             node_language(self_),
-            u32::from((*ts_node__subtree(self_).ptr).data.children.production_id),
+            u32::from((*node__subtree(self_).ptr).data.children.production_id),
             &mut field_map,
             &mut field_map_end,
         );
         if field_map == field_map_end {
-            return ts_node__null();
+            return node__null();
         }
 
         // Scan to find mappings for the given field id
         while (*field_map).field_id < field_id {
             field_map = field_map.add(1);
             if field_map == field_map_end {
-                return ts_node__null();
+                return node__null();
             }
         }
         while (*field_map_end.sub(1)).field_id > field_id {
             field_map_end = field_map_end.sub(1);
             if field_map == field_map_end {
-                return ts_node__null();
+                return node__null();
             }
         }
 
-        let mut child = ts_node__null();
-        let mut iterator = ts_node_iterate_children(&self_);
-        while ts_node_child_iterator_next(&mut iterator, &mut child) {
-            if !ts_subtree_extra(ts_node__subtree(child)) {
+        let mut child = node__null();
+        let mut iterator = node_iterate_children(&self_);
+        while node_child_iterator_next(&mut iterator, &mut child) {
+            if !subtree_extra(node__subtree(child)) {
                 let index = iterator.structural_child_index - 1;
                 if (index as u8) < (*field_map).child_index {
                     continue;
@@ -957,21 +943,21 @@ pub unsafe extern "C" fn ts_node_child_by_field_id(
                     }
                     field_map = field_map.add(1);
                     if field_map == field_map_end {
-                        return ts_node__null();
+                        return node__null();
                     }
-                } else if ts_node__is_relevant(child, true) {
+                } else if node__is_relevant(child, true) {
                     return child;
                 } else if node_child_count(child) > 0 {
-                    return ts_node__child(child, 0, true);
+                    return node__child(child, 0, true);
                 }
                 field_map = field_map.add(1);
                 if field_map == field_map_end {
-                    return ts_node__null();
+                    return node__null();
                 }
             }
         }
 
-        return ts_node__null();
+        return node__null();
     }
 }
 
@@ -987,32 +973,32 @@ pub unsafe extern "C" fn ts_node_child_by_field_name(
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_node_next_sibling(self_: TSNode) -> TSNode {
-    ts_node__next_sibling(self_, true)
+    node__next_sibling(self_, true)
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_node_next_named_sibling(self_: TSNode) -> TSNode {
-    ts_node__next_sibling(self_, false)
+    node__next_sibling(self_, false)
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_node_prev_sibling(self_: TSNode) -> TSNode {
-    ts_node__prev_sibling(self_, true)
+    node__prev_sibling(self_, true)
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_node_prev_named_sibling(self_: TSNode) -> TSNode {
-    ts_node__prev_sibling(self_, false)
+    node__prev_sibling(self_, false)
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_node_first_child_for_byte(self_: TSNode, byte: u32) -> TSNode {
-    ts_node__first_child_for_byte(self_, byte, true)
+    node__first_child_for_byte(self_, byte, true)
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_node_first_named_child_for_byte(self_: TSNode, byte: u32) -> TSNode {
-    ts_node__first_child_for_byte(self_, byte, false)
+    node__first_child_for_byte(self_, byte, false)
 }
 
 #[no_mangle]
@@ -1021,7 +1007,7 @@ pub unsafe extern "C" fn ts_node_descendant_for_byte_range(
     start: u32,
     end: u32,
 ) -> TSNode {
-    ts_node__descendant_for_byte_range(self_, start, end, true)
+    node__descendant_for_byte_range(self_, start, end, true)
 }
 
 #[no_mangle]
@@ -1030,7 +1016,7 @@ pub unsafe extern "C" fn ts_node_named_descendant_for_byte_range(
     start: u32,
     end: u32,
 ) -> TSNode {
-    ts_node__descendant_for_byte_range(self_, start, end, false)
+    node__descendant_for_byte_range(self_, start, end, false)
 }
 
 #[no_mangle]
@@ -1039,7 +1025,7 @@ pub unsafe extern "C" fn ts_node_descendant_for_point_range(
     start: TSPoint,
     end: TSPoint,
 ) -> TSNode {
-    ts_node__descendant_for_point_range(self_, start, end, true)
+    node__descendant_for_point_range(self_, start, end, true)
 }
 
 #[no_mangle]
@@ -1048,7 +1034,7 @@ pub unsafe extern "C" fn ts_node_named_descendant_for_point_range(
     start: TSPoint,
     end: TSPoint,
 ) -> TSNode {
-    ts_node__descendant_for_point_range(self_, start, end, false)
+    node__descendant_for_point_range(self_, start, end, false)
 }
 
 // ---------------------------------------------------------------------------
@@ -1066,19 +1052,17 @@ pub unsafe extern "C" fn ts_node_field_name_for_child(
     loop {
         let mut did_descend = false;
 
-        let mut child = ts_node__null();
+        let mut child = node__null();
         let mut index: u32 = 0;
-        let mut iterator = ts_node_iterate_children(&result);
-        while ts_node_child_iterator_next(&mut iterator, &mut child) {
-            if ts_node__is_relevant(child, true) {
+        let mut iterator = node_iterate_children(&result);
+        while node_child_iterator_next(&mut iterator, &mut child) {
+            if node__is_relevant(child, true) {
                 if index == child_index {
-                    if ts_subtree_extra(ts_node__subtree(child)) {
+                    if subtree_extra(node__subtree(child)) {
                         return ptr::null();
                     }
-                    let field_name = ts_node__field_name_from_language(
-                        result,
-                        iterator.structural_child_index - 1,
-                    );
+                    let field_name =
+                        node__field_name_from_language(result, iterator.structural_child_index - 1);
                     if !field_name.is_null() {
                         return field_name;
                     }
@@ -1087,12 +1071,10 @@ pub unsafe extern "C" fn ts_node_field_name_for_child(
                 index += 1;
             } else {
                 let grandchild_index = child_index - index;
-                let grandchild_count = ts_node__relevant_child_count(child, true);
+                let grandchild_count = node__relevant_child_count(child, true);
                 if grandchild_index < grandchild_count {
-                    let field_name = ts_node__field_name_from_language(
-                        result,
-                        iterator.structural_child_index - 1,
-                    );
+                    let field_name =
+                        node__field_name_from_language(result, iterator.structural_child_index - 1);
                     if !field_name.is_null() {
                         inherited_field_name = field_name;
                     }
@@ -1123,19 +1105,17 @@ pub unsafe extern "C" fn ts_node_field_name_for_named_child(
     loop {
         let mut did_descend = false;
 
-        let mut child = ts_node__null();
+        let mut child = node__null();
         let mut index: u32 = 0;
-        let mut iterator = ts_node_iterate_children(&result);
-        while ts_node_child_iterator_next(&mut iterator, &mut child) {
-            if ts_node__is_relevant(child, false) {
+        let mut iterator = node_iterate_children(&result);
+        while node_child_iterator_next(&mut iterator, &mut child) {
+            if node__is_relevant(child, false) {
                 if index == named_child_index {
-                    if ts_subtree_extra(ts_node__subtree(child)) {
+                    if subtree_extra(node__subtree(child)) {
                         return ptr::null();
                     }
-                    let field_name = ts_node__field_name_from_language(
-                        result,
-                        iterator.structural_child_index - 1,
-                    );
+                    let field_name =
+                        node__field_name_from_language(result, iterator.structural_child_index - 1);
                     if !field_name.is_null() {
                         return field_name;
                     }
@@ -1144,12 +1124,10 @@ pub unsafe extern "C" fn ts_node_field_name_for_named_child(
                 index += 1;
             } else {
                 let named_grandchild_index = named_child_index - index;
-                let grandchild_count = ts_node__relevant_child_count(child, false);
+                let grandchild_count = node__relevant_child_count(child, false);
                 if named_grandchild_index < grandchild_count {
-                    let field_name = ts_node__field_name_from_language(
-                        result,
-                        iterator.structural_child_index - 1,
-                    );
+                    let field_name =
+                        node__field_name_from_language(result, iterator.structural_child_index - 1);
                     if !field_name.is_null() {
                         inherited_field_name = field_name;
                     }

@@ -4,7 +4,7 @@
 use core::ffi::c_void;
 
 // Default allocator functions that abort on failure.
-unsafe fn ts_malloc_default(size: usize) -> *mut c_void {
+unsafe fn malloc_default(size: usize) -> *mut c_void {
     let result = unsafe { libc_malloc(size) };
     if size > 0 && result.is_null() {
         alloc_failed("allocate", size);
@@ -12,7 +12,7 @@ unsafe fn ts_malloc_default(size: usize) -> *mut c_void {
     result
 }
 
-unsafe fn ts_calloc_default(count: usize, size: usize) -> *mut c_void {
+unsafe fn calloc_default(count: usize, size: usize) -> *mut c_void {
     let result = unsafe { libc_calloc(count, size) };
     if count > 0 && result.is_null() {
         alloc_failed("allocate", count * size);
@@ -20,7 +20,7 @@ unsafe fn ts_calloc_default(count: usize, size: usize) -> *mut c_void {
     result
 }
 
-unsafe fn ts_realloc_default(buffer: *mut c_void, size: usize) -> *mut c_void {
+unsafe fn realloc_default(buffer: *mut c_void, size: usize) -> *mut c_void {
     let result = unsafe { libc_realloc(buffer, size) };
     if size > 0 && result.is_null() {
         alloc_failed("reallocate", size);
@@ -63,15 +63,15 @@ pub static mut ts_current_free: unsafe extern "C" fn(*mut c_void) = libc_free_c;
 
 // C-ABI wrapper functions for the defaults.
 unsafe extern "C" fn ts_malloc_default_c(size: usize) -> *mut c_void {
-    unsafe { ts_malloc_default(size) }
+    unsafe { malloc_default(size) }
 }
 
 unsafe extern "C" fn ts_calloc_default_c(count: usize, size: usize) -> *mut c_void {
-    unsafe { ts_calloc_default(count, size) }
+    unsafe { calloc_default(count, size) }
 }
 
 unsafe extern "C" fn ts_realloc_default_c(buffer: *mut c_void, size: usize) -> *mut c_void {
-    unsafe { ts_realloc_default(buffer, size) }
+    unsafe { realloc_default(buffer, size) }
 }
 
 unsafe extern "C" fn libc_free_c(ptr: *mut c_void) {
@@ -100,21 +100,21 @@ pub unsafe extern "C" fn ts_set_allocator(
 
 // Convenience wrappers for internal Rust code.
 #[inline]
-pub unsafe fn ts_malloc(size: usize) -> *mut c_void {
+pub unsafe fn malloc(size: usize) -> *mut c_void {
     unsafe { (ts_current_malloc)(size) }
 }
 
 #[inline]
-pub unsafe fn ts_calloc(count: usize, size: usize) -> *mut c_void {
+pub unsafe fn calloc(count: usize, size: usize) -> *mut c_void {
     unsafe { (ts_current_calloc)(count, size) }
 }
 
 #[inline]
-pub unsafe fn ts_realloc(ptr: *mut c_void, size: usize) -> *mut c_void {
+pub unsafe fn realloc(ptr: *mut c_void, size: usize) -> *mut c_void {
     unsafe { (ts_current_realloc)(ptr, size) }
 }
 
 #[inline]
-pub unsafe fn ts_free(ptr: *mut c_void) {
+pub unsafe fn free(ptr: *mut c_void) {
     unsafe { (ts_current_free)(ptr) }
 }

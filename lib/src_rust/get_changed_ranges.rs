@@ -6,17 +6,16 @@ use std::ptr;
 
 use crate::ffi::{TSInputEdit, TSLanguage, TSRange, TSSymbol};
 
-use super::alloc::{ts_calloc, ts_realloc};
+use super::alloc::{calloc, realloc};
 use super::error_costs::ERROR_STATE;
-use super::language::ts_language_alias_at;
+use super::language::language_alias_at;
 use super::length::{length_add, length_min, length_zero, Length, LENGTH_MAX};
 use super::point::{point_add, point_sub, POINT_MAX};
 use super::subtree::{
-    ts_builtin_sym_error, ts_subtree_child_count, ts_subtree_children, ts_subtree_error_cost,
-    ts_subtree_external_scanner_state_eq, ts_subtree_extra, ts_subtree_has_changes,
-    ts_subtree_has_external_tokens, ts_subtree_last_external_token, ts_subtree_padding,
-    ts_subtree_parse_state, ts_subtree_size, ts_subtree_symbol, ts_subtree_total_size,
-    ts_subtree_visible, Subtree, NULL_SUBTREE, TS_TREE_STATE_NONE,
+    subtree_child_count, subtree_children, subtree_error_cost, subtree_external_scanner_state_eq,
+    subtree_extra, subtree_has_changes, subtree_has_external_tokens, subtree_last_external_token,
+    subtree_padding, subtree_parse_state, subtree_size, subtree_symbol, subtree_total_size,
+    subtree_visible, ts_builtin_sym_error, Subtree, NULL_SUBTREE, TS_TREE_STATE_NONE,
 };
 use super::tree_cursor::{TreeCursor, TreeCursorEntry, TreeCursorEntryArray};
 
@@ -84,7 +83,7 @@ const unsafe fn range_array_slice(arr: &TSRangeArray) -> &[TSRange] {
 }
 
 #[inline]
-pub const unsafe fn ts_range_slice<'a>(ranges: *const TSRange, count: u32) -> &'a [TSRange] {
+pub const unsafe fn range_slice<'a>(ranges: *const TSRange, count: u32) -> &'a [TSRange] {
     if count == 0 {
         &[]
     } else {
@@ -101,9 +100,9 @@ unsafe fn array_grow_range(arr: &mut TSRangeArray, count: u32) {
         }
         if arr.contents.is_null() {
             arr.contents =
-                ts_calloc(new_capacity as usize, std::mem::size_of::<TSRange>()).cast::<TSRange>();
+                calloc(new_capacity as usize, std::mem::size_of::<TSRange>()).cast::<TSRange>();
         } else {
-            arr.contents = ts_realloc(
+            arr.contents = realloc(
                 arr.contents.cast::<c_void>(),
                 new_capacity as usize * std::mem::size_of::<TSRange>(),
             )
@@ -119,7 +118,7 @@ unsafe fn array_push_range(arr: &mut TSRangeArray, range: TSRange) {
     arr.size += 1;
 }
 
-pub fn ts_range_edit_ref(range: &mut TSRange, edit: &TSInputEdit) {
+pub fn range_edit_ref(range: &mut TSRange, edit: &TSInputEdit) {
     if range.end_byte >= edit.old_end_byte {
         if range.end_byte != u32::MAX {
             range.end_byte = edit.new_end_byte + (range.end_byte - edit.old_end_byte);
@@ -153,7 +152,7 @@ pub fn ts_range_edit_ref(range: &mut TSRange, edit: &TSInputEdit) {
     }
 }
 
-pub unsafe fn ts_range_array_intersects_ref(
+pub unsafe fn range_array_intersects_ref(
     ranges: &TSRangeArray,
     start_index: u32,
     start_byte: u32,
@@ -193,13 +192,13 @@ unsafe fn stack_grow(arr: &mut TreeCursorEntryArray, count: u32) {
             new_capacity *= 2;
         }
         if arr.contents.is_null() {
-            arr.contents = ts_calloc(
+            arr.contents = calloc(
                 new_capacity as usize,
                 std::mem::size_of::<TreeCursorEntry>(),
             )
             .cast::<TreeCursorEntry>();
         } else {
-            arr.contents = ts_realloc(
+            arr.contents = realloc(
                 arr.contents.cast::<c_void>(),
                 new_capacity as usize * std::mem::size_of::<TreeCursorEntry>(),
             )
@@ -222,14 +221,14 @@ unsafe fn stack_pop(arr: &mut TreeCursorEntryArray) -> TreeCursorEntry {
 
 #[inline]
 unsafe fn subtree_child<'a>(parent: Subtree, index: u32) -> &'a Subtree {
-    subtree_children(parent).get_unchecked(index as usize)
+    subtree_children_slice(parent).get_unchecked(index as usize)
 }
 
 #[inline]
-const unsafe fn subtree_children<'a>(parent: Subtree) -> &'a [Subtree] {
+const unsafe fn subtree_children_slice<'a>(parent: Subtree) -> &'a [Subtree] {
     std::slice::from_raw_parts(
-        ts_subtree_children(parent),
-        ts_subtree_child_count(parent) as usize,
+        subtree_children(parent),
+        subtree_child_count(parent) as usize,
     )
 }
 
@@ -237,7 +236,7 @@ const unsafe fn subtree_children<'a>(parent: Subtree) -> &'a [Subtree] {
 // Internal helpers — skeletons
 // ---------------------------------------------------------------------------
 
-unsafe fn ts_range_array_add(self_: &mut TSRangeArray, start: Length, end: Length) {
+unsafe fn range_array_add(self_: &mut TSRangeArray, start: Length, end: Length) {
     if self_.size > 0 {
         let last_range = self_
             .contents
@@ -302,18 +301,18 @@ unsafe fn iterator_start_position(self_: &Iterator) -> Length {
     if self_.in_padding {
         entry.position
     } else {
-        length_add(entry.position, ts_subtree_padding(*entry.subtree))
+        length_add(entry.position, subtree_padding(*entry.subtree))
     }
 }
 
 /// Return the current item's end position.
 unsafe fn iterator_end_position(self_: &Iterator) -> Length {
     let entry = stack_slice(&self_.cursor.stack).last().unwrap_unchecked();
-    let result = length_add(entry.position, ts_subtree_padding(*entry.subtree));
+    let result = length_add(entry.position, subtree_padding(*entry.subtree));
     if self_.in_padding {
         result
     } else {
-        length_add(result, ts_subtree_size(*entry.subtree))
+        length_add(result, subtree_size(*entry.subtree))
     }
 }
 
@@ -324,13 +323,13 @@ unsafe fn iterator_end_position(self_: &Iterator) -> Length {
 unsafe fn iterator_tree_is_visible(self_: &Iterator) -> bool {
     let entries = stack_slice(&self_.cursor.stack);
     let entry = entries.last().unwrap_unchecked();
-    if ts_subtree_visible(*entry.subtree) {
+    if subtree_visible(*entry.subtree) {
         return true;
     }
     if self_.cursor.stack.size > 1 {
         let parent_entry = entries.get_unchecked(self_.cursor.stack.size as usize - 2);
         let parent = *parent_entry.subtree;
-        return ts_language_alias_at(
+        return language_alias_at(
             self_.language,
             u32::from((*parent.ptr).data.children.production_id),
             entry.structural_child_index,
@@ -361,14 +360,14 @@ unsafe fn iterator_get_visible_state(self_: &Iterator) -> VisibleState {
 
         if i > 0 {
             let parent = entries.get_unchecked((i - 1) as usize).subtree;
-            result.alias_symbol = ts_language_alias_at(
+            result.alias_symbol = language_alias_at(
                 self_.language,
                 u32::from((*(*parent).ptr).data.children.production_id),
                 entry.structural_child_index,
             );
         }
 
-        if ts_subtree_visible(*entry.subtree) || result.alias_symbol != 0 {
+        if subtree_visible(*entry.subtree) || result.alias_symbol != 0 {
             result.tree = *entry.subtree;
             result.start_byte = entry.position.bytes;
             break;
@@ -417,11 +416,11 @@ unsafe fn iterator_descend(self_: &mut Iterator, goal_position: u32) -> bool {
         let entry = *stack_slice(&self_.cursor.stack).last().unwrap_unchecked();
         let mut position = entry.position;
         let mut structural_child_index: u32 = 0;
-        let n = ts_subtree_child_count(*entry.subtree);
+        let n = subtree_child_count(*entry.subtree);
         for i in 0..n {
             let child = subtree_child(*entry.subtree, i);
-            let child_left = length_add(position, ts_subtree_padding(*child));
-            let child_right = length_add(child_left, ts_subtree_size(*child));
+            let child_left = length_add(position, subtree_padding(*child));
+            let child_right = length_add(child_left, subtree_size(*child));
 
             if child_right.bytes > goal_position {
                 stack_push(
@@ -449,10 +448,10 @@ unsafe fn iterator_descend(self_: &mut Iterator, goal_position: u32) -> bool {
             }
 
             position = child_right;
-            if !ts_subtree_extra(*child) {
+            if !subtree_extra(*child) {
                 structural_child_index += 1;
             }
-            let last_external_token = ts_subtree_last_external_token(*child);
+            let last_external_token = subtree_last_external_token(*child);
             if !last_external_token.ptr.is_null() {
                 self_.prev_external_token = last_external_token;
             }
@@ -491,14 +490,14 @@ unsafe fn iterator_advance(self_: &mut Iterator) {
             .unwrap_unchecked()
             .subtree;
         let child_index = entry.child_index + 1;
-        let last_external_token = ts_subtree_last_external_token(*entry.subtree);
+        let last_external_token = subtree_last_external_token(*entry.subtree);
         if !last_external_token.ptr.is_null() {
             self_.prev_external_token = last_external_token;
         }
-        if ts_subtree_child_count(*parent) > child_index {
-            let position = length_add(entry.position, ts_subtree_total_size(*entry.subtree));
+        if subtree_child_count(*parent) > child_index {
+            let position = length_add(entry.position, subtree_total_size(*entry.subtree));
             let mut structural_child_index = entry.structural_child_index;
-            if !ts_subtree_extra(*entry.subtree) {
+            if !subtree_extra(*entry.subtree) {
                 structural_child_index += 1;
             }
             let next_child = subtree_child(*parent, child_index);
@@ -515,7 +514,7 @@ unsafe fn iterator_advance(self_: &mut Iterator) {
             );
 
             if iterator_tree_is_visible(self_) {
-                if ts_subtree_padding(*next_child).bytes > 0 {
+                if subtree_padding(*next_child).bytes > 0 {
                     self_.in_padding = true;
                 } else {
                     self_.visible_depth += 1;
@@ -538,8 +537,8 @@ unsafe fn iterator_compare(old_iter: &Iterator, new_iter: &Iterator) -> Iterator
     let new_visible = iterator_get_visible_state(new_iter);
     let old_tree = old_visible.tree;
     let new_tree = new_visible.tree;
-    let old_symbol = ts_subtree_symbol(old_tree);
-    let new_symbol = ts_subtree_symbol(new_tree);
+    let old_symbol = subtree_symbol(old_tree);
+    let new_symbol = subtree_symbol(new_tree);
 
     if old_tree.ptr.is_null() && new_tree.ptr.is_null() {
         return IteratorComparison::Matches;
@@ -551,14 +550,14 @@ unsafe fn iterator_compare(old_iter: &Iterator, new_iter: &Iterator) -> Iterator
         return IteratorComparison::Differs;
     }
 
-    let old_size = ts_subtree_size(old_tree).bytes;
-    let new_size = ts_subtree_size(new_tree).bytes;
-    let old_state = ts_subtree_parse_state(old_tree);
-    let new_state = ts_subtree_parse_state(new_tree);
-    let old_has_external_tokens = ts_subtree_has_external_tokens(old_tree);
-    let new_has_external_tokens = ts_subtree_has_external_tokens(new_tree);
-    let old_error_cost = ts_subtree_error_cost(old_tree);
-    let new_error_cost = ts_subtree_error_cost(new_tree);
+    let old_size = subtree_size(old_tree).bytes;
+    let new_size = subtree_size(new_tree).bytes;
+    let old_state = subtree_parse_state(old_tree);
+    let new_state = subtree_parse_state(new_tree);
+    let old_has_external_tokens = subtree_has_external_tokens(old_tree);
+    let new_has_external_tokens = subtree_has_external_tokens(new_tree);
+    let old_error_cost = subtree_error_cost(old_tree);
+    let new_error_cost = subtree_error_cost(new_tree);
 
     if old_visible.start_byte != new_visible.start_byte
         || old_symbol == ts_builtin_sym_error
@@ -568,9 +567,9 @@ unsafe fn iterator_compare(old_iter: &Iterator, new_iter: &Iterator) -> Iterator
         || (old_state == ERROR_STATE) != (new_state == ERROR_STATE)
         || old_error_cost != new_error_cost
         || old_has_external_tokens != new_has_external_tokens
-        || ts_subtree_has_changes(old_tree)
+        || subtree_has_changes(old_tree)
         || (old_has_external_tokens
-            && !ts_subtree_external_scanner_state_eq(
+            && !subtree_external_scanner_state_eq(
                 &old_iter.prev_external_token,
                 &new_iter.prev_external_token,
             ))
@@ -585,7 +584,7 @@ unsafe fn iterator_compare(old_iter: &Iterator, new_iter: &Iterator) -> Iterator
 // Exported functions — skeletons
 // ---------------------------------------------------------------------------
 
-pub unsafe fn ts_range_array_get_changed_ranges_ref(
+pub unsafe fn range_array_get_changed_ranges_ref(
     old_ranges: &[TSRange],
     new_ranges: &[TSRange],
     differences: &mut TSRangeArray,
@@ -634,7 +633,7 @@ pub unsafe fn ts_range_array_get_changed_ranges_ref(
         match next_old_position.bytes.cmp(&next_new_position.bytes) {
             Ordering::Less => {
                 if in_old_range != in_new_range {
-                    ts_range_array_add(differences, current_position, next_old_position);
+                    range_array_add(differences, current_position, next_old_position);
                 }
                 if in_old_range {
                     old_index += 1;
@@ -644,7 +643,7 @@ pub unsafe fn ts_range_array_get_changed_ranges_ref(
             }
             Ordering::Greater => {
                 if in_old_range != in_new_range {
-                    ts_range_array_add(differences, current_position, next_new_position);
+                    range_array_add(differences, current_position, next_new_position);
                 }
                 if in_new_range {
                     new_index += 1;
@@ -654,7 +653,7 @@ pub unsafe fn ts_range_array_get_changed_ranges_ref(
             }
             Ordering::Equal => {
                 if in_old_range != in_new_range {
-                    ts_range_array_add(differences, current_position, next_new_position);
+                    range_array_add(differences, current_position, next_new_position);
                 }
                 if in_old_range {
                     old_index += 1;
@@ -675,7 +674,7 @@ pub unsafe extern "C" fn ts_range_edit(range: *mut TSRange, edit: *const TSInput
     let range = range.as_mut().unwrap_unchecked();
     let edit = edit.as_ref().unwrap_unchecked();
 
-    ts_range_edit_ref(range, edit);
+    range_edit_ref(range, edit);
 }
 
 #[cfg(test)]
@@ -728,7 +727,7 @@ mod tests {
     fn edit_range_after_changed_range() {
         let mut edited_range = range(14, 18);
 
-        ts_range_edit_ref(&mut edited_range, &edit());
+        range_edit_ref(&mut edited_range, &edit());
 
         assert_range_eq(
             edited_range,
@@ -745,7 +744,7 @@ mod tests {
     fn edit_range_overlapping_changed_range() {
         let mut edited_range = range(7, 14);
 
-        ts_range_edit_ref(&mut edited_range, &edit());
+        range_edit_ref(&mut edited_range, &edit());
 
         assert_range_eq(
             edited_range,
@@ -762,7 +761,7 @@ mod tests {
     fn edit_range_before_changed_range() {
         let mut edited_range = range(1, 4);
 
-        ts_range_edit_ref(&mut edited_range, &edit());
+        range_edit_ref(&mut edited_range, &edit());
 
         assert_range_eq(edited_range, range(1, 4));
     }
@@ -772,7 +771,7 @@ mod tests {
         let mut ranges = [range(2, 4), range(7, 9), range(12, 15)];
         let range_array = range_array(&mut ranges);
 
-        assert!(unsafe { ts_range_array_intersects_ref(&range_array, 0, 8, 11) });
+        assert!(unsafe { range_array_intersects_ref(&range_array, 0, 8, 11) });
     }
 
     #[test]
@@ -780,11 +779,11 @@ mod tests {
         let mut ranges = [range(2, 4), range(7, 9), range(12, 15)];
         let range_array = range_array(&mut ranges);
 
-        assert!(!unsafe { ts_range_array_intersects_ref(&range_array, 2, 8, 11) });
+        assert!(!unsafe { range_array_intersects_ref(&range_array, 2, 8, 11) });
     }
 }
 
-pub unsafe fn ts_subtree_get_changed_ranges_ref(
+pub unsafe fn subtree_get_changed_ranges_ref(
     old_tree: &Subtree,
     new_tree: &Subtree,
     old_cursor: &mut TreeCursor,
@@ -810,10 +809,10 @@ pub unsafe fn ts_subtree_get_changed_ranges_ref(
     let mut position = iterator_start_position(&old_iter);
     let mut next_position = iterator_start_position(&new_iter);
     if position.bytes < next_position.bytes {
-        ts_range_array_add(&mut results, position, next_position);
+        range_array_add(&mut results, position, next_position);
         position = next_position;
     } else if position.bytes > next_position.bytes {
-        ts_range_array_add(&mut results, next_position, position);
+        range_array_add(&mut results, next_position, position);
         next_position = position;
     }
 
@@ -825,7 +824,7 @@ pub unsafe fn ts_subtree_get_changed_ranges_ref(
         // internally if they contain a range of text that was previously
         // excluded from the parse, and is now included, or vice-versa.
         if comparison == IteratorComparison::Matches
-            && ts_range_array_intersects_ref(
+            && range_array_intersects_ref(
                 included_range_differences_array,
                 included_range_difference_index,
                 position.bytes,
@@ -897,7 +896,7 @@ pub unsafe fn ts_subtree_get_changed_ranges_ref(
         }
 
         if is_changed {
-            ts_range_array_add(&mut results, position, next_position);
+            range_array_add(&mut results, position, next_position);
         }
 
         position = next_position;
@@ -919,12 +918,12 @@ pub unsafe fn ts_subtree_get_changed_ranges_ref(
         }
     }
 
-    let old_size = ts_subtree_total_size(*old_tree);
-    let new_size = ts_subtree_total_size(*new_tree);
+    let old_size = subtree_total_size(*old_tree);
+    let new_size = subtree_total_size(*new_tree);
     if old_size.bytes < new_size.bytes {
-        ts_range_array_add(&mut results, old_size, new_size);
+        range_array_add(&mut results, old_size, new_size);
     } else if new_size.bytes < old_size.bytes {
-        ts_range_array_add(&mut results, new_size, old_size);
+        range_array_add(&mut results, new_size, old_size);
     }
 
     *old_cursor = old_iter.cursor;

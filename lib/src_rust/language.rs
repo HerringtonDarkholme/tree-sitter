@@ -16,7 +16,7 @@ use std::ptr;
 use crate::ffi::{TSFieldId, TSLanguage, TSStateId, TSSymbol};
 
 // Re-use types already defined in subtree.rs
-use super::alloc::{ts_free, ts_malloc};
+use super::alloc::{free, malloc};
 use super::subtree::TSSymbolMetadata;
 
 // ---------------------------------------------------------------------------
@@ -389,11 +389,7 @@ unsafe fn c_string_prefix_cmp(left: *const i8, right: *const i8, len: usize) -> 
 /// For non-terminal symbols → successor state.
 /// For terminal symbols → index into actions table.
 #[inline]
-pub unsafe fn ts_language_lookup(
-    self_: *const TSLanguage,
-    state: TSStateId,
-    symbol: TSSymbol,
-) -> u16 {
+pub unsafe fn language_lookup(self_: *const TSLanguage, state: TSStateId, symbol: TSSymbol) -> u16 {
     let l = lang(self_);
     if u32::from(state) >= l.large_state_count {
         let index = *l
@@ -423,46 +419,43 @@ pub unsafe fn ts_language_lookup(
 
 /// Get the parse actions for a (state, symbol) pair.
 #[inline]
-pub unsafe fn ts_language_actions(
+pub unsafe fn language_actions(
     self_: *const TSLanguage,
     state: TSStateId,
     symbol: TSSymbol,
     count: &mut u32,
 ) -> *const TSParseAction {
     let mut entry = TableEntry::empty();
-    ts_language_table_entry(self_, state, symbol, &mut entry);
+    language_table_entry(self_, state, symbol, &mut entry);
     *count = entry.action_count;
     entry.actions
 }
 
 /// Check if a (state, symbol) has a reduce action.
 #[inline]
-pub unsafe fn ts_language_has_reduce_action(
+pub unsafe fn language_has_reduce_action(
     self_: *const TSLanguage,
     state: TSStateId,
     symbol: TSSymbol,
 ) -> bool {
     let mut entry = TableEntry::empty();
-    ts_language_table_entry(self_, state, symbol, &mut entry);
+    language_table_entry(self_, state, symbol, &mut entry);
     entry.action_count > 0 && (*entry.actions).type_ == TSParseActionTypeReduce
 }
 
 /// Check if a (state, symbol) has any actions.
 #[inline]
-pub unsafe fn ts_language_has_actions(
+pub unsafe fn language_has_actions(
     self_: *const TSLanguage,
     state: TSStateId,
     symbol: TSSymbol,
 ) -> bool {
-    ts_language_lookup(self_, state, symbol) != 0
+    language_lookup(self_, state, symbol) != 0
 }
 
 /// Create a lookahead iterator for a given state.
 #[inline]
-pub unsafe fn ts_language_lookaheads(
-    self_: *const TSLanguage,
-    state: TSStateId,
-) -> LookaheadIterator {
+pub unsafe fn language_lookaheads(self_: *const TSLanguage, state: TSStateId) -> LookaheadIterator {
     let l = lang(self_);
     let is_small_state = u32::from(state) >= l.large_state_count;
     let (data, group_end, group_count): (*const u16, *const u16, u16) = if is_small_state {
@@ -498,7 +491,7 @@ pub unsafe fn ts_language_lookaheads(
 
 /// Advance a lookahead iterator to the next valid symbol.
 #[inline]
-pub unsafe fn ts_lookahead_iterator__next(self_: &mut LookaheadIterator) -> bool {
+pub unsafe fn lookahead_iterator__next(self_: &mut LookaheadIterator) -> bool {
     let l = lang(self_.language);
 
     if self_.is_small_state {
@@ -549,10 +542,7 @@ pub unsafe fn ts_lookahead_iterator__next(self_: &mut LookaheadIterator) -> bool
 
 /// Whether the state is a "primary state" (ABI >= 14).
 #[inline]
-pub const unsafe fn ts_language_state_is_primary(
-    self_: *const TSLanguage,
-    state: TSStateId,
-) -> bool {
+pub const unsafe fn language_state_is_primary(self_: *const TSLanguage, state: TSStateId) -> bool {
     let l = lang(self_);
     if l.abi_version >= LANGUAGE_VERSION_WITH_PRIMARY_STATES {
         state == *l.primary_state_ids.add(state as usize)
@@ -563,7 +553,7 @@ pub const unsafe fn ts_language_state_is_primary(
 
 /// Get enabled external tokens for a given external scanner state.
 #[inline]
-pub const unsafe fn ts_language_enabled_external_tokens(
+pub const unsafe fn language_enabled_external_tokens(
     self_: *const TSLanguage,
     external_scanner_state: u32,
 ) -> *const bool {
@@ -579,7 +569,7 @@ pub const unsafe fn ts_language_enabled_external_tokens(
 
 /// Get the alias sequence for a production ID.
 #[inline]
-pub const unsafe fn ts_language_alias_sequence(
+pub const unsafe fn language_alias_sequence(
     self_: *const TSLanguage,
     production_id: u32,
 ) -> *const TSSymbol {
@@ -594,7 +584,7 @@ pub const unsafe fn ts_language_alias_sequence(
 
 /// Get the alias at a specific position in a production's alias sequence.
 #[inline]
-pub const unsafe fn ts_language_alias_at(
+pub const unsafe fn language_alias_at(
     self_: *const TSLanguage,
     production_id: u32,
     child_index: u32,
@@ -611,7 +601,7 @@ pub const unsafe fn ts_language_alias_at(
 
 /// Get the field map (start, end) for a production ID.
 #[inline]
-pub unsafe fn ts_language_field_map(
+pub unsafe fn language_field_map(
     self_: *const TSLanguage,
     production_id: u32,
     start: *mut *const TSFieldMapEntry,
@@ -632,7 +622,7 @@ pub unsafe fn ts_language_field_map(
 
 /// Get all aliases for a symbol.
 #[inline]
-pub unsafe fn ts_language_aliases_for_symbol(
+pub unsafe fn language_aliases_for_symbol(
     self_: *const TSLanguage,
     original_symbol: TSSymbol,
     start: *mut *const TSSymbol,
@@ -662,7 +652,7 @@ pub unsafe fn ts_language_aliases_for_symbol(
 
 /// Write a symbol name with escaping to a FILE*.
 #[inline]
-pub unsafe fn ts_language_write_symbol_as_dot_string(
+pub unsafe fn language_write_symbol_as_dot_string(
     self_: *const TSLanguage,
     f: *mut c_void,
     symbol: TSSymbol,
@@ -784,7 +774,7 @@ pub const unsafe extern "C" fn ts_language_field_count(self_: *const TSLanguage)
     lang(self_).field_count
 }
 
-pub unsafe fn ts_language_table_entry(
+pub unsafe fn language_table_entry(
     self_: *const TSLanguage,
     state: TSStateId,
     symbol: TSSymbol,
@@ -798,7 +788,7 @@ pub unsafe fn ts_language_table_entry(
     } else {
         let language = l;
         debug_assert!(u32::from(symbol) < language.token_count);
-        let action_index = ts_language_lookup(self_, state, symbol) as usize;
+        let action_index = language_lookup(self_, state, symbol) as usize;
         let entry = parse_action_entry(language, action_index);
         result.action_count = u32::from(entry.entry.count);
         result.is_reusable = entry.entry.reusable;
@@ -806,7 +796,7 @@ pub unsafe fn ts_language_table_entry(
     }
 }
 
-pub const unsafe fn ts_language_lex_mode_for_state(
+pub const unsafe fn language_lex_mode_for_state(
     self_: *const TSLanguage,
     state: TSStateId,
 ) -> TSLexerMode {
@@ -823,13 +813,13 @@ pub const unsafe fn ts_language_lex_mode_for_state(
     }
 }
 
-pub unsafe fn ts_language_is_reserved_word(
+pub unsafe fn language_is_reserved_word(
     self_: *const TSLanguage,
     state: TSStateId,
     symbol: TSSymbol,
 ) -> bool {
     let l = lang(self_);
-    let lex_mode = ts_language_lex_mode_for_state(self_, state);
+    let lex_mode = language_lex_mode_for_state(self_, state);
     if lex_mode.reserved_word_set_id > 0 {
         let start =
             u32::from(lex_mode.reserved_word_set_id) * u32::from(l.max_reserved_word_set_size);
@@ -869,10 +859,7 @@ pub const unsafe extern "C" fn ts_language_symbol_metadata(
     }
 }
 
-pub const unsafe fn ts_language_public_symbol(
-    self_: *const TSLanguage,
-    symbol: TSSymbol,
-) -> TSSymbol {
+pub const unsafe fn language_public_symbol(self_: *const TSLanguage, symbol: TSSymbol) -> TSSymbol {
     if symbol == ts_builtin_sym_error {
         symbol
     } else {
@@ -891,7 +878,7 @@ pub unsafe extern "C" fn ts_language_next_state(
         0
     } else if u32::from(symbol) < l.token_count {
         let mut count: u32 = 0;
-        let actions = ts_language_actions(self_, state, symbol, &mut count);
+        let actions = language_actions(self_, state, symbol, &mut count);
         if count > 0 {
             let action = *actions.add(count as usize - 1);
             if action.type_ == TSParseActionTypeShift {
@@ -904,7 +891,7 @@ pub unsafe extern "C" fn ts_language_next_state(
         }
         0
     } else {
-        ts_language_lookup(self_, state, symbol)
+        language_lookup(self_, state, symbol)
     }
 }
 
@@ -1015,14 +1002,14 @@ pub unsafe extern "C" fn ts_lookahead_iterator_new(
     if u32::from(state) >= lang(self_).state_count {
         return ptr::null_mut();
     }
-    let iterator = ts_malloc(std::mem::size_of::<LookaheadIterator>()).cast::<LookaheadIterator>();
-    *iterator = ts_language_lookaheads(self_, state);
+    let iterator = malloc(std::mem::size_of::<LookaheadIterator>()).cast::<LookaheadIterator>();
+    *iterator = language_lookaheads(self_, state);
     iterator
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_lookahead_iterator_delete(self_: *mut LookaheadIterator) {
-    ts_free(self_.cast::<c_void>());
+    free(self_.cast::<c_void>());
 }
 
 #[no_mangle]
@@ -1033,7 +1020,7 @@ pub unsafe extern "C" fn ts_lookahead_iterator_reset_state(
     if u32::from(state) >= lang((*self_).language).state_count {
         return false;
     }
-    *self_ = ts_language_lookaheads((*self_).language, state);
+    *self_ = language_lookaheads((*self_).language, state);
     true
 }
 
@@ -1053,13 +1040,13 @@ pub unsafe extern "C" fn ts_lookahead_iterator_reset(
     if u32::from(state) >= lang(language).state_count {
         return false;
     }
-    *self_ = ts_language_lookaheads(language, state);
+    *self_ = language_lookaheads(language, state);
     true
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_lookahead_iterator_next(self_: *mut LookaheadIterator) -> bool {
-    ts_lookahead_iterator__next(self_.as_mut().unwrap_unchecked())
+    lookahead_iterator__next(self_.as_mut().unwrap_unchecked())
 }
 
 #[no_mangle]

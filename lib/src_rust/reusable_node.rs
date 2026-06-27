@@ -4,8 +4,8 @@ use super::stack::{
     array_back_ref, array_clear, array_delete, array_new, array_pop, array_push, Array,
 };
 use super::subtree::{
-    ts_subtree_child_count, ts_subtree_children, ts_subtree_has_external_tokens,
-    ts_subtree_last_external_token, ts_subtree_total_bytes, Subtree, NULL_SUBTREE,
+    subtree_child_count, subtree_children, subtree_has_external_tokens,
+    subtree_last_external_token, subtree_total_bytes, Subtree, NULL_SUBTREE,
 };
 
 /// One frame in the old-tree reuse cursor.
@@ -72,9 +72,9 @@ pub unsafe fn reusable_node_delete(self_: &mut ReusableNode) {
 
 #[inline]
 unsafe fn reusable_node_entry_after(entry: StackEntry) -> (u32, Subtree) {
-    let byte_offset = entry.byte_offset + ts_subtree_total_bytes(entry.tree);
-    let last_external_token = if ts_subtree_has_external_tokens(entry.tree) {
-        ts_subtree_last_external_token(entry.tree)
+    let byte_offset = entry.byte_offset + subtree_total_bytes(entry.tree);
+    let last_external_token = if subtree_has_external_tokens(entry.tree) {
+        subtree_last_external_token(entry.tree)
     } else {
         NULL_SUBTREE
     };
@@ -104,7 +104,7 @@ pub unsafe fn reusable_node_advance(self_: &mut ReusableNode) {
             return;
         }
         tree = reusable_node_last_entry(self_).map_or(NULL_SUBTREE, |entry| entry.tree);
-        if ts_subtree_child_count(tree) > next_index {
+        if subtree_child_count(tree) > next_index {
             break;
         }
     }
@@ -124,7 +124,7 @@ pub unsafe fn reusable_node_descend(self_: &mut ReusableNode) -> bool {
     let Some(last_entry) = reusable_node_last_entry(self_).copied() else {
         return false;
     };
-    if ts_subtree_child_count(last_entry.tree) > 0 {
+    if subtree_child_count(last_entry.tree) > 0 {
         array_push(
             &mut self_.stack,
             StackEntry {
@@ -171,8 +171,8 @@ pub unsafe fn reusable_node_reset(self_: &mut ReusableNode, tree: Subtree) {
 
 #[inline]
 unsafe fn reusable_node_subtree_child<'a>(parent: Subtree, index: u32) -> &'a Subtree {
-    debug_assert!(index < ts_subtree_child_count(parent));
-    ts_subtree_children(parent)
+    debug_assert!(index < subtree_child_count(parent));
+    subtree_children(parent)
         .add(index as usize)
         .as_ref()
         .unwrap_unchecked()

@@ -12,20 +12,19 @@ use std::ptr;
 
 use crate::ffi::{TSLanguage, TSStateId, TSSymbol};
 
-use super::alloc::{ts_calloc, ts_free, ts_malloc, ts_realloc};
+use super::alloc::{calloc, free, malloc, realloc};
 use super::error_costs::{ERROR_COST_PER_RECOVERY, ERROR_STATE};
-use super::language::ts_language_write_symbol_as_dot_string;
+use super::language::language_write_symbol_as_dot_string;
 use super::length::{length_add, length_zero, Length};
 use super::subtree::{
-    ts_builtin_sym_error_repeat, ts_external_scanner_state_data, ts_subtree_alloc_size,
-    ts_subtree_child_count, ts_subtree_dynamic_precedence, ts_subtree_error_cost,
-    ts_subtree_external_scanner_state, ts_subtree_external_scanner_state_eq, ts_subtree_extra,
-    ts_subtree_is_error, ts_subtree_named, ts_subtree_padding, ts_subtree_release,
-    ts_subtree_retain, ts_subtree_size, ts_subtree_symbol, ts_subtree_total_bytes,
-    ts_subtree_total_size, ts_subtree_visible, ts_subtree_visible_descendant_count, Subtree,
-    SubtreeArray, SubtreePool, NULL_SUBTREE,
+    external_scanner_state_data, subtree_alloc_size, subtree_child_count,
+    subtree_dynamic_precedence, subtree_error_cost, subtree_external_scanner_state,
+    subtree_external_scanner_state_eq, subtree_extra, subtree_is_error, subtree_named,
+    subtree_padding, subtree_release, subtree_retain, subtree_size, subtree_symbol,
+    subtree_total_bytes, subtree_total_size, subtree_visible, subtree_visible_descendant_count,
+    ts_builtin_sym_error_repeat, Subtree, SubtreeArray, SubtreePool, NULL_SUBTREE,
 };
-use super::subtree::{ts_subtree_array_copy, ts_subtree_array_delete, ts_subtree_array_reverse};
+use super::subtree::{subtree_array_copy, subtree_array_delete, subtree_array_reverse};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -375,7 +374,7 @@ pub unsafe fn array_init<T>(arr: &mut Array<T>) {
 
 pub unsafe fn array_delete<T>(arr: &mut Array<T>) {
     if !arr.contents.is_null() {
-        ts_free(arr.contents.cast::<c_void>());
+        free(arr.contents.cast::<c_void>());
     }
     arr.contents = ptr::null_mut();
     arr.size = 0;
@@ -392,9 +391,9 @@ pub unsafe fn array_reserve<T>(arr: &mut Array<T>, new_capacity: u32) {
     if new_capacity > arr.capacity {
         let elem_size = std::mem::size_of::<T>();
         if arr.contents.is_null() {
-            arr.contents = ts_malloc(new_capacity as usize * elem_size).cast::<T>();
+            arr.contents = malloc(new_capacity as usize * elem_size).cast::<T>();
         } else {
-            arr.contents = ts_realloc(
+            arr.contents = realloc(
                 arr.contents.cast::<c_void>(),
                 new_capacity as usize * elem_size,
             )
@@ -542,7 +541,7 @@ pub unsafe fn array_assign<T>(self_: &mut Array<T>, other: &Array<T>) {
     }
 }
 
-pub const unsafe fn ts_stack_pop_builder_new() -> StackPopBuilder {
+pub const unsafe fn stack_pop_builder_new() -> StackPopBuilder {
     StackPopBuilder {
         slices: array_new(),
         subtrees: SubtreeArray {
@@ -554,7 +553,7 @@ pub const unsafe fn ts_stack_pop_builder_new() -> StackPopBuilder {
     }
 }
 
-pub unsafe fn ts_stack_pop_builder_delete(self_: &mut StackPopBuilder) {
+pub unsafe fn stack_pop_builder_delete(self_: &mut StackPopBuilder) {
     if !self_.slices.contents.is_null() {
         array_delete(&mut self_.slices);
     }
@@ -566,7 +565,7 @@ pub unsafe fn ts_stack_pop_builder_delete(self_: &mut StackPopBuilder) {
     }
 }
 
-unsafe fn ts_stack_pop_builder_clear(self_: &mut StackPopBuilder) {
+unsafe fn stack_pop_builder_clear(self_: &mut StackPopBuilder) {
     self_.slices.size = 0;
     self_.subtrees.size = 0;
     self_.payloads.size = 0;
@@ -675,7 +674,7 @@ unsafe fn stack_node_release(
         if pool.size < MAX_NODE_POOL_SIZE {
             array_push(pool, self_);
         } else {
-            ts_free(self_.cast::<c_void>());
+            free(self_.cast::<c_void>());
         }
 
         if !first_predecessor.is_null() {
@@ -688,11 +687,11 @@ unsafe fn stack_node_release(
 
 /// Count visible nodes in a subtree for progress tracking.
 unsafe fn stack__subtree_node_count(subtree: Subtree) -> u32 {
-    let mut count = ts_subtree_visible_descendant_count(subtree);
-    if ts_subtree_visible(subtree) {
+    let mut count = subtree_visible_descendant_count(subtree);
+    if subtree_visible(subtree) {
         count += 1;
     }
-    if ts_subtree_symbol(subtree) == ts_builtin_sym_error_repeat {
+    if subtree_symbol(subtree) == ts_builtin_sym_error_repeat {
         count += 1;
     }
     count
@@ -727,7 +726,7 @@ const fn stack_link_payload_new_pending_reduction(
 }
 
 #[inline]
-const unsafe fn stack_link_payload_subtree(payload: StackLinkPayload) -> Subtree {
+const unsafe fn stack_link_payload_subtree_raw(payload: StackLinkPayload) -> Subtree {
     payload.value.subtree
 }
 
@@ -737,32 +736,32 @@ const unsafe fn stack_link_payload_is_pending(payload: StackLinkPayload) -> bool
 }
 
 #[inline]
-const unsafe fn stack_link_payload_is_pending_reduction(payload: StackLinkPayload) -> bool {
+const unsafe fn stack_link_payload_is_pending_reduction_raw(payload: StackLinkPayload) -> bool {
     payload.flags & STACK_LINK_PAYLOAD_IS_PENDING_REDUCTION != 0
 }
 
 #[inline]
-const unsafe fn stack_link_payload_pending_reduction(
+const unsafe fn stack_link_payload_pending_reduction_raw(
     payload: StackLinkPayload,
 ) -> *mut PendingReduction {
     payload.value.pending_reduction
 }
 
 #[inline]
-pub const unsafe fn ts_stack_link_payload_is_pending_reduction(payload: StackLinkPayload) -> bool {
-    stack_link_payload_is_pending_reduction(payload)
+pub const unsafe fn stack_link_payload_is_pending_reduction(payload: StackLinkPayload) -> bool {
+    stack_link_payload_is_pending_reduction_raw(payload)
 }
 
 #[inline]
-pub const unsafe fn ts_stack_link_payload_pending_reduction(
+pub const unsafe fn stack_link_payload_pending_reduction(
     payload: StackLinkPayload,
 ) -> *mut PendingReduction {
-    stack_link_payload_pending_reduction(payload)
+    stack_link_payload_pending_reduction_raw(payload)
 }
 
 #[inline]
-pub const unsafe fn ts_stack_link_payload_subtree(payload: StackLinkPayload) -> Subtree {
-    stack_link_payload_subtree(payload)
+pub const unsafe fn stack_link_payload_subtree(payload: StackLinkPayload) -> Subtree {
+    stack_link_payload_subtree_raw(payload)
 }
 
 #[inline]
@@ -779,7 +778,7 @@ unsafe fn stack_link_payload_error_cost(payload: StackLinkPayload) -> u32 {
     if stack_link_payload_is_pending_reduction(payload) {
         (*stack_link_payload_pending_reduction(payload)).error_cost
     } else {
-        ts_subtree_error_cost(stack_link_payload_subtree(payload))
+        subtree_error_cost(stack_link_payload_subtree(payload))
     }
 }
 
@@ -791,7 +790,7 @@ unsafe fn stack_link_payload_total_size(payload: StackLinkPayload) -> Length {
             .unwrap_unchecked();
         length_add(pending.padding, pending.size)
     } else {
-        ts_subtree_total_size(stack_link_payload_subtree(payload))
+        subtree_total_size(stack_link_payload_subtree(payload))
     }
 }
 
@@ -800,7 +799,7 @@ unsafe fn stack_link_payload_total_bytes(payload: StackLinkPayload) -> u32 {
     if stack_link_payload_is_pending_reduction(payload) {
         stack_link_payload_total_size(payload).bytes
     } else {
-        ts_subtree_total_bytes(stack_link_payload_subtree(payload))
+        subtree_total_bytes(stack_link_payload_subtree(payload))
     }
 }
 
@@ -809,7 +808,7 @@ unsafe fn stack_link_payload_dynamic_precedence(payload: StackLinkPayload) -> i3
     if stack_link_payload_is_pending_reduction(payload) {
         (*stack_link_payload_pending_reduction(payload)).dynamic_precedence
     } else {
-        ts_subtree_dynamic_precedence(stack_link_payload_subtree(payload))
+        subtree_dynamic_precedence(stack_link_payload_subtree(payload))
     }
 }
 
@@ -823,40 +822,43 @@ unsafe fn stack_link_payload_node_count(payload: StackLinkPayload) -> u32 {
 }
 
 #[inline]
-unsafe fn stack_link_payload_retain(payload: StackLinkPayload) {
+unsafe fn stack_link_payload_retain_impl(payload: StackLinkPayload) {
     if stack_link_payload_is_pending_reduction(payload) {
         let pending = stack_link_payload_pending_reduction(payload);
         (*pending).ref_count += 1;
     } else {
-        ts_subtree_retain(stack_link_payload_subtree(payload));
+        subtree_retain(stack_link_payload_subtree(payload));
     }
 }
 
 #[inline]
-unsafe fn stack_link_payload_release(payload: StackLinkPayload, subtree_pool: &mut SubtreePool) {
+unsafe fn stack_link_payload_release_impl(
+    payload: StackLinkPayload,
+    subtree_pool: &mut SubtreePool,
+) {
     if stack_link_payload_is_pending_reduction(payload) {
         let pending = stack_link_payload_pending_reduction(payload);
         (*pending).ref_count -= 1;
         if (*pending).ref_count == 0 && !(*pending).materialized.ptr.is_null() {
-            ts_subtree_release(subtree_pool, (*pending).materialized);
+            subtree_release(subtree_pool, (*pending).materialized);
             (*pending).materialized = NULL_SUBTREE;
         }
     } else {
-        ts_subtree_release(subtree_pool, stack_link_payload_subtree(payload));
+        subtree_release(subtree_pool, stack_link_payload_subtree(payload));
     }
 }
 
 #[inline]
-pub unsafe fn ts_stack_link_payload_retain(payload: StackLinkPayload) {
-    stack_link_payload_retain(payload);
+pub unsafe fn stack_link_payload_retain(payload: StackLinkPayload) {
+    stack_link_payload_retain_impl(payload);
 }
 
 #[inline]
-pub unsafe fn ts_stack_link_payload_release(
+pub unsafe fn stack_link_payload_release(
     payload: StackLinkPayload,
     subtree_pool: &mut SubtreePool,
 ) {
-    stack_link_payload_release(payload, subtree_pool);
+    stack_link_payload_release_impl(payload, subtree_pool);
 }
 
 #[inline]
@@ -864,7 +866,7 @@ unsafe fn stack_link_payload_extra(payload: StackLinkPayload) -> bool {
     if stack_link_payload_is_pending_reduction(payload) {
         (*stack_link_payload_pending_reduction(payload)).flags & PENDING_REDUCTION_EXTRA != 0
     } else {
-        ts_subtree_extra(stack_link_payload_subtree(payload))
+        subtree_extra(stack_link_payload_subtree(payload))
     }
 }
 
@@ -878,7 +880,7 @@ unsafe fn stack_node_new_with_payload(
     let node: *mut StackNode = if pool.size > 0 {
         array_pop(pool)
     } else {
-        ts_malloc(std::mem::size_of::<StackNode>()).cast::<StackNode>()
+        malloc(std::mem::size_of::<StackNode>()).cast::<StackNode>()
     };
 
     (*node).ref_count = 1;
@@ -935,19 +937,19 @@ unsafe fn stack__subtree_is_equivalent(left: Subtree, right: Subtree) -> bool {
         return false;
     }
 
-    if ts_subtree_symbol(left) != ts_subtree_symbol(right) {
+    if subtree_symbol(left) != subtree_symbol(right) {
         return false;
     }
 
-    if ts_subtree_error_cost(left) > 0 && ts_subtree_error_cost(right) > 0 {
+    if subtree_error_cost(left) > 0 && subtree_error_cost(right) > 0 {
         return true;
     }
 
-    ts_subtree_padding(left).bytes == ts_subtree_padding(right).bytes
-        && ts_subtree_size(left).bytes == ts_subtree_size(right).bytes
-        && ts_subtree_child_count(left) == ts_subtree_child_count(right)
-        && ts_subtree_extra(left) == ts_subtree_extra(right)
-        && ts_subtree_external_scanner_state_eq(&left, &right)
+    subtree_padding(left).bytes == subtree_padding(right).bytes
+        && subtree_size(left).bytes == subtree_size(right).bytes
+        && subtree_child_count(left) == subtree_child_count(right)
+        && subtree_extra(left) == subtree_extra(right)
+        && subtree_external_scanner_state_eq(&left, &right)
 }
 
 #[inline]
@@ -1064,21 +1066,21 @@ unsafe fn stack_head_delete(
 ) {
     if !self_.node.is_null() {
         if !self_.last_external_token.ptr.is_null() {
-            ts_subtree_release(subtree_pool, self_.last_external_token);
+            subtree_release(subtree_pool, self_.last_external_token);
         }
         if !self_.lookahead_when_paused.ptr.is_null() {
-            ts_subtree_release(subtree_pool, self_.lookahead_when_paused);
+            subtree_release(subtree_pool, self_.lookahead_when_paused);
         }
         if !self_.summary.is_null() {
             array_delete(self_.summary.as_mut().unwrap_unchecked());
-            ts_free(self_.summary.cast::<c_void>());
+            free(self_.summary.cast::<c_void>());
         }
         stack_node_release(stack_node_mut(self_.node), pool, subtree_pool);
     }
 }
 
 /// Add a new version to the stack, cloning metadata from an existing version.
-unsafe fn ts_stack__add_version(
+unsafe fn stack__add_version(
     self_: &mut Stack,
     original_version: StackVersion,
     node: &mut StackNode,
@@ -1097,13 +1099,13 @@ unsafe fn ts_stack__add_version(
     stack_node_retain(node);
     let head = array_back_ref(&self_.heads);
     if !head.last_external_token.ptr.is_null() {
-        ts_subtree_retain(head.last_external_token);
+        subtree_retain(head.last_external_token);
     }
     self_.heads.size - 1
 }
 
 /// Add a slice to the stack's slice array, finding or creating a version.
-unsafe fn ts_stack__add_slice(
+unsafe fn stack__add_slice(
     self_: &mut Stack,
     original_version: StackVersion,
     node: &mut StackNode,
@@ -1122,7 +1124,7 @@ unsafe fn ts_stack__add_slice(
         }
     }
 
-    let version = ts_stack__add_version(self_, original_version, node);
+    let version = stack__add_version(self_, original_version, node);
     let slice = StackSlice {
         subtrees: ptr::read(subtrees),
         version,
@@ -1207,7 +1209,7 @@ unsafe fn stack_pop_builder_add_slice(
         }
     }
 
-    slice.version = ts_stack__add_version(self_, original_version, node);
+    slice.version = stack__add_version(self_, original_version, node);
     array_push(&mut builder.slices, slice);
 }
 
@@ -1277,7 +1279,7 @@ unsafe fn stack_payload_array_reverse(payloads: &mut StackLinkPayloadArray) {
     }
 }
 
-pub unsafe fn ts_stack_pop_builder_payloads(
+pub unsafe fn stack_pop_builder_payloads(
     builder: &StackPopBuilder,
     span: StackSliceSpan,
 ) -> StackLinkPayloadArray {
@@ -1292,7 +1294,7 @@ pub unsafe fn ts_stack_pop_builder_payloads(
     }
 }
 
-pub unsafe fn ts_stack_pop_builder_release_payload_span(
+pub unsafe fn stack_pop_builder_release_payload_span(
     stack: &mut Stack,
     builder: &mut StackPopBuilder,
     span: StackSliceSpan,
@@ -1312,7 +1314,7 @@ pub unsafe fn ts_stack_pop_builder_release_payload_span(
 /// one predecessor, this can walk a straight linked list, retain payloads, then
 /// reverse the collected child array into left-to-right order. Encountering a
 /// branched node returns `None` so the caller can use the full DFS pop path.
-unsafe fn ts_stack_pop_count_linear(
+unsafe fn stack_pop_count_linear(
     self_: &mut Stack,
     version: StackVersion,
     count: u32,
@@ -1326,7 +1328,7 @@ unsafe fn ts_stack_pop_count_linear(
         size: 0,
         capacity: 0,
     };
-    let reserve_count = ts_subtree_alloc_size(count) / std::mem::size_of::<Subtree>();
+    let reserve_count = subtree_alloc_size(count) / std::mem::size_of::<Subtree>();
     array_reserve(
         subtree_array_as_array_mut(&mut subtrees),
         u32::try_from(reserve_count).unwrap(),
@@ -1335,7 +1337,7 @@ unsafe fn ts_stack_pop_count_linear(
     while subtree_count < count {
         let current_node = node.as_ref().unwrap_unchecked();
         if current_node.link_count != 1 {
-            ts_subtree_array_delete(
+            subtree_array_delete(
                 self_.subtree_pool.as_mut().unwrap_unchecked(),
                 &mut subtrees,
             );
@@ -1357,17 +1359,17 @@ unsafe fn ts_stack_pop_count_linear(
         }
     }
 
-    ts_subtree_array_reverse(&mut subtrees);
-    ts_stack__add_slice(self_, version, stack_node_mut(node), &subtrees);
+    subtree_array_reverse(&mut subtrees);
+    stack__add_slice(self_, version, stack_node_mut(node), &subtrees);
     Some(ptr::read(&self_.slices))
 }
 
-/// Builder-writing variant of `ts_stack_pop_count_linear`.
+/// Builder-writing variant of `stack_pop_count_linear`.
 ///
 /// Fresh parses use parser-owned `StackPopBuilder` scratch storage to avoid
 /// allocating a temporary `StackSliceArray` for every reduce. The traversal and
-/// fallback condition are the same as `ts_stack_pop_count_linear`.
-unsafe fn ts_stack_pop_count_linear_into(
+/// fallback condition are the same as `stack_pop_count_linear`.
+unsafe fn stack_pop_count_linear_into(
     self_: &mut Stack,
     version: StackVersion,
     count: u32,
@@ -1376,7 +1378,7 @@ unsafe fn ts_stack_pop_count_linear_into(
     let mut node = stack_head(self_, version).node;
     let mut subtree_count = 0;
     let start = builder.subtrees.size;
-    let reserve_count = ts_subtree_alloc_size(count) / std::mem::size_of::<Subtree>();
+    let reserve_count = subtree_alloc_size(count) / std::mem::size_of::<Subtree>();
     array_reserve(
         subtree_array_as_array_mut(&mut builder.subtrees),
         start + u32::try_from(reserve_count).unwrap(),
@@ -1387,7 +1389,7 @@ unsafe fn ts_stack_pop_count_linear_into(
         if current_node.link_count != 1 {
             let subtrees = subtree_array_as_array_mut(&mut builder.subtrees);
             for i in start..subtrees.size {
-                ts_subtree_release(
+                subtree_release(
                     self_.subtree_pool.as_mut().unwrap_unchecked(),
                     *array_get_ref(subtrees, i),
                 );
@@ -1422,13 +1424,13 @@ unsafe fn ts_stack_pop_count_linear_into(
     true
 }
 
-pub unsafe fn ts_stack_pop_count_payloads_into(
+pub unsafe fn stack_pop_count_payloads_into(
     self_: &mut Stack,
     version: StackVersion,
     count: u32,
     builder: &mut StackPopBuilder,
 ) -> bool {
-    ts_stack_pop_builder_clear(builder);
+    stack_pop_builder_clear(builder);
     if stack_pop_count_payloads_linear_into(self_, version, count, builder) {
         return true;
     }
@@ -1445,7 +1447,7 @@ unsafe fn stack_pop_count_payloads_linear_into(
     let mut node = stack_head(self_, version).node;
     let mut subtree_count = 0;
     let start = builder.payloads.size;
-    let reserve_count = ts_subtree_alloc_size(count) / std::mem::size_of::<StackLinkPayload>();
+    let reserve_count = subtree_alloc_size(count) / std::mem::size_of::<StackLinkPayload>();
     array_reserve(
         &mut builder.payloads,
         start + u32::try_from(reserve_count).unwrap(),
@@ -1511,7 +1513,7 @@ unsafe fn stack_pop_payloads_into(
     };
 
     let reserve_count =
-        ts_subtree_alloc_size(goal_subtree_count) / std::mem::size_of::<StackLinkPayload>();
+        subtree_alloc_size(goal_subtree_count) / std::mem::size_of::<StackLinkPayload>();
     array_reserve(
         &mut new_iterator.payloads,
         u32::try_from(reserve_count).unwrap(),
@@ -1649,8 +1651,7 @@ unsafe fn stack__iter(
     };
 
     if let Some(goal_subtree_count) = goal_subtree_count {
-        let reserve_count =
-            ts_subtree_alloc_size(goal_subtree_count) / std::mem::size_of::<Subtree>();
+        let reserve_count = subtree_alloc_size(goal_subtree_count) / std::mem::size_of::<Subtree>();
         let subtrees = subtree_array_as_array_mut(&mut new_iterator.subtrees);
         array_reserve(subtrees, u32::try_from(reserve_count).unwrap());
     }
@@ -1673,16 +1674,16 @@ unsafe fn stack__iter(
                 let mut subtrees = ptr::read(&array_get_ref(&stack.iterators, i).subtrees);
                 if !should_stop {
                     let source_subtrees = ptr::read(&subtrees);
-                    ts_subtree_array_copy(&source_subtrees, &mut subtrees);
+                    subtree_array_copy(&source_subtrees, &mut subtrees);
                 }
-                ts_subtree_array_reverse(&mut subtrees);
-                ts_stack__add_slice(stack, version, stack_node_mut(node), &subtrees);
+                subtree_array_reverse(&mut subtrees);
+                stack__add_slice(stack, version, stack_node_mut(node), &subtrees);
             }
 
             if should_stop {
                 if !should_pop {
                     let iter = array_get_mut(&mut stack.iterators, i);
-                    ts_subtree_array_delete(
+                    subtree_array_delete(
                         stack.subtree_pool.as_mut().unwrap_unchecked(),
                         &mut iter.subtrees,
                     );
@@ -1711,7 +1712,7 @@ unsafe fn stack__iter(
                     array_push(&mut stack.iterators, current_iterator);
                     next_iterator = array_back_mut(&mut stack.iterators);
                     let source_subtrees = ptr::read(&next_iterator.subtrees);
-                    ts_subtree_array_copy(&source_subtrees, &mut next_iterator.subtrees);
+                    subtree_array_copy(&source_subtrees, &mut next_iterator.subtrees);
                 }
 
                 next_iterator.node = link.node;
@@ -1771,7 +1772,7 @@ unsafe fn pop_error_callback(payload: *mut c_void, iterator: &StackIterator) -> 
     if iterator.subtrees.size > 0 {
         let found_error = payload.cast::<bool>().as_mut().unwrap_unchecked();
         if !*found_error
-            && ts_subtree_is_error(*array_get_ref(
+            && subtree_is_error(*array_get_ref(
                 subtree_array_as_array(&iterator.subtrees),
                 0,
             ))
@@ -1832,8 +1833,8 @@ unsafe fn summarize_stack_callback(payload: *mut c_void, iterator: &StackIterato
 // ===========================================================================
 
 /// Create a new parse stack.
-pub unsafe fn ts_stack_new(subtree_pool: &mut SubtreePool) -> *mut Stack {
-    let self_ = ts_calloc(1, std::mem::size_of::<Stack>()).cast::<Stack>();
+pub unsafe fn stack_new(subtree_pool: &mut SubtreePool) -> *mut Stack {
+    let self_ = calloc(1, std::mem::size_of::<Stack>()).cast::<Stack>();
     let stack = self_.as_mut().unwrap_unchecked();
 
     array_init(&mut stack.heads);
@@ -1857,13 +1858,13 @@ pub unsafe fn ts_stack_new(subtree_pool: &mut SubtreePool) -> *mut Stack {
         1,
         &mut stack.node_pool,
     );
-    ts_stack_clear(stack);
+    stack_clear(stack);
 
     self_
 }
 
 /// Free the parse stack.
-pub unsafe fn ts_stack_delete(self_: &mut Stack) {
+pub unsafe fn stack_delete(self_: &mut Stack) {
     stack_segment_storage_clear(self_);
     if !self_.segments.contents.is_null() {
         array_delete(&mut self_.segments);
@@ -1891,21 +1892,21 @@ pub unsafe fn ts_stack_delete(self_: &mut Stack) {
     array_clear(heads);
     if !node_pool.contents.is_null() {
         for i in 0..node_pool.size {
-            ts_free((*array_get_ref(node_pool, i)).cast::<c_void>());
+            free((*array_get_ref(node_pool, i)).cast::<c_void>());
         }
         array_delete(node_pool);
     }
     array_delete(heads);
-    ts_free(ptr::from_mut(self_).cast::<c_void>());
+    free(ptr::from_mut(self_).cast::<c_void>());
 }
 
 /// Get the number of versions in the stack.
-pub const unsafe fn ts_stack_version_count(self_: &Stack) -> u32 {
+pub const unsafe fn stack_version_count(self_: &Stack) -> u32 {
     self_.heads.size
 }
 
 /// Get the number of halted versions.
-pub unsafe fn ts_stack_halted_version_count(self_: &Stack) -> u32 {
+pub unsafe fn stack_halted_version_count(self_: &Stack) -> u32 {
     let mut count = 0u32;
     for i in 0..self_.heads.size {
         if stack_head(self_, i).status == StackStatus::Halted {
@@ -1916,7 +1917,7 @@ pub unsafe fn ts_stack_halted_version_count(self_: &Stack) -> u32 {
 }
 
 /// Get the state at the top of a version.
-pub unsafe fn ts_stack_state(self_: &Stack, version: StackVersion) -> TSStateId {
+pub unsafe fn stack_state(self_: &Stack, version: StackVersion) -> TSStateId {
     stack_head(self_, version)
         .node
         .as_ref()
@@ -1925,7 +1926,7 @@ pub unsafe fn ts_stack_state(self_: &Stack, version: StackVersion) -> TSStateId 
 }
 
 /// Get the position of a version.
-pub unsafe fn ts_stack_position(self_: &Stack, version: StackVersion) -> Length {
+pub unsafe fn stack_position(self_: &Stack, version: StackVersion) -> Length {
     stack_head(self_, version)
         .node
         .as_ref()
@@ -1934,12 +1935,12 @@ pub unsafe fn ts_stack_position(self_: &Stack, version: StackVersion) -> Length 
 }
 
 /// Get the last external token for a version.
-pub unsafe fn ts_stack_last_external_token(self_: &Stack, version: StackVersion) -> Subtree {
+pub unsafe fn stack_last_external_token(self_: &Stack, version: StackVersion) -> Subtree {
     stack_head(self_, version).last_external_token
 }
 
 /// Set the last external token for a version.
-pub unsafe fn ts_stack_set_last_external_token(
+pub unsafe fn stack_set_last_external_token(
     self_: &mut Stack,
     version: StackVersion,
     token: Subtree,
@@ -1947,16 +1948,16 @@ pub unsafe fn ts_stack_set_last_external_token(
     let subtree_pool = self_.subtree_pool.as_mut().unwrap_unchecked();
     let head = array_get_mut(&mut self_.heads, version);
     if !token.ptr.is_null() {
-        ts_subtree_retain(token);
+        subtree_retain(token);
     }
     if !head.last_external_token.ptr.is_null() {
-        ts_subtree_release(subtree_pool, head.last_external_token);
+        subtree_release(subtree_pool, head.last_external_token);
     }
     head.last_external_token = token;
 }
 
 /// Get the error cost for a version.
-pub unsafe fn ts_stack_error_cost(self_: &Stack, version: StackVersion) -> u32 {
+pub unsafe fn stack_error_cost(self_: &Stack, version: StackVersion) -> u32 {
     let head = stack_head(self_, version);
     let node = head.node.as_ref().unwrap_unchecked();
     let mut result = node.error_cost;
@@ -1969,7 +1970,7 @@ pub unsafe fn ts_stack_error_cost(self_: &Stack, version: StackVersion) -> u32 {
 }
 
 /// Get the node count since last error for a version.
-pub unsafe fn ts_stack_node_count_since_error(self_: &mut Stack, version: StackVersion) -> u32 {
+pub unsafe fn stack_node_count_since_error(self_: &mut Stack, version: StackVersion) -> u32 {
     let head = stack_head_mut(self_, version);
     let node = head.node.as_ref().unwrap_unchecked();
     if node.node_count < head.node_count_at_last_error {
@@ -1979,7 +1980,7 @@ pub unsafe fn ts_stack_node_count_since_error(self_: &mut Stack, version: StackV
 }
 
 /// Push a subtree onto a version.
-pub unsafe fn ts_stack_push(
+pub unsafe fn stack_push(
     stack: &mut Stack,
     version: StackVersion,
     subtree: Subtree,
@@ -1997,7 +1998,7 @@ pub unsafe fn ts_stack_push(
 }
 
 /// Push a pending reduction descriptor onto a version.
-pub unsafe fn ts_stack_push_pending_reduction(
+pub unsafe fn stack_push_pending_reduction(
     stack: &mut Stack,
     version: StackVersion,
     pending_reduction: *mut PendingReduction,
@@ -2017,12 +2018,12 @@ pub unsafe fn ts_stack_push_pending_reduction(
 }
 
 /// Pop a given number of entries from a version.
-pub unsafe fn ts_stack_pop_count(
+pub unsafe fn stack_pop_count(
     self_: &mut Stack,
     version: StackVersion,
     count: u32,
 ) -> StackSliceArray {
-    if let Some(result) = ts_stack_pop_count_linear(self_, version, count) {
+    if let Some(result) = stack_pop_count_linear(self_, version, count) {
         return result;
     }
 
@@ -2036,14 +2037,14 @@ pub unsafe fn ts_stack_pop_count(
 }
 
 /// Pop a given number of entries from a version into a caller-owned builder.
-pub unsafe fn ts_stack_pop_count_into(
+pub unsafe fn stack_pop_count_into(
     self_: &mut Stack,
     version: StackVersion,
     count: u32,
     builder: &mut StackPopBuilder,
 ) {
-    ts_stack_pop_builder_clear(builder);
-    if ts_stack_pop_count_linear_into(self_, version, count, builder) {
+    stack_pop_builder_clear(builder);
+    if stack_pop_count_linear_into(self_, version, count, builder) {
         return;
     }
 
@@ -2064,12 +2065,12 @@ pub unsafe fn ts_stack_pop_count_into(
 }
 
 /// Pop an error from the top of a version.
-pub unsafe fn ts_stack_pop_error(self_: &mut Stack, version: StackVersion) -> SubtreeArray {
+pub unsafe fn stack_pop_error(self_: &mut Stack, version: StackVersion) -> SubtreeArray {
     let node = stack_head(self_, version).node;
     for i in 0..(*node).link_count as usize {
         let payload = (*node).links[i].payload;
         let subtree = stack_link_payload_subtree(payload);
-        if !stack_link_payload_is_null(payload) && ts_subtree_is_error(subtree) {
+        if !stack_link_payload_is_null(payload) && subtree_is_error(subtree) {
             let mut found_error = false;
             let pop = stack__iter(
                 self_,
@@ -2081,7 +2082,7 @@ pub unsafe fn ts_stack_pop_error(self_: &mut Stack, version: StackVersion) -> Su
             if pop.size > 0 {
                 debug_assert!(pop.size == 1);
                 let first_pop = array_get_ref(&pop, 0);
-                ts_stack_renumber_version(self_, first_pop.version, version);
+                stack_renumber_version(self_, first_pop.version, version);
                 return ptr::read(&first_pop.subtrees);
             }
             break;
@@ -2095,7 +2096,7 @@ pub unsafe fn ts_stack_pop_error(self_: &mut Stack, version: StackVersion) -> Su
 }
 
 /// Pop pending entries from a version.
-pub unsafe fn ts_stack_pop_pending(self_: &mut Stack, version: StackVersion) -> StackSliceArray {
+pub unsafe fn stack_pop_pending(self_: &mut Stack, version: StackVersion) -> StackSliceArray {
     let mut pop = stack__iter(
         self_,
         version,
@@ -2105,21 +2106,21 @@ pub unsafe fn ts_stack_pop_pending(self_: &mut Stack, version: StackVersion) -> 
     );
     if pop.size > 0 {
         let first_pop = array_get_mut(&mut pop, 0);
-        ts_stack_renumber_version(self_, first_pop.version, version);
+        stack_renumber_version(self_, first_pop.version, version);
         first_pop.version = version;
     }
     pop
 }
 
 /// Pop all entries from a version.
-pub unsafe fn ts_stack_pop_all(self_: &mut Stack, version: StackVersion) -> StackSliceArray {
+pub unsafe fn stack_pop_all(self_: &mut Stack, version: StackVersion) -> StackSliceArray {
     stack__iter(self_, version, pop_all_callback, ptr::null_mut(), Some(0))
 }
 
 /// Record a summary of parse states near the top of a version.
-pub unsafe fn ts_stack_record_summary(self_: &mut Stack, version: StackVersion, max_depth: u32) {
+pub unsafe fn stack_record_summary(self_: &mut Stack, version: StackVersion, max_depth: u32) {
     let mut session = SummarizeStackSession {
-        summary: ts_malloc(std::mem::size_of::<StackSummary>()).cast::<StackSummary>(),
+        summary: malloc(std::mem::size_of::<StackSummary>()).cast::<StackSummary>(),
         max_depth,
     };
     array_init(session.summary.as_mut().unwrap_unchecked());
@@ -2133,18 +2134,18 @@ pub unsafe fn ts_stack_record_summary(self_: &mut Stack, version: StackVersion, 
     let head = stack_head_mut(self_, version);
     if !head.summary.is_null() {
         array_delete(head.summary.as_mut().unwrap_unchecked());
-        ts_free(head.summary.cast::<c_void>());
+        free(head.summary.cast::<c_void>());
     }
     head.summary = session.summary;
 }
 
 /// Get the recorded summary for a version.
-pub unsafe fn ts_stack_get_summary(stack: &Stack, version: StackVersion) -> *mut StackSummary {
+pub unsafe fn stack_get_summary(stack: &Stack, version: StackVersion) -> *mut StackSummary {
     stack_head(stack, version).summary
 }
 
 /// Get the dynamic precedence of a version.
-pub unsafe fn ts_stack_dynamic_precedence(self_: &Stack, version: StackVersion) -> i32 {
+pub unsafe fn stack_dynamic_precedence(self_: &Stack, version: StackVersion) -> i32 {
     stack_head(self_, version)
         .node
         .as_ref()
@@ -2153,7 +2154,7 @@ pub unsafe fn ts_stack_dynamic_precedence(self_: &Stack, version: StackVersion) 
 }
 
 /// Check if a version has advanced since the last error.
-pub unsafe fn ts_stack_has_advanced_since_error(self_: &Stack, version: StackVersion) -> bool {
+pub unsafe fn stack_has_advanced_since_error(self_: &Stack, version: StackVersion) -> bool {
     let head = stack_head(self_, version);
     let mut node = head.node;
     if (*node).error_cost == 0 {
@@ -2179,7 +2180,7 @@ pub unsafe fn ts_stack_has_advanced_since_error(self_: &Stack, version: StackVer
 }
 
 /// Remove a version from the stack.
-pub unsafe fn ts_stack_remove_version(self_: &mut Stack, version: StackVersion) {
+pub unsafe fn stack_remove_version(self_: &mut Stack, version: StackVersion) {
     let heads = &mut self_.heads;
     let node_pool = &mut self_.node_pool;
     let subtree_pool = self_.subtree_pool.as_mut().unwrap_unchecked();
@@ -2188,7 +2189,7 @@ pub unsafe fn ts_stack_remove_version(self_: &mut Stack, version: StackVersion) 
 }
 
 /// Renumber version v1 to v2 (move v1 into v2's slot, removing v2).
-pub unsafe fn ts_stack_renumber_version(stack: &mut Stack, v1: StackVersion, v2: StackVersion) {
+pub unsafe fn stack_renumber_version(stack: &mut Stack, v1: StackVersion, v2: StackVersion) {
     if v1 == v2 {
         return;
     }
@@ -2209,7 +2210,7 @@ pub unsafe fn ts_stack_renumber_version(stack: &mut Stack, v1: StackVersion, v2:
 }
 
 /// Swap two versions.
-pub unsafe fn ts_stack_swap_versions(stack: &mut Stack, v1: StackVersion, v2: StackVersion) {
+pub unsafe fn stack_swap_versions(stack: &mut Stack, v1: StackVersion, v2: StackVersion) {
     let temp = ptr::read(array_get_ref(&stack.heads, v1));
     let other = ptr::read(array_get_ref(&stack.heads, v2));
     ptr::write(array_get_mut(&mut stack.heads, v1), other);
@@ -2217,26 +2218,26 @@ pub unsafe fn ts_stack_swap_versions(stack: &mut Stack, v1: StackVersion, v2: St
 }
 
 /// Copy a version, creating a new one.
-pub unsafe fn ts_stack_copy_version(stack: &mut Stack, version: StackVersion) -> StackVersion {
+pub unsafe fn stack_copy_version(stack: &mut Stack, version: StackVersion) -> StackVersion {
     debug_assert!(version < stack.heads.size);
     let version_head = ptr::read(array_get_ref(&stack.heads, version));
     array_push(&mut stack.heads, version_head);
     let head = array_back_mut(&mut stack.heads);
     stack_node_retain(stack_node_mut(head.node));
     if !head.last_external_token.ptr.is_null() {
-        ts_subtree_retain(head.last_external_token);
+        subtree_retain(head.last_external_token);
     }
     head.summary = ptr::null_mut();
     stack.heads.size - 1
 }
 
 /// Merge two versions if possible.
-pub unsafe fn ts_stack_merge(
+pub unsafe fn stack_merge(
     stack: &mut Stack,
     version1: StackVersion,
     version2: StackVersion,
 ) -> bool {
-    if !ts_stack_can_merge(stack, version1, version2) {
+    if !stack_can_merge(stack, version1, version2) {
         return false;
     }
     {
@@ -2256,12 +2257,12 @@ pub unsafe fn ts_stack_merge(
             head1.node_count_at_last_error = head1_node.node_count;
         }
     }
-    ts_stack_remove_version(stack, version2);
+    stack_remove_version(stack, version2);
     true
 }
 
 /// Check if two versions can be merged.
-pub unsafe fn ts_stack_can_merge(
+pub unsafe fn stack_can_merge(
     stack: &Stack,
     version1: StackVersion,
     version2: StackVersion,
@@ -2275,19 +2276,16 @@ pub unsafe fn ts_stack_can_merge(
         && node1.state == node2.state
         && node1.position.bytes == node2.position.bytes
         && node1.error_cost == node2.error_cost
-        && ts_subtree_external_scanner_state_eq(
-            &head1.last_external_token,
-            &head2.last_external_token,
-        )
+        && subtree_external_scanner_state_eq(&head1.last_external_token, &head2.last_external_token)
 }
 
 /// Halt a version.
-pub unsafe fn ts_stack_halt(self_: &mut Stack, version: StackVersion) {
+pub unsafe fn stack_halt(self_: &mut Stack, version: StackVersion) {
     stack_head_mut(self_, version).status = StackStatus::Halted;
 }
 
 /// Pause a version with a lookahead token.
-pub unsafe fn ts_stack_pause(stack: &mut Stack, version: StackVersion, lookahead: Subtree) {
+pub unsafe fn stack_pause(stack: &mut Stack, version: StackVersion, lookahead: Subtree) {
     let head = stack_head_mut(stack, version);
     head.status = StackStatus::Paused;
     head.lookahead_when_paused = lookahead;
@@ -2295,22 +2293,22 @@ pub unsafe fn ts_stack_pause(stack: &mut Stack, version: StackVersion, lookahead
 }
 
 /// Check if a version is active.
-pub unsafe fn ts_stack_is_active(self_: &Stack, version: StackVersion) -> bool {
+pub unsafe fn stack_is_active(self_: &Stack, version: StackVersion) -> bool {
     stack_head(self_, version).status == StackStatus::Active
 }
 
 /// Check if a version is halted.
-pub unsafe fn ts_stack_is_halted(self_: &Stack, version: StackVersion) -> bool {
+pub unsafe fn stack_is_halted(self_: &Stack, version: StackVersion) -> bool {
     stack_head(self_, version).status == StackStatus::Halted
 }
 
 /// Check if a version is paused.
-pub unsafe fn ts_stack_is_paused(self_: &Stack, version: StackVersion) -> bool {
+pub unsafe fn stack_is_paused(self_: &Stack, version: StackVersion) -> bool {
     stack_head(self_, version).status == StackStatus::Paused
 }
 
 /// Resume a paused version, returning its stored lookahead.
-pub unsafe fn ts_stack_resume(stack: &mut Stack, version: StackVersion) -> Subtree {
+pub unsafe fn stack_resume(stack: &mut Stack, version: StackVersion) -> Subtree {
     let head = stack_head_mut(stack, version);
     debug_assert!(head.status == StackStatus::Paused);
     let result = head.lookahead_when_paused;
@@ -2320,7 +2318,7 @@ pub unsafe fn ts_stack_resume(stack: &mut Stack, version: StackVersion) -> Subtr
 }
 
 /// Clear all versions, resetting to initial state.
-pub unsafe fn ts_stack_clear(self_: &mut Stack) {
+pub unsafe fn stack_clear(self_: &mut Stack) {
     stack_segment_storage_clear(self_);
     stack_node_retain(stack_node_mut(self_.base_node));
     let heads = &mut self_.heads;
@@ -2344,7 +2342,7 @@ pub unsafe fn ts_stack_clear(self_: &mut Stack) {
 }
 
 /// Print the stack as a DOT graph for debugging.
-pub unsafe fn ts_stack_print_dot_graph(
+pub unsafe fn stack_print_dot_graph(
     stack: &mut Stack,
     language: *const TSLanguage,
     mut f: *mut c_void,
@@ -2369,8 +2367,8 @@ pub unsafe fn ts_stack_print_dot_graph(
         if stack_head(stack, i).status == StackStatus::Halted {
             continue;
         }
-        let node_count_since_error = ts_stack_node_count_since_error(stack, i);
-        let error_cost = ts_stack_error_cost(stack, i);
+        let node_count_since_error = stack_node_count_since_error(stack, i);
+        let error_cost = stack_error_cost(stack, i);
         let head = stack_head(stack, i);
 
         fprintf(
@@ -2408,8 +2406,8 @@ pub unsafe fn ts_stack_print_dot_graph(
         }
 
         if !head.last_external_token.ptr.is_null() {
-            let state = ts_subtree_external_scanner_state(&head.last_external_token);
-            let data = ts_external_scanner_state_data(state);
+            let state = subtree_external_scanner_state(&head.last_external_token);
+            let data = external_scanner_state_data(state);
             fprintf(f, c"\nexternal_scanner_state:".as_ptr().cast::<i8>());
             for j in 0..state.length {
                 fprintf(
@@ -2503,11 +2501,11 @@ pub unsafe fn ts_stack_print_dot_graph(
                     fprintf(f, c"color=red".as_ptr().cast::<i8>());
                 } else {
                     fprintf(f, c"label=\"".as_ptr().cast::<i8>());
-                    let quoted = ts_subtree_visible(subtree) && !ts_subtree_named(subtree);
+                    let quoted = subtree_visible(subtree) && !subtree_named(subtree);
                     if quoted {
                         fprintf(f, c"'".as_ptr().cast::<i8>());
                     }
-                    ts_language_write_symbol_as_dot_string(language, f, ts_subtree_symbol(subtree));
+                    language_write_symbol_as_dot_string(language, f, subtree_symbol(subtree));
                     if quoted {
                         fprintf(f, c"'".as_ptr().cast::<i8>());
                     }
