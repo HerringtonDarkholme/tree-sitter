@@ -12,6 +12,7 @@ use super::language::{
 };
 use super::length::{length_add, length_zero, Length};
 use super::point::{point_add, point_edit, point_eq, point_gt, point_lt, point_lte};
+use super::raw_pointer::{ptr_mut, ptr_ref};
 use super::subtree::subtree_parse_state;
 use super::subtree::{
     subtree_child_count, subtree_children, subtree_error_cost, subtree_extra, subtree_has_changes,
@@ -67,18 +68,6 @@ const unsafe fn node__subtree(self_: TSNode) -> Subtree {
 #[inline]
 const fn node_tree(self_: TSNode) -> *const TSTree {
     self_.tree.cast::<TSTree>()
-}
-
-#[inline]
-unsafe fn ptr_ref<'a, T>(ptr: *const T) -> &'a T {
-    debug_assert!(!ptr.is_null());
-    ptr.as_ref().unwrap_unchecked()
-}
-
-#[inline]
-unsafe fn ptr_mut<'a, T>(ptr: *mut T) -> &'a mut T {
-    debug_assert!(!ptr.is_null());
-    ptr.as_mut().unwrap_unchecked()
 }
 
 #[inline]

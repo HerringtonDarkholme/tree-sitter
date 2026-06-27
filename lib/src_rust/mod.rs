@@ -37,5 +37,6 @@ pub mod parser;
 // query.c — not migrated, remains in C
 
 // Internal helpers (no corresponding .c file)
+mod raw_pointer;
 pub mod reduce_action;
 mod reusable_node;

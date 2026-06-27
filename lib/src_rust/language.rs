@@ -17,6 +17,7 @@ use crate::ffi::{TSFieldId, TSLanguage, TSStateId, TSSymbol};
 
 // Re-use types already defined in subtree.rs
 use super::alloc::{free, malloc};
+use super::raw_pointer::ptr_mut;
 use super::subtree::TSSymbolMetadata;
 
 // ---------------------------------------------------------------------------
@@ -34,11 +35,6 @@ pub const TSSymbolTypeRegular: TSSymbolType = 0;
 pub const TSSymbolTypeAnonymous: TSSymbolType = 1;
 pub const TSSymbolTypeSupertype: TSSymbolType = 2;
 
-#[inline]
-unsafe fn ptr_mut<'a, T>(ptr: *mut T) -> &'a mut T {
-    debug_assert!(!ptr.is_null());
-    ptr.as_mut().unwrap_unchecked()
-}
 pub const TSSymbolTypeAuxiliary: TSSymbolType = 3;
 
 // ---------------------------------------------------------------------------

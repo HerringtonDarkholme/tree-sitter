@@ -23,6 +23,7 @@ use crate::ffi::{
 use super::alloc::{free, realloc};
 use super::language::TSLexer;
 use super::length::{length_is_undefined, Length, LENGTH_UNDEFINED};
+use super::raw_pointer::{ptr_mut, ptr_ref};
 use super::unicode::{ts_decode_utf16_be, ts_decode_utf16_le, ts_decode_utf8, TS_DECODE_ERROR};
 
 // ---------------------------------------------------------------------------
@@ -104,6 +105,55 @@ pub struct Lexer {
     pub debug_buffer: [u8; TREE_SITTER_SERIALIZATION_BUFFER_SIZE],
 }
 
+pub unsafe fn lexer_new() -> Lexer {
+    let mut lexer = Lexer {
+        data: TSLexer {
+            lookahead: 0,
+            result_symbol: 0,
+            advance: Some(ts_lexer__advance),
+            mark_end: Some(ts_lexer__mark_end),
+            get_column: Some(ts_lexer__get_column),
+            is_at_included_range_start: Some(ts_lexer__is_at_included_range_start),
+            eof: Some(ts_lexer__eof),
+            log: Some(ts_lexer__log_shim),
+        },
+        current_position: Length {
+            bytes: 0,
+            extent: TSPoint { row: 0, column: 0 },
+        },
+        token_start_position: Length {
+            bytes: 0,
+            extent: TSPoint { row: 0, column: 0 },
+        },
+        token_end_position: LENGTH_UNDEFINED,
+        included_ranges: ptr::null_mut(),
+        chunk: ptr::null(),
+        input: TSInput {
+            payload: ptr::null_mut(),
+            read: None,
+            encoding: TSInputEncodingUTF8,
+            decode: None,
+        },
+        logger: TSLogger {
+            payload: ptr::null_mut(),
+            log: None,
+        },
+        included_range_count: 0,
+        current_included_range_index: 0,
+        chunk_start: 0,
+        chunk_size: 0,
+        lookahead_size: 0,
+        did_get_column: false,
+        column_data: ColumnData {
+            value: 0,
+            valid: false,
+        },
+        debug_buffer: [0; TREE_SITTER_SERIALIZATION_BUFFER_SIZE],
+    };
+    lexer_set_included_ranges(&mut lexer, ptr::null(), 0);
+    lexer
+}
+
 // ---------------------------------------------------------------------------
 // Compile-time layout assertions
 // ---------------------------------------------------------------------------
@@ -116,14 +166,12 @@ const _: () = assert!(std::mem::size_of::<ColumnData>() == 8);
 
 #[inline]
 unsafe fn lexer_ref<'a>(lexer: *const TSLexer) -> &'a Lexer {
-    debug_assert!(!lexer.is_null());
-    lexer.cast::<Lexer>().as_ref().unwrap_unchecked()
+    ptr_ref(lexer.cast::<Lexer>())
 }
 
 #[inline]
 unsafe fn lexer_mut<'a>(lexer: *mut TSLexer) -> &'a mut Lexer {
-    debug_assert!(!lexer.is_null());
-    lexer.cast::<Lexer>().as_mut().unwrap_unchecked()
+    ptr_mut(lexer.cast::<Lexer>())
 }
 
 /// Sets the column data to the given value and marks it valid.
@@ -166,7 +214,7 @@ fn lexer__clear_chunk(self_: &mut Lexer) {
 unsafe fn lexer__included_range(self_: &Lexer, index: usize) -> &TSRange {
     debug_assert!(index < self_.included_range_count as usize);
     debug_assert!(!self_.included_ranges.is_null());
-    self_.included_ranges.add(index).as_ref().unwrap_unchecked()
+    ptr_ref(self_.included_ranges.add(index))
 }
 
 /// Call the input callback to obtain a new chunk of source code.
@@ -517,39 +565,6 @@ extern "C" {
 // ===========================================================================
 // Parser-facing lexer functions.
 // ===========================================================================
-
-/// Initialize a Lexer, setting up the `TSLexer` vtable and default state.
-pub unsafe fn lexer_init(self_: &mut Lexer) {
-    let s = self_;
-    s.data.advance = Some(ts_lexer__advance);
-    s.data.mark_end = Some(ts_lexer__mark_end);
-    s.data.get_column = Some(ts_lexer__get_column);
-    s.data.is_at_included_range_start = Some(ts_lexer__is_at_included_range_start);
-    s.data.eof = Some(ts_lexer__eof);
-    s.data.log = Some(ts_lexer__log_shim);
-    s.data.lookahead = 0;
-    s.data.result_symbol = 0;
-    s.chunk = ptr::null();
-    s.chunk_size = 0;
-    s.chunk_start = 0;
-    s.current_position = Length {
-        bytes: 0,
-        extent: TSPoint { row: 0, column: 0 },
-    };
-    s.logger = TSLogger {
-        payload: ptr::null_mut(),
-        log: None,
-    };
-    s.included_ranges = ptr::null_mut();
-    s.included_range_count = 0;
-    s.current_included_range_index = 0;
-    s.did_get_column = false;
-    s.column_data = ColumnData {
-        valid: false,
-        value: 0,
-    };
-    lexer_set_included_ranges(s, ptr::null(), 0);
-}
 
 /// Free the lexer's `included_ranges` allocation.
 pub unsafe fn lexer_delete(self_: &mut Lexer) {

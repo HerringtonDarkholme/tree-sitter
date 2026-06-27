@@ -17,6 +17,7 @@ use super::error_costs::{
 };
 use super::language::{ts_language_symbol_metadata, ts_language_symbol_name};
 use super::length::{length_add, length_saturating_sub, length_sub, length_zero, Length};
+use super::raw_pointer::{ptr_mut, ptr_ref};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -950,7 +951,7 @@ unsafe fn tree_arena_try_current_page(
     alignment: usize,
 ) -> *mut c_void {
     if !arena.current_page.is_null() {
-        let page = arena.current_page.as_mut().unwrap_unchecked();
+        let page = ptr_mut(arena.current_page);
         let offset = align_up(page.size, alignment);
         if offset + size <= page.capacity {
             page.size = offset + size;
@@ -990,7 +991,7 @@ unsafe fn tree_arena_alloc_new_page(
 /// nodes together when the last copied `TSTree` is deleted.
 unsafe fn tree_arena_alloc(arena: *mut TreeArena, size: usize, alignment: usize) -> *mut c_void {
     debug_assert!(!arena.is_null());
-    let arena = arena.as_mut().unwrap_unchecked();
+    let arena = ptr_mut(arena);
 
     let result = tree_arena_try_current_page(arena, size, alignment);
     if !result.is_null() {
@@ -1167,19 +1168,19 @@ unsafe fn mutable_subtree_children<'a>(self_: MutableSubtree) -> &'a mut [Subtre
 
 #[inline]
 unsafe fn mutable_subtree_data_mut<'a>(self_: MutableSubtree) -> &'a mut SubtreeHeapData {
-    self_.ptr.as_mut().unwrap_unchecked()
+    ptr_mut(self_.ptr)
 }
 
 #[inline]
 unsafe fn subtree_data_ref<'a>(self_: Subtree) -> &'a SubtreeHeapData {
-    self_.ptr.as_ref().unwrap_unchecked()
+    ptr_ref(self_.ptr)
 }
 
 #[inline]
 unsafe fn external_scanner_state_mut<'a>(
     state: *mut ExternalScannerState,
 ) -> &'a mut ExternalScannerState {
-    state.as_mut().unwrap_unchecked()
+    ptr_mut(state)
 }
 
 #[inline]

@@ -9,7 +9,7 @@ use crate::ffi::{
     TSParseOptions, TSParseState, TSPoint, TSRange, TSStateId, TSSymbol, TSWasmStore,
 };
 
-use super::alloc::{calloc, free, malloc};
+use super::alloc::{free, malloc};
 use super::error_costs::{
     ERROR_COST_PER_RECOVERY, ERROR_COST_PER_SKIPPED_CHAR, ERROR_COST_PER_SKIPPED_LINE,
     ERROR_COST_PER_SKIPPED_TREE, ERROR_STATE,
@@ -31,9 +31,10 @@ use super::language::{
 };
 use super::length::{length_add, length_sub, length_zero, Length};
 use super::lexer::{
-    lexer_delete, lexer_finish, lexer_included_ranges, lexer_init, lexer_mark_end, lexer_reset,
+    lexer_delete, lexer_finish, lexer_included_ranges, lexer_mark_end, lexer_new, lexer_reset,
     lexer_set_included_ranges, lexer_set_input, lexer_start, Lexer,
 };
+use super::raw_pointer::{ptr_mut, ptr_ref};
 use super::reusable_node::{
     reusable_node_advance, reusable_node_advance_past_leaf, reusable_node_byte_offset,
     reusable_node_clear, reusable_node_delete, reusable_node_descend, reusable_node_new,
@@ -47,7 +48,6 @@ use super::stack::{
     array_erase,
     array_get_mut,
     array_get_ref,
-    array_init,
     array_new,
     array_pop,
     array_push,
@@ -576,24 +576,31 @@ const fn parse_state_empty() -> TSParseState {
 
 #[inline]
 unsafe fn parser_stack_mut<'a>(stack: *mut Stack) -> &'a mut Stack {
-    stack.as_mut().unwrap_unchecked()
+    ptr_mut(stack)
 }
 
 #[inline]
 unsafe fn parser_stack_ref<'a>(stack: *const Stack) -> &'a Stack {
-    stack.as_ref().unwrap_unchecked()
+    ptr_ref(stack)
 }
 
 #[inline]
 unsafe fn parser_language_full<'a>(language: *const TSLanguage) -> &'a TSLanguageFull {
-    language
-        .cast::<TSLanguageFull>()
-        .as_ref()
-        .unwrap_unchecked()
+    ptr_ref(language.cast::<TSLanguageFull>())
+}
+
+#[inline]
+unsafe fn parser_mut<'a>(parser: *mut TSParser) -> &'a mut TSParser {
+    ptr_mut(parser)
+}
+
+#[inline]
+unsafe fn parser_ref<'a>(parser: *const TSParser) -> &'a TSParser {
+    ptr_ref(parser)
 }
 
 unsafe fn parser__pending_reduction_delete(self_: &mut TSParser, pending: *mut PendingReduction) {
-    let pending = pending.as_mut().unwrap_unchecked();
+    let pending = ptr_mut(pending);
     if !pending.materialized.ptr.is_null() {
         subtree_release(&mut self_.tree_pool, pending.materialized);
         pending.materialized = NULL_SUBTREE;
@@ -900,7 +907,7 @@ unsafe fn parser__payload_size(payload: StackLinkPayload) -> Length {
 #[inline]
 unsafe fn parser__payload_total_size(payload: StackLinkPayload) -> Length {
     if stack_link_payload_is_pending_reduction(payload) {
-        let pending = parser__payload_pending(payload).as_ref().unwrap_unchecked();
+        let pending = ptr_ref(parser__payload_pending(payload));
         length_add(pending.padding, pending.size)
     } else {
         subtree_total_size(parser__payload_subtree(payload))
@@ -1160,7 +1167,7 @@ unsafe fn parser__pending_reduction_new_from_children(
             fragile,
         ),
     );
-    let pending_ref = pending.as_mut().unwrap_unchecked();
+    let pending_ref = ptr_mut(pending);
 
     array_reserve(
         subtree_array_as_array_mut(&mut pending_ref.children),
@@ -1202,7 +1209,7 @@ unsafe fn parser__pending_reduction_new_from_payloads(
             fragile,
         ),
     );
-    let pending_ref = pending.as_mut().unwrap_unchecked();
+    let pending_ref = ptr_mut(pending);
 
     array_reserve(&mut pending_ref.payload_children, children.size);
     for i in 0..children.size {
@@ -1221,7 +1228,7 @@ unsafe fn parser__materialize_pending_reduction(
     self_: &mut TSParser,
     pending: *mut PendingReduction,
 ) -> Subtree {
-    let pending_ref = pending.as_mut().unwrap_unchecked();
+    let pending_ref = ptr_mut(pending);
     if !pending_ref.materialized.ptr.is_null() {
         subtree_retain(pending_ref.materialized);
         return pending_ref.materialized;
@@ -1381,7 +1388,7 @@ unsafe extern "C" fn ts_string_input_read(
     _point: TSPoint,
     length: *mut u32,
 ) -> *const i8 {
-    let input = payload.cast::<TSStringInput>().as_ref().unwrap_unchecked();
+    let input = ptr_ref(payload.cast::<TSStringInput>());
     if byte >= input.length {
         *length = 0;
         c"".as_ptr().cast::<i8>()
@@ -3183,7 +3190,7 @@ unsafe fn parser__recover(self_: &mut TSParser, version: StackVersion, mut looka
 
     // Strategy 1: Find a previous state where the lookahead is valid.
     if !summary.is_null() && !subtree_is_error(lookahead) {
-        let summary = summary.as_ref().unwrap_unchecked();
+        let summary = ptr_ref(summary);
         for i in 0..summary.size {
             let entry = *array_get_ref(summary, i);
 
@@ -3960,28 +3967,46 @@ unsafe fn parser__take_finished_tree(self_: &mut TSParser) -> *mut TSTree {
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_parser_new() -> *mut TSParser {
-    let self_ = calloc(1, core::mem::size_of::<TSParser>()).cast::<TSParser>();
-    let parser = self_.as_mut().unwrap_unchecked();
-    lexer_init(&mut parser.lexer);
-    array_init(&mut parser.reduce_actions);
+    let self_ = malloc(core::mem::size_of::<TSParser>()).cast::<TSParser>();
+    ptr::write(
+        self_,
+        TSParser {
+            lexer: lexer_new(),
+            stack: ptr::null_mut(),
+            tree_pool: subtree_pool_new(32),
+            language: ptr::null(),
+            wasm_store: ptr::null_mut(),
+            reduce_actions: array_new(),
+            finished_tree: NULL_SUBTREE,
+            reduce_builder: stack_pop_builder_new(),
+            pending_reductions: array_new(),
+            trailing_extras: subtree_array_new(),
+            trailing_extras2: subtree_array_new(),
+            scratch_trees: subtree_array_new(),
+            token_cache: TokenCache {
+                token: NULL_SUBTREE,
+                last_external_token: NULL_SUBTREE,
+                byte_index: 0,
+            },
+            tree_arena: ptr::null_mut(),
+            reusable_node: reusable_node_new(),
+            external_scanner_payload: ptr::null_mut(),
+            dot_graph_file: ptr::null_mut(),
+            accept_count: 0,
+            operation_count: 0,
+            old_tree: NULL_SUBTREE,
+            included_range_differences: range_array_new(),
+            parse_options: parse_options_none(),
+            parse_state: parse_state_empty(),
+            included_range_difference_index: 0,
+            has_scanner_error: false,
+            canceled_balancing: false,
+            has_error: false,
+        },
+    );
+    let parser = parser_mut(self_);
     array_reserve(&mut parser.reduce_actions, 4);
-    array_init(&mut parser.pending_reductions);
-    parser.tree_pool = subtree_pool_new(32);
     parser.stack = stack_new(&mut parser.tree_pool);
-    parser.reduce_builder = stack_pop_builder_new();
-    parser.finished_tree = NULL_SUBTREE;
-    parser.tree_arena = ptr::null_mut();
-    parser.reusable_node = reusable_node_new();
-    parser.dot_graph_file = ptr::null_mut();
-    parser.language = ptr::null();
-    parser.has_scanner_error = false;
-    parser.has_error = false;
-    parser.canceled_balancing = false;
-    parser.external_scanner_payload = ptr::null_mut();
-    parser.operation_count = 0;
-    parser.old_tree = NULL_SUBTREE;
-    parser.included_range_differences = range_array_new();
-    parser.included_range_difference_index = 0;
     parser__set_cached_token(parser, 0, NULL_SUBTREE, NULL_SUBTREE);
     self_
 }
@@ -3993,7 +4018,7 @@ pub unsafe extern "C" fn ts_parser_delete(self_: *mut TSParser) {
     }
 
     ts_parser_set_language(self_, ptr::null());
-    let parser = self_.as_mut().unwrap_unchecked();
+    let parser = parser_mut(self_);
     stack_delete(parser_stack_mut(parser.stack));
     parser__clear_pending_reductions(parser);
     if !parser.reduce_actions.contents.is_null() {
@@ -4033,7 +4058,7 @@ pub unsafe extern "C" fn ts_parser_delete(self_: *mut TSParser) {
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_parser_language(self_: *const TSParser) -> *const TSLanguage {
-    let parser = self_.as_ref().unwrap_unchecked();
+    let parser = parser_ref(self_);
     parser.language
 }
 
@@ -4043,7 +4068,7 @@ pub unsafe extern "C" fn ts_parser_set_language(
     language: *const TSLanguage,
 ) -> bool {
     ts_parser_reset(self_);
-    let parser = self_.as_mut().unwrap_unchecked();
+    let parser = parser_mut(self_);
     ts_language_delete(parser.language);
     parser.language = ptr::null();
 
@@ -4069,19 +4094,19 @@ pub unsafe extern "C" fn ts_parser_set_language(
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_parser_logger(self_: *const TSParser) -> TSLogger {
-    let parser = self_.as_ref().unwrap_unchecked();
+    let parser = parser_ref(self_);
     ptr::read(&parser.lexer.logger)
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_parser_set_logger(self_: *mut TSParser, logger: TSLogger) {
-    let parser = self_.as_mut().unwrap_unchecked();
+    let parser = parser_mut(self_);
     parser.lexer.logger = logger;
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_parser_print_dot_graphs(self_: *mut TSParser, fd: i32) {
-    let parser = self_.as_mut().unwrap_unchecked();
+    let parser = parser_mut(self_);
     if !parser.dot_graph_file.is_null() {
         fclose(parser.dot_graph_file);
     }
@@ -4109,7 +4134,7 @@ pub unsafe extern "C" fn ts_parser_set_included_ranges(
     ranges: *const TSRange,
     count: u32,
 ) -> bool {
-    let parser = self_.as_mut().unwrap_unchecked();
+    let parser = parser_mut(self_);
     lexer_set_included_ranges(&mut parser.lexer, ranges, count)
 }
 
@@ -4118,13 +4143,13 @@ pub unsafe extern "C" fn ts_parser_included_ranges(
     self_: *const TSParser,
     count: *mut u32,
 ) -> *const TSRange {
-    let parser = self_.as_ref().unwrap_unchecked();
+    let parser = parser_ref(self_);
     lexer_included_ranges(&parser.lexer, count)
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_parser_reset(self_: *mut TSParser) {
-    let parser = self_.as_mut().unwrap_unchecked();
+    let parser = parser_mut(self_);
     parser__external_scanner_destroy(parser);
     if !parser.wasm_store.is_null() {
         ts_wasm_store_reset(parser.wasm_store);
@@ -4178,7 +4203,7 @@ pub unsafe extern "C" fn ts_parser_parse(
     old_tree: *const TSTree,
     input: TSInput,
 ) -> *mut TSTree {
-    let parser = self_.as_mut().unwrap_unchecked();
+    let parser = parser_mut(self_);
     let mut result: *mut TSTree = ptr::null_mut();
     if parser.language.is_null() || input.read.is_none() {
         return ptr::null_mut();
@@ -4371,13 +4396,13 @@ pub unsafe extern "C" fn ts_parser_parse_with_options(
     parse_options: TSParseOptions,
 ) -> *mut TSTree {
     {
-        let parser = self_.as_mut().unwrap_unchecked();
+        let parser = parser_mut(self_);
         parser.parse_options = parse_options;
         parser.parse_state.payload = parse_options.payload;
     }
     let result = ts_parser_parse(self_, old_tree, input);
     // Reset parser options before further parse calls.
-    let parser = self_.as_mut().unwrap_unchecked();
+    let parser = parser_mut(self_);
     parser.parse_options = parse_options_none();
     result
 }
@@ -4419,7 +4444,7 @@ pub unsafe extern "C" fn ts_parser_parse_string_encoding(
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_parser_set_wasm_store(self_: *mut TSParser, store: *mut TSWasmStore) {
-    let parser = self_.as_ref().unwrap_unchecked();
+    let parser = parser_ref(self_);
     if !parser.language.is_null() && ts_language_is_wasm(parser.language) {
         // Copy the assigned language into the new store.
         let copy = ts_language_copy(parser.language);
@@ -4427,19 +4452,19 @@ pub unsafe extern "C" fn ts_parser_set_wasm_store(self_: *mut TSParser, store: *
         ts_language_delete(copy);
     }
 
-    let parser = self_.as_mut().unwrap_unchecked();
+    let parser = parser_mut(self_);
     ts_wasm_store_delete(parser.wasm_store);
     parser.wasm_store = store;
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_parser_take_wasm_store(self_: *mut TSParser) -> *mut TSWasmStore {
-    let parser = self_.as_ref().unwrap_unchecked();
+    let parser = parser_ref(self_);
     if !parser.language.is_null() && ts_language_is_wasm(parser.language) {
         ts_parser_set_language(self_, ptr::null());
     }
 
-    let parser = self_.as_mut().unwrap_unchecked();
+    let parser = parser_mut(self_);
     let result = parser.wasm_store;
     parser.wasm_store = ptr::null_mut();
     result

@@ -13,6 +13,7 @@ use super::get_changed_ranges::{
 use super::language::{ts_language_copy, ts_language_delete};
 use super::length::{length_add, Length};
 use super::node::node_new;
+use super::raw_pointer::{ptr_mut, ptr_ref};
 use super::subtree::{
     subtree_edit, subtree_padding, subtree_pool_delete, subtree_pool_new, subtree_print_dot_graph,
     subtree_release, subtree_retain, tree_arena_release, tree_arena_retain, Subtree, TreeArena,
@@ -167,18 +168,6 @@ const fn tree_cursor_empty() -> TreeCursor {
         stack: tree_cursor_entry_array_new(),
         root_alias_symbol: 0,
     }
-}
-
-#[inline]
-unsafe fn ptr_ref<'a, T>(ptr: *const T) -> &'a T {
-    debug_assert!(!ptr.is_null());
-    ptr.as_ref().unwrap_unchecked()
-}
-
-#[inline]
-unsafe fn ptr_mut<'a, T>(ptr: *mut T) -> &'a mut T {
-    debug_assert!(!ptr.is_null());
-    ptr.as_mut().unwrap_unchecked()
 }
 
 /// Apply an edit to the tree's ranges and root subtree.

@@ -11,6 +11,7 @@ use super::error_costs::ERROR_STATE;
 use super::language::language_alias_at;
 use super::length::{length_add, length_min, length_zero, Length, LENGTH_MAX};
 use super::point::{point_add, point_sub, POINT_MAX};
+use super::raw_pointer::{ptr_mut, ptr_ref};
 use super::subtree::{
     subtree_child_count, subtree_children, subtree_error_cost, subtree_external_scanner_state_eq,
     subtree_extra, subtree_has_changes, subtree_has_external_tokens, subtree_last_external_token,
@@ -40,18 +41,6 @@ pub const fn range_array_new() -> TSRangeArray {
         size: 0,
         capacity: 0,
     }
-}
-
-#[inline]
-unsafe fn ptr_ref<'a, T>(ptr: *const T) -> &'a T {
-    debug_assert!(!ptr.is_null());
-    ptr.as_ref().unwrap_unchecked()
-}
-
-#[inline]
-unsafe fn ptr_mut<'a, T>(ptr: *mut T) -> &'a mut T {
-    debug_assert!(!ptr.is_null());
-    ptr.as_mut().unwrap_unchecked()
 }
 
 /// Cursor used when diffing two syntax trees.

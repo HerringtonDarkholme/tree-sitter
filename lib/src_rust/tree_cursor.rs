@@ -13,6 +13,7 @@ use super::language::{
 use super::length::{length_add, length_is_undefined, length_zero, Length, LENGTH_UNDEFINED};
 use super::node::{node_new, ts_node_start_byte, ts_node_start_point};
 use super::point::point_gt;
+use super::raw_pointer::{ptr_mut, ptr_ref};
 use super::subtree::{
     subtree_child_count, subtree_children, subtree_extra, subtree_padding, subtree_size,
     subtree_symbol, subtree_total_size, subtree_visible, subtree_visible_child_count,
@@ -92,20 +93,17 @@ pub struct TreeCursor {
 
 #[inline]
 unsafe fn cursor_ref<'a>(cursor: *const TSTreeCursor) -> &'a TreeCursor {
-    debug_assert!(!cursor.is_null());
-    cursor.cast::<TreeCursor>().as_ref().unwrap_unchecked()
+    ptr_ref(cursor.cast::<TreeCursor>())
 }
 
 #[inline]
 unsafe fn cursor_mut<'a>(cursor: *mut TSTreeCursor) -> &'a mut TreeCursor {
-    debug_assert!(!cursor.is_null());
-    cursor.cast::<TreeCursor>().as_mut().unwrap_unchecked()
+    ptr_mut(cursor.cast::<TreeCursor>())
 }
 
 #[inline]
 unsafe fn out_param_mut<'a, T>(ptr: *mut T) -> &'a mut T {
-    debug_assert!(!ptr.is_null());
-    ptr.as_mut().unwrap_unchecked()
+    ptr_mut(ptr)
 }
 
 /// Result of internal navigation.

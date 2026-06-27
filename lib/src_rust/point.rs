@@ -2,6 +2,8 @@
 
 use crate::ffi::{TSInputEdit, TSPoint};
 
+use super::raw_pointer::{ptr_mut, ptr_ref};
+
 pub const POINT_ZERO: TSPoint = TSPoint { row: 0, column: 0 };
 pub const POINT_MAX: TSPoint = TSPoint {
     row: u32::MAX,
@@ -75,18 +77,6 @@ pub fn point_edit(point: &mut TSPoint, byte: &mut u32, edit: &TSInputEdit) {
         *byte = edit.new_end_byte;
         *point = edit.new_end_point;
     }
-}
-
-#[inline]
-unsafe fn ptr_ref<'a, T>(ptr: *const T) -> &'a T {
-    debug_assert!(!ptr.is_null());
-    ptr.as_ref().unwrap_unchecked()
-}
-
-#[inline]
-unsafe fn ptr_mut<'a, T>(ptr: *mut T) -> &'a mut T {
-    debug_assert!(!ptr.is_null());
-    ptr.as_mut().unwrap_unchecked()
 }
 
 /// C-compatible `ts_point_edit` — exported for use by remaining C code (node.c).
