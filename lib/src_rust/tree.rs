@@ -27,13 +27,18 @@ use super::utils::{ptr_mut, ptr_ref};
 // Extern C functions (still in C or other Rust modules)
 // ---------------------------------------------------------------------------
 
+#[cfg(not(target_family = "wasm"))]
 extern "C" {
-    #[cfg(not(target_os = "windows"))]
-    fn dup(fd: i32) -> i32;
-    #[cfg(not(target_os = "windows"))]
+    // `fdopen` is spelled `_fdopen` on Windows; `fclose` keeps its name on all
+    // platforms.
+    #[cfg_attr(target_os = "windows", link_name = "_fdopen")]
     fn fdopen(fd: i32, mode: *const i8) -> *mut c_void;
-    #[cfg(not(target_os = "windows"))]
     fn fclose(f: *mut c_void) -> i32;
+}
+
+#[cfg(not(any(target_os = "windows", target_family = "wasm")))]
+extern "C" {
+    fn dup(fd: i32) -> i32;
 }
 
 use crate::ffi::TSInputEdit;
@@ -194,7 +199,13 @@ unsafe fn tree_edit_ref(tree: &mut TSTree, edit: &TSInputEdit) {
 
 #[cfg(not(target_family = "wasm"))]
 unsafe fn tree_print_dot_graph_ref(tree: &TSTree, file_descriptor: i32) {
-    let file = fdopen(_ts_dup(file_descriptor), c"a".as_ptr().cast::<i8>());
+    // On Windows `_ts_dup` takes the OS handle behind the fd (mirroring
+    // lib/src/tree.c); elsewhere it duplicates the fd directly.
+    #[cfg(target_os = "windows")]
+    let dup_fd = _ts_dup(win_dot_graph::_get_osfhandle(file_descriptor) as win_dot_graph::Handle);
+    #[cfg(not(target_os = "windows"))]
+    let dup_fd = _ts_dup(file_descriptor);
+    let file = fdopen(dup_fd, c"a".as_ptr().cast::<i8>());
     subtree_print_dot_graph(tree.root, tree.language, file);
     fclose(file);
 }
@@ -356,6 +367,53 @@ pub unsafe extern "C" fn ts_tree_get_changed_ranges(
 #[no_mangle]
 pub unsafe extern "C" fn _ts_dup(file_descriptor: i32) -> i32 {
     dup(file_descriptor)
+}
+
+// Windows fd duplication for the dot-graph FILE*, mirroring lib/src/tree.c: the
+// fd's OS handle is duplicated and reopened so the temporary FILE* can be closed
+// without closing the caller's fd.
+#[cfg(all(target_os = "windows", not(target_family = "wasm")))]
+mod win_dot_graph {
+    use core::ffi::c_void;
+
+    pub type Handle = *mut c_void;
+    pub const DUPLICATE_SAME_ACCESS: u32 = 0x0000_0002;
+
+    extern "system" {
+        pub fn GetCurrentProcess() -> Handle;
+        pub fn DuplicateHandle(
+            source_process: Handle,
+            source_handle: Handle,
+            target_process: Handle,
+            target_handle: *mut Handle,
+            desired_access: u32,
+            inherit_handle: i32,
+            options: u32,
+        ) -> i32;
+    }
+    extern "C" {
+        pub fn _get_osfhandle(fd: i32) -> isize;
+        pub fn _open_osfhandle(osfhandle: isize, flags: i32) -> i32;
+    }
+}
+
+#[cfg(all(target_os = "windows", not(target_family = "wasm")))]
+#[no_mangle]
+pub unsafe extern "C" fn _ts_dup(handle: win_dot_graph::Handle) -> i32 {
+    let mut dup_handle: win_dot_graph::Handle = core::ptr::null_mut();
+    if win_dot_graph::DuplicateHandle(
+        win_dot_graph::GetCurrentProcess(),
+        handle,
+        win_dot_graph::GetCurrentProcess(),
+        &mut dup_handle,
+        0,
+        0,
+        win_dot_graph::DUPLICATE_SAME_ACCESS,
+    ) == 0
+    {
+        return -1;
+    }
+    win_dot_graph::_open_osfhandle(dup_handle as isize, 0)
 }
 
 #[cfg(not(target_family = "wasm"))]

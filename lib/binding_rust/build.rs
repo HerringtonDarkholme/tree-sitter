@@ -71,10 +71,6 @@ fn main() {
             .warnings(false)
             .file(core_src_path.join(core_impl.library_source()));
 
-        if core_impl == CoreImpl::Rust {
-            config.file(src_path.join("lexer_log_shim.c"));
-        }
-
         config.compile("tree-sitter");
     }
 
@@ -109,12 +105,10 @@ impl CoreImpl {
 
     const fn library_source(self) -> &'static str {
         match self {
-            // The Rust core provides everything except the still-C wasm store,
-            // which is compiled directly (no amalgamation wrapper needed).
-            Self::Rust => "wasm_store.c",
-            // The C core builds from a pre-rewrite source dir (see source_path);
-            // that historical tree still has its amalgamated lib.c.
-            Self::C => "lib.c",
+            // Both cores compile the `lib.c` amalgamation. For the Rust core
+            // `lib.c` wraps the remaining C (wasm_store.c + lexer_log_shim.c);
+            // the C core's pre-rewrite tree has the full amalgamation.
+            Self::Rust | Self::C => "lib.c",
         }
     }
 

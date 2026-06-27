@@ -217,9 +217,10 @@ extern "C" {
     fn fprintf(f: *mut c_void, fmt: *const i8, ...) -> i32;
     fn fputs(s: *const i8, f: *mut c_void) -> i32;
     fn fputc(c: i32, f: *mut c_void) -> i32;
+    // `fdopen` is spelled `_fdopen` on Windows (declared at the call site);
+    // `fclose` keeps its name on all platforms.
     #[cfg(not(target_os = "windows"))]
     fn fdopen(fd: i32, mode: *const i8) -> *mut c_void;
-    #[cfg(not(target_os = "windows"))]
     fn fclose(f: *mut c_void) -> i32;
 }
 

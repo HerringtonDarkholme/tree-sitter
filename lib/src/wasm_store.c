@@ -11,6 +11,7 @@
 #include "./lexer.h"
 #include "./wasm/wasm-stdlib.h"
 
+#include <stdio.h>
 #include <string.h>
 #include <wasm.h>
 #include <wasmtime.h>

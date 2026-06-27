@@ -247,12 +247,12 @@ pub fn run_wasm(args: &BuildWasm) -> Result<()> {
         "--pre-js",     "lib/binding_web/lib/prefix.js",
         "-o",           if args.cjs { binding_file!(".cjs") } else { binding_file!(".mjs") },
         core_staticlib,
-        // These C files are linked here rather than compiled into the staticlib, so
-        // the staticlib build needs no C toolchain (see build.rs). They supply the
-        // symbols the Rust core references via FFI: the variadic lexer log shim, and
-        // wasm_store.c's no-wasmtime stubs (ts_language_is_wasm, ts_wasm_store_*).
-        "lib/src/lexer_log_shim.c",
-        "lib/src/wasm_store.c",
+        // lib.c (the remaining-C amalgamation) is linked here rather than compiled
+        // into the staticlib, so the staticlib build needs no C toolchain (see
+        // build.rs). It supplies the symbols the Rust core references via FFI: the
+        // variadic lexer log shim and wasm_store.c's no-wasmtime stubs
+        // (ts_language_is_wasm, ts_wasm_store_*).
+        "lib/src/lib.c",
         "lib/binding_web/lib/tree-sitter.c",
     ]);
     if args.emit_tsd {
