@@ -1,0 +1,123 @@
+_ts_dup	pub unsafe extern "C" fn _ts_dup(file_descriptor: i32) -> i32
+ts_language_abi_version	pub const unsafe extern "C" fn ts_language_abi_version(self_: *const TSLanguage) -> u32
+ts_language_copy	pub unsafe extern "C" fn ts_language_copy(self_: *const TSLanguage) -> *const TSLanguage
+ts_language_delete	pub unsafe extern "C" fn ts_language_delete(self_: *const TSLanguage)
+ts_language_field_count	pub const unsafe extern "C" fn ts_language_field_count(self_: *const TSLanguage) -> u32
+ts_language_field_id_for_name	pub unsafe extern "C" fn ts_language_field_id_for_name( self_: *const TSLanguage, name: *const i8, name_length: u32, ) -> TSFieldId
+ts_language_field_name_for_id	pub unsafe extern "C" fn ts_language_field_name_for_id( self_: *const TSLanguage, id: TSFieldId, ) -> *const i8
+ts_language_metadata	pub const unsafe extern "C" fn ts_language_metadata( self_: *const TSLanguage, ) -> *const TSLanguageMetadata
+ts_language_name	pub const unsafe extern "C" fn ts_language_name(self_: *const TSLanguage) -> *const i8
+ts_language_next_state	pub unsafe extern "C" fn ts_language_next_state( self_: *const TSLanguage, state: TSStateId, symbol: TSSymbol, ) -> TSStateId
+ts_language_state_count	pub const unsafe extern "C" fn ts_language_state_count(self_: *const TSLanguage) -> u32
+ts_language_subtypes	pub unsafe extern "C" fn ts_language_subtypes( self_: *const TSLanguage, supertype: TSSymbol, length: *mut u32, ) -> *const TSSymbol
+ts_language_supertypes	pub unsafe extern "C" fn ts_language_supertypes( self_: *const TSLanguage, length: *mut u32, ) -> *const TSSymbol
+ts_language_symbol_count	pub const unsafe extern "C" fn ts_language_symbol_count(self_: *const TSLanguage) -> u32
+ts_language_symbol_for_name	pub unsafe extern "C" fn ts_language_symbol_for_name( self_: *const TSLanguage, string: *const i8, length: u32, is_named: bool, ) -> TSSymbol
+ts_language_symbol_metadata	pub const unsafe extern "C" fn ts_language_symbol_metadata( self_: *const TSLanguage, symbol: TSSymbol, ) -> TSSymbolMetadata
+ts_language_symbol_name	pub unsafe extern "C" fn ts_language_symbol_name( self_: *const TSLanguage, symbol: TSSymbol, ) -> *const i8
+ts_language_symbol_type	pub const unsafe extern "C" fn ts_language_symbol_type( self_: *const TSLanguage, symbol: TSSymbol, ) -> TSSymbolType
+ts_lookahead_iterator_current_symbol	pub const unsafe extern "C" fn ts_lookahead_iterator_current_symbol( self_: *const LookaheadIterator, ) -> TSSymbol
+ts_lookahead_iterator_current_symbol_name	pub unsafe extern "C" fn ts_lookahead_iterator_current_symbol_name( self_: *const LookaheadIterator, ) -> *const i8
+ts_lookahead_iterator_delete	pub unsafe extern "C" fn ts_lookahead_iterator_delete(self_: *mut LookaheadIterator)
+ts_lookahead_iterator_language	pub const unsafe extern "C" fn ts_lookahead_iterator_language( self_: *const LookaheadIterator, ) -> *const TSLanguage
+ts_lookahead_iterator_new	pub unsafe extern "C" fn ts_lookahead_iterator_new( self_: *const TSLanguage, state: TSStateId, ) -> *mut LookaheadIterator
+ts_lookahead_iterator_next	pub unsafe extern "C" fn ts_lookahead_iterator_next(self_: *mut LookaheadIterator) -> bool
+ts_lookahead_iterator_reset	pub unsafe extern "C" fn ts_lookahead_iterator_reset( self_: *mut LookaheadIterator, language: *const TSLanguage, state: TSStateId, ) -> bool
+ts_lookahead_iterator_reset_state	pub unsafe extern "C" fn ts_lookahead_iterator_reset_state( self_: *mut LookaheadIterator, state: TSStateId, ) -> bool
+ts_malloc_default_c	pub static mut ts_current_calloc: unsafe extern "C" fn(usize, usize) -> *mut c_void = ts_calloc_default_c; #[no_mangle] pub static mut ts_current_realloc: unsafe extern "C" fn(*mut c_void, usize) -> *mut c_void = ts_realloc_default_c; #[no_mangle] pub static mut ts_current_free: unsafe extern "C" fn(*mut c_void) = libc_free_c; // C-ABI wrapper functions for the defaults. unsafe extern "C" fn ts_malloc_default_c(size: usize) -> *mut c_void
+ts_malloc_default_c	pub static mut ts_current_free: unsafe extern "C" fn(*mut c_void) = libc_free_c; // C-ABI wrapper functions for the defaults. unsafe extern "C" fn ts_malloc_default_c(size: usize) -> *mut c_void
+ts_malloc_default_c	pub static mut ts_current_malloc: unsafe extern "C" fn(usize) -> *mut c_void = ts_malloc_default_c; #[no_mangle] pub static mut ts_current_calloc: unsafe extern "C" fn(usize, usize) -> *mut c_void = ts_calloc_default_c; #[no_mangle] pub static mut ts_current_realloc: unsafe extern "C" fn(*mut c_void, usize) -> *mut c_void = ts_realloc_default_c; #[no_mangle] pub static mut ts_current_free: unsafe extern "C" fn(*mut c_void) = libc_free_c; // C-ABI wrapper functions for the defaults. unsafe extern "C" fn ts_malloc_default_c(size: usize) -> *mut c_void
+ts_malloc_default_c	pub static mut ts_current_realloc: unsafe extern "C" fn(*mut c_void, usize) -> *mut c_void = ts_realloc_default_c; #[no_mangle] pub static mut ts_current_free: unsafe extern "C" fn(*mut c_void) = libc_free_c; // C-ABI wrapper functions for the defaults. unsafe extern "C" fn ts_malloc_default_c(size: usize) -> *mut c_void
+ts_node_child	pub unsafe extern "C" fn ts_node_child(self_: TSNode, child_index: u32) -> TSNode
+ts_node_child_by_field_id	pub unsafe extern "C" fn ts_node_child_by_field_id( mut self_: TSNode, field_id: TSFieldId, ) -> TSNode
+ts_node_child_by_field_name	pub unsafe extern "C" fn ts_node_child_by_field_name( self_: TSNode, name: *const i8, name_length: u32, ) -> TSNode
+ts_node_child_count	pub const unsafe extern "C" fn ts_node_child_count(self_: TSNode) -> u32
+ts_node_child_with_descendant	pub unsafe extern "C" fn ts_node_child_with_descendant( mut self_: TSNode, descendant: TSNode, ) -> TSNode
+ts_node_descendant_count	pub const unsafe extern "C" fn ts_node_descendant_count(self_: TSNode) -> u32
+ts_node_descendant_for_byte_range	pub unsafe extern "C" fn ts_node_descendant_for_byte_range( self_: TSNode, start: u32, end: u32, ) -> TSNode
+ts_node_descendant_for_point_range	pub unsafe extern "C" fn ts_node_descendant_for_point_range( self_: TSNode, start: TSPoint, end: TSPoint, ) -> TSNode
+ts_node_edit	pub unsafe extern "C" fn ts_node_edit(self_: *mut TSNode, edit: *const TSInputEdit)
+ts_node_end_byte	pub unsafe extern "C" fn ts_node_end_byte(self_: TSNode) -> u32
+ts_node_end_point	pub unsafe extern "C" fn ts_node_end_point(self_: TSNode) -> TSPoint
+ts_node_eq	pub unsafe extern "C" fn ts_node_eq(self_: TSNode, other: TSNode) -> bool
+ts_node_field_name_for_child	pub unsafe extern "C" fn ts_node_field_name_for_child( self_: TSNode, mut child_index: u32, ) -> *const i8
+ts_node_field_name_for_named_child	pub unsafe extern "C" fn ts_node_field_name_for_named_child( self_: TSNode, mut named_child_index: u32, ) -> *const i8
+ts_node_first_child_for_byte	pub unsafe extern "C" fn ts_node_first_child_for_byte(self_: TSNode, byte: u32) -> TSNode
+ts_node_first_named_child_for_byte	pub unsafe extern "C" fn ts_node_first_named_child_for_byte(self_: TSNode, byte: u32) -> TSNode
+ts_node_grammar_symbol	pub unsafe extern "C" fn ts_node_grammar_symbol(self_: TSNode) -> TSSymbol
+ts_node_grammar_type	pub unsafe extern "C" fn ts_node_grammar_type(self_: TSNode) -> *const i8
+ts_node_has_changes	pub const unsafe extern "C" fn ts_node_has_changes(self_: TSNode) -> bool
+ts_node_has_error	pub const unsafe extern "C" fn ts_node_has_error(self_: TSNode) -> bool
+ts_node_is_error	pub unsafe extern "C" fn ts_node_is_error(self_: TSNode) -> bool
+ts_node_is_extra	pub const unsafe extern "C" fn ts_node_is_extra(self_: TSNode) -> bool
+ts_node_is_missing	pub const unsafe extern "C" fn ts_node_is_missing(self_: TSNode) -> bool
+ts_node_is_named	pub const unsafe extern "C" fn ts_node_is_named(self_: TSNode) -> bool
+ts_node_is_null	pub unsafe extern "C" fn ts_node_is_null(self_: TSNode) -> bool
+ts_node_language	pub const unsafe extern "C" fn ts_node_language(self_: TSNode) -> *const TSLanguage
+ts_node_named_child	pub unsafe extern "C" fn ts_node_named_child(self_: TSNode, child_index: u32) -> TSNode
+ts_node_named_child_count	pub const unsafe extern "C" fn ts_node_named_child_count(self_: TSNode) -> u32
+ts_node_named_descendant_for_byte_range	pub unsafe extern "C" fn ts_node_named_descendant_for_byte_range( self_: TSNode, start: u32, end: u32, ) -> TSNode
+ts_node_named_descendant_for_point_range	pub unsafe extern "C" fn ts_node_named_descendant_for_point_range( self_: TSNode, start: TSPoint, end: TSPoint, ) -> TSNode
+ts_node_next_named_sibling	pub unsafe extern "C" fn ts_node_next_named_sibling(self_: TSNode) -> TSNode
+ts_node_next_parse_state	pub unsafe extern "C" fn ts_node_next_parse_state(self_: TSNode) -> TSStateId
+ts_node_next_sibling	pub unsafe extern "C" fn ts_node_next_sibling(self_: TSNode) -> TSNode
+ts_node_parent	pub unsafe extern "C" fn ts_node_parent(self_: TSNode) -> TSNode
+ts_node_parse_state	pub const unsafe extern "C" fn ts_node_parse_state(self_: TSNode) -> TSStateId
+ts_node_prev_named_sibling	pub unsafe extern "C" fn ts_node_prev_named_sibling(self_: TSNode) -> TSNode
+ts_node_prev_sibling	pub unsafe extern "C" fn ts_node_prev_sibling(self_: TSNode) -> TSNode
+ts_node_start_byte	pub const unsafe extern "C" fn ts_node_start_byte(self_: TSNode) -> u32
+ts_node_start_point	pub const unsafe extern "C" fn ts_node_start_point(self_: TSNode) -> TSPoint
+ts_node_string	pub unsafe extern "C" fn ts_node_string(self_: TSNode) -> *mut i8
+ts_node_symbol	pub unsafe extern "C" fn ts_node_symbol(self_: TSNode) -> TSSymbol
+ts_node_type	pub unsafe extern "C" fn ts_node_type(self_: TSNode) -> *const i8
+ts_parser_delete	pub unsafe extern "C" fn ts_parser_delete(self_: *mut TSParser)
+ts_parser_included_ranges	pub unsafe extern "C" fn ts_parser_included_ranges( self_: *const TSParser, count: *mut u32, ) -> *const TSRange
+ts_parser_language	pub unsafe extern "C" fn ts_parser_language(self_: *const TSParser) -> *const TSLanguage
+ts_parser_logger	pub unsafe extern "C" fn ts_parser_logger(self_: *const TSParser) -> TSLogger
+ts_parser_new	pub unsafe extern "C" fn ts_parser_new() -> *mut TSParser
+ts_parser_parse	/// Parse one input document and return a new tree. /// /// The driver owns the outer GLR loop: /// - initialize lexer, external scanner, arena, and optional old-tree reuse; /// - process every active stack version until none can advance normally; /// - condense/merge/prune stack versions; /// - recover when all versions are paused at errors; /// - balance the accepted tree and transfer arena ownership into `TSTree`. /// /// Returning null means parsing was canceled, scanner setup failed, or wasm /// support was unavailable. In all cases parser-owned scratch state is reset /// before returning unless the parse is intentionally resumable. pub unsafe extern "C" fn ts_parser_parse( self_: *mut TSParser, old_tree: *const TSTree, input: TSInput, ) -> *mut TSTree
+ts_parser_parse_string	pub unsafe extern "C" fn ts_parser_parse_string( self_: *mut TSParser, old_tree: *const TSTree, string: *const i8, length: u32, ) -> *mut TSTree
+ts_parser_parse_string_encoding	pub unsafe extern "C" fn ts_parser_parse_string_encoding( self_: *mut TSParser, old_tree: *const TSTree, string: *const i8, length: u32, encoding: TSInputEncoding, ) -> *mut TSTree
+ts_parser_parse_with_options	pub unsafe extern "C" fn ts_parser_parse_with_options( self_: *mut TSParser, old_tree: *const TSTree, input: TSInput, parse_options: TSParseOptions, ) -> *mut TSTree
+ts_parser_print_dot_graphs	pub unsafe extern "C" fn ts_parser_print_dot_graphs(self_: *mut TSParser, fd: i32)
+ts_parser_reset	pub unsafe extern "C" fn ts_parser_reset(self_: *mut TSParser)
+ts_parser_set_included_ranges	pub unsafe extern "C" fn ts_parser_set_included_ranges( self_: *mut TSParser, ranges: *const TSRange, count: u32, ) -> bool
+ts_parser_set_language	pub unsafe extern "C" fn ts_parser_set_language( self_: *mut TSParser, language: *const TSLanguage, ) -> bool
+ts_parser_set_logger	pub unsafe extern "C" fn ts_parser_set_logger(self_: *mut TSParser, logger: TSLogger)
+ts_parser_set_wasm_store	pub unsafe extern "C" fn ts_parser_set_wasm_store(self_: *mut TSParser, store: *mut TSWasmStore)
+ts_parser_take_wasm_store	pub unsafe extern "C" fn ts_parser_take_wasm_store(self_: *mut TSParser) -> *mut TSWasmStore
+ts_point_edit	pub unsafe extern "C" fn ts_point_edit( point: *mut TSPoint, byte: *mut u32, edit: *const TSInputEdit, )
+ts_range_edit	pub unsafe extern "C" fn ts_range_edit(range: *mut TSRange, edit: *const TSInputEdit)
+ts_set_allocator	/// Replace the runtime allocator hooks. /// /// Passing `None` for a hook restores that operation to the default libc-backed /// allocator. This mirrors the public C API and intentionally updates global /// mutable function pointers. pub unsafe extern "C" fn ts_set_allocator( new_malloc: Option<unsafe extern "C" fn(usize) -> *mut c_void>, new_calloc: Option<unsafe extern "C" fn(usize, usize) -> *mut c_void>, new_realloc: Option<unsafe extern "C" fn(*mut c_void, usize) -> *mut c_void>, new_free: Option<unsafe extern "C" fn(*mut c_void)>, )
+ts_tree_copy	pub unsafe extern "C" fn ts_tree_copy(self_: *const TSTree) -> *mut TSTree
+ts_tree_cursor_copy	pub unsafe extern "C" fn ts_tree_cursor_copy(cursor_ptr: *const TSTreeCursor) -> TSTreeCursor
+ts_tree_cursor_current_depth	pub unsafe extern "C" fn ts_tree_cursor_current_depth(self_: *const TSTreeCursor) -> u32
+ts_tree_cursor_current_descendant_index	pub unsafe extern "C" fn ts_tree_cursor_current_descendant_index( self_: *const TSTreeCursor, ) -> u32
+ts_tree_cursor_current_field_id	pub unsafe extern "C" fn ts_tree_cursor_current_field_id(self_: *const TSTreeCursor) -> TSFieldId
+ts_tree_cursor_current_field_name	pub unsafe extern "C" fn ts_tree_cursor_current_field_name( self_: *const TSTreeCursor, ) -> *const i8
+ts_tree_cursor_current_node	pub unsafe extern "C" fn ts_tree_cursor_current_node(self_: *const TSTreeCursor) -> TSNode
+ts_tree_cursor_current_status	pub unsafe extern "C" fn ts_tree_cursor_current_status( self_: *const TSTreeCursor, field_id: *mut TSFieldId, has_later_siblings: *mut bool, has_later_named_siblings: *mut bool, can_have_later_siblings_with_this_field: *mut bool, supertypes: *mut TSSymbol, supertype_count: *mut u32, )
+ts_tree_cursor_delete	pub unsafe extern "C" fn ts_tree_cursor_delete(self_: *mut TSTreeCursor)
+ts_tree_cursor_goto_descendant	pub unsafe extern "C" fn ts_tree_cursor_goto_descendant( self_: *mut TSTreeCursor, goal_descendant_index: u32, )
+ts_tree_cursor_goto_first_child	pub unsafe extern "C" fn ts_tree_cursor_goto_first_child(self_: *mut TSTreeCursor) -> bool
+ts_tree_cursor_goto_first_child_for_byte	pub unsafe extern "C" fn ts_tree_cursor_goto_first_child_for_byte( self_: *mut TSTreeCursor, goal_byte: u32, ) -> i64
+ts_tree_cursor_goto_first_child_for_point	pub unsafe extern "C" fn ts_tree_cursor_goto_first_child_for_point( self_: *mut TSTreeCursor, goal_point: TSPoint, ) -> i64
+ts_tree_cursor_goto_first_child_internal	pub unsafe extern "C" fn ts_tree_cursor_goto_first_child_internal( self_: *mut TSTreeCursor, ) -> TreeCursorStep
+ts_tree_cursor_goto_last_child	pub unsafe extern "C" fn ts_tree_cursor_goto_last_child(self_: *mut TSTreeCursor) -> bool
+ts_tree_cursor_goto_next_sibling	pub unsafe extern "C" fn ts_tree_cursor_goto_next_sibling(self_: *mut TSTreeCursor) -> bool
+ts_tree_cursor_goto_next_sibling_internal	pub unsafe extern "C" fn ts_tree_cursor_goto_next_sibling_internal( self_: *mut TSTreeCursor, ) -> TreeCursorStep
+ts_tree_cursor_goto_parent	pub unsafe extern "C" fn ts_tree_cursor_goto_parent(self_: *mut TSTreeCursor) -> bool
+ts_tree_cursor_goto_previous_sibling	pub unsafe extern "C" fn ts_tree_cursor_goto_previous_sibling(self_: *mut TSTreeCursor) -> bool
+ts_tree_cursor_new	pub unsafe extern "C" fn ts_tree_cursor_new(node: TSNode) -> TSTreeCursor
+ts_tree_cursor_parent_node	pub unsafe extern "C" fn ts_tree_cursor_parent_node(self_: *const TSTreeCursor) -> TSNode
+ts_tree_cursor_reset	pub unsafe extern "C" fn ts_tree_cursor_reset(self_: *mut TSTreeCursor, node: TSNode)
+ts_tree_cursor_reset_to	pub unsafe extern "C" fn ts_tree_cursor_reset_to(dst: *mut TSTreeCursor, src: *const TSTreeCursor)
+ts_tree_delete	pub unsafe extern "C" fn ts_tree_delete(self_: *mut TSTree)
+ts_tree_edit	pub unsafe extern "C" fn ts_tree_edit(self_: *mut TSTree, edit: *const TSInputEdit)
+ts_tree_get_changed_ranges	pub unsafe extern "C" fn ts_tree_get_changed_ranges( old_tree: *const TSTree, new_tree: *const TSTree, length: *mut u32, ) -> *mut TSRange
+ts_tree_included_ranges	pub unsafe extern "C" fn ts_tree_included_ranges( self_: *const TSTree, length: *mut u32, ) -> *mut TSRange
+ts_tree_language	pub unsafe extern "C" fn ts_tree_language(self_: *const TSTree) -> *const TSLanguage
+ts_tree_print_dot_graph	pub unsafe extern "C" fn ts_tree_print_dot_graph(self_: *const TSTree, file_descriptor: i32)
+ts_tree_print_dot_graph	pub unsafe extern "C" fn ts_tree_print_dot_graph(self_: *const TSTree, file_descriptor: i32)
+ts_tree_root_node	pub unsafe extern "C" fn ts_tree_root_node(self_: *const TSTree) -> TSNode
+ts_tree_root_node_with_offset	pub unsafe extern "C" fn ts_tree_root_node_with_offset( self_: *const TSTree, offset_bytes: u32, offset_extent: TSPoint, ) -> TSNode
