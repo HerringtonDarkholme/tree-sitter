@@ -188,6 +188,14 @@ jobs:
       env:
         PACKAGE: ${{ matrix.platform == 'wasm32' && '-p tree-sitter' || '' }}
 
+    - name: Build C library
+      if: matrix.platform != 'wasm32'
+      # libtree-sitter (cdylib + staticlib) is what C-API consumers link against.
+      # The crate is rlib-only (like upstream); the C core is now Rust, so request
+      # the C-library crate-types explicitly here instead of compiling lib/src/*.c.
+      # This replaces the retired per-platform make/CMake C-library builds.
+      run: cargo rustc -p tree-sitter --release --target='${{ matrix.target }}' --features='${{ matrix.features }}' --crate-type cdylib --crate-type staticlib
+
     - name: Cache fixtures
       id: cache
       if: inputs.run-test && !matrix.no-run

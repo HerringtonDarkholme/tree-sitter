@@ -5,11 +5,12 @@
   rustPlatform,
   stdenv,
 }:
-# The tree-sitter core now lives in Rust (lib/src_rust). The C library is built
-# by cargo: the `tree-sitter` crate's `crate-type` includes `staticlib` and
-# `cdylib`, so cargo emits libtree_sitter.{a,so,dylib} (Rust core + the
-# wasm_store.c shim). This derivation builds that crate and installs the C
-# library, public header, and pkg-config file.
+# The tree-sitter core now lives in Rust (lib/src_rust). The `tree-sitter` crate
+# is rlib-only (like upstream); the standalone C library is produced by asking
+# cargo for the `cdylib` + `staticlib` crate-types explicitly, which emits
+# libtree_sitter.{a,so,dylib} (Rust core + the wasm_store.c shim). This
+# derivation builds that library and installs it with the public header and
+# pkg-config file.
 #
 # NOTE: this replaced the former CMake-based build; the install layout below
 # (esp. the shared-library soname/install_name handling) should be verified on
@@ -20,11 +21,15 @@ rustPlatform.buildRustPackage {
 
   cargoLock.lockFile = ../Cargo.lock;
 
-  # Build only the library crate.
-  cargoBuildFlags = [
-    "--package"
-    "tree-sitter"
-  ];
+  # `cargo build` on an rlib-only crate produces no C library, so build the
+  # cdylib + staticlib explicitly. cargo reads CARGO_BUILD_TARGET from the
+  # environment for cross builds.
+  buildPhase = ''
+    runHook preBuild
+    cargo rustc --release --offline -j $NIX_BUILD_CORES \
+      --package tree-sitter --crate-type cdylib --crate-type staticlib
+    runHook postBuild
+  '';
 
   doCheck = false;
 

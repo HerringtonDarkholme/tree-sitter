@@ -13,9 +13,12 @@ use super::language::{ts_language_copy, ts_language_delete};
 use super::length::{length_add, Length};
 use super::node::node_new;
 use super::subtree::{
-    subtree_edit, subtree_padding, subtree_pool_delete, subtree_pool_new, subtree_print_dot_graph,
-    subtree_release, subtree_retain, tree_arena_release, tree_arena_retain, Subtree, TreeArena,
+    subtree_edit, subtree_padding, subtree_pool_delete, subtree_pool_new, subtree_release,
+    subtree_retain, tree_arena_release, tree_arena_retain, Subtree, TreeArena,
 };
+// Only used by `tree_print_dot_graph_ref`, which is unavailable on wasm.
+#[cfg(not(target_family = "wasm"))]
+use super::subtree::subtree_print_dot_graph;
 use super::tree_cursor::{tree_cursor_init_ref, TreeCursor};
 use super::utils::array_new;
 use super::utils::{ptr_mut, ptr_ref};
