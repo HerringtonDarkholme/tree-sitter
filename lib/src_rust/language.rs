@@ -46,7 +46,7 @@ pub const TSSymbolTypeAuxiliary: TSSymbolType = 3;
 // struct here so we can cast `*const TSLanguage` → `TSLanguageFull`
 // and access every field.
 //
-// This replaces the partial `TSLanguageData` in subtree.rs.
+// This replaces the earlier partial language-layout mirrors.
 // ---------------------------------------------------------------------------
 
 /// Mirrors the `external_scanner` sub-struct inside `TSLanguage`.
@@ -580,8 +580,8 @@ pub const unsafe fn language_alias_sequence(
     self_: *const TSLanguage,
     production_id: u32,
 ) -> *const TSSymbol {
-    let l = lang(self_);
     if production_id != 0 {
+        let l = lang(self_);
         l.alias_sequences
             .add(production_id as usize * l.max_alias_sequence_length as usize)
     } else {
@@ -596,8 +596,8 @@ pub const unsafe fn language_alias_at(
     production_id: u32,
     child_index: u32,
 ) -> TSSymbol {
-    let l = lang(self_);
     if production_id != 0 {
+        let l = lang(self_);
         *l.alias_sequences.add(
             production_id as usize * l.max_alias_sequence_length as usize + child_index as usize,
         )

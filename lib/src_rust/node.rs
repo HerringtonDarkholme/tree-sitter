@@ -15,7 +15,7 @@ use super::point::{point_add, point_edit, point_eq, point_gt, point_lt, point_lt
 use super::raw_pointer::{ptr_mut, ptr_ref};
 use super::subtree::subtree_parse_state;
 use super::subtree::{
-    subtree_child_count, subtree_children, subtree_error_cost, subtree_extra, subtree_has_changes,
+    subtree_child, subtree_child_count, subtree_error_cost, subtree_extra, subtree_has_changes,
     subtree_missing, subtree_named, subtree_padding, subtree_size, subtree_string, subtree_symbol,
     subtree_total_bytes, subtree_visible, subtree_visible_descendant_count, ts_builtin_sym_error,
     Subtree, TSFieldMapEntry, NULL_SUBTREE, TS_TREE_STATE_NONE,
@@ -178,19 +178,6 @@ unsafe fn node_iterate_children(node: &TSNode) -> NodeChildIterator {
     }
 }
 
-#[inline]
-unsafe fn node_child<'a>(parent: Subtree, index: u32) -> &'a Subtree {
-    node_children(parent).get_unchecked(index as usize)
-}
-
-#[inline]
-const unsafe fn node_children<'a>(parent: Subtree) -> &'a [Subtree] {
-    std::slice::from_raw_parts(
-        subtree_children(parent),
-        subtree_child_count(parent) as usize,
-    )
-}
-
 /// Advance the child iterator and construct a `TSNode` for the raw child.
 ///
 /// The iterator applies padding before each non-first child, resolves aliases
@@ -200,7 +187,7 @@ unsafe fn node_child_iterator_next(self_: &mut NodeChildIterator, result: &mut T
     if self_.parent.ptr.is_null() || self_.child_index == (*self_.parent.ptr).child_count {
         return false;
     }
-    let child = node_child(self_.parent, self_.child_index);
+    let child = subtree_child(self_.parent, self_.child_index);
     let mut alias_symbol: TSSymbol = 0;
     if !subtree_extra(*child) {
         if !self_.alias_sequence.is_null() {
@@ -308,7 +295,7 @@ unsafe fn subtree_has_trailing_empty_descendant(self_: Subtree, other: Subtree) 
     }
     let mut i = count - 1;
     loop {
-        let child = *node_child(self_, i);
+        let child = *subtree_child(self_, i);
         if subtree_total_bytes(child) > 0 {
             break;
         }

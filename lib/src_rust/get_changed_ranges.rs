@@ -13,12 +13,15 @@ use super::length::{length_add, length_min, length_zero, Length, LENGTH_MAX};
 use super::point::{point_add, point_sub, POINT_MAX};
 use super::raw_pointer::{ptr_mut, ptr_ref};
 use super::subtree::{
-    subtree_child_count, subtree_children, subtree_error_cost, subtree_external_scanner_state_eq,
+    subtree_child, subtree_child_count, subtree_error_cost, subtree_external_scanner_state_eq,
     subtree_extra, subtree_has_changes, subtree_has_external_tokens, subtree_last_external_token,
     subtree_padding, subtree_parse_state, subtree_size, subtree_symbol, subtree_total_size,
     subtree_visible, ts_builtin_sym_error, Subtree, NULL_SUBTREE, TS_TREE_STATE_NONE,
 };
-use super::tree_cursor::{TreeCursor, TreeCursorEntry, TreeCursorEntryArray};
+use super::tree_cursor::{
+    tree_cursor_entry_array_clear, tree_cursor_entry_array_pop, tree_cursor_entry_array_push,
+    tree_cursor_entry_slice, TreeCursor, TreeCursorEntry,
+};
 
 // ---------------------------------------------------------------------------
 // Types
@@ -180,68 +183,6 @@ pub unsafe fn range_array_intersects_ref(
 }
 
 // ---------------------------------------------------------------------------
-// Array helpers for TreeCursorEntry stack (mirrors tree_cursor.rs helpers)
-// ---------------------------------------------------------------------------
-
-#[inline]
-const unsafe fn stack_slice(arr: &TreeCursorEntryArray) -> &[TreeCursorEntry] {
-    std::slice::from_raw_parts(arr.contents, arr.size as usize)
-}
-
-#[inline]
-fn stack_clear(arr: &mut TreeCursorEntryArray) {
-    arr.size = 0;
-}
-
-unsafe fn stack_grow(arr: &mut TreeCursorEntryArray, count: u32) {
-    let new_size = arr.size + count;
-    if new_size > arr.capacity {
-        let mut new_capacity = if arr.capacity > 0 { arr.capacity } else { 8 };
-        while new_capacity < new_size {
-            new_capacity *= 2;
-        }
-        if arr.contents.is_null() {
-            arr.contents = calloc(
-                new_capacity as usize,
-                std::mem::size_of::<TreeCursorEntry>(),
-            )
-            .cast::<TreeCursorEntry>();
-        } else {
-            arr.contents = realloc(
-                arr.contents.cast::<c_void>(),
-                new_capacity as usize * std::mem::size_of::<TreeCursorEntry>(),
-            )
-            .cast::<TreeCursorEntry>();
-        }
-        arr.capacity = new_capacity;
-    }
-}
-
-unsafe fn stack_push(arr: &mut TreeCursorEntryArray, entry: TreeCursorEntry) {
-    stack_grow(arr, 1);
-    ptr::write(arr.contents.add(arr.size as usize), entry);
-    arr.size += 1;
-}
-
-unsafe fn stack_pop(arr: &mut TreeCursorEntryArray) -> TreeCursorEntry {
-    arr.size -= 1;
-    ptr::read(arr.contents.add(arr.size as usize))
-}
-
-#[inline]
-unsafe fn subtree_child<'a>(parent: Subtree, index: u32) -> &'a Subtree {
-    subtree_children_slice(parent).get_unchecked(index as usize)
-}
-
-#[inline]
-const unsafe fn subtree_children_slice<'a>(parent: Subtree) -> &'a [Subtree] {
-    std::slice::from_raw_parts(
-        subtree_children(parent),
-        subtree_child_count(parent) as usize,
-    )
-}
-
-// ---------------------------------------------------------------------------
 // Internal helpers — skeletons
 // ---------------------------------------------------------------------------
 
@@ -276,8 +217,8 @@ unsafe fn iterator_new(
     tree: &Subtree,
     language: *const TSLanguage,
 ) -> Iterator {
-    stack_clear(&mut cursor.stack);
-    stack_push(
+    tree_cursor_entry_array_clear(&mut cursor.stack);
+    tree_cursor_entry_array_push(
         &mut cursor.stack,
         TreeCursorEntry {
             subtree: tree,
@@ -306,7 +247,9 @@ const fn iterator_done(self_: &Iterator) -> bool {
 /// For padding items this is the parent entry position. For node-content items,
 /// it is the position after leading padding.
 unsafe fn iterator_start_position(self_: &Iterator) -> Length {
-    let entry = stack_slice(&self_.cursor.stack).last().unwrap_unchecked();
+    let entry = tree_cursor_entry_slice(&self_.cursor.stack)
+        .last()
+        .unwrap_unchecked();
     if self_.in_padding {
         entry.position
     } else {
@@ -316,7 +259,9 @@ unsafe fn iterator_start_position(self_: &Iterator) -> Length {
 
 /// Return the current item's end position.
 unsafe fn iterator_end_position(self_: &Iterator) -> Length {
-    let entry = stack_slice(&self_.cursor.stack).last().unwrap_unchecked();
+    let entry = tree_cursor_entry_slice(&self_.cursor.stack)
+        .last()
+        .unwrap_unchecked();
     let result = length_add(entry.position, subtree_padding(*entry.subtree));
     if self_.in_padding {
         result
@@ -330,7 +275,7 @@ unsafe fn iterator_end_position(self_: &Iterator) -> Length {
 /// Hidden grammar nodes can still be visible through aliases, so this must check
 /// the parent production's alias sequence in addition to subtree visibility.
 unsafe fn iterator_tree_is_visible(self_: &Iterator) -> bool {
-    let entries = stack_slice(&self_.cursor.stack);
+    let entries = tree_cursor_entry_slice(&self_.cursor.stack);
     let entry = entries.last().unwrap_unchecked();
     if subtree_visible(*entry.subtree) {
         return true;
@@ -363,7 +308,7 @@ unsafe fn iterator_get_visible_state(self_: &Iterator) -> VisibleState {
         i -= 1;
     }
 
-    let entries = stack_slice(&self_.cursor.stack);
+    let entries = tree_cursor_entry_slice(&self_.cursor.stack);
     loop {
         let entry = entries.get_unchecked(i as usize);
 
@@ -398,7 +343,7 @@ unsafe fn iterator_ascend(self_: &mut Iterator) {
     if iterator_tree_is_visible(self_) && !self_.in_padding {
         self_.visible_depth -= 1;
     }
-    if stack_slice(&self_.cursor.stack)
+    if tree_cursor_entry_slice(&self_.cursor.stack)
         .last()
         .unwrap_unchecked()
         .child_index
@@ -422,7 +367,9 @@ unsafe fn iterator_descend(self_: &mut Iterator, goal_position: u32) -> bool {
     let mut did_descend;
     loop {
         did_descend = false;
-        let entry = *stack_slice(&self_.cursor.stack).last().unwrap_unchecked();
+        let entry = *tree_cursor_entry_slice(&self_.cursor.stack)
+            .last()
+            .unwrap_unchecked();
         let mut position = entry.position;
         let mut structural_child_index: u32 = 0;
         let n = subtree_child_count(*entry.subtree);
@@ -432,7 +379,7 @@ unsafe fn iterator_descend(self_: &mut Iterator, goal_position: u32) -> bool {
             let child_right = length_add(child_left, subtree_size(*child));
 
             if child_right.bytes > goal_position {
-                stack_push(
+                tree_cursor_entry_array_push(
                     &mut self_.cursor.stack,
                     TreeCursorEntry {
                         subtree: std::ptr::from_ref::<Subtree>(child),
@@ -489,12 +436,12 @@ unsafe fn iterator_advance(self_: &mut Iterator) {
         if iterator_tree_is_visible(self_) {
             self_.visible_depth -= 1;
         }
-        let entry = stack_pop(&mut self_.cursor.stack);
+        let entry = tree_cursor_entry_array_pop(&mut self_.cursor.stack);
         if iterator_done(self_) {
             return;
         }
 
-        let parent = stack_slice(&self_.cursor.stack)
+        let parent = tree_cursor_entry_slice(&self_.cursor.stack)
             .last()
             .unwrap_unchecked()
             .subtree;
@@ -511,7 +458,7 @@ unsafe fn iterator_advance(self_: &mut Iterator) {
             }
             let next_child = subtree_child(*parent, child_index);
 
-            stack_push(
+            tree_cursor_entry_array_push(
                 &mut self_.cursor.stack,
                 TreeCursorEntry {
                     subtree: std::ptr::from_ref::<Subtree>(next_child),

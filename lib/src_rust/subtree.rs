@@ -15,7 +15,10 @@ use super::error_costs::{
     ERROR_COST_PER_MISSING_TREE, ERROR_COST_PER_RECOVERY, ERROR_COST_PER_SKIPPED_CHAR,
     ERROR_COST_PER_SKIPPED_LINE, ERROR_COST_PER_SKIPPED_TREE,
 };
-use super::language::{ts_language_symbol_metadata, ts_language_symbol_name};
+use super::language::{
+    language_alias_sequence, language_field_map, language_full,
+    language_write_symbol_as_dot_string, ts_language_symbol_metadata, ts_language_symbol_name,
+};
 use super::length::{length_add, length_saturating_sub, length_sub, length_zero, Length};
 use super::raw_pointer::{ptr_mut, ptr_ref};
 
@@ -616,53 +619,6 @@ struct Edit {
 }
 
 // ---------------------------------------------------------------------------
-// Partial TSLanguage layout (mirrors parser.h) for static-inline helpers
-// ---------------------------------------------------------------------------
-
-#[repr(C)]
-struct TSLanguageData {
-    abi_version: u32,
-    symbol_count: u32,
-    alias_count: u32,
-    token_count: u32,
-    external_token_count: u32,
-    state_count: u32,
-    large_state_count: u32,
-    production_id_count: u32,
-    field_count: u32,
-    max_alias_sequence_length: u16,
-    // repr(C) adds implicit padding here to align the next pointer
-    parse_table: *const u16,
-    small_parse_table: *const u16,
-    small_parse_table_map: *const u32,
-    parse_actions: *const c_void,
-    symbol_names: *const *const i8,
-    field_names: *const *const i8,
-    field_map_slices: *const TSMapSlice,
-    field_map_entries: *const TSFieldMapEntry,
-    symbol_metadata: *const TSSymbolMetadata,
-    public_symbol_map: *const TSSymbol,
-    alias_map: *const u16,
-    alias_sequences: *const TSSymbol,
-}
-
-/// Rust re-implementation of the static inline `language_alias_sequence` from `language.h`.
-#[inline]
-const unsafe fn language_alias_sequence(
-    language: *const TSLanguage,
-    production_id: u32,
-) -> *const TSSymbol {
-    let lang = language.cast::<TSLanguageData>();
-    if production_id != 0 {
-        (*lang)
-            .alias_sequences
-            .add(production_id as usize * (*lang).max_alias_sequence_length as usize)
-    } else {
-        ptr::null()
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Static data
 // ---------------------------------------------------------------------------
 
@@ -1147,7 +1103,11 @@ pub const unsafe fn subtree_children(self_: Subtree) -> *mut Subtree {
 }
 
 #[inline]
-const unsafe fn subtree_children_slice<'a>(self_: Subtree) -> &'a [Subtree] {
+pub unsafe fn subtree_child<'a>(self_: Subtree, index: u32) -> &'a Subtree {
+    subtree_children_slice(self_).get_unchecked(index as usize)
+}
+
+pub const unsafe fn subtree_children_slice<'a>(self_: Subtree) -> &'a [Subtree] {
     let count = subtree_child_count(self_) as usize;
     if count == 0 {
         &[]
@@ -1631,99 +1591,16 @@ pub unsafe fn subtree_clone(self_: Subtree) -> MutableSubtree {
 
 // --- #37: new_node ---
 
-/// Create a heap internal node by moving child storage into the node allocation.
-///
-/// The child array is resized so the `SubtreeHeapData` header can live directly
-/// after the child slice, matching the C memory layout:
-/// `[child_0, child_1, ... child_n][SubtreeHeapData]`.
-pub unsafe fn subtree_new_node(
+unsafe fn subtree_init_node_data(
+    data: *mut SubtreeHeapData,
     symbol: TSSymbol,
-    children: *mut SubtreeArray,
-    production_id: u32,
-    language: *const TSLanguage,
-) -> MutableSubtree {
-    let metadata = ts_language_symbol_metadata(language, symbol);
-    let fragile = symbol == ts_builtin_sym_error || symbol == ts_builtin_sym_error_repeat;
-
-    // Allocate the node's data at the end of the array of children.
-    let new_byte_size = subtree_alloc_size((*children).size);
-    if ((*children).capacity as usize) * std::mem::size_of::<Subtree>() < new_byte_size {
-        (*children).contents =
-            realloc((*children).contents.cast::<c_void>(), new_byte_size).cast::<Subtree>();
-        (*children).capacity = (new_byte_size / std::mem::size_of::<Subtree>()) as u32;
-    }
-    let data = (*children)
-        .contents
-        .add((*children).size as usize)
-        .cast::<SubtreeHeapData>();
-
-    *data = SubtreeHeapData {
-        ref_count: 1,
-        padding: length_zero(),
-        size: length_zero(),
-        lookahead_bytes: 0,
-        error_cost: 0,
-        child_count: (*children).size,
-        symbol,
-        parse_state: 0,
-        flags: SubtreeHeapData::make_flags(
-            metadata.visible,
-            metadata.named,
-            false,
-            fragile,
-            fragile,
-            false,
-            false,
-            false,
-            false,
-            false,
-            false,
-        ),
-        data: SubtreeHeapDataContent {
-            children: SubtreeChildrenData {
-                visible_child_count: 0,
-                named_child_count: 0,
-                visible_descendant_count: 0,
-                dynamic_precedence: 0,
-                repeat_depth: 0,
-                production_id: production_id as u16,
-                first_leaf: FirstLeaf {
-                    symbol: 0,
-                    parse_state: 0,
-                },
-            },
-        },
-    };
-    let result = MutableSubtree { ptr: data };
-    subtree_summarize_children(result, language);
-    result
-}
-
-/// Create an arena-owned internal node.
-///
-/// This has the same memory layout as `subtree_new_node`, but allocation
-/// comes from the returned tree's arena instead of the transient subtree pool.
-pub unsafe fn subtree_new_node_in_arena(
-    arena: *mut TreeArena,
-    symbol: TSSymbol,
-    children: *const Subtree,
     child_count: u32,
     production_id: u32,
     language: *const TSLanguage,
+    extra_flags: u16,
 ) -> MutableSubtree {
     let metadata = ts_language_symbol_metadata(language, symbol);
     let fragile = symbol == ts_builtin_sym_error || symbol == ts_builtin_sym_error_repeat;
-    let byte_size = subtree_alloc_size(child_count);
-    let allocation = tree_arena_alloc(arena, byte_size, std::mem::align_of::<SubtreeHeapData>())
-        .cast::<Subtree>();
-
-    if child_count > 0 {
-        ptr::copy_nonoverlapping(children, allocation, child_count as usize);
-    }
-
-    let data = allocation
-        .add(child_count as usize)
-        .cast::<SubtreeHeapData>();
     *data = SubtreeHeapData {
         ref_count: 1,
         padding: length_zero(),
@@ -1745,7 +1622,7 @@ pub unsafe fn subtree_new_node_in_arena(
             false,
             false,
             false,
-        ) | HEAP_ARENA_OWNED,
+        ) | extra_flags,
         data: SubtreeHeapDataContent {
             children: SubtreeChildrenData {
                 visible_child_count: 0,
@@ -1761,8 +1638,68 @@ pub unsafe fn subtree_new_node_in_arena(
             },
         },
     };
+    MutableSubtree { ptr: data }
+}
 
-    let result = MutableSubtree { ptr: data };
+/// Create a heap internal node by moving child storage into the node allocation.
+///
+/// The child array is resized so the `SubtreeHeapData` header can live directly
+/// after the child slice, matching the C memory layout:
+/// `[child_0, child_1, ... child_n][SubtreeHeapData]`.
+pub unsafe fn subtree_new_node(
+    symbol: TSSymbol,
+    children: *mut SubtreeArray,
+    production_id: u32,
+    language: *const TSLanguage,
+) -> MutableSubtree {
+    // Allocate the node's data at the end of the array of children.
+    let new_byte_size = subtree_alloc_size((*children).size);
+    if ((*children).capacity as usize) * std::mem::size_of::<Subtree>() < new_byte_size {
+        (*children).contents =
+            realloc((*children).contents.cast::<c_void>(), new_byte_size).cast::<Subtree>();
+        (*children).capacity = (new_byte_size / std::mem::size_of::<Subtree>()) as u32;
+    }
+    let data = (*children)
+        .contents
+        .add((*children).size as usize)
+        .cast::<SubtreeHeapData>();
+
+    let result = subtree_init_node_data(data, symbol, (*children).size, production_id, language, 0);
+    subtree_summarize_children(result, language);
+    result
+}
+
+/// Create an arena-owned internal node.
+///
+/// This has the same memory layout as `subtree_new_node`, but allocation
+/// comes from the returned tree's arena instead of the transient subtree pool.
+pub unsafe fn subtree_new_node_in_arena(
+    arena: *mut TreeArena,
+    symbol: TSSymbol,
+    children: *const Subtree,
+    child_count: u32,
+    production_id: u32,
+    language: *const TSLanguage,
+) -> MutableSubtree {
+    let byte_size = subtree_alloc_size(child_count);
+    let allocation = tree_arena_alloc(arena, byte_size, std::mem::align_of::<SubtreeHeapData>())
+        .cast::<Subtree>();
+
+    if child_count > 0 {
+        ptr::copy_nonoverlapping(children, allocation, child_count as usize);
+    }
+
+    let data = allocation
+        .add(child_count as usize)
+        .cast::<SubtreeHeapData>();
+    let result = subtree_init_node_data(
+        data,
+        symbol,
+        child_count,
+        production_id,
+        language,
+        HEAP_ARENA_OWNED,
+    );
     subtree_summarize_children(result, language);
     result
 }
@@ -2361,59 +2298,9 @@ pub unsafe fn subtree_external_scanner_state_eq(self_: &Subtree, other: &Subtree
 extern "C" {
     fn snprintf(s: *mut i8, n: usize, format: *const i8, ...) -> i32;
     fn fprintf(f: *mut c_void, format: *const i8, ...) -> i32;
-    fn fputc(c: i32, f: *mut c_void) -> i32;
-    fn fputs(s: *const i8, f: *mut c_void) -> i32;
 }
 
 static ROOT_FIELD: &[u8; 9] = b"__ROOT__\0";
-
-/// Rust re-implementation of the static inline `language_field_map` from `language.h`.
-unsafe fn language_field_map(
-    language: *const TSLanguage,
-    production_id: u32,
-    start: *mut *const TSFieldMapEntry,
-    end: *mut *const TSFieldMapEntry,
-) {
-    let lang = language.cast::<TSLanguageData>();
-    if (*lang).field_count == 0 {
-        *start = ptr::null();
-        *end = ptr::null();
-        return;
-    }
-    let slice = *(*lang).field_map_slices.add(production_id as usize);
-    *start = (*lang).field_map_entries.add(slice.index as usize);
-    *end = (*lang)
-        .field_map_entries
-        .add(slice.index as usize + slice.length as usize);
-}
-
-/// Rust re-implementation of the static inline `language_write_symbol_as_dot_string`.
-unsafe fn language_write_symbol_as_dot_string(
-    language: *const TSLanguage,
-    f: *mut c_void,
-    symbol: TSSymbol,
-) {
-    let name = ts_language_symbol_name(language, symbol);
-    let mut chr = name;
-    while *chr != 0 {
-        match *chr as u8 {
-            b'"' | b'\\' => {
-                fputc(i32::from(b'\\'), f);
-                fputc(i32::from(*chr), f);
-            }
-            b'\n' => {
-                fputs(c"\\n".as_ptr().cast::<i8>(), f);
-            }
-            b'\t' => {
-                fputs(c"\\t".as_ptr().cast::<i8>(), f);
-            }
-            _ => {
-                fputc(i32::from(*chr), f);
-            }
-        }
-        chr = chr.add(1);
-    }
-}
 
 unsafe fn subtree__write_char_to_string(s: *mut i8, n: usize, chr: i32) -> usize {
     if chr == -1 {
@@ -2586,8 +2473,8 @@ unsafe fn subtree__write_to_string(
                 let mut map = field_map;
                 while map < field_map_end {
                     if !(*map).inherited && (*map).child_index == structural_child_index as u8 {
-                        let lang = language.cast::<TSLanguageData>();
-                        child_field_name = *(*lang).field_names.add((*map).field_id as usize);
+                        let lang = language_full(language);
+                        child_field_name = *lang.field_names.add((*map).field_id as usize);
                         break;
                     }
                     map = map.add(1);
@@ -2708,14 +2595,14 @@ unsafe fn subtree__print_dot_graph(
     fprintf(f, c"\"]\n".as_ptr().cast::<i8>());
 
     let mut child_start_offset = start_offset;
-    let lang = language.cast::<TSLanguageData>();
+    let lang = language_full(language);
     let mut child_info_offset =
-        u32::from((*lang).max_alias_sequence_length) * u32::from(subtree_production_id(tree));
+        u32::from(lang.max_alias_sequence_length) * u32::from(subtree_production_id(tree));
     for (i, child) in subtree_children_slice(tree).iter().enumerate() {
         let child_ptr = ptr::from_ref(child);
         let mut subtree_alias_symbol: TSSymbol = 0;
         if !subtree_extra(*child) && child_info_offset != 0 {
-            subtree_alias_symbol = *(*lang).alias_sequences.add(child_info_offset as usize);
+            subtree_alias_symbol = *lang.alias_sequences.add(child_info_offset as usize);
             child_info_offset += 1;
         }
         subtree__print_dot_graph(

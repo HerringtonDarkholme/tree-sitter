@@ -4,8 +4,8 @@ use super::stack::{
     array_back_ref, array_clear, array_delete, array_new, array_pop, array_push, Array,
 };
 use super::subtree::{
-    subtree_child_count, subtree_children, subtree_has_external_tokens,
-    subtree_last_external_token, subtree_total_bytes, Subtree, NULL_SUBTREE,
+    subtree_child, subtree_child_count, subtree_has_external_tokens, subtree_last_external_token,
+    subtree_total_bytes, Subtree, NULL_SUBTREE,
 };
 
 /// One frame in the old-tree reuse cursor.
@@ -112,7 +112,7 @@ pub unsafe fn reusable_node_advance(self_: &mut ReusableNode) {
     array_push(
         &mut self_.stack,
         StackEntry {
-            tree: *reusable_node_subtree_child(tree, next_index),
+            tree: *subtree_child(tree, next_index),
             child_index: next_index,
             byte_offset,
         },
@@ -128,7 +128,7 @@ pub unsafe fn reusable_node_descend(self_: &mut ReusableNode) -> bool {
         array_push(
             &mut self_.stack,
             StackEntry {
-                tree: *reusable_node_subtree_child(last_entry.tree, 0),
+                tree: *subtree_child(last_entry.tree, 0),
                 child_index: 0,
                 byte_offset: last_entry.byte_offset,
             },
@@ -167,13 +167,4 @@ pub unsafe fn reusable_node_reset(self_: &mut ReusableNode, tree: Subtree) {
     if !reusable_node_descend(self_) {
         reusable_node_clear(self_);
     }
-}
-
-#[inline]
-unsafe fn reusable_node_subtree_child<'a>(parent: Subtree, index: u32) -> &'a Subtree {
-    debug_assert!(index < subtree_child_count(parent));
-    subtree_children(parent)
-        .add(index as usize)
-        .as_ref()
-        .unwrap_unchecked()
 }
