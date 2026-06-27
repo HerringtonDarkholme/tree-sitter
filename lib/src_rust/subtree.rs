@@ -1016,13 +1016,6 @@ unsafe fn subtree_data_ref<'a>(self_: Subtree) -> &'a SubtreeHeapData {
 }
 
 #[inline]
-unsafe fn external_scanner_state_mut<'a>(
-    state: *mut ExternalScannerState,
-) -> &'a mut ExternalScannerState {
-    ptr_mut(state)
-}
-
-#[inline]
 unsafe fn mutable_subtree_child(self_: MutableSubtree, index: usize) -> Subtree {
     *mutable_subtree_children(self_).get_unchecked(index)
 }
@@ -1712,7 +1705,7 @@ pub unsafe fn subtree_release(pool: &mut SubtreePool, self_: Subtree) {
                 let external_scanner_state =
                     ptr::addr_of_mut!((*tree.ptr).data.external_scanner_state)
                         .cast::<ExternalScannerState>();
-                external_scanner_state_delete(external_scanner_state_mut(external_scanner_state));
+                external_scanner_state_delete(ptr_mut(external_scanner_state));
             }
             if !(*tree.ptr).arena_owned() {
                 subtree_pool_free(pool, tree);

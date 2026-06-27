@@ -624,11 +624,6 @@ fn stack_node_retain(self_: &mut StackNode) {
     debug_assert!(self_.ref_count != 0);
 }
 
-#[inline]
-unsafe fn stack_node_mut<'a>(node: *mut StackNode) -> &'a mut StackNode {
-    ptr_mut(node)
-}
-
 /// Release (decrement ref count) a stack node, freeing if zero.
 unsafe fn stack_node_release(
     self_: &mut StackNode,
@@ -637,7 +632,7 @@ unsafe fn stack_node_release(
 ) {
     let mut self_ = ptr::from_mut(self_);
     loop {
-        let node = stack_node_mut(self_);
+        let node = ptr_mut(self_);
         debug_assert!(node.ref_count != 0);
         node.ref_count -= 1;
         if node.ref_count > 0 {
@@ -650,7 +645,7 @@ unsafe fn stack_node_release(
                 if !stack_link_payload_is_null(link.payload) {
                     stack_link_payload_release(link.payload, subtree_pool);
                 }
-                stack_node_release(stack_node_mut(link.node), pool, subtree_pool);
+                stack_node_release(ptr_mut(link.node), pool, subtree_pool);
             }
             let link = node.links[0];
             if !stack_link_payload_is_null(link.payload) {
@@ -1015,7 +1010,7 @@ unsafe fn stack_node_add_link(
             {
                 for j in 0..link_node.link_count as usize {
                     stack_node_add_link(
-                        stack_node_mut(existing_link.node),
+                        ptr_mut(existing_link.node),
                         link_node.links[j],
                         subtree_pool,
                     );
@@ -1036,7 +1031,7 @@ unsafe fn stack_node_add_link(
         return;
     }
 
-    stack_node_retain(stack_node_mut(link.node));
+    stack_node_retain(ptr_mut(link.node));
     let link_node = ptr_ref(link.node);
     let mut node_count = link_node.node_count;
     let mut dynamic_precedence = link_node.dynamic_precedence;
@@ -1074,7 +1069,7 @@ unsafe fn stack_head_delete(
             array_delete(ptr_mut(self_.summary));
             free(self_.summary.cast::<c_void>());
         }
-        stack_node_release(stack_node_mut(self_.node), pool, subtree_pool);
+        stack_node_release(ptr_mut(self_.node), pool, subtree_pool);
     }
 }
 
@@ -1247,7 +1242,7 @@ unsafe fn stack_segment_storage_clear(self_: &mut Stack) {
     for i in 0..self_.segments.size {
         let segment = *array_get_ref(&self_.segments, i);
         if segment.base_kind == STACK_SEGMENT_BASE_GRAPH && !segment.base_node.is_null() {
-            stack_node_release(stack_node_mut(segment.base_node), node_pool, subtree_pool);
+            stack_node_release(ptr_mut(segment.base_node), node_pool, subtree_pool);
         }
     }
     array_clear(&mut self_.frames);
@@ -1349,7 +1344,7 @@ unsafe fn stack_pop_count_linear(
     }
 
     subtree_array_reverse(&mut subtrees);
-    stack__add_slice(self_, version, stack_node_mut(node), &subtrees);
+    stack__add_slice(self_, version, ptr_mut(node), &subtrees);
     Some(ptr::read(&self_.slices))
 }
 
@@ -1406,7 +1401,7 @@ unsafe fn stack_pop_count_linear_into(
         size,
         version: STACK_VERSION_NONE,
     };
-    stack_pop_builder_add_slice(self_, version, stack_node_mut(node), builder, slice);
+    stack_pop_builder_add_slice(self_, version, ptr_mut(node), builder, slice);
     true
 }
 
@@ -1467,7 +1462,7 @@ unsafe fn stack_pop_count_payloads_linear_into(
         size,
         version: STACK_VERSION_NONE,
     };
-    stack_pop_builder_add_slice(self_, version, stack_node_mut(node), builder, slice);
+    stack_pop_builder_add_slice(self_, version, ptr_mut(node), builder, slice);
     true
 }
 
@@ -1528,7 +1523,7 @@ unsafe fn stack_pop_payloads_into(
                     size: builder.payloads.size - start,
                     version: STACK_VERSION_NONE,
                 };
-                stack_pop_builder_add_slice(stack, version, stack_node_mut(node), builder, span);
+                stack_pop_builder_add_slice(stack, version, ptr_mut(node), builder, span);
                 popped = true;
             }
 
@@ -1640,7 +1635,7 @@ unsafe fn stack__iter(
                     subtree_array_copy(&source_subtrees, &mut subtrees);
                 }
                 subtree_array_reverse(&mut subtrees);
-                stack__add_slice(stack, version, stack_node_mut(node), &subtrees);
+                stack__add_slice(stack, version, ptr_mut(node), &subtrees);
             }
 
             if should_stop {
@@ -1838,11 +1833,7 @@ pub unsafe fn stack_delete(self_: &mut Stack) {
         array_delete(&mut self_.iterators);
     }
     let subtree_pool = ptr_mut(self_.subtree_pool);
-    stack_node_release(
-        stack_node_mut(self_.base_node),
-        &mut self_.node_pool,
-        subtree_pool,
-    );
+    stack_node_release(ptr_mut(self_.base_node), &mut self_.node_pool, subtree_pool);
     let heads = &mut self_.heads;
     let node_pool = &mut self_.node_pool;
     for i in 0..heads.size {
@@ -2168,7 +2159,7 @@ pub unsafe fn stack_copy_version(stack: &mut Stack, version: StackVersion) -> St
     let version_head = ptr::read(array_get_ref(&stack.heads, version));
     array_push(&mut stack.heads, version_head);
     let head = array_back_mut(&mut stack.heads);
-    stack_node_retain(stack_node_mut(head.node));
+    stack_node_retain(ptr_mut(head.node));
     if !head.last_external_token.ptr.is_null() {
         subtree_retain(head.last_external_token);
     }
@@ -2191,11 +2182,7 @@ pub unsafe fn stack_merge(
         let (head1, head2) = stack_head_array_pair_mut(stack_heads, version1, version2);
         let head2_node = ptr_ref(head2.node);
         for i in 0..head2_node.link_count as usize {
-            stack_node_add_link(
-                stack_node_mut(head1.node),
-                head2_node.links[i],
-                subtree_pool,
-            );
+            stack_node_add_link(ptr_mut(head1.node), head2_node.links[i], subtree_pool);
         }
         let head1_node = ptr_ref(head1.node);
         if head1_node.state == ERROR_STATE {
@@ -2265,7 +2252,7 @@ pub unsafe fn stack_resume(stack: &mut Stack, version: StackVersion) -> Subtree 
 /// Clear all versions, resetting to initial state.
 pub unsafe fn stack_clear(self_: &mut Stack) {
     stack_segment_storage_clear(self_);
-    stack_node_retain(stack_node_mut(self_.base_node));
+    stack_node_retain(ptr_mut(self_.base_node));
     let heads = &mut self_.heads;
     let node_pool = &mut self_.node_pool;
     let subtree_pool = ptr_mut(self_.subtree_pool);
