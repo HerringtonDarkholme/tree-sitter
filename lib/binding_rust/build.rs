@@ -5,6 +5,15 @@ fn main() {
     let target = env::var("TARGET").unwrap();
     let core_impl = CoreImpl::from_env();
 
+    // On Windows MSVC the printf-family functions are inline-only in the UCRT
+    // headers, so the symbols the Rust core imports via FFI (snprintf, fprintf,
+    // ...) have no definition to link against. legacy_stdio_definitions.lib
+    // provides them. (Needed once the cdylib exports every symbol; the CLI exe
+    // happened to drop them via dead-code elimination.)
+    if target.ends_with("-pc-windows-msvc") {
+        println!("cargo:rustc-link-lib=legacy_stdio_definitions");
+    }
+
     #[cfg(feature = "bindgen")]
     generate_bindings(&out_dir);
 
