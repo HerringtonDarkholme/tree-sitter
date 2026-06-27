@@ -38,40 +38,138 @@ pub struct ReusableNode {
     pub last_external_token: Subtree,
 }
 
-pub const fn reusable_node_new() -> ReusableNode {
-    ReusableNode {
-        stack: array_new(),
-        last_external_token: NULL_SUBTREE,
+impl Default for ReusableNode {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
-pub fn reusable_node_clear(self_: &mut ReusableNode) {
-    array_clear(&mut self_.stack);
-    self_.last_external_token = NULL_SUBTREE;
-}
+impl ReusableNode {
+    pub const fn new() -> Self {
+        Self {
+            stack: array_new(),
+            last_external_token: NULL_SUBTREE,
+        }
+    }
 
-unsafe fn reusable_node_last_entry(self_: &ReusableNode) -> Option<&StackEntry> {
-    if self_.stack.size > 0 {
-        Some(array_back_ref(&self_.stack))
-    } else {
-        None
+    pub fn clear(&mut self) {
+        array_clear(&mut self.stack);
+        self.last_external_token = NULL_SUBTREE;
+    }
+
+    unsafe fn last_entry(&self) -> Option<&StackEntry> {
+        if self.stack.size > 0 {
+            Some(array_back_ref(&self.stack))
+        } else {
+            None
+        }
+    }
+
+    pub unsafe fn tree(&self) -> Subtree {
+        self.last_entry().map_or(NULL_SUBTREE, |entry| entry.tree)
+    }
+
+    pub unsafe fn byte_offset(&self) -> u32 {
+        self.last_entry()
+            .map_or(u32::MAX, |entry| entry.byte_offset)
+    }
+
+    pub unsafe fn delete(&mut self) {
+        array_delete(&mut self.stack);
+    }
+
+    /// Move from the current old-tree node to the next sibling in preorder.
+    ///
+    /// The current node is considered consumed. The cursor walks upward until it
+    /// finds an ancestor with another child, then pushes that sibling. Reaching
+    /// the top means the old tree has no more reusable candidates.
+    pub unsafe fn advance(&mut self) {
+        let Some(last_entry) = self.last_entry().copied() else {
+            return;
+        };
+        let (byte_offset, last_external_token) = entry_after(last_entry);
+        if !last_external_token.ptr.is_null() {
+            self.last_external_token = last_external_token;
+        }
+
+        let mut tree;
+        let mut next_index;
+        loop {
+            let popped_entry = array_pop(&mut self.stack);
+            next_index = popped_entry.child_index + 1;
+            if self.stack.size == 0 {
+                return;
+            }
+            tree = self.last_entry().map_or(NULL_SUBTREE, |entry| entry.tree);
+            if subtree_child_count(tree) > next_index {
+                break;
+            }
+        }
+
+        array_push(
+            &mut self.stack,
+            StackEntry {
+                tree: *subtree_child(tree, next_index),
+                child_index: next_index,
+                byte_offset,
+            },
+        );
+    }
+
+    /// Descend from the current candidate to its first child.
+    pub unsafe fn descend(&mut self) -> bool {
+        let Some(last_entry) = self.last_entry().copied() else {
+            return false;
+        };
+        if subtree_child_count(last_entry.tree) > 0 {
+            array_push(
+                &mut self.stack,
+                StackEntry {
+                    tree: *subtree_child(last_entry.tree, 0),
+                    child_index: 0,
+                    byte_offset: last_entry.byte_offset,
+                },
+            );
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Move past the current leaf, descending first if the candidate is a node.
+    pub unsafe fn advance_past_leaf(&mut self) {
+        while self.descend() {}
+        self.advance();
+    }
+
+    /// Reset the cursor to the first reusable child of an old root.
+    ///
+    /// The root is deliberately skipped because accepted roots contain
+    /// parser-added structure such as EOF and trailing extras that should not be
+    /// reused as a normal grammar node.
+    pub unsafe fn reset(&mut self, tree: Subtree) {
+        self.clear();
+        array_push(
+            &mut self.stack,
+            StackEntry {
+                tree,
+                child_index: 0,
+                byte_offset: 0,
+            },
+        );
+
+        // Never reuse the root node, because it has a non-standard internal
+        // structure due to transformations that are applied when it is accepted:
+        // adding the EOF child and any extra children.
+        if !self.descend() {
+            self.clear();
+        }
     }
 }
 
-pub unsafe fn reusable_node_tree(self_: &ReusableNode) -> Subtree {
-    reusable_node_last_entry(self_).map_or(NULL_SUBTREE, |entry| entry.tree)
-}
-
-pub unsafe fn reusable_node_byte_offset(self_: &ReusableNode) -> u32 {
-    reusable_node_last_entry(self_).map_or(u32::MAX, |entry| entry.byte_offset)
-}
-
-pub unsafe fn reusable_node_delete(self_: &mut ReusableNode) {
-    array_delete(&mut self_.stack);
-}
-
+/// Byte offset and external-scanner token immediately after a consumed entry.
 #[inline]
-unsafe fn reusable_node_entry_after(entry: StackEntry) -> (u32, Subtree) {
+unsafe fn entry_after(entry: StackEntry) -> (u32, Subtree) {
     let byte_offset = entry.byte_offset + subtree_total_bytes(entry.tree);
     let last_external_token = if subtree_has_external_tokens(entry.tree) {
         subtree_last_external_token(entry.tree)
@@ -79,92 +177,4 @@ unsafe fn reusable_node_entry_after(entry: StackEntry) -> (u32, Subtree) {
         NULL_SUBTREE
     };
     (byte_offset, last_external_token)
-}
-
-/// Move from the current old-tree node to the next sibling in preorder.
-///
-/// The current node is considered consumed. The cursor walks upward until it
-/// finds an ancestor with another child, then pushes that sibling. Reaching the
-/// top means the old tree has no more reusable candidates.
-pub unsafe fn reusable_node_advance(self_: &mut ReusableNode) {
-    let Some(last_entry) = reusable_node_last_entry(self_).copied() else {
-        return;
-    };
-    let (byte_offset, last_external_token) = reusable_node_entry_after(last_entry);
-    if !last_external_token.ptr.is_null() {
-        self_.last_external_token = last_external_token;
-    }
-
-    let mut tree;
-    let mut next_index;
-    loop {
-        let popped_entry = array_pop(&mut self_.stack);
-        next_index = popped_entry.child_index + 1;
-        if self_.stack.size == 0 {
-            return;
-        }
-        tree = reusable_node_last_entry(self_).map_or(NULL_SUBTREE, |entry| entry.tree);
-        if subtree_child_count(tree) > next_index {
-            break;
-        }
-    }
-
-    array_push(
-        &mut self_.stack,
-        StackEntry {
-            tree: *subtree_child(tree, next_index),
-            child_index: next_index,
-            byte_offset,
-        },
-    );
-}
-
-/// Descend from the current candidate to its first child.
-pub unsafe fn reusable_node_descend(self_: &mut ReusableNode) -> bool {
-    let Some(last_entry) = reusable_node_last_entry(self_).copied() else {
-        return false;
-    };
-    if subtree_child_count(last_entry.tree) > 0 {
-        array_push(
-            &mut self_.stack,
-            StackEntry {
-                tree: *subtree_child(last_entry.tree, 0),
-                child_index: 0,
-                byte_offset: last_entry.byte_offset,
-            },
-        );
-        true
-    } else {
-        false
-    }
-}
-
-/// Move past the current leaf, descending first if the candidate is a node.
-pub unsafe fn reusable_node_advance_past_leaf(self_: &mut ReusableNode) {
-    while reusable_node_descend(self_) {}
-    reusable_node_advance(self_);
-}
-
-/// Reset the cursor to the first reusable child of an old root.
-///
-/// The root is deliberately skipped because accepted roots contain parser-added
-/// structure such as EOF and trailing extras that should not be reused as a
-/// normal grammar node.
-pub unsafe fn reusable_node_reset(self_: &mut ReusableNode, tree: Subtree) {
-    reusable_node_clear(self_);
-    array_push(
-        &mut self_.stack,
-        StackEntry {
-            tree,
-            child_index: 0,
-            byte_offset: 0,
-        },
-    );
-
-    // Never reuse the root node, because it has a non-standard internal structure
-    // due to transformations that are applied when it is accepted: adding the EOF
-    // child and any extra children.
-    if !reusable_node_descend(self_) {
-        reusable_node_clear(self_);
-    }
 }

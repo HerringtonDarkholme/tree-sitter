@@ -35,11 +35,7 @@ use super::lexer::{
     lexer_set_included_ranges, lexer_set_input, lexer_start, Lexer,
 };
 use super::raw_pointer::{ptr_mut, ptr_ref};
-use super::reusable_node::{
-    reusable_node_advance, reusable_node_advance_past_leaf, reusable_node_byte_offset,
-    reusable_node_clear, reusable_node_delete, reusable_node_descend, reusable_node_new,
-    reusable_node_reset, reusable_node_tree, ReusableNode,
-};
+use super::reusable_node::ReusableNode;
 use super::stack::{
     array_assign,
     array_back_ref,
@@ -1493,15 +1489,15 @@ unsafe fn parser__breakdown_lookahead(
     let parser = ptr::from_mut(self_);
     let reusable_node = &mut self_.reusable_node;
     let mut did_descend = false;
-    let mut tree = reusable_node_tree(reusable_node);
+    let mut tree = reusable_node.tree();
     while subtree_child_count(tree) > 0 && subtree_parse_state(tree) != state {
         LOG!(
             parser,
             c"state_mismatch sym:%s".as_ptr().cast::<i8>(),
             SYM_NAME!(parser, subtree_symbol(tree))
         );
-        reusable_node_descend(reusable_node);
-        tree = reusable_node_tree(reusable_node);
+        reusable_node.descend();
+        tree = reusable_node.tree();
         did_descend = true;
     }
 
@@ -2248,11 +2244,11 @@ unsafe fn parser__reuse_node(
     let parser = ptr::from_mut(self_);
     let mut result;
     loop {
-        result = reusable_node_tree(&self_.reusable_node);
+        result = self_.reusable_node.tree();
         if result.ptr.is_null() {
             break;
         }
-        let byte_offset = reusable_node_byte_offset(&self_.reusable_node);
+        let byte_offset = self_.reusable_node.byte_offset();
 
         // Do not reuse an EOF node if the included ranges array has changes
         // later on in the file.
@@ -2277,8 +2273,8 @@ unsafe fn parser__reuse_node(
                 c"past_reusable_node symbol:%s".as_ptr().cast::<i8>(),
                 SYM_NAME!(parser, subtree_symbol(result))
             );
-            if end_byte_offset <= position || !reusable_node_descend(&mut self_.reusable_node) {
-                reusable_node_advance(&mut self_.reusable_node);
+            if end_byte_offset <= position || !self_.reusable_node.descend() {
+                self_.reusable_node.advance();
             }
             continue;
         }
@@ -2294,7 +2290,7 @@ unsafe fn parser__reuse_node(
                     .cast::<i8>(),
                 SYM_NAME!(parser, subtree_symbol(result))
             );
-            reusable_node_advance(&mut self_.reusable_node);
+            self_.reusable_node.advance();
             continue;
         }
 
@@ -2318,8 +2314,8 @@ unsafe fn parser__reuse_node(
                 reason,
                 SYM_NAME!(parser, subtree_symbol(result))
             );
-            if !reusable_node_descend(&mut self_.reusable_node) {
-                reusable_node_advance(&mut self_.reusable_node);
+            if !self_.reusable_node.descend() {
+                self_.reusable_node.advance();
                 parser__breakdown_top_of_stack(self_, version);
                 *state = stack_state(parser_stack_ref(self_.stack), version);
             }
@@ -2337,7 +2333,7 @@ unsafe fn parser__reuse_node(
                 SYM_NAME!(parser, subtree_symbol(result)),
                 SYM_NAME!(parser, leaf_symbol)
             );
-            reusable_node_advance_past_leaf(&mut self_.reusable_node);
+            self_.reusable_node.advance_past_leaf();
             break;
         }
 
@@ -3597,7 +3593,7 @@ unsafe fn parser__advance(
                         parser__shift(self_, version, next_state, lookahead, action.shift.extra);
                     }
                     if did_reuse {
-                        reusable_node_advance(&mut self_.reusable_node);
+                        self_.reusable_node.advance();
                     }
                     return true;
                 }
@@ -3640,7 +3636,7 @@ unsafe fn parser__advance(
 
                     parser__recover(self_, version, lookahead);
                     if did_reuse {
-                        reusable_node_advance(&mut self_.reusable_node);
+                        self_.reusable_node.advance();
                     }
                     return true;
                 }
@@ -3975,7 +3971,7 @@ pub unsafe extern "C" fn ts_parser_new() -> *mut TSParser {
                 byte_index: 0,
             },
             tree_arena: ptr::null_mut(),
-            reusable_node: reusable_node_new(),
+            reusable_node: ReusableNode::new(),
             external_scanner_payload: ptr::null_mut(),
             dot_graph_file: ptr::null_mut(),
             accept_count: 0,
@@ -4030,7 +4026,7 @@ pub unsafe extern "C" fn ts_parser_delete(self_: *mut TSParser) {
     lexer_delete(&mut parser.lexer);
     parser__set_cached_token(parser, 0, NULL_SUBTREE, NULL_SUBTREE);
     subtree_pool_delete(&mut parser.tree_pool);
-    reusable_node_delete(&mut parser.reusable_node);
+    parser.reusable_node.delete();
     stack_pop_builder_delete(&mut parser.reduce_builder);
     array_delete(subtree_array_as_array_mut(&mut parser.trailing_extras));
     array_delete(subtree_array_as_array_mut(&mut parser.trailing_extras2));
@@ -4146,7 +4142,7 @@ pub unsafe extern "C" fn ts_parser_reset(self_: *mut TSParser) {
         parser.old_tree = NULL_SUBTREE;
     }
 
-    reusable_node_clear(&mut parser.reusable_node);
+    parser.reusable_node.clear();
     lexer_reset(&mut parser.lexer, length_zero());
     stack_clear(parser_stack_mut(parser.stack));
     parser__clear_pending_reductions(parser);
@@ -4257,7 +4253,7 @@ pub unsafe extern "C" fn ts_parser_parse(
                 new_included_ranges,
                 &mut parser.included_range_differences,
             );
-            reusable_node_reset(&mut parser.reusable_node, old_tree.root);
+            parser.reusable_node.reset(old_tree.root);
             LOG!(self_, c"parse_after_edit".as_ptr().cast::<i8>());
             LOG_TREE!(self_, parser.old_tree);
             for i in 0..parser.included_range_differences.size {
@@ -4271,7 +4267,7 @@ pub unsafe extern "C" fn ts_parser_parse(
                 );
             }
         } else {
-            reusable_node_clear(&mut parser.reusable_node);
+            parser.reusable_node.clear();
             LOG!(self_, c"new_parse".as_ptr().cast::<i8>());
         }
     }
