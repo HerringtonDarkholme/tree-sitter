@@ -364,8 +364,23 @@ extern "C" {
     #[link_name = "__stderrp"]
     static stderr: *mut c_void;
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     static stderr: *mut c_void;
+
+    // Windows MSVC has no `stderr` symbol; the CRT exposes the standard streams
+    // through __acrt_iob_func (stderr is index 2).
+    #[cfg(target_os = "windows")]
+    fn __acrt_iob_func(index: u32) -> *mut c_void;
+}
+
+#[cfg(target_os = "windows")]
+unsafe fn stderr_file() -> *mut c_void {
+    __acrt_iob_func(2)
+}
+
+#[cfg(not(target_os = "windows"))]
+unsafe fn stderr_file() -> *mut c_void {
+    stderr
 }
 
 pub const fn stack_pop_builder_new() -> StackPopBuilder {
@@ -2099,7 +2114,7 @@ pub unsafe fn stack_print_dot_graph(
 ) -> bool {
     array_reserve(&mut stack.iterators, 32);
     if f.is_null() {
-        f = stderr;
+        f = stderr_file();
     }
 
     fprintf(f, c"digraph stack {\n".as_ptr().cast::<i8>());
