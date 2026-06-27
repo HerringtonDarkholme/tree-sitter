@@ -82,6 +82,15 @@ used_underscore_items = "allow"
 mismatched_lifetime_syntaxes = "allow"
 deprecated_safe_2024 = "deny"
 
+# Optimize the parser core even in debug/test builds. Upstream's core is C,
+# compiled at `-O0` (no -O flag) yet fast because C has no bounds/overflow
+# checks; an unoptimized *Rust* core (overflow + bounds checks, no inlining) is
+# far slower and, under qemu emulation, overshoots the tight timing bound in
+# `test_parsing_with_a_timeout`. Optimizing just this crate restores comparable
+# speed while keeping the rest of the workspace debuggable.
+[profile.dev.package.tree-sitter]
+opt-level = 3
+
 [profile.optimize]
 inherits = "release"
 strip = true         # Automatically strip symbols from the binary.
