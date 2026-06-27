@@ -523,7 +523,7 @@ pub unsafe extern "C" fn ts_tree_cursor_delete(self_: *mut TSTreeCursor) {
 // Navigation: children
 // ---------------------------------------------------------------------------
 
-unsafe fn tree_cursor_goto_first_child_internal(cursor: &mut TreeCursor) -> TreeCursorStep {
+pub unsafe fn tree_cursor_goto_first_child_internal(cursor: &mut TreeCursor) -> TreeCursorStep {
     let mut iterator = tree_cursor_iterate_children(cursor);
     while let Some(child) = tree_cursor_child_iterator_next(&mut iterator) {
         let entry = child.entry;
@@ -624,7 +624,7 @@ pub unsafe extern "C" fn ts_tree_cursor_goto_first_child_for_point(
 // Navigation: siblings, parent, descendant
 // ---------------------------------------------------------------------------
 
-unsafe fn tree_cursor_goto_next_sibling_internal(cursor: &mut TreeCursor) -> TreeCursorStep {
+pub unsafe fn tree_cursor_goto_next_sibling_internal(cursor: &mut TreeCursor) -> TreeCursorStep {
     tree_cursor_goto_sibling_internal(cursor, tree_cursor_child_iterator_next)
 }
 

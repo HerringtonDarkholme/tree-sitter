@@ -20,12 +20,13 @@
 //! the original.
 
 use crate::ffi::{
-    TSFieldId, TSLanguage, TSQuantifier, TSQuantifierOne, TSQuantifierOneOrMore, TSQuantifierZero,
-    TSQuantifierZeroOrMore, TSQuantifierZeroOrOne, TSQueryCapture, TSQueryCursorOptions,
-    TSQueryCursorState, TSQueryError, TSQueryErrorCapture, TSQueryErrorField, TSQueryErrorLanguage,
-    TSQueryErrorNodeType, TSQueryErrorNone, TSQueryErrorStructure, TSQueryErrorSyntax,
-    TSQueryPredicateStep, TSQueryPredicateStepTypeCapture, TSQueryPredicateStepTypeDone,
-    TSQueryPredicateStepTypeString, TSRange, TSStateId, TSSymbol,
+    TSFieldId, TSLanguage, TSNode, TSPoint, TSQuantifier, TSQuantifierOne, TSQuantifierOneOrMore,
+    TSQuantifierZero, TSQuantifierZeroOrMore, TSQuantifierZeroOrOne, TSQueryCapture,
+    TSQueryCursorOptions, TSQueryCursorState, TSQueryError, TSQueryErrorCapture, TSQueryErrorField,
+    TSQueryErrorLanguage, TSQueryErrorNodeType, TSQueryErrorNone, TSQueryErrorStructure,
+    TSQueryErrorSyntax, TSQueryMatch, TSQueryPredicateStep, TSQueryPredicateStepTypeCapture,
+    TSQueryPredicateStepTypeDone, TSQueryPredicateStepTypeString, TSRange, TSStateId, TSSymbol,
+    TSTreeCursor,
 };
 
 use super::alloc::{calloc, free, malloc};
@@ -37,13 +38,25 @@ use super::language::{
     ts_language_symbol_for_name, ts_language_symbol_metadata, TSParseActionTypeReduce,
     TSParseActionTypeShift, LANGUAGE_VERSION_WITH_RESERVED_WORDS,
 };
+use super::node::{
+    ts_node_child_by_field_id, ts_node_end_byte, ts_node_end_point, ts_node_is_missing,
+    ts_node_is_named, ts_node_is_null, ts_node_start_byte, ts_node_start_point, ts_node_symbol,
+};
+use super::point::{point_eq, point_gt, point_gte, point_lt, point_lte, POINT_MAX};
 use super::stack::{
     array_assign, array_back_mut, array_back_ref, array_clear, array_delete, array_erase,
     array_get_mut, array_get_ref, array_grow_by, array_init, array_insert, array_new, array_pop,
-    array_push, array_splice, Array,
+    array_push, array_reserve, array_splice, Array,
 };
-use super::subtree::{ts_builtin_sym_error, TSFieldMapEntry};
-use super::tree_cursor::TreeCursor;
+use super::subtree::{
+    subtree_is_repetition, subtree_symbol, ts_builtin_sym_error, Subtree, TSFieldMapEntry,
+};
+use super::tree_cursor::{
+    tree_cursor_entry_slice, tree_cursor_goto_first_child_internal,
+    tree_cursor_goto_next_sibling_internal, ts_tree_cursor_current_node,
+    ts_tree_cursor_current_status, ts_tree_cursor_delete, ts_tree_cursor_goto_parent,
+    ts_tree_cursor_parent_node, ts_tree_cursor_reset, TreeCursor, TreeCursorStep,
+};
 use super::unicode::ts_decode_utf8;
 use core::ffi::c_void;
 use core::mem::size_of;
@@ -3162,4 +3175,1229 @@ pub unsafe extern "C" fn ts_query_disable_pattern(self_: *mut TSQuery, pattern_i
             i += 1;
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Query cursor
+// ---------------------------------------------------------------------------
+//
+// The internal cursor helpers take `*mut TSQueryCursor` and use raw-pointer
+// field access, mirroring the C source (which threads `TSQueryCursor *`
+// everywhere) and avoiding borrow-checker conflicts when mutating the states
+// array while iterating it. As with the rest of the query API, the public
+// functions are `extern "C"` without `#[no_mangle]` until tier 5.
+
+/// `&TreeCursor` as a `*const TSTreeCursor` (layout-compatible public view).
+#[inline]
+const fn tc_const(cursor: &TreeCursor) -> *const TSTreeCursor {
+    core::ptr::from_ref(cursor).cast::<TSTreeCursor>()
+}
+
+/// `&mut TreeCursor` as a `*mut TSTreeCursor`.
+#[inline]
+fn tc_mut(cursor: &mut TreeCursor) -> *mut TSTreeCursor {
+    core::ptr::from_mut(cursor).cast::<TSTreeCursor>()
+}
+
+/// The subtree at the cursor's current position (top of its stack).
+#[inline]
+unsafe fn cursor_current_subtree(cursor: &TreeCursor) -> Subtree {
+    *tree_cursor_entry_slice(&cursor.stack)
+        .last()
+        .unwrap_unchecked()
+        .subtree
+}
+
+const EMPTY_RANGE: TSRange = TSRange {
+    start_point: TSPoint { row: 0, column: 0 },
+    end_point: POINT_MAX,
+    start_byte: 0,
+    end_byte: u32::MAX,
+};
+
+pub unsafe extern "C" fn ts_query_cursor_new() -> *mut TSQueryCursor {
+    let self_ = malloc(size_of::<TSQueryCursor>()).cast::<TSQueryCursor>();
+    core::ptr::write(
+        self_,
+        TSQueryCursor {
+            query: core::ptr::null(),
+            cursor: core::mem::zeroed(),
+            states: array_new(),
+            finished_states: array_new(),
+            capture_list_pool: capture_list_pool_new(),
+            depth: 0,
+            max_start_depth: u32::MAX,
+            included_range: EMPTY_RANGE,
+            containing_range: EMPTY_RANGE,
+            next_state_id: 0,
+            query_options: core::ptr::null(),
+            query_state: TSQueryCursorState {
+                payload: core::ptr::null_mut(),
+                current_byte_offset: 0,
+            },
+            operation_count: 0,
+            on_visible_node: false,
+            ascending: false,
+            halted: false,
+            did_exceed_match_limit: false,
+        },
+    );
+    array_reserve(&mut (*self_).states, 8);
+    array_reserve(&mut (*self_).finished_states, 8);
+    self_
+}
+
+pub unsafe extern "C" fn ts_query_cursor_delete(self_: *mut TSQueryCursor) {
+    array_delete(&mut (*self_).states);
+    array_delete(&mut (*self_).finished_states);
+    ts_tree_cursor_delete(tc_mut(&mut (*self_).cursor));
+    capture_list_pool_delete(&mut (*self_).capture_list_pool);
+    free(self_.cast::<c_void>());
+}
+
+pub const unsafe extern "C" fn ts_query_cursor_did_exceed_match_limit(
+    self_: *const TSQueryCursor,
+) -> bool {
+    (*self_).did_exceed_match_limit
+}
+
+pub const unsafe extern "C" fn ts_query_cursor_match_limit(self_: *const TSQueryCursor) -> u32 {
+    (*self_).capture_list_pool.max_capture_list_count
+}
+
+pub unsafe extern "C" fn ts_query_cursor_set_match_limit(self_: *mut TSQueryCursor, limit: u32) {
+    (*self_).capture_list_pool.max_capture_list_count = limit;
+}
+
+pub unsafe extern "C" fn ts_query_cursor_exec(
+    self_: *mut TSQueryCursor,
+    query: *const TSQuery,
+    node: TSNode,
+) {
+    array_clear(&mut (*self_).states);
+    array_clear(&mut (*self_).finished_states);
+    ts_tree_cursor_reset(tc_mut(&mut (*self_).cursor), node);
+    capture_list_pool_reset(&mut (*self_).capture_list_pool);
+    (*self_).on_visible_node = true;
+    (*self_).next_state_id = 0;
+    (*self_).depth = 0;
+    (*self_).ascending = false;
+    (*self_).halted = false;
+    (*self_).query = query;
+    (*self_).did_exceed_match_limit = false;
+    (*self_).operation_count = 0;
+    (*self_).query_options = core::ptr::null();
+    (*self_).query_state = TSQueryCursorState {
+        payload: core::ptr::null_mut(),
+        current_byte_offset: 0,
+    };
+}
+
+pub unsafe extern "C" fn ts_query_cursor_exec_with_options(
+    self_: *mut TSQueryCursor,
+    query: *const TSQuery,
+    node: TSNode,
+    query_options: *const TSQueryCursorOptions,
+) {
+    ts_query_cursor_exec(self_, query, node);
+    if !query_options.is_null() {
+        (*self_).query_options = query_options;
+        (*self_).query_state = TSQueryCursorState {
+            payload: (*query_options).payload,
+            current_byte_offset: 0,
+        };
+    }
+}
+
+pub unsafe extern "C" fn ts_query_cursor_set_byte_range(
+    self_: *mut TSQueryCursor,
+    start_byte: u32,
+    mut end_byte: u32,
+) -> bool {
+    if end_byte == 0 {
+        end_byte = u32::MAX;
+    }
+    if start_byte > end_byte {
+        return false;
+    }
+    (*self_).included_range.start_byte = start_byte;
+    (*self_).included_range.end_byte = end_byte;
+    true
+}
+
+pub unsafe extern "C" fn ts_query_cursor_set_point_range(
+    self_: *mut TSQueryCursor,
+    start_point: TSPoint,
+    mut end_point: TSPoint,
+) -> bool {
+    if end_point.row == 0 && end_point.column == 0 {
+        end_point = POINT_MAX;
+    }
+    if point_gt(start_point, end_point) {
+        return false;
+    }
+    (*self_).included_range.start_point = start_point;
+    (*self_).included_range.end_point = end_point;
+    true
+}
+
+pub unsafe extern "C" fn ts_query_cursor_set_containing_byte_range(
+    self_: *mut TSQueryCursor,
+    start_byte: u32,
+    mut end_byte: u32,
+) -> bool {
+    if end_byte == 0 {
+        end_byte = u32::MAX;
+    }
+    if start_byte > end_byte {
+        return false;
+    }
+    (*self_).containing_range.start_byte = start_byte;
+    (*self_).containing_range.end_byte = end_byte;
+    true
+}
+
+pub unsafe extern "C" fn ts_query_cursor_set_containing_point_range(
+    self_: *mut TSQueryCursor,
+    start_point: TSPoint,
+    mut end_point: TSPoint,
+) -> bool {
+    if end_point.row == 0 && end_point.column == 0 {
+        end_point = POINT_MAX;
+    }
+    if point_gt(start_point, end_point) {
+        return false;
+    }
+    (*self_).containing_range.start_point = start_point;
+    (*self_).containing_range.end_point = end_point;
+    true
+}
+
+/// Find the captured node that occurs earliest in the document across all
+/// in-progress states. `is_definite` (when non-null) receives whether the
+/// chosen capture is definite. Returns `(found, state_index, byte_offset,
+/// pattern_index)`.
+unsafe fn ts_query_cursor_first_in_progress_capture(
+    self_: *mut TSQueryCursor,
+    is_definite: *mut bool,
+) -> (bool, u32, u32, u32) {
+    let mut result = false;
+    let mut state_index = u32::MAX;
+    let mut byte_offset = u32::MAX;
+    let mut pattern_index = u32::MAX;
+    let mut i = 0u32;
+    while i < (*self_).states.size {
+        let state = std::ptr::from_mut::<QueryState>(array_get_mut(&mut (*self_).states, i));
+        if (*state).dead {
+            i += 1;
+            continue;
+        }
+
+        let captures =
+            capture_list_pool_get(&(*self_).capture_list_pool, (*state).capture_list_id as u16);
+        if u32::from((*state).consumed_capture_count) >= captures.size {
+            i += 1;
+            continue;
+        }
+
+        let node = array_get_ref(captures, u32::from((*state).consumed_capture_count)).node;
+        if ts_node_end_byte(node) <= (*self_).included_range.start_byte
+            || point_lte(ts_node_end_point(node), (*self_).included_range.start_point)
+        {
+            (*state).consumed_capture_count += 1;
+            continue;
+        }
+
+        let node_start_byte = ts_node_start_byte(node);
+        if !result
+            || node_start_byte < byte_offset
+            || (node_start_byte == byte_offset && u32::from((*state).pattern_index) < pattern_index)
+        {
+            let step = array_get_ref(&(*(*self_).query).steps, u32::from((*state).step_index));
+            if !is_definite.is_null() {
+                // Conservative: the following step must not be immediate, since
+                // this capture could be discarded if the next tree symbol isn't
+                // the required one.
+                *is_definite = step.root_pattern_guaranteed && !step.is_immediate;
+            } else if step.root_pattern_guaranteed {
+                i += 1;
+                continue;
+            }
+
+            result = true;
+            state_index = i;
+            byte_offset = node_start_byte;
+            pattern_index = u32::from((*state).pattern_index);
+        }
+        i += 1;
+    }
+    (result, state_index, byte_offset, pattern_index)
+}
+
+/// Determine which node is first in a depth-first traversal.
+unsafe fn ts_query_cursor_compare_nodes(left: TSNode, right: TSNode) -> i32 {
+    if left.id != right.id {
+        let left_start = ts_node_start_byte(left);
+        let right_start = ts_node_start_byte(right);
+        if left_start < right_start {
+            return -1;
+        }
+        if left_start > right_start {
+            return 1;
+        }
+        let left_node_count = ts_node_end_byte(left);
+        let right_node_count = ts_node_end_byte(right);
+        if left_node_count > right_node_count {
+            return -1;
+        }
+        if left_node_count < right_node_count {
+            return 1;
+        }
+    }
+    0
+}
+
+/// Determine if either state contains a superset of the other's captures.
+unsafe fn ts_query_cursor_compare_captures(
+    self_: *mut TSQueryCursor,
+    left_state: *const QueryState,
+    right_state: *const QueryState,
+) -> (bool, bool) {
+    let left_captures = std::ptr::from_ref::<CaptureList>(capture_list_pool_get(
+        &(*self_).capture_list_pool,
+        (*left_state).capture_list_id as u16,
+    ));
+    let right_captures = std::ptr::from_ref::<CaptureList>(capture_list_pool_get(
+        &(*self_).capture_list_pool,
+        (*right_state).capture_list_id as u16,
+    ));
+    let mut left_contains_right = true;
+    let mut right_contains_left = true;
+    let mut i = 0u32;
+    let mut j = 0u32;
+    loop {
+        if i < (*left_captures).size {
+            if j < (*right_captures).size {
+                let left = array_get_ref(&*left_captures, i);
+                let right = array_get_ref(&*right_captures, j);
+                if left.node.id == right.node.id && left.index == right.index {
+                    i += 1;
+                    j += 1;
+                } else {
+                    match ts_query_cursor_compare_nodes(left.node, right.node) {
+                        -1 => {
+                            right_contains_left = false;
+                            i += 1;
+                        }
+                        1 => {
+                            left_contains_right = false;
+                            j += 1;
+                        }
+                        _ => {
+                            right_contains_left = false;
+                            left_contains_right = false;
+                            i += 1;
+                            j += 1;
+                        }
+                    }
+                }
+            } else {
+                right_contains_left = false;
+                break;
+            }
+        } else {
+            if j < (*right_captures).size {
+                left_contains_right = false;
+            }
+            break;
+        }
+    }
+    (left_contains_right, right_contains_left)
+}
+
+unsafe fn ts_query_cursor_add_state(self_: *mut TSQueryCursor, pattern: *const PatternEntry) {
+    let step = array_get_ref(&(*(*self_).query).steps, u32::from((*pattern).step_index));
+    let start_depth = (*self_).depth - u32::from(step.depth);
+    let needs_parent = step.depth == 1;
+
+    // Keep the states array in ascending order of start_depth and pattern_index.
+    let mut index = (*self_).states.size;
+    while index > 0 {
+        let prev_state = array_get_ref(&(*self_).states, index - 1);
+        if u32::from(prev_state.start_depth) < start_depth {
+            break;
+        }
+        if u32::from(prev_state.start_depth) == start_depth {
+            // Avoid inserting an unnecessary duplicate state.
+            if prev_state.pattern_index == (*pattern).pattern_index
+                && prev_state.step_index == (*pattern).step_index
+            {
+                return;
+            }
+            if prev_state.pattern_index <= (*pattern).pattern_index {
+                break;
+            }
+        }
+        index -= 1;
+    }
+
+    array_insert(
+        &mut (*self_).states,
+        index,
+        QueryState {
+            id: u32::MAX,
+            capture_list_id: u32::from(NONE),
+            step_index: (*pattern).step_index,
+            pattern_index: (*pattern).pattern_index,
+            start_depth: start_depth as u16,
+            consumed_capture_count: 0,
+            seeking_immediate_match: true,
+            has_in_progress_alternatives: false,
+            needs_parent,
+            dead: false,
+        },
+    );
+}
+
+/// Acquire a capture list for the state, stealing one (and killing the earliest
+/// state) if the pool is exhausted. Returns null if none can be obtained.
+unsafe fn ts_query_cursor_prepare_to_capture(
+    self_: *mut TSQueryCursor,
+    capture_list_id: *mut u32,
+    state_index_to_preserve: u32,
+) -> *mut CaptureList {
+    if *capture_list_id == u32::from(NONE) {
+        *capture_list_id = u32::from(capture_list_pool_acquire(&mut (*self_).capture_list_pool));
+
+        // If the pool is empty, terminate the state that captured the earliest
+        // node and steal its capture list.
+        if *capture_list_id == u32::from(NONE) {
+            (*self_).did_exceed_match_limit = true;
+            let (found, state_index, _byte_offset, _pattern_index) =
+                ts_query_cursor_first_in_progress_capture(self_, core::ptr::null_mut());
+            if found && state_index != state_index_to_preserve {
+                let other_state = std::ptr::from_mut::<QueryState>(array_get_mut(
+                    &mut (*self_).states,
+                    state_index,
+                ));
+                *capture_list_id = (*other_state).capture_list_id;
+                (*other_state).capture_list_id = u32::from(NONE);
+                (*other_state).dead = true;
+                let list = capture_list_pool_get_mut(
+                    &mut (*self_).capture_list_pool,
+                    *capture_list_id as u16,
+                );
+                array_clear(list);
+                return list;
+            }
+            return core::ptr::null_mut();
+        }
+    }
+    capture_list_pool_get_mut(&mut (*self_).capture_list_pool, *capture_list_id as u16)
+}
+
+unsafe fn ts_query_cursor_capture(
+    self_: *mut TSQueryCursor,
+    state: *mut QueryState,
+    step: *const QueryStep,
+    node: TSNode,
+) {
+    if (*state).dead {
+        return;
+    }
+    let capture_list = ts_query_cursor_prepare_to_capture(
+        self_,
+        core::ptr::addr_of_mut!((*state).capture_list_id),
+        u32::MAX,
+    );
+    if capture_list.is_null() {
+        (*state).dead = true;
+        return;
+    }
+
+    for j in 0..MAX_STEP_CAPTURE_COUNT {
+        let capture_id = (*step).capture_ids[j];
+        if capture_id == NONE {
+            break;
+        }
+        array_push(
+            &mut *capture_list,
+            TSQueryCapture {
+                node,
+                index: u32::from(capture_id),
+            },
+        );
+    }
+}
+
+/// Duplicate the state at `state_index`, inserting the copy immediately after.
+/// Returns the index of the copy, or `None` if a capture list could not be
+/// obtained.
+unsafe fn ts_query_cursor_copy_state(self_: *mut TSQueryCursor, state_index: u32) -> Option<u32> {
+    let mut copy = *array_get_ref(&(*self_).states, state_index);
+    let original_capture_list_id = copy.capture_list_id;
+    copy.capture_list_id = u32::from(NONE);
+
+    // If the state has captures, copy its capture list.
+    if original_capture_list_id != u32::from(NONE) {
+        let new_captures = ts_query_cursor_prepare_to_capture(
+            self_,
+            core::ptr::addr_of_mut!(copy.capture_list_id),
+            state_index,
+        );
+        if new_captures.is_null() {
+            return None;
+        }
+        let old_captures = std::ptr::from_ref::<CaptureList>(capture_list_pool_get(
+            &(*self_).capture_list_pool,
+            original_capture_list_id as u16,
+        ));
+        array_splice(
+            &mut *new_captures,
+            (*new_captures).size,
+            0,
+            (*old_captures).size,
+            (*old_captures).contents,
+        );
+    }
+
+    array_insert(&mut (*self_).states, state_index + 1, copy);
+    Some(state_index + 1)
+}
+
+unsafe fn ts_query_cursor_should_descend(
+    self_: *mut TSQueryCursor,
+    node_intersects_range: bool,
+) -> bool {
+    if node_intersects_range && (*self_).depth < (*self_).max_start_depth {
+        return true;
+    }
+
+    // Descend if any in-progress match has remaining steps deeper in the tree.
+    for i in 0..(*self_).states.size {
+        let state = array_get_ref(&(*self_).states, i);
+        let next_step = array_get_ref(&(*(*self_).query).steps, u32::from(state.step_index));
+        if next_step.depth != PATTERN_DONE_MARKER
+            && u32::from(state.start_depth) + u32::from(next_step.depth) > (*self_).depth
+        {
+            return true;
+        }
+    }
+
+    if (*self_).depth >= (*self_).max_start_depth {
+        return false;
+    }
+
+    // A hidden node may contain a root of a non-rooted pattern; descend, but
+    // avoid expensive repetition nodes unless this query can match rootless
+    // patterns within them.
+    if !(*self_).on_visible_node {
+        let subtree = cursor_current_subtree(&(*self_).cursor);
+        if subtree_is_repetition(subtree) != 0 {
+            let (_index, exists) = array_search_sorted_by_u16(
+                &(*(*self_).query).repeat_symbols_with_rootless_patterns,
+                |x| *x,
+                subtree_symbol(subtree),
+            );
+            return exists;
+        }
+        return true;
+    }
+
+    false
+}
+
+const fn range_intersects(a: &TSRange, b: &TSRange) -> bool {
+    let is_empty = a.start_byte == a.end_byte;
+    (a.end_byte > b.start_byte || (is_empty && a.end_byte == b.start_byte))
+        && (point_gt(a.end_point, b.start_point)
+            || (is_empty && point_eq(a.end_point, b.start_point)))
+        && a.start_byte < b.end_byte
+        && point_lt(a.start_point, b.end_point)
+}
+
+const fn range_within(a: &TSRange, b: &TSRange) -> bool {
+    a.start_byte >= b.start_byte
+        && point_gte(a.start_point, b.start_point)
+        && a.end_byte <= b.end_byte
+        && point_lte(a.end_point, b.end_point)
+}
+
+/// Walk the tree, processing patterns until at least one finishes (its state is
+/// stored in `finished_states`) or there are no more matches. Returns whether a
+/// pattern finished.
+unsafe fn ts_query_cursor_advance(self_: *mut TSQueryCursor, stop_on_definite_step: bool) -> bool {
+    let mut did_match = false;
+    loop {
+        if (*self_).halted {
+            while (*self_).states.size > 0 {
+                let state = array_pop(&mut (*self_).states);
+                capture_list_pool_release(
+                    &mut (*self_).capture_list_pool,
+                    state.capture_list_id as u16,
+                );
+            }
+        }
+
+        (*self_).operation_count += 1;
+        if (*self_).operation_count == OP_COUNT_PER_QUERY_CALLBACK_CHECK {
+            (*self_).operation_count = 0;
+        }
+
+        if !(*self_).query_options.is_null()
+            && (*(*self_).query_options).progress_callback.is_some()
+        {
+            (*self_).query_state.current_byte_offset =
+                ts_node_start_byte(ts_tree_cursor_current_node(tc_const(&(*self_).cursor)));
+        }
+        let callback_halt = (*self_).operation_count == 0
+            && !(*self_).query_options.is_null()
+            && (*(*self_).query_options).progress_callback.is_some()
+            && ((*(*self_).query_options)
+                .progress_callback
+                .unwrap_unchecked())(core::ptr::addr_of_mut!((*self_).query_state));
+        if did_match || (*self_).halted || callback_halt {
+            return did_match;
+        }
+
+        // Exit the current node.
+        if (*self_).ascending {
+            if (*self_).on_visible_node {
+                // Remove states that cannot make further progress.
+                let mut deleted_count = 0u32;
+                let n = (*self_).states.size;
+                let mut i = 0u32;
+                while i < n {
+                    let state = *array_get_ref(&(*self_).states, i);
+                    let step =
+                        *array_get_ref(&(*(*self_).query).steps, u32::from(state.step_index));
+
+                    if step.depth == PATTERN_DONE_MARKER
+                        && (u32::from(state.start_depth) > (*self_).depth || (*self_).depth == 0)
+                    {
+                        // Pattern completed inside this node but was deferred.
+                        array_push(&mut (*self_).finished_states, state);
+                        did_match = true;
+                        deleted_count += 1;
+                    } else if step.depth != PATTERN_DONE_MARKER
+                        && u32::from(state.start_depth) + u32::from(step.depth) > (*self_).depth
+                    {
+                        // Needed to match within this node, but failed.
+                        capture_list_pool_release(
+                            &mut (*self_).capture_list_pool,
+                            state.capture_list_id as u16,
+                        );
+                        deleted_count += 1;
+                    } else if deleted_count > 0 {
+                        *array_get_mut(&mut (*self_).states, i - deleted_count) = state;
+                    }
+                    i += 1;
+                }
+                (*self_).states.size -= deleted_count;
+            }
+
+            // Step to the next sibling or up to the parent.
+            match tree_cursor_goto_next_sibling_internal(&mut (*self_).cursor) {
+                TreeCursorStep::Visible => {
+                    if !(*self_).on_visible_node {
+                        (*self_).depth += 1;
+                        (*self_).on_visible_node = true;
+                    }
+                    (*self_).ascending = false;
+                }
+                TreeCursorStep::Hidden => {
+                    if (*self_).on_visible_node {
+                        (*self_).depth -= 1;
+                        (*self_).on_visible_node = false;
+                    }
+                    (*self_).ascending = false;
+                }
+                TreeCursorStep::None => {
+                    if ts_tree_cursor_goto_parent(tc_mut(&mut (*self_).cursor)) {
+                        (*self_).depth -= 1;
+                    } else {
+                        (*self_).halted = true;
+                    }
+                }
+            }
+        }
+        // Enter a new node.
+        else {
+            let node = ts_tree_cursor_current_node(tc_const(&(*self_).cursor));
+            let parent_node = ts_tree_cursor_parent_node(tc_const(&(*self_).cursor));
+
+            let parent_intersects_range = ts_node_is_null(parent_node)
+                || range_intersects(
+                    &TSRange {
+                        start_point: ts_node_start_point(parent_node),
+                        end_point: ts_node_end_point(parent_node),
+                        start_byte: ts_node_start_byte(parent_node),
+                        end_byte: ts_node_end_byte(parent_node),
+                    },
+                    &(*self_).included_range,
+                );
+            let node_range = TSRange {
+                start_point: ts_node_start_point(node),
+                end_point: ts_node_end_point(node),
+                start_byte: ts_node_start_byte(node),
+                end_byte: ts_node_end_byte(node),
+            };
+            let node_intersects_range =
+                parent_intersects_range && range_intersects(&node_range, &(*self_).included_range);
+            let node_intersects_containing_range =
+                range_intersects(&node_range, &(*self_).containing_range);
+            let node_within_containing_range =
+                range_within(&node_range, &(*self_).containing_range);
+
+            if node_within_containing_range && (*self_).on_visible_node {
+                let symbol = ts_node_symbol(node);
+                let is_named = ts_node_is_named(node);
+                let is_missing = ts_node_is_missing(node);
+                let mut field_id: TSFieldId = 0;
+                let mut has_later_siblings = false;
+                let mut has_later_named_siblings = false;
+                let mut can_have_later_siblings_with_this_field = false;
+                let mut supertypes: [TSSymbol; 8] = [0; 8];
+                let mut supertype_count: u32 = 8;
+                ts_tree_cursor_current_status(
+                    tc_const(&(*self_).cursor),
+                    &mut field_id,
+                    &mut has_later_siblings,
+                    &mut has_later_named_siblings,
+                    &mut can_have_later_siblings_with_this_field,
+                    supertypes.as_mut_ptr(),
+                    &mut supertype_count,
+                );
+
+                let node_is_error = symbol == ts_builtin_sym_error;
+                let parent_is_error = !ts_node_is_null(parent_node)
+                    && ts_node_symbol(parent_node) == ts_builtin_sym_error;
+
+                // Add states for patterns whose root node is a wildcard.
+                if !node_is_error {
+                    for i in 0..u32::from((*(*self_).query).wildcard_root_pattern_count) {
+                        let pattern = std::ptr::from_ref::<PatternEntry>(array_get_ref(
+                            &(*(*self_).query).pattern_map,
+                            i,
+                        ));
+                        let step = array_get_ref(
+                            &(*(*self_).query).steps,
+                            u32::from((*pattern).step_index),
+                        );
+                        let start_depth = (*self_).depth - u32::from(step.depth);
+                        if (if (*pattern).is_rooted {
+                            node_intersects_range
+                        } else {
+                            parent_intersects_range && !parent_is_error
+                        }) && (step.field == 0 || field_id == step.field)
+                            && (step.supertype_symbol == 0 || supertype_count > 0)
+                            && (start_depth <= (*self_).max_start_depth)
+                        {
+                            ts_query_cursor_add_state(self_, pattern);
+                        }
+                    }
+                }
+
+                // Add states for patterns whose root node matches this node.
+                let mut i: u32 = 0;
+                if ts_query_pattern_map_search(&*(*self_).query, symbol, &mut i) {
+                    let mut pattern = std::ptr::from_ref::<PatternEntry>(array_get_ref(
+                        &(*(*self_).query).pattern_map,
+                        i,
+                    ));
+                    let mut step =
+                        *array_get_ref(&(*(*self_).query).steps, u32::from((*pattern).step_index));
+                    loop {
+                        let start_depth = (*self_).depth - u32::from(step.depth);
+                        if (if (*pattern).is_rooted {
+                            node_intersects_range
+                        } else {
+                            parent_intersects_range && !parent_is_error
+                        }) && (step.field == 0 || field_id == step.field)
+                            && (start_depth <= (*self_).max_start_depth)
+                        {
+                            ts_query_cursor_add_state(self_, pattern);
+                        }
+
+                        i += 1;
+                        if i == (*(*self_).query).pattern_map.size {
+                            break;
+                        }
+                        pattern = std::ptr::from_ref::<PatternEntry>(array_get_ref(
+                            &(*(*self_).query).pattern_map,
+                            i,
+                        ));
+                        step = *array_get_ref(
+                            &(*(*self_).query).steps,
+                            u32::from((*pattern).step_index),
+                        );
+                        if step.symbol != symbol {
+                            break;
+                        }
+                    }
+                }
+
+                // Update all in-progress states with the current node.
+                let mut j: u32 = 0;
+                while j < (*self_).states.size {
+                    let mut state =
+                        std::ptr::from_mut::<QueryState>(array_get_mut(&mut (*self_).states, j));
+                    let step =
+                        *array_get_ref(&(*(*self_).query).steps, u32::from((*state).step_index));
+                    (*state).has_in_progress_alternatives = false;
+                    let mut copy_count = 0u32;
+
+                    if u32::from((*state).start_depth) + u32::from(step.depth) != (*self_).depth {
+                        j += 1;
+                        continue;
+                    }
+
+                    // Determine whether the node matches this step and whether a
+                    // later sibling could match it.
+                    let mut node_does_match;
+                    if step.symbol == WILDCARD_SYMBOL {
+                        if step.is_missing {
+                            node_does_match = is_missing;
+                        } else {
+                            node_does_match = !node_is_error && (is_named || !step.is_named);
+                        }
+                    } else {
+                        node_does_match = symbol == step.symbol && (!step.is_missing || is_missing);
+                    }
+                    let mut later_sibling_can_match =
+                        if (step.is_immediate && is_named) || (*state).seeking_immediate_match {
+                            false
+                        } else {
+                            has_later_siblings
+                        };
+                    if step.is_last_child && has_later_named_siblings {
+                        node_does_match = false;
+                    }
+                    if step.supertype_symbol != 0 {
+                        let mut has_supertype = false;
+                        for k in 0..supertype_count {
+                            if supertypes[k as usize] == step.supertype_symbol {
+                                has_supertype = true;
+                                break;
+                            }
+                        }
+                        if !has_supertype {
+                            node_does_match = false;
+                        }
+                    }
+                    if step.field != 0 {
+                        if step.field == field_id {
+                            if !can_have_later_siblings_with_this_field {
+                                later_sibling_can_match = false;
+                            }
+                        } else {
+                            node_does_match = false;
+                        }
+                    }
+
+                    if step.negated_field_list_id != 0 {
+                        let mut idx = u32::from(step.negated_field_list_id);
+                        loop {
+                            let negated_field_id =
+                                *array_get_ref(&(*(*self_).query).negated_fields, idx);
+                            if negated_field_id != 0 {
+                                idx += 1;
+                                if !ts_node_child_by_field_id(node, negated_field_id)
+                                    .id
+                                    .is_null()
+                                {
+                                    node_does_match = false;
+                                    break;
+                                }
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+
+                    // Remove the state immediately if it can never match.
+                    if !node_does_match {
+                        if later_sibling_can_match {
+                            j += 1;
+                        } else {
+                            capture_list_pool_release(
+                                &mut (*self_).capture_list_pool,
+                                (*state).capture_list_id as u16,
+                            );
+                            array_erase(&mut (*self_).states, j);
+                        }
+                        continue;
+                    }
+
+                    // Split the state if it could also match a later sibling.
+                    if later_sibling_can_match
+                        && (step.contains_captures
+                            || ts_query_step_is_fallible(&*(*self_).query, (*state).step_index))
+                        && ts_query_cursor_copy_state(self_, j).is_some()
+                    {
+                        copy_count += 1;
+                    }
+                    // The states array may have moved; re-fetch the state.
+                    state =
+                        std::ptr::from_mut::<QueryState>(array_get_mut(&mut (*self_).states, j));
+
+                    // If this pattern started with a wildcard (pattern map points
+                    // to its second step), require a parent and capture it.
+                    if (*state).needs_parent {
+                        let parent = ts_tree_cursor_parent_node(tc_const(&(*self_).cursor));
+                        if ts_node_is_null(parent) {
+                            (*state).dead = true;
+                        } else {
+                            (*state).needs_parent = false;
+                            let mut sw_index = u32::from((*state).step_index);
+                            loop {
+                                sw_index -= 1;
+                                let sw = *array_get_ref(&(*(*self_).query).steps, sw_index);
+                                if !(sw.is_dead_end || sw.is_pass_through || sw.depth > 0) {
+                                    break;
+                                }
+                            }
+                            if array_get_ref(&(*(*self_).query).steps, sw_index).capture_ids[0]
+                                != NONE
+                            {
+                                let sw_step = std::ptr::from_ref::<QueryStep>(array_get_ref(
+                                    &(*(*self_).query).steps,
+                                    sw_index,
+                                ));
+                                ts_query_cursor_capture(self_, state, sw_step, parent);
+                            }
+                        }
+                    }
+
+                    // Capture the current node if needed.
+                    if step.capture_ids[0] != NONE {
+                        ts_query_cursor_capture(self_, state, core::ptr::from_ref(&step), node);
+                    }
+
+                    if (*state).dead {
+                        array_erase(&mut (*self_).states, j);
+                        continue;
+                    }
+
+                    // Advance the state to the next step.
+                    (*state).step_index += 1;
+                    let next_step =
+                        *array_get_ref(&(*(*self_).query).steps, u32::from((*state).step_index));
+
+                    // Special-case unnamed wildcard immediately followed by an
+                    // immediate step: keep seeking an immediate match.
+                    (*state).seeking_immediate_match =
+                        step.symbol == WILDCARD_SYMBOL && !step.is_named && next_step.is_immediate;
+
+                    if stop_on_definite_step && next_step.root_pattern_guaranteed {
+                        did_match = true;
+                    }
+
+                    // Expand the state's alternative-step chain by copying.
+                    let mut end_index = j + 1;
+                    let mut k = j;
+                    while k < end_index {
+                        let child_state = std::ptr::from_mut::<QueryState>(array_get_mut(
+                            &mut (*self_).states,
+                            k,
+                        ));
+                        let child_step = *array_get_ref(
+                            &(*(*self_).query).steps,
+                            u32::from((*child_state).step_index),
+                        );
+                        if child_step.alternative_index != NONE {
+                            // A dead-end step jumps straight to its alternative.
+                            if child_step.is_dead_end {
+                                (*child_state).step_index = child_step.alternative_index;
+                                continue;
+                            }
+                            // A pass-through step splits, then advances.
+                            if child_step.is_pass_through {
+                                (*child_state).step_index += 1;
+                            }
+                            if let Some(copy_index) = ts_query_cursor_copy_state(self_, k) {
+                                end_index += 1;
+                                copy_count += 1;
+                                let copy = std::ptr::from_mut::<QueryState>(array_get_mut(
+                                    &mut (*self_).states,
+                                    copy_index,
+                                ));
+                                (*copy).step_index = child_step.alternative_index;
+                                if child_step.alternative_is_immediate {
+                                    (*copy).seeking_immediate_match = true;
+                                }
+                            }
+                            if child_step.is_pass_through {
+                                continue;
+                            }
+                        }
+                        k += 1;
+                    }
+
+                    j += 1 + copy_count;
+                }
+
+                // Enforce the longest-match criteria, finishing completed states.
+                let mut j: u32 = 0;
+                while j < (*self_).states.size {
+                    let state =
+                        std::ptr::from_mut::<QueryState>(array_get_mut(&mut (*self_).states, j));
+                    if (*state).dead {
+                        array_erase(&mut (*self_).states, j);
+                        continue;
+                    }
+
+                    let mut did_remove = false;
+                    let mut k = j + 1;
+                    while k < (*self_).states.size {
+                        let other_state = std::ptr::from_mut::<QueryState>(array_get_mut(
+                            &mut (*self_).states,
+                            k,
+                        ));
+                        // States are sorted by start_depth and pattern_index.
+                        if (*other_state).start_depth != (*state).start_depth
+                            || (*other_state).pattern_index != (*state).pattern_index
+                        {
+                            break;
+                        }
+                        let (left_contains_right, right_contains_left) =
+                            ts_query_cursor_compare_captures(self_, state, other_state);
+                        if left_contains_right {
+                            if (*state).step_index == (*other_state).step_index {
+                                capture_list_pool_release(
+                                    &mut (*self_).capture_list_pool,
+                                    (*other_state).capture_list_id as u16,
+                                );
+                                array_erase(&mut (*self_).states, k);
+                                continue;
+                            }
+                            (*other_state).has_in_progress_alternatives = true;
+                        }
+                        if right_contains_left {
+                            if (*state).step_index == (*other_state).step_index {
+                                capture_list_pool_release(
+                                    &mut (*self_).capture_list_pool,
+                                    (*state).capture_list_id as u16,
+                                );
+                                array_erase(&mut (*self_).states, j);
+                                did_remove = true;
+                                break;
+                            }
+                            (*state).has_in_progress_alternatives = true;
+                        }
+                        k += 1;
+                    }
+
+                    // If the state is at the end of its pattern, finish it.
+                    if !did_remove {
+                        let next_step = *array_get_ref(
+                            &(*(*self_).query).steps,
+                            u32::from((*state).step_index),
+                        );
+                        if next_step.depth == PATTERN_DONE_MARKER {
+                            if (*state).has_in_progress_alternatives {
+                                // defer finishing
+                                j += 1;
+                            } else {
+                                array_push(&mut (*self_).finished_states, *state);
+                                array_erase(&mut (*self_).states, j);
+                                did_match = true;
+                            }
+                        } else {
+                            j += 1;
+                        }
+                    }
+                    // (if did_remove, state j was erased; revisit j)
+                }
+            }
+
+            if node_intersects_containing_range
+                && ts_query_cursor_should_descend(self_, node_intersects_range)
+            {
+                match tree_cursor_goto_first_child_internal(&mut (*self_).cursor) {
+                    TreeCursorStep::Visible => {
+                        (*self_).depth += 1;
+                        (*self_).on_visible_node = true;
+                        continue;
+                    }
+                    TreeCursorStep::Hidden => {
+                        (*self_).on_visible_node = false;
+                        continue;
+                    }
+                    TreeCursorStep::None => {}
+                }
+            }
+
+            (*self_).ascending = true;
+        }
+    }
+}
+
+pub unsafe extern "C" fn ts_query_cursor_next_match(
+    self_: *mut TSQueryCursor,
+    match_: *mut TSQueryMatch,
+) -> bool {
+    if (*self_).finished_states.size == 0 && !ts_query_cursor_advance(self_, false) {
+        return false;
+    }
+
+    let state = std::ptr::from_mut::<QueryState>(array_get_mut(&mut (*self_).finished_states, 0));
+    if (*state).id == u32::MAX {
+        (*state).id = (*self_).next_state_id;
+        (*self_).next_state_id += 1;
+    }
+    (*match_).id = (*state).id;
+    (*match_).pattern_index = (*state).pattern_index;
+    let captures =
+        capture_list_pool_get(&(*self_).capture_list_pool, (*state).capture_list_id as u16);
+    (*match_).captures = captures.contents;
+    (*match_).capture_count = captures.size as u16;
+    capture_list_pool_release(
+        &mut (*self_).capture_list_pool,
+        (*state).capture_list_id as u16,
+    );
+    array_erase(&mut (*self_).finished_states, 0);
+    true
+}
+
+pub unsafe extern "C" fn ts_query_cursor_remove_match(self_: *mut TSQueryCursor, match_id: u32) {
+    for i in 0..(*self_).finished_states.size {
+        let state = array_get_ref(&(*self_).finished_states, i);
+        if state.id == match_id {
+            capture_list_pool_release(
+                &mut (*self_).capture_list_pool,
+                state.capture_list_id as u16,
+            );
+            array_erase(&mut (*self_).finished_states, i);
+            return;
+        }
+    }
+
+    // Remove unfinished states too, to prevent future captures for the match.
+    for i in 0..(*self_).states.size {
+        let state = array_get_ref(&(*self_).states, i);
+        if state.id == match_id {
+            capture_list_pool_release(
+                &mut (*self_).capture_list_pool,
+                state.capture_list_id as u16,
+            );
+            array_erase(&mut (*self_).states, i);
+            return;
+        }
+    }
+}
+
+pub unsafe extern "C" fn ts_query_cursor_next_capture(
+    self_: *mut TSQueryCursor,
+    match_: *mut TSQueryMatch,
+    capture_index: *mut u32,
+) -> bool {
+    // Return captures in document order even though they may be discovered out
+    // of order, since patterns can overlap.
+    loop {
+        // Find the earliest capture in an unfinished match.
+        let mut first_unfinished_state_is_definite = false;
+        let (
+            found_unfinished_state,
+            first_unfinished_state_index,
+            first_unfinished_capture_byte,
+            first_unfinished_pattern_index,
+        ) = ts_query_cursor_first_in_progress_capture(
+            self_,
+            &mut first_unfinished_state_is_definite,
+        );
+
+        // Then find the earliest capture in a finished match (must precede the
+        // first unfinished capture).
+        let mut first_finished_state: *mut QueryState = core::ptr::null_mut();
+        let mut first_finished_capture_byte = first_unfinished_capture_byte;
+        let mut first_finished_pattern_index = first_unfinished_pattern_index;
+        let mut i = 0u32;
+        while i < (*self_).finished_states.size {
+            let state =
+                std::ptr::from_mut::<QueryState>(array_get_mut(&mut (*self_).finished_states, i));
+            let captures =
+                capture_list_pool_get(&(*self_).capture_list_pool, (*state).capture_list_id as u16);
+
+            // Remove states whose captures are all consumed.
+            if u32::from((*state).consumed_capture_count) >= captures.size {
+                capture_list_pool_release(
+                    &mut (*self_).capture_list_pool,
+                    (*state).capture_list_id as u16,
+                );
+                array_erase(&mut (*self_).finished_states, i);
+                continue;
+            }
+
+            let node = array_get_ref(captures, u32::from((*state).consumed_capture_count)).node;
+
+            let node_precedes_range = ts_node_end_byte(node) <= (*self_).included_range.start_byte
+                || point_lte(ts_node_end_point(node), (*self_).included_range.start_point);
+            let node_follows_range = ts_node_start_byte(node) >= (*self_).included_range.end_byte
+                || point_gte(ts_node_start_point(node), (*self_).included_range.end_point);
+            if node_precedes_range || node_follows_range {
+                (*state).consumed_capture_count += 1;
+                continue;
+            }
+
+            let node_start_byte = ts_node_start_byte(node);
+            if node_start_byte < first_finished_capture_byte
+                || (node_start_byte == first_finished_capture_byte
+                    && u32::from((*state).pattern_index) < first_finished_pattern_index)
+            {
+                first_finished_state = state;
+                first_finished_capture_byte = node_start_byte;
+                first_finished_pattern_index = u32::from((*state).pattern_index);
+            }
+            i += 1;
+        }
+
+        // If a finished capture clearly precedes any unfinished capture, return
+        // it and mark it consumed.
+        let state: *mut QueryState = if !first_finished_state.is_null() {
+            first_finished_state
+        } else if first_unfinished_state_is_definite {
+            std::ptr::from_mut::<QueryState>(array_get_mut(
+                &mut (*self_).states,
+                first_unfinished_state_index,
+            ))
+        } else {
+            core::ptr::null_mut()
+        };
+
+        if !state.is_null() {
+            if (*state).id == u32::MAX {
+                (*state).id = (*self_).next_state_id;
+                (*self_).next_state_id += 1;
+            }
+            (*match_).id = (*state).id;
+            (*match_).pattern_index = (*state).pattern_index;
+            let captures =
+                capture_list_pool_get(&(*self_).capture_list_pool, (*state).capture_list_id as u16);
+            (*match_).captures = captures.contents;
+            (*match_).capture_count = captures.size as u16;
+            *capture_index = u32::from((*state).consumed_capture_count);
+            (*state).consumed_capture_count += 1;
+            return true;
+        }
+
+        if capture_list_pool_is_empty(&(*self_).capture_list_pool) && found_unfinished_state {
+            let clid =
+                array_get_ref(&(*self_).states, first_unfinished_state_index).capture_list_id;
+            capture_list_pool_release(&mut (*self_).capture_list_pool, clid as u16);
+            array_erase(&mut (*self_).states, first_unfinished_state_index);
+        }
+
+        // No finished match ready; keep searching.
+        if !ts_query_cursor_advance(self_, true) && (*self_).finished_states.size == 0 {
+            return false;
+        }
+    }
+}
+
+pub unsafe extern "C" fn ts_query_cursor_set_max_start_depth(
+    self_: *mut TSQueryCursor,
+    max_start_depth: u32,
+) {
+    (*self_).max_start_depth = max_start_depth;
 }
