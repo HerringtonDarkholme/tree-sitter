@@ -186,11 +186,11 @@ pub unsafe fn range_array_intersects_ref(
 // Internal helpers — skeletons
 // ---------------------------------------------------------------------------
 
-unsafe fn range_array_add(self_: &mut TSRangeArray, start: Length, end: Length) {
-    if self_.size > 0 {
-        let last_range = self_
+unsafe fn range_array_add(arr: &mut TSRangeArray, start: Length, end: Length) {
+    if arr.size > 0 {
+        let last_range = arr
             .contents
-            .add(self_.size as usize - 1)
+            .add(arr.size as usize - 1)
             .as_mut()
             .unwrap_unchecked();
         if start.bytes <= last_range.end_byte {
@@ -207,333 +207,331 @@ unsafe fn range_array_add(self_: &mut TSRangeArray, start: Length, end: Length) 
             start_byte: start.bytes,
             end_byte: end.bytes,
         };
-        array_push_range(self_, range);
+        array_push_range(arr, range);
     }
 }
 
-/// Create a diff iterator rooted at a subtree.
-unsafe fn iterator_new(
-    cursor: &mut TreeCursor,
-    tree: &Subtree,
-    language: *const TSLanguage,
-) -> DiffIterator {
-    tree_cursor_entry_array_clear(&mut cursor.stack);
-    tree_cursor_entry_array_push(
-        &mut cursor.stack,
-        TreeCursorEntry {
-            subtree: tree,
-            position: length_zero(),
-            child_index: 0,
-            structural_child_index: 0,
-            descendant_index: 0,
-        },
-    );
-    DiffIterator {
-        cursor: ptr::read(cursor),
-        language,
-        visible_depth: 1,
-        in_padding: false,
-        prev_external_token: NULL_SUBTREE,
-    }
-}
-
-#[inline]
-const fn iterator_done(self_: &DiffIterator) -> bool {
-    self_.cursor.stack.size == 0
-}
-
-/// Return the current item's start position.
-///
-/// For padding items this is the parent entry position. For node-content items,
-/// it is the position after leading padding.
-unsafe fn iterator_start_position(self_: &DiffIterator) -> Length {
-    let entry = tree_cursor_entry_slice(&self_.cursor.stack)
-        .last()
-        .unwrap_unchecked();
-    if self_.in_padding {
-        entry.position
-    } else {
-        length_add(entry.position, subtree_padding(*entry.subtree))
-    }
-}
-
-/// Return the current item's end position.
-unsafe fn iterator_end_position(self_: &DiffIterator) -> Length {
-    let entry = tree_cursor_entry_slice(&self_.cursor.stack)
-        .last()
-        .unwrap_unchecked();
-    let result = length_add(entry.position, subtree_padding(*entry.subtree));
-    if self_.in_padding {
-        result
-    } else {
-        length_add(result, subtree_size(*entry.subtree))
-    }
-}
-
-/// Determine whether the current cursor entry is publicly visible.
-///
-/// Hidden grammar nodes can still be visible through aliases, so this must check
-/// the parent production's alias sequence in addition to subtree visibility.
-unsafe fn iterator_tree_is_visible(self_: &DiffIterator) -> bool {
-    let entries = tree_cursor_entry_slice(&self_.cursor.stack);
-    let entry = entries.last().unwrap_unchecked();
-    if subtree_visible(*entry.subtree) {
-        return true;
-    }
-    if self_.cursor.stack.size > 1 {
-        let parent_entry = entries.get_unchecked(self_.cursor.stack.size as usize - 2);
-        let parent = *parent_entry.subtree;
-        return language_alias_at(
-            self_.language,
-            u32::from((*parent.ptr).data.children.production_id),
-            entry.structural_child_index,
-        ) != 0;
-    }
-    false
-}
-
-/// Find the nearest visible state at or above the iterator position.
-unsafe fn iterator_get_visible_state(self_: &DiffIterator) -> VisibleState {
-    let mut result = VisibleState {
-        tree: NULL_SUBTREE,
-        alias_symbol: 0,
-        start_byte: 0,
-    };
-    let mut i = self_.cursor.stack.size - 1;
-
-    if self_.in_padding {
-        if i == 0 {
-            return result;
+impl DiffIterator {
+    /// Create a diff iterator rooted at a subtree.
+    unsafe fn new(cursor: &mut TreeCursor, tree: &Subtree, language: *const TSLanguage) -> Self {
+        tree_cursor_entry_array_clear(&mut cursor.stack);
+        tree_cursor_entry_array_push(
+            &mut cursor.stack,
+            TreeCursorEntry {
+                subtree: tree,
+                position: length_zero(),
+                child_index: 0,
+                structural_child_index: 0,
+                descendant_index: 0,
+            },
+        );
+        Self {
+            cursor: ptr::read(cursor),
+            language,
+            visible_depth: 1,
+            in_padding: false,
+            prev_external_token: NULL_SUBTREE,
         }
-        i -= 1;
     }
 
-    let entries = tree_cursor_entry_slice(&self_.cursor.stack);
-    loop {
-        let entry = entries.get_unchecked(i as usize);
-
-        if i > 0 {
-            let parent = entries.get_unchecked((i - 1) as usize).subtree;
-            result.alias_symbol = language_alias_at(
-                self_.language,
-                u32::from((*(*parent).ptr).data.children.production_id),
-                entry.structural_child_index,
-            );
-        }
-
-        if subtree_visible(*entry.subtree) || result.alias_symbol != 0 {
-            result.tree = *entry.subtree;
-            result.start_byte = entry.position.bytes;
-            break;
-        }
-
-        if i == 0 {
-            break;
-        }
-        i -= 1;
-    }
-    result
-}
-
-/// Move one level up in the diff cursor.
-unsafe fn iterator_ascend(self_: &mut DiffIterator) {
-    if iterator_done(self_) {
-        return;
-    }
-    if iterator_tree_is_visible(self_) && !self_.in_padding {
-        self_.visible_depth -= 1;
-    }
-    if tree_cursor_entry_slice(&self_.cursor.stack)
-        .last()
-        .unwrap_unchecked()
-        .child_index
-        > 0
-    {
-        self_.in_padding = false;
-    }
-    self_.cursor.stack.size -= 1;
-}
-
-/// Descend to the child that spans `goal_position`.
-///
-/// If the child is visible and its padding starts after the goal, the iterator
-/// stops in padding. Otherwise it stops on the child content or keeps descending
-/// through hidden children.
-unsafe fn iterator_descend(self_: &mut DiffIterator, goal_position: u32) -> bool {
-    if self_.in_padding {
-        return false;
+    #[inline]
+    const fn done(&self) -> bool {
+        self.cursor.stack.size == 0
     }
 
-    let mut did_descend;
-    loop {
-        did_descend = false;
-        let entry = *tree_cursor_entry_slice(&self_.cursor.stack)
+    /// Return the current item's start position.
+    ///
+    /// For padding items this is the parent entry position. For node-content items,
+    /// it is the position after leading padding.
+    unsafe fn start_position(&self) -> Length {
+        let entry = tree_cursor_entry_slice(&self.cursor.stack)
             .last()
             .unwrap_unchecked();
-        let mut position = entry.position;
-        let mut structural_child_index: u32 = 0;
-        let n = subtree_child_count(*entry.subtree);
-        for i in 0..n {
-            let child = subtree_child(*entry.subtree, i);
-            let child_left = length_add(position, subtree_padding(*child));
-            let child_right = length_add(child_left, subtree_size(*child));
+        if self.in_padding {
+            entry.position
+        } else {
+            length_add(entry.position, subtree_padding(*entry.subtree))
+        }
+    }
 
-            if child_right.bytes > goal_position {
+    /// Return the current item's end position.
+    unsafe fn end_position(&self) -> Length {
+        let entry = tree_cursor_entry_slice(&self.cursor.stack)
+            .last()
+            .unwrap_unchecked();
+        let result = length_add(entry.position, subtree_padding(*entry.subtree));
+        if self.in_padding {
+            result
+        } else {
+            length_add(result, subtree_size(*entry.subtree))
+        }
+    }
+
+    /// Determine whether the current cursor entry is publicly visible.
+    ///
+    /// Hidden grammar nodes can still be visible through aliases, so this must check
+    /// the parent production's alias sequence in addition to subtree visibility.
+    unsafe fn tree_is_visible(&self) -> bool {
+        let entries = tree_cursor_entry_slice(&self.cursor.stack);
+        let entry = entries.last().unwrap_unchecked();
+        if subtree_visible(*entry.subtree) {
+            return true;
+        }
+        if self.cursor.stack.size > 1 {
+            let parent_entry = entries.get_unchecked(self.cursor.stack.size as usize - 2);
+            let parent = *parent_entry.subtree;
+            return language_alias_at(
+                self.language,
+                u32::from((*parent.ptr).data.children.production_id),
+                entry.structural_child_index,
+            ) != 0;
+        }
+        false
+    }
+
+    /// Find the nearest visible state at or above the iterator position.
+    unsafe fn visible_state(&self) -> VisibleState {
+        let mut result = VisibleState {
+            tree: NULL_SUBTREE,
+            alias_symbol: 0,
+            start_byte: 0,
+        };
+        let mut i = self.cursor.stack.size - 1;
+
+        if self.in_padding {
+            if i == 0 {
+                return result;
+            }
+            i -= 1;
+        }
+
+        let entries = tree_cursor_entry_slice(&self.cursor.stack);
+        loop {
+            let entry = entries.get_unchecked(i as usize);
+
+            if i > 0 {
+                let parent = entries.get_unchecked((i - 1) as usize).subtree;
+                result.alias_symbol = language_alias_at(
+                    self.language,
+                    u32::from((*(*parent).ptr).data.children.production_id),
+                    entry.structural_child_index,
+                );
+            }
+
+            if subtree_visible(*entry.subtree) || result.alias_symbol != 0 {
+                result.tree = *entry.subtree;
+                result.start_byte = entry.position.bytes;
+                break;
+            }
+
+            if i == 0 {
+                break;
+            }
+            i -= 1;
+        }
+        result
+    }
+
+    /// Move one level up in the diff cursor.
+    unsafe fn ascend(&mut self) {
+        if self.done() {
+            return;
+        }
+        if self.tree_is_visible() && !self.in_padding {
+            self.visible_depth -= 1;
+        }
+        if tree_cursor_entry_slice(&self.cursor.stack)
+            .last()
+            .unwrap_unchecked()
+            .child_index
+            > 0
+        {
+            self.in_padding = false;
+        }
+        self.cursor.stack.size -= 1;
+    }
+
+    /// Descend to the child that spans `goal_position`.
+    ///
+    /// If the child is visible and its padding starts after the goal, the iterator
+    /// stops in padding. Otherwise it stops on the child content or keeps descending
+    /// through hidden children.
+    unsafe fn descend(&mut self, goal_position: u32) -> bool {
+        if self.in_padding {
+            return false;
+        }
+
+        let mut did_descend;
+        loop {
+            did_descend = false;
+            let entry = *tree_cursor_entry_slice(&self.cursor.stack)
+                .last()
+                .unwrap_unchecked();
+            let mut position = entry.position;
+            let mut structural_child_index: u32 = 0;
+            let n = subtree_child_count(*entry.subtree);
+            for i in 0..n {
+                let child = subtree_child(*entry.subtree, i);
+                let child_left = length_add(position, subtree_padding(*child));
+                let child_right = length_add(child_left, subtree_size(*child));
+
+                if child_right.bytes > goal_position {
+                    tree_cursor_entry_array_push(
+                        &mut self.cursor.stack,
+                        TreeCursorEntry {
+                            subtree: std::ptr::from_ref::<Subtree>(child),
+                            position,
+                            child_index: i,
+                            structural_child_index,
+                            descendant_index: 0,
+                        },
+                    );
+
+                    if self.tree_is_visible() {
+                        if child_left.bytes > goal_position {
+                            self.in_padding = true;
+                        } else {
+                            self.visible_depth += 1;
+                        }
+                        return true;
+                    }
+
+                    did_descend = true;
+                    break;
+                }
+
+                position = child_right;
+                if !subtree_extra(*child) {
+                    structural_child_index += 1;
+                }
+                let last_external_token = subtree_last_external_token(*child);
+                if !last_external_token.ptr.is_null() {
+                    self.prev_external_token = last_external_token;
+                }
+            }
+            if !did_descend {
+                break;
+            }
+        }
+
+        false
+    }
+
+    /// Advance to the next visible range or padding range in source order.
+    unsafe fn advance(&mut self) {
+        if self.in_padding {
+            self.in_padding = false;
+            if self.tree_is_visible() {
+                self.visible_depth += 1;
+            } else {
+                self.descend(0);
+            }
+            return;
+        }
+
+        loop {
+            if self.tree_is_visible() {
+                self.visible_depth -= 1;
+            }
+            let entry = tree_cursor_entry_array_pop(&mut self.cursor.stack);
+            if self.done() {
+                return;
+            }
+
+            let parent = tree_cursor_entry_slice(&self.cursor.stack)
+                .last()
+                .unwrap_unchecked()
+                .subtree;
+            let child_index = entry.child_index + 1;
+            let last_external_token = subtree_last_external_token(*entry.subtree);
+            if !last_external_token.ptr.is_null() {
+                self.prev_external_token = last_external_token;
+            }
+            if subtree_child_count(*parent) > child_index {
+                let position = length_add(entry.position, subtree_total_size(*entry.subtree));
+                let mut structural_child_index = entry.structural_child_index;
+                if !subtree_extra(*entry.subtree) {
+                    structural_child_index += 1;
+                }
+                let next_child = subtree_child(*parent, child_index);
+
                 tree_cursor_entry_array_push(
-                    &mut self_.cursor.stack,
+                    &mut self.cursor.stack,
                     TreeCursorEntry {
-                        subtree: std::ptr::from_ref::<Subtree>(child),
+                        subtree: std::ptr::from_ref::<Subtree>(next_child),
                         position,
-                        child_index: i,
+                        child_index,
                         structural_child_index,
                         descendant_index: 0,
                     },
                 );
 
-                if iterator_tree_is_visible(self_) {
-                    if child_left.bytes > goal_position {
-                        self_.in_padding = true;
+                if self.tree_is_visible() {
+                    if subtree_padding(*next_child).bytes > 0 {
+                        self.in_padding = true;
                     } else {
-                        self_.visible_depth += 1;
+                        self.visible_depth += 1;
                     }
-                    return true;
+                } else {
+                    self.descend(0);
                 }
-
-                did_descend = true;
                 break;
             }
-
-            position = child_right;
-            if !subtree_extra(*child) {
-                structural_child_index += 1;
-            }
-            let last_external_token = subtree_last_external_token(*child);
-            if !last_external_token.ptr.is_null() {
-                self_.prev_external_token = last_external_token;
-            }
-        }
-        if !did_descend {
-            break;
         }
     }
 
-    false
-}
+    /// Compare the visible old/new states at the current iterator positions.
+    ///
+    /// Definite differences can be reported immediately. "May differ" asks the diff
+    /// loop to descend because external scanner state, parse states, edit flags, or
+    /// error metadata prevent treating the whole subtree as identical.
+    unsafe fn compare(&self, new_iter: &Self) -> IteratorComparison {
+        let old_visible = self.visible_state();
+        let new_visible = new_iter.visible_state();
+        let old_tree = old_visible.tree;
+        let new_tree = new_visible.tree;
+        let old_symbol = subtree_symbol(old_tree);
+        let new_symbol = subtree_symbol(new_tree);
 
-/// Advance to the next visible range or padding range in source order.
-unsafe fn iterator_advance(self_: &mut DiffIterator) {
-    if self_.in_padding {
-        self_.in_padding = false;
-        if iterator_tree_is_visible(self_) {
-            self_.visible_depth += 1;
-        } else {
-            iterator_descend(self_, 0);
+        if old_tree.ptr.is_null() && new_tree.ptr.is_null() {
+            return IteratorComparison::Matches;
         }
-        return;
-    }
-
-    loop {
-        if iterator_tree_is_visible(self_) {
-            self_.visible_depth -= 1;
+        if old_tree.ptr.is_null() || new_tree.ptr.is_null() {
+            return IteratorComparison::Differs;
         }
-        let entry = tree_cursor_entry_array_pop(&mut self_.cursor.stack);
-        if iterator_done(self_) {
-            return;
+        if old_visible.alias_symbol != new_visible.alias_symbol || old_symbol != new_symbol {
+            return IteratorComparison::Differs;
         }
 
-        let parent = tree_cursor_entry_slice(&self_.cursor.stack)
-            .last()
-            .unwrap_unchecked()
-            .subtree;
-        let child_index = entry.child_index + 1;
-        let last_external_token = subtree_last_external_token(*entry.subtree);
-        if !last_external_token.ptr.is_null() {
-            self_.prev_external_token = last_external_token;
+        let old_size = subtree_size(old_tree).bytes;
+        let new_size = subtree_size(new_tree).bytes;
+        let old_state = subtree_parse_state(old_tree);
+        let new_state = subtree_parse_state(new_tree);
+        let old_has_external_tokens = subtree_has_external_tokens(old_tree);
+        let new_has_external_tokens = subtree_has_external_tokens(new_tree);
+        let old_error_cost = subtree_error_cost(old_tree);
+        let new_error_cost = subtree_error_cost(new_tree);
+
+        if old_visible.start_byte != new_visible.start_byte
+            || old_symbol == ts_builtin_sym_error
+            || old_size != new_size
+            || old_state == TS_TREE_STATE_NONE
+            || new_state == TS_TREE_STATE_NONE
+            || (old_state == ERROR_STATE) != (new_state == ERROR_STATE)
+            || old_error_cost != new_error_cost
+            || old_has_external_tokens != new_has_external_tokens
+            || subtree_has_changes(old_tree)
+            || (old_has_external_tokens
+                && !subtree_external_scanner_state_eq(
+                    &self.prev_external_token,
+                    &new_iter.prev_external_token,
+                ))
+        {
+            return IteratorComparison::MayDiffer;
         }
-        if subtree_child_count(*parent) > child_index {
-            let position = length_add(entry.position, subtree_total_size(*entry.subtree));
-            let mut structural_child_index = entry.structural_child_index;
-            if !subtree_extra(*entry.subtree) {
-                structural_child_index += 1;
-            }
-            let next_child = subtree_child(*parent, child_index);
 
-            tree_cursor_entry_array_push(
-                &mut self_.cursor.stack,
-                TreeCursorEntry {
-                    subtree: std::ptr::from_ref::<Subtree>(next_child),
-                    position,
-                    child_index,
-                    structural_child_index,
-                    descendant_index: 0,
-                },
-            );
-
-            if iterator_tree_is_visible(self_) {
-                if subtree_padding(*next_child).bytes > 0 {
-                    self_.in_padding = true;
-                } else {
-                    self_.visible_depth += 1;
-                }
-            } else {
-                iterator_descend(self_, 0);
-            }
-            break;
-        }
+        IteratorComparison::Matches
     }
-}
-
-/// Compare the visible old/new states at the current iterator positions.
-///
-/// Definite differences can be reported immediately. "May differ" asks the diff
-/// loop to descend because external scanner state, parse states, edit flags, or
-/// error metadata prevent treating the whole subtree as identical.
-unsafe fn iterator_compare(old_iter: &DiffIterator, new_iter: &DiffIterator) -> IteratorComparison {
-    let old_visible = iterator_get_visible_state(old_iter);
-    let new_visible = iterator_get_visible_state(new_iter);
-    let old_tree = old_visible.tree;
-    let new_tree = new_visible.tree;
-    let old_symbol = subtree_symbol(old_tree);
-    let new_symbol = subtree_symbol(new_tree);
-
-    if old_tree.ptr.is_null() && new_tree.ptr.is_null() {
-        return IteratorComparison::Matches;
-    }
-    if old_tree.ptr.is_null() || new_tree.ptr.is_null() {
-        return IteratorComparison::Differs;
-    }
-    if old_visible.alias_symbol != new_visible.alias_symbol || old_symbol != new_symbol {
-        return IteratorComparison::Differs;
-    }
-
-    let old_size = subtree_size(old_tree).bytes;
-    let new_size = subtree_size(new_tree).bytes;
-    let old_state = subtree_parse_state(old_tree);
-    let new_state = subtree_parse_state(new_tree);
-    let old_has_external_tokens = subtree_has_external_tokens(old_tree);
-    let new_has_external_tokens = subtree_has_external_tokens(new_tree);
-    let old_error_cost = subtree_error_cost(old_tree);
-    let new_error_cost = subtree_error_cost(new_tree);
-
-    if old_visible.start_byte != new_visible.start_byte
-        || old_symbol == ts_builtin_sym_error
-        || old_size != new_size
-        || old_state == TS_TREE_STATE_NONE
-        || new_state == TS_TREE_STATE_NONE
-        || (old_state == ERROR_STATE) != (new_state == ERROR_STATE)
-        || old_error_cost != new_error_cost
-        || old_has_external_tokens != new_has_external_tokens
-        || subtree_has_changes(old_tree)
-        || (old_has_external_tokens
-            && !subtree_external_scanner_state_eq(
-                &old_iter.prev_external_token,
-                &new_iter.prev_external_token,
-            ))
-    {
-        return IteratorComparison::MayDiffer;
-    }
-
-    IteratorComparison::Matches
 }
 
 // ---------------------------------------------------------------------------
@@ -753,13 +751,13 @@ pub unsafe fn subtree_get_changed_ranges_ref(
     // changed range and advance both iterators past the differing span.
     let mut results = range_array_new();
 
-    let mut old_iter = iterator_new(old_cursor, old_tree, language);
-    let mut new_iter = iterator_new(new_cursor, new_tree, language);
+    let mut old_iter = DiffIterator::new(old_cursor, old_tree, language);
+    let mut new_iter = DiffIterator::new(new_cursor, new_tree, language);
 
     let mut included_range_difference_index: u32 = 0;
 
-    let mut position = iterator_start_position(&old_iter);
-    let mut next_position = iterator_start_position(&new_iter);
+    let mut position = old_iter.start_position();
+    let mut next_position = new_iter.start_position();
     if position.bytes < next_position.bytes {
         range_array_add(&mut results, position, next_position);
         position = next_position;
@@ -770,7 +768,7 @@ pub unsafe fn subtree_get_changed_ranges_ref(
 
     loop {
         // Compare the old and new subtrees.
-        let mut comparison = iterator_compare(&old_iter, &new_iter);
+        let mut comparison = old_iter.compare(&new_iter);
 
         // Even if the two subtrees appear to be identical, they could differ
         // internally if they contain a range of text that was previously
@@ -780,7 +778,7 @@ pub unsafe fn subtree_get_changed_ranges_ref(
                 included_range_differences_array,
                 included_range_difference_index,
                 position.bytes,
-                iterator_end_position(&old_iter).bytes,
+                old_iter.end_position().bytes,
             )
         {
             comparison = IteratorComparison::MayDiffer;
@@ -790,28 +788,25 @@ pub unsafe fn subtree_get_changed_ranges_ref(
             // If the subtrees are definitely identical, move to the end
             // of both subtrees.
             IteratorComparison::Matches => {
-                next_position = iterator_end_position(&old_iter);
+                next_position = old_iter.end_position();
                 false
             }
 
             // If the subtrees might differ internally, descend into both
             // subtrees, finding the first child that spans the current position.
             IteratorComparison::MayDiffer => {
-                if iterator_descend(&mut old_iter, position.bytes) {
-                    if !iterator_descend(&mut new_iter, position.bytes) {
-                        next_position = iterator_end_position(&old_iter);
+                if old_iter.descend(position.bytes) {
+                    if !new_iter.descend(position.bytes) {
+                        next_position = old_iter.end_position();
                         true
                     } else {
                         false
                     }
-                } else if iterator_descend(&mut new_iter, position.bytes) {
-                    next_position = iterator_end_position(&new_iter);
+                } else if new_iter.descend(position.bytes) {
+                    next_position = new_iter.end_position();
                     true
                 } else {
-                    next_position = length_min(
-                        iterator_end_position(&old_iter),
-                        iterator_end_position(&new_iter),
-                    );
+                    next_position = length_min(old_iter.end_position(), new_iter.end_position());
                     false
                 }
             }
@@ -819,32 +814,25 @@ pub unsafe fn subtree_get_changed_ranges_ref(
             // If the subtrees are different, record a change and then move
             // to the end of both subtrees.
             IteratorComparison::Differs => {
-                next_position = length_min(
-                    iterator_end_position(&old_iter),
-                    iterator_end_position(&new_iter),
-                );
+                next_position = length_min(old_iter.end_position(), new_iter.end_position());
                 true
             }
         };
 
         // Ensure that both iterators are caught up to the current position.
-        while !iterator_done(&old_iter)
-            && iterator_end_position(&old_iter).bytes <= next_position.bytes
-        {
-            iterator_advance(&mut old_iter);
+        while !old_iter.done() && old_iter.end_position().bytes <= next_position.bytes {
+            old_iter.advance();
         }
-        while !iterator_done(&new_iter)
-            && iterator_end_position(&new_iter).bytes <= next_position.bytes
-        {
-            iterator_advance(&mut new_iter);
+        while !new_iter.done() && new_iter.end_position().bytes <= next_position.bytes {
+            new_iter.advance();
         }
 
         // Ensure that both iterators are at the same depth in the tree.
         while old_iter.visible_depth > new_iter.visible_depth {
-            iterator_ascend(&mut old_iter);
+            old_iter.ascend();
         }
         while new_iter.visible_depth > old_iter.visible_depth {
-            iterator_ascend(&mut new_iter);
+            new_iter.ascend();
         }
 
         if is_changed {
@@ -865,7 +853,7 @@ pub unsafe fn subtree_get_changed_ranges_ref(
             }
         }
 
-        if iterator_done(&old_iter) || iterator_done(&new_iter) {
+        if old_iter.done() || new_iter.done() {
             break;
         }
     }
