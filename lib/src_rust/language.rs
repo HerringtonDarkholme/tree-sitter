@@ -716,6 +716,18 @@ pub const unsafe extern "C" fn ts_language_state_count(self_: *const TSLanguage)
     lang(self_).state_count
 }
 
+/// Raw `token_count` table field (terminal symbols come before this index).
+/// Distinct from any public symbol count; used by query analysis.
+pub const unsafe fn language_token_count(self_: *const TSLanguage) -> u32 {
+    lang(self_).token_count
+}
+
+/// Raw `symbol_count` table field (excludes aliases, unlike the public
+/// `ts_language_symbol_count`). Used by query analysis.
+pub const unsafe fn language_symbol_count(self_: *const TSLanguage) -> u32 {
+    lang(self_).symbol_count
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn ts_language_supertypes(
     self_: *const TSLanguage,
