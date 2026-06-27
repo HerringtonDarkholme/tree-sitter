@@ -180,7 +180,7 @@ const unsafe fn stack_slice(arr: &TreeCursorEntryArray) -> &[TreeCursorEntry] {
 }
 
 #[inline]
-unsafe fn stack_clear(arr: &mut TreeCursorEntryArray) {
+fn stack_clear(arr: &mut TreeCursorEntryArray) {
     arr.size = 0;
 }
 
@@ -288,7 +288,7 @@ unsafe fn iterator_new(
 }
 
 #[inline]
-const unsafe fn iterator_done(self_: &Iterator) -> bool {
+const fn iterator_done(self_: &Iterator) -> bool {
     self_.cursor.stack.size == 0
 }
 

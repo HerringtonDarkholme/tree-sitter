@@ -1499,7 +1499,7 @@ unsafe fn parser__breakdown_lookahead(
 // Internal helpers — version comparison
 // ---------------------------------------------------------------------------
 
-const unsafe fn parser__compare_versions(a: ErrorStatus, b: ErrorStatus) -> ErrorComparison {
+const fn parser__compare_versions(a: ErrorStatus, b: ErrorStatus) -> ErrorComparison {
     if !a.is_in_error && b.is_in_error {
         if a.cost < b.cost {
             return ErrorComparison::TakeLeft;

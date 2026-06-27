@@ -50,12 +50,12 @@ struct NodeChildIterator {
 // ---------------------------------------------------------------------------
 
 #[inline]
-unsafe fn node__null() -> TSNode {
+fn node__null() -> TSNode {
     node_new(ptr::null(), ptr::null(), length_zero(), 0)
 }
 
 #[inline]
-const unsafe fn node__alias(self_: &TSNode) -> u32 {
+const fn node__alias(self_: &TSNode) -> u32 {
     self_.context[3]
 }
 
@@ -65,7 +65,7 @@ const unsafe fn node__subtree(self_: TSNode) -> Subtree {
 }
 
 #[inline]
-const unsafe fn node_tree(self_: TSNode) -> *const TSTree {
+const fn node_tree(self_: TSNode) -> *const TSTree {
     self_.tree.cast::<TSTree>()
 }
 
@@ -640,7 +640,7 @@ unsafe fn node__field_name_from_language(self_: TSNode, structural_child_index: 
 // Internal constructors
 // ---------------------------------------------------------------------------
 
-pub unsafe fn node_new(
+pub fn node_new(
     tree: *const TSTree,
     subtree: *const Subtree,
     position: Length,

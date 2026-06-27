@@ -125,7 +125,7 @@ const unsafe fn tree_cursor_entry_slice(arr: &TreeCursorEntryArray) -> &[TreeCur
 }
 
 #[inline]
-unsafe fn array_clear(arr: &mut TreeCursorEntryArray) {
+fn array_clear(arr: &mut TreeCursorEntryArray) {
     arr.size = 0;
 }
 
@@ -179,7 +179,7 @@ unsafe fn array_delete(arr: &mut TreeCursorEntryArray) {
     arr.capacity = 0;
 }
 
-unsafe fn array_init(arr: &mut TreeCursorEntryArray) {
+fn array_init(arr: &mut TreeCursorEntryArray) {
     arr.contents = ptr::null_mut();
     arr.size = 0;
     arr.capacity = 0;
@@ -310,7 +310,7 @@ unsafe fn tree_cursor_child_iterator_next(self_: &mut CursorChildIterator) -> Op
 }
 
 #[inline]
-const unsafe fn length_backtrack(a: Length, b: Length) -> Length {
+const fn length_backtrack(a: Length, b: Length) -> Length {
     if length_is_undefined(a) || b.extent.row != 0 {
         return LENGTH_UNDEFINED;
     }

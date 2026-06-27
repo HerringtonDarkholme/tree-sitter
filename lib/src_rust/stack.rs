@@ -366,7 +366,7 @@ extern "C" {
 // Array helper functions (generic, mirrors array.h)
 // ---------------------------------------------------------------------------
 
-pub unsafe fn array_init<T>(arr: &mut Array<T>) {
+pub fn array_init<T>(arr: &mut Array<T>) {
     arr.size = 0;
     arr.capacity = 0;
     arr.contents = ptr::null_mut();
@@ -382,7 +382,7 @@ pub unsafe fn array_delete<T>(arr: &mut Array<T>) {
 }
 
 #[inline]
-pub unsafe fn array_clear<T>(arr: &mut Array<T>) {
+pub fn array_clear<T>(arr: &mut Array<T>) {
     arr.size = 0;
 }
 
@@ -488,7 +488,7 @@ pub unsafe fn array_insert<T>(arr: &mut Array<T>, index: u32, element: T) {
     arr.size += 1;
 }
 
-pub const unsafe fn array_new<T>() -> Array<T> {
+pub const fn array_new<T>() -> Array<T> {
     Array {
         contents: ptr::null_mut(),
         size: 0,
@@ -529,7 +529,7 @@ pub unsafe fn array_splice<T>(
     arr.size = new_size;
 }
 
-pub unsafe fn array_swap<T>(self_: &mut Array<T>, other: &mut Array<T>) {
+pub fn array_swap<T>(self_: &mut Array<T>, other: &mut Array<T>) {
     std::mem::swap(self_, other);
 }
 
@@ -541,7 +541,7 @@ pub unsafe fn array_assign<T>(self_: &mut Array<T>, other: &Array<T>) {
     }
 }
 
-pub const unsafe fn stack_pop_builder_new() -> StackPopBuilder {
+pub const fn stack_pop_builder_new() -> StackPopBuilder {
     StackPopBuilder {
         slices: array_new(),
         subtrees: SubtreeArray {
@@ -565,7 +565,7 @@ pub unsafe fn stack_pop_builder_delete(self_: &mut StackPopBuilder) {
     }
 }
 
-unsafe fn stack_pop_builder_clear(self_: &mut StackPopBuilder) {
+fn stack_pop_builder_clear(self_: &mut StackPopBuilder) {
     self_.slices.size = 0;
     self_.subtrees.size = 0;
     self_.payloads.size = 0;
@@ -628,7 +628,7 @@ unsafe fn subtree_array_as_array_mut(self_: &mut SubtreeArray) -> &mut Array<Sub
 // ---------------------------------------------------------------------------
 
 /// Retain (increment ref count) a stack node.
-unsafe fn stack_node_retain(self_: &mut StackNode) {
+fn stack_node_retain(self_: &mut StackNode) {
     debug_assert!(self_.ref_count > 0);
     self_.ref_count += 1;
     debug_assert!(self_.ref_count != 0);
@@ -731,12 +731,12 @@ const unsafe fn stack_link_payload_subtree_raw(payload: StackLinkPayload) -> Sub
 }
 
 #[inline]
-const unsafe fn stack_link_payload_is_pending(payload: StackLinkPayload) -> bool {
+const fn stack_link_payload_is_pending(payload: StackLinkPayload) -> bool {
     payload.flags & STACK_LINK_PAYLOAD_IS_PENDING_LINK != 0
 }
 
 #[inline]
-const unsafe fn stack_link_payload_is_pending_reduction_raw(payload: StackLinkPayload) -> bool {
+const fn stack_link_payload_is_pending_reduction_raw(payload: StackLinkPayload) -> bool {
     payload.flags & STACK_LINK_PAYLOAD_IS_PENDING_REDUCTION != 0
 }
 
@@ -748,7 +748,7 @@ const unsafe fn stack_link_payload_pending_reduction_raw(
 }
 
 #[inline]
-pub const unsafe fn stack_link_payload_is_pending_reduction(payload: StackLinkPayload) -> bool {
+pub const fn stack_link_payload_is_pending_reduction(payload: StackLinkPayload) -> bool {
     stack_link_payload_is_pending_reduction_raw(payload)
 }
 
@@ -1901,7 +1901,7 @@ pub unsafe fn stack_delete(self_: &mut Stack) {
 }
 
 /// Get the number of versions in the stack.
-pub const unsafe fn stack_version_count(self_: &Stack) -> u32 {
+pub const fn stack_version_count(self_: &Stack) -> u32 {
     self_.heads.size
 }
 

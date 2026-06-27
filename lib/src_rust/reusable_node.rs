@@ -38,14 +38,14 @@ pub struct ReusableNode {
     pub last_external_token: Subtree,
 }
 
-pub const unsafe fn reusable_node_new() -> ReusableNode {
+pub const fn reusable_node_new() -> ReusableNode {
     ReusableNode {
         stack: array_new(),
         last_external_token: NULL_SUBTREE,
     }
 }
 
-pub unsafe fn reusable_node_clear(self_: &mut ReusableNode) {
+pub fn reusable_node_clear(self_: &mut ReusableNode) {
     array_clear(&mut self_.stack);
     self_.last_external_token = NULL_SUBTREE;
 }

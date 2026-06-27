@@ -304,7 +304,7 @@ unsafe fn lexer_goto(self_: &mut Lexer, position: Length) {
 ///
 /// This step only moves the logical position. It does not load a new input
 /// chunk or decode the next character.
-unsafe fn lexer__advance_position(self_: &mut Lexer) {
+fn lexer__advance_position(self_: &mut Lexer) {
     if self_.lookahead_size != 0 {
         if self_.data.lookahead == '\n' as i32 {
             self_.current_position.extent.row += 1;

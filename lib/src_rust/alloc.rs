@@ -4,7 +4,7 @@
 use core::ffi::c_void;
 
 // Default allocator functions that abort on failure.
-unsafe fn malloc_default(size: usize) -> *mut c_void {
+fn malloc_default(size: usize) -> *mut c_void {
     let result = unsafe { libc_malloc(size) };
     if size > 0 && result.is_null() {
         alloc_failed("allocate", size);
@@ -12,7 +12,7 @@ unsafe fn malloc_default(size: usize) -> *mut c_void {
     result
 }
 
-unsafe fn calloc_default(count: usize, size: usize) -> *mut c_void {
+fn calloc_default(count: usize, size: usize) -> *mut c_void {
     let result = unsafe { libc_calloc(count, size) };
     if count > 0 && result.is_null() {
         alloc_failed("allocate", count * size);
@@ -63,11 +63,11 @@ pub static mut ts_current_free: unsafe extern "C" fn(*mut c_void) = libc_free_c;
 
 // C-ABI wrapper functions for the defaults.
 unsafe extern "C" fn ts_malloc_default_c(size: usize) -> *mut c_void {
-    unsafe { malloc_default(size) }
+    malloc_default(size)
 }
 
 unsafe extern "C" fn ts_calloc_default_c(count: usize, size: usize) -> *mut c_void {
-    unsafe { calloc_default(count, size) }
+    calloc_default(count, size)
 }
 
 unsafe extern "C" fn ts_realloc_default_c(buffer: *mut c_void, size: usize) -> *mut c_void {
