@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 #![allow(non_snake_case)]
 
-use std::ptr;
+use core::ptr;
 
 use crate::ffi::{TSFieldId, TSInputEdit, TSLanguage, TSNode, TSPoint, TSStateId, TSSymbol};
 
@@ -202,7 +202,7 @@ unsafe fn node_child_iterator_next(self_: &mut NodeChildIterator, result: &mut T
     }
     *result = node_new(
         self_.tree,
-        std::ptr::from_ref::<Subtree>(child),
+        core::ptr::from_ref::<Subtree>(child),
         self_.position,
         alias_symbol,
     );

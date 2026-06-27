@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
-use std::ffi::c_void;
-use std::ptr;
+use core::ffi::c_void;
+use core::ptr;
 
 use super::alloc::{free, malloc, realloc};
 
@@ -62,7 +62,7 @@ pub fn array_clear<T>(arr: &mut Array<T>) {
 #[inline]
 pub unsafe fn array_reserve<T>(arr: &mut Array<T>, new_capacity: u32) {
     if new_capacity > arr.capacity {
-        let elem_size = std::mem::size_of::<T>();
+        let elem_size = core::mem::size_of::<T>();
         if arr.contents.is_null() {
             arr.contents = malloc(new_capacity as usize * elem_size).cast::<T>();
         } else {
@@ -212,7 +212,7 @@ pub unsafe fn array_splice<T>(
 }
 
 pub fn array_swap<T>(self_: &mut Array<T>, other: &mut Array<T>) {
-    std::mem::swap(self_, other);
+    core::mem::swap(self_, other);
 }
 
 pub unsafe fn array_assign<T>(self_: &mut Array<T>, other: &Array<T>) {

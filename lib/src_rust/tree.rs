@@ -87,9 +87,9 @@ unsafe fn tree_init_ref(
     tree.included_range_count = included_ranges.len() as u32;
     tree.arena = arena;
     tree.included_ranges =
-        calloc(included_ranges.len(), std::mem::size_of::<TSRange>()).cast::<TSRange>();
+        calloc(included_ranges.len(), core::mem::size_of::<TSRange>()).cast::<TSRange>();
     if !included_ranges.is_empty() {
-        std::ptr::copy_nonoverlapping(
+        core::ptr::copy_nonoverlapping(
             included_ranges.as_ptr(),
             tree.included_ranges,
             included_ranges.len(),
@@ -149,11 +149,11 @@ unsafe fn tree_included_ranges_ref(tree: &TSTree, length: &mut u32) -> *mut TSRa
     *length = tree.included_range_count;
     let ranges = calloc(
         tree.included_range_count as usize,
-        std::mem::size_of::<TSRange>(),
+        core::mem::size_of::<TSRange>(),
     )
     .cast::<TSRange>();
     if tree.included_range_count > 0 {
-        std::ptr::copy_nonoverlapping(
+        core::ptr::copy_nonoverlapping(
             tree.included_ranges,
             ranges,
             tree.included_range_count as usize,
@@ -164,7 +164,7 @@ unsafe fn tree_included_ranges_ref(tree: &TSTree, length: &mut u32) -> *mut TSRa
 
 const fn tree_cursor_empty() -> TreeCursor {
     TreeCursor {
-        tree: std::ptr::null(),
+        tree: core::ptr::null(),
         stack: array_new(),
         root_alias_symbol: 0,
     }
@@ -179,7 +179,7 @@ unsafe fn tree_edit_ref(tree: &mut TSTree, edit: &TSInputEdit) {
     let included_ranges = if tree.included_range_count == 0 {
         &mut []
     } else {
-        std::slice::from_raw_parts_mut(tree.included_ranges, tree.included_range_count as usize)
+        core::slice::from_raw_parts_mut(tree.included_ranges, tree.included_range_count as usize)
     };
     for range in included_ranges {
         range_edit_ref(range, edit);
@@ -211,7 +211,7 @@ pub unsafe fn tree_new(
         language,
         included_ranges,
         included_range_count,
-        std::ptr::null_mut(),
+        core::ptr::null_mut(),
     )
 }
 
@@ -222,7 +222,7 @@ pub unsafe fn tree_new_with_arena(
     included_range_count: u32,
     arena: *mut TreeArena,
 ) -> *mut TSTree {
-    let result = malloc(std::mem::size_of::<TSTree>()).cast::<TSTree>();
+    let result = malloc(core::mem::size_of::<TSTree>()).cast::<TSTree>();
     let tree = ptr_mut(result);
     let included_ranges = range_slice(included_ranges, included_range_count);
     tree_init_ref(tree, root, language, included_ranges, arena);
@@ -323,7 +323,7 @@ pub unsafe extern "C" fn ts_tree_get_changed_ranges(
         &mut included_range_differences,
     );
 
-    let mut result: *mut TSRange = std::ptr::null_mut();
+    let mut result: *mut TSRange = core::ptr::null_mut();
     *length = subtree_get_changed_ranges_ref(
         &old_tree_ref.root,
         &new_tree_ref.root,
@@ -371,7 +371,7 @@ pub unsafe extern "C" fn ts_tree_print_dot_graph(self_: *const TSTree, file_desc
 
 #[cfg(test)]
 mod tests {
-    use std::ptr;
+    use core::ptr;
 
     use super::*;
     use crate::core_impl::length::length_zero;

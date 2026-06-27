@@ -29,12 +29,18 @@ unsafe fn realloc_default(buffer: *mut c_void, size: usize) -> *mut c_void {
 }
 
 fn alloc_failed(action: &str, size: usize) -> ! {
-    eprintln!("tree-sitter failed to {action} {size} bytes");
-    std::process::abort();
+    #[cfg(feature = "std")]
+    std::eprintln!("tree-sitter failed to {action} {size} bytes");
+    #[cfg(not(feature = "std"))]
+    let _ = (action, size);
+    // Mirror the C library's behavior on allocation failure. `abort` comes from
+    // libc, so this works in both std and no_std builds.
+    unsafe { abort() }
 }
 
 // C standard library allocation functions
 extern "C" {
+    fn abort() -> !;
     #[link_name = "malloc"]
     fn libc_malloc(size: usize) -> *mut c_void;
     #[link_name = "calloc"]

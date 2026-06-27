@@ -12,8 +12,8 @@
 //! with function pointers to static functions in this module, so generated
 //! parsers can call them without linking against this library.
 
-use std::ffi::{c_char, c_void};
-use std::ptr;
+use core::ffi::{c_char, c_void};
+use core::ptr;
 
 use crate::ffi::{
     TSInput, TSInputEncodingUTF16BE, TSInputEncodingUTF16LE, TSInputEncodingUTF8, TSLogger,
@@ -158,7 +158,7 @@ pub unsafe fn lexer_new() -> Lexer {
 // Compile-time layout assertions
 // ---------------------------------------------------------------------------
 
-const _: () = assert!(std::mem::size_of::<ColumnData>() == 8);
+const _: () = assert!(core::mem::size_of::<ColumnData>() == 8);
 
 // ---------------------------------------------------------------------------
 // Internal (static) functions
@@ -649,7 +649,7 @@ pub unsafe fn lexer_set_included_ranges(
         count = 1;
     } else {
         let mut previous_byte: u32 = 0;
-        for range in std::slice::from_raw_parts(ranges, count as usize) {
+        for range in core::slice::from_raw_parts(ranges, count as usize) {
             if range.start_byte < previous_byte || range.end_byte < range.start_byte {
                 return false;
             }
@@ -660,10 +660,10 @@ pub unsafe fn lexer_set_included_ranges(
     let count = count as usize;
     self_.included_ranges = realloc(
         self_.included_ranges.cast::<c_void>(),
-        count * std::mem::size_of::<TSRange>(),
+        count * core::mem::size_of::<TSRange>(),
     )
     .cast::<TSRange>();
-    std::ptr::copy_nonoverlapping(ranges, self_.included_ranges, count);
+    core::ptr::copy_nonoverlapping(ranges, self_.included_ranges, count);
     self_.included_range_count = count as u32;
     lexer_goto(self_, self_.current_position);
     true

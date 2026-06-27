@@ -2,8 +2,10 @@
 #![allow(non_upper_case_globals)]
 #![allow(non_snake_case)]
 
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
 use core::ffi::c_void;
-use std::{
+use core::{
     ptr,
     sync::atomic::{AtomicU32, Ordering},
 };
@@ -471,7 +473,7 @@ pub union SubtreeHeapDataContent {
     /// Aggregate child metadata for internal nodes.
     pub children: SubtreeChildrenData,
     /// Serialized scanner state for external-token leaves.
-    pub external_scanner_state: std::mem::ManuallyDrop<ExternalScannerState>,
+    pub external_scanner_state: core::mem::ManuallyDrop<ExternalScannerState>,
     /// First skipped character for error leaves.
     pub lookahead_char: i32,
 }
@@ -529,11 +531,12 @@ pub union MutableSubtree {
 pub const NULL_SUBTREE: Subtree = Subtree { ptr: ptr::null() };
 
 // Compile-time layout assertions — catch ABI mismatches immediately
-const _: () = assert!(std::mem::size_of::<SubtreeInlineData>() == 8);
-const _: () = assert!(std::mem::size_of::<Subtree>() == 8);
-const _: () = assert!(std::mem::size_of::<MutableSubtree>() == 8);
-const _: () = assert!(std::mem::size_of::<ExternalScannerState>() == 32);
-const _: () = assert!(std::mem::size_of::<FirstLeaf>() == 4);
+const _: () = assert!(core::mem::size_of::<SubtreeInlineData>() == 8);
+const _: () = assert!(core::mem::size_of::<Subtree>() == 8);
+const _: () = assert!(core::mem::size_of::<MutableSubtree>() == 8);
+#[cfg(target_pointer_width = "64")]
+const _: () = assert!(core::mem::size_of::<ExternalScannerState>() == 32);
+const _: () = assert!(core::mem::size_of::<FirstLeaf>() == 4);
 
 pub type SubtreeArray = Array<Subtree>;
 pub type MutableSubtreeArray = Array<MutableSubtree>;
@@ -663,8 +666,8 @@ pub unsafe fn external_scanner_state_eq(
         return true;
     }
     let length = length as usize;
-    std::slice::from_raw_parts(external_scanner_state_data(self_), length)
-        == std::slice::from_raw_parts(buffer, length)
+    core::slice::from_raw_parts(external_scanner_state_data(self_), length)
+        == core::slice::from_raw_parts(buffer, length)
 }
 
 // ===========================================================================
@@ -677,7 +680,7 @@ pub unsafe fn subtree_array_copy(self_: &SubtreeArray, dest: &mut SubtreeArray) 
     dest.contents = self_.contents;
     if self_.capacity > 0 {
         dest.contents =
-            calloc(self_.capacity as usize, std::mem::size_of::<Subtree>()).cast::<Subtree>();
+            calloc(self_.capacity as usize, core::mem::size_of::<Subtree>()).cast::<Subtree>();
         ptr::copy_nonoverlapping(self_.contents, dest.contents, self_.size as usize);
         for i in 0..self_.size {
             subtree_retain(*dest.contents.add(i as usize));
@@ -741,7 +744,7 @@ const fn align_up(value: usize, alignment: usize) -> usize {
 }
 
 pub unsafe fn tree_arena_new() -> *mut TreeArena {
-    let arena = malloc(std::mem::size_of::<TreeArena>()).cast::<TreeArena>();
+    let arena = malloc(core::mem::size_of::<TreeArena>()).cast::<TreeArena>();
     ptr::write(
         arena,
         TreeArena {
@@ -803,7 +806,7 @@ unsafe fn tree_arena_alloc_new_page(
     alignment: usize,
 ) -> *mut c_void {
     let capacity = TREE_ARENA_PAGE_SIZE.max(size + alignment);
-    let page = malloc(std::mem::size_of::<TreeArenaPage>()).cast::<TreeArenaPage>();
+    let page = malloc(core::mem::size_of::<TreeArenaPage>()).cast::<TreeArenaPage>();
     let contents = malloc(capacity).cast::<u8>();
     ptr::write(
         page,
@@ -866,7 +869,7 @@ unsafe fn subtree_pool_allocate(self_: &mut SubtreePool) -> *mut SubtreeHeapData
     if self_.free_trees.size > 0 {
         array_pop(&mut self_.free_trees).ptr
     } else {
-        malloc(std::mem::size_of::<SubtreeHeapData>()).cast::<SubtreeHeapData>()
+        malloc(core::mem::size_of::<SubtreeHeapData>()).cast::<SubtreeHeapData>()
     }
 }
 
@@ -965,7 +968,7 @@ pub unsafe fn subtree_lookahead_bytes(self_: Subtree) -> u32 {
 
 #[inline]
 pub const fn subtree_alloc_size(child_count: u32) -> usize {
-    child_count as usize * std::mem::size_of::<Subtree>() + std::mem::size_of::<SubtreeHeapData>()
+    child_count as usize * core::mem::size_of::<Subtree>() + core::mem::size_of::<SubtreeHeapData>()
 }
 
 #[inline]
@@ -991,7 +994,7 @@ pub const unsafe fn subtree_children_slice<'a>(self_: Subtree) -> &'a [Subtree] 
     if count == 0 {
         &[]
     } else {
-        std::slice::from_raw_parts(subtree_children(self_), count)
+        core::slice::from_raw_parts(subtree_children(self_), count)
     }
 }
 
@@ -1001,7 +1004,7 @@ unsafe fn mutable_subtree_children<'a>(self_: MutableSubtree) -> &'a mut [Subtre
     if count == 0 {
         &mut []
     } else {
-        std::slice::from_raw_parts_mut(subtree_children(subtree_from_mut(self_)), count)
+        core::slice::from_raw_parts_mut(subtree_children(subtree_from_mut(self_)), count)
     }
 }
 
@@ -1452,7 +1455,7 @@ pub unsafe fn subtree_clone(self_: Subtree) -> MutableSubtree {
             subtree_retain(*new_children.add(i as usize));
         }
     } else if data.has_external_tokens() {
-        (*result).data.external_scanner_state = std::mem::ManuallyDrop::new(
+        (*result).data.external_scanner_state = core::mem::ManuallyDrop::new(
             external_scanner_state_copy(&data.data.external_scanner_state),
         );
     }
@@ -1526,10 +1529,10 @@ pub unsafe fn subtree_new_node(
 ) -> MutableSubtree {
     // Allocate the node's data at the end of the array of children.
     let new_byte_size = subtree_alloc_size((*children).size);
-    if ((*children).capacity as usize) * std::mem::size_of::<Subtree>() < new_byte_size {
+    if ((*children).capacity as usize) * core::mem::size_of::<Subtree>() < new_byte_size {
         (*children).contents =
             realloc((*children).contents.cast::<c_void>(), new_byte_size).cast::<Subtree>();
-        (*children).capacity = (new_byte_size / std::mem::size_of::<Subtree>()) as u32;
+        (*children).capacity = (new_byte_size / core::mem::size_of::<Subtree>()) as u32;
     }
     let data = (*children)
         .contents
@@ -1554,7 +1557,7 @@ pub unsafe fn subtree_new_node_in_arena(
     language: *const TSLanguage,
 ) -> MutableSubtree {
     let byte_size = subtree_alloc_size(child_count);
-    let allocation = tree_arena_alloc(arena, byte_size, std::mem::align_of::<SubtreeHeapData>())
+    let allocation = tree_arena_alloc(arena, byte_size, core::mem::align_of::<SubtreeHeapData>())
         .cast::<Subtree>();
 
     if child_count > 0 {
@@ -1967,7 +1970,7 @@ pub unsafe fn subtree_edit(
 
     let mut stack: Vec<EditEntry> = Vec::new();
     stack.push(EditEntry {
-        tree: std::ptr::addr_of_mut!(self_),
+        tree: core::ptr::addr_of_mut!(self_),
         edit: Edit {
             start: Length {
                 bytes: input_edit.start_byte,
@@ -2498,7 +2501,7 @@ unsafe fn subtree__print_dot_graph(
 pub unsafe fn subtree_print_dot_graph(self_: Subtree, language: *const TSLanguage, f: *mut c_void) {
     fprintf(f, c"digraph tree {\n".as_ptr().cast::<i8>());
     fprintf(f, c"edge [arrowhead=none]\n".as_ptr().cast::<i8>());
-    subtree__print_dot_graph(std::ptr::addr_of!(self_), 0, language, 0, f);
+    subtree__print_dot_graph(core::ptr::addr_of!(self_), 0, language, 0, f);
     fprintf(f, c"}\n".as_ptr().cast::<i8>());
 }
 

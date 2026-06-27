@@ -1,6 +1,6 @@
 #![allow(non_snake_case)]
 
-use std::ptr;
+use core::ptr;
 
 use crate::ffi::{TSFieldId, TSNode, TSPoint, TSSymbol, TSTreeCursor};
 
@@ -129,7 +129,7 @@ struct CursorChild {
 
 #[inline]
 pub const unsafe fn tree_cursor_entry_slice(arr: &TreeCursorEntryArray) -> &[TreeCursorEntry] {
-    std::slice::from_raw_parts(arr.contents, arr.size as usize)
+    core::slice::from_raw_parts(arr.contents, arr.size as usize)
 }
 
 // ---------------------------------------------------------------------------

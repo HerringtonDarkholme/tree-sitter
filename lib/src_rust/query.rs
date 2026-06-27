@@ -627,7 +627,7 @@ unsafe fn symbol_table_id_for_name(self_: &SymbolTable, name: *const u8, length:
         let slice = *array_get_ref(&self_.slices, i);
         if slice.length == length {
             let candidate = core::slice::from_raw_parts(
-                std::ptr::from_ref::<u8>(array_get_ref(&self_.characters, slice.offset)),
+                core::ptr::from_ref::<u8>(array_get_ref(&self_.characters, slice.offset)),
                 length as usize,
             );
             if candidate == needle {
@@ -641,7 +641,7 @@ unsafe fn symbol_table_id_for_name(self_: &SymbolTable, name: *const u8, length:
 unsafe fn symbol_table_name_for_id(self_: &SymbolTable, id: u16, length: &mut u32) -> *const u8 {
     let slice = *array_get_ref(&self_.slices, u32::from(id));
     *length = slice.length;
-    std::ptr::from_ref::<u8>(array_get_ref(&self_.characters, slice.offset))
+    core::ptr::from_ref::<u8>(array_get_ref(&self_.characters, slice.offset))
 }
 
 unsafe fn symbol_table_insert_name(self_: &mut SymbolTable, name: *const u8, length: u32) -> u16 {
@@ -665,7 +665,7 @@ unsafe fn symbol_table_insert_name(self_: &mut SymbolTable, name: *const u8, len
 unsafe fn ptr_copy_into_chars(chars: &mut Array<u8>, offset: u32, src: *const u8, length: u32) {
     core::ptr::copy_nonoverlapping(
         src,
-        std::ptr::from_mut::<u8>(array_get_mut(chars, offset)),
+        core::ptr::from_mut::<u8>(array_get_mut(chars, offset)),
         length as usize,
     );
 }
@@ -3393,7 +3393,7 @@ unsafe fn ts_query_cursor_first_in_progress_capture(
     let mut pattern_index = u32::MAX;
     let mut i = 0u32;
     while i < (*self_).states.size {
-        let state = std::ptr::from_mut::<QueryState>(array_get_mut(&mut (*self_).states, i));
+        let state = core::ptr::from_mut::<QueryState>(array_get_mut(&mut (*self_).states, i));
         if (*state).dead {
             i += 1;
             continue;
@@ -3469,11 +3469,11 @@ unsafe fn ts_query_cursor_compare_captures(
     left_state: *const QueryState,
     right_state: *const QueryState,
 ) -> (bool, bool) {
-    let left_captures = std::ptr::from_ref::<CaptureList>(capture_list_pool_get(
+    let left_captures = core::ptr::from_ref::<CaptureList>(capture_list_pool_get(
         &(*self_).capture_list_pool,
         (*left_state).capture_list_id as u16,
     ));
-    let right_captures = std::ptr::from_ref::<CaptureList>(capture_list_pool_get(
+    let right_captures = core::ptr::from_ref::<CaptureList>(capture_list_pool_get(
         &(*self_).capture_list_pool,
         (*right_state).capture_list_id as u16,
     ));
@@ -3582,7 +3582,7 @@ unsafe fn ts_query_cursor_prepare_to_capture(
             let (found, state_index, _byte_offset, _pattern_index) =
                 ts_query_cursor_first_in_progress_capture(self_, core::ptr::null_mut());
             if found && state_index != state_index_to_preserve {
-                let other_state = std::ptr::from_mut::<QueryState>(array_get_mut(
+                let other_state = core::ptr::from_mut::<QueryState>(array_get_mut(
                     &mut (*self_).states,
                     state_index,
                 ));
@@ -3654,7 +3654,7 @@ unsafe fn ts_query_cursor_copy_state(self_: *mut TSQueryCursor, state_index: u32
         if new_captures.is_null() {
             return None;
         }
-        let old_captures = std::ptr::from_ref::<CaptureList>(capture_list_pool_get(
+        let old_captures = core::ptr::from_ref::<CaptureList>(capture_list_pool_get(
             &(*self_).capture_list_pool,
             original_capture_list_id as u16,
         ));
@@ -3882,7 +3882,7 @@ unsafe fn ts_query_cursor_advance(self_: *mut TSQueryCursor, stop_on_definite_st
                 // Add states for patterns whose root node is a wildcard.
                 if !node_is_error {
                     for i in 0..u32::from((*(*self_).query).wildcard_root_pattern_count) {
-                        let pattern = std::ptr::from_ref::<PatternEntry>(array_get_ref(
+                        let pattern = core::ptr::from_ref::<PatternEntry>(array_get_ref(
                             &(*(*self_).query).pattern_map,
                             i,
                         ));
@@ -3907,7 +3907,7 @@ unsafe fn ts_query_cursor_advance(self_: *mut TSQueryCursor, stop_on_definite_st
                 // Add states for patterns whose root node matches this node.
                 let mut i: u32 = 0;
                 if ts_query_pattern_map_search(&*(*self_).query, symbol, &mut i) {
-                    let mut pattern = std::ptr::from_ref::<PatternEntry>(array_get_ref(
+                    let mut pattern = core::ptr::from_ref::<PatternEntry>(array_get_ref(
                         &(*(*self_).query).pattern_map,
                         i,
                     ));
@@ -3929,7 +3929,7 @@ unsafe fn ts_query_cursor_advance(self_: *mut TSQueryCursor, stop_on_definite_st
                         if i == (*(*self_).query).pattern_map.size {
                             break;
                         }
-                        pattern = std::ptr::from_ref::<PatternEntry>(array_get_ref(
+                        pattern = core::ptr::from_ref::<PatternEntry>(array_get_ref(
                             &(*(*self_).query).pattern_map,
                             i,
                         ));
@@ -3947,7 +3947,7 @@ unsafe fn ts_query_cursor_advance(self_: *mut TSQueryCursor, stop_on_definite_st
                 let mut j: u32 = 0;
                 while j < (*self_).states.size {
                     let mut state =
-                        std::ptr::from_mut::<QueryState>(array_get_mut(&mut (*self_).states, j));
+                        core::ptr::from_mut::<QueryState>(array_get_mut(&mut (*self_).states, j));
                     let step =
                         *array_get_ref(&(*(*self_).query).steps, u32::from((*state).step_index));
                     (*state).has_in_progress_alternatives = false;
@@ -4045,7 +4045,7 @@ unsafe fn ts_query_cursor_advance(self_: *mut TSQueryCursor, stop_on_definite_st
                     }
                     // The states array may have moved; re-fetch the state.
                     state =
-                        std::ptr::from_mut::<QueryState>(array_get_mut(&mut (*self_).states, j));
+                        core::ptr::from_mut::<QueryState>(array_get_mut(&mut (*self_).states, j));
 
                     // If this pattern started with a wildcard (pattern map points
                     // to its second step), require a parent and capture it.
@@ -4066,7 +4066,7 @@ unsafe fn ts_query_cursor_advance(self_: *mut TSQueryCursor, stop_on_definite_st
                             if array_get_ref(&(*(*self_).query).steps, sw_index).capture_ids[0]
                                 != NONE
                             {
-                                let sw_step = std::ptr::from_ref::<QueryStep>(array_get_ref(
+                                let sw_step = core::ptr::from_ref::<QueryStep>(array_get_ref(
                                     &(*(*self_).query).steps,
                                     sw_index,
                                 ));
@@ -4108,7 +4108,7 @@ unsafe fn ts_query_cursor_advance(self_: *mut TSQueryCursor, stop_on_definite_st
                     let mut end_index = j + 1;
                     let mut k = j;
                     while k < end_index {
-                        let child_state = std::ptr::from_mut::<QueryState>(array_get_mut(
+                        let child_state = core::ptr::from_mut::<QueryState>(array_get_mut(
                             &mut (*self_).states,
                             k,
                         ));
@@ -4129,7 +4129,7 @@ unsafe fn ts_query_cursor_advance(self_: *mut TSQueryCursor, stop_on_definite_st
                             if let Some(copy_index) = ts_query_cursor_copy_state(self_, k) {
                                 end_index += 1;
                                 copy_count += 1;
-                                let copy = std::ptr::from_mut::<QueryState>(array_get_mut(
+                                let copy = core::ptr::from_mut::<QueryState>(array_get_mut(
                                     &mut (*self_).states,
                                     copy_index,
                                 ));
@@ -4152,7 +4152,7 @@ unsafe fn ts_query_cursor_advance(self_: *mut TSQueryCursor, stop_on_definite_st
                 let mut j: u32 = 0;
                 while j < (*self_).states.size {
                     let state =
-                        std::ptr::from_mut::<QueryState>(array_get_mut(&mut (*self_).states, j));
+                        core::ptr::from_mut::<QueryState>(array_get_mut(&mut (*self_).states, j));
                     if (*state).dead {
                         array_erase(&mut (*self_).states, j);
                         continue;
@@ -4161,7 +4161,7 @@ unsafe fn ts_query_cursor_advance(self_: *mut TSQueryCursor, stop_on_definite_st
                     let mut did_remove = false;
                     let mut k = j + 1;
                     while k < (*self_).states.size {
-                        let other_state = std::ptr::from_mut::<QueryState>(array_get_mut(
+                        let other_state = core::ptr::from_mut::<QueryState>(array_get_mut(
                             &mut (*self_).states,
                             k,
                         ));
@@ -4253,7 +4253,7 @@ pub unsafe extern "C" fn ts_query_cursor_next_match(
         return false;
     }
 
-    let state = std::ptr::from_mut::<QueryState>(array_get_mut(&mut (*self_).finished_states, 0));
+    let state = core::ptr::from_mut::<QueryState>(array_get_mut(&mut (*self_).finished_states, 0));
     if (*state).id == u32::MAX {
         (*state).id = (*self_).next_state_id;
         (*self_).next_state_id += 1;
@@ -4329,7 +4329,7 @@ pub unsafe extern "C" fn ts_query_cursor_next_capture(
         let mut i = 0u32;
         while i < (*self_).finished_states.size {
             let state =
-                std::ptr::from_mut::<QueryState>(array_get_mut(&mut (*self_).finished_states, i));
+                core::ptr::from_mut::<QueryState>(array_get_mut(&mut (*self_).finished_states, i));
             let captures =
                 capture_list_pool_get(&(*self_).capture_list_pool, (*state).capture_list_id as u16);
 
@@ -4371,7 +4371,7 @@ pub unsafe extern "C" fn ts_query_cursor_next_capture(
         let state: *mut QueryState = if !first_finished_state.is_null() {
             first_finished_state
         } else if first_unfinished_state_is_definite {
-            std::ptr::from_mut::<QueryState>(array_get_mut(
+            core::ptr::from_mut::<QueryState>(array_get_mut(
                 &mut (*self_).states,
                 first_unfinished_state_index,
             ))

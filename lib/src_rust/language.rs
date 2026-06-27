@@ -10,8 +10,8 @@
 //! `TSLanguage` itself is defined in parser.h and created by generated parsers.
 //! We access it as an opaque `repr(C)` struct via raw pointers.
 
-use std::ffi::c_void;
-use std::ptr;
+use core::ffi::c_void;
+use core::ptr;
 
 use crate::ffi::{TSFieldId, TSLanguage, TSStateId, TSSymbol};
 
@@ -321,17 +321,19 @@ pub struct LookaheadIterator {
 // Compile-time layout assertions
 // ---------------------------------------------------------------------------
 
-const _: () = assert!(std::mem::size_of::<TSLexMode>() == 4);
-const _: () = assert!(std::mem::size_of::<TSLexerMode>() == 6);
-const _: () = assert!(std::mem::size_of::<TSParseActionReduce>() == 8);
-const _: () = assert!(std::mem::size_of::<TSParseActionShift>() == 6);
-const _: () = assert!(std::mem::size_of::<TSParseAction>() == 8);
-const _: () = assert!(std::mem::size_of::<TSParseActionEntryData>() == 2);
-const _: () = assert!(std::mem::size_of::<TSParseActionEntry>() == 8);
-const _: () = assert!(std::mem::size_of::<TSLanguageMetadata>() == 3);
-const _: () = assert!(std::mem::size_of::<TSMapSlice>() == 4);
-const _: () = assert!(std::mem::size_of::<TableEntry>() == 16);
-const _: () = assert!(std::mem::size_of::<LookaheadIterator>() == 56);
+const _: () = assert!(core::mem::size_of::<TSLexMode>() == 4);
+const _: () = assert!(core::mem::size_of::<TSLexerMode>() == 6);
+const _: () = assert!(core::mem::size_of::<TSParseActionReduce>() == 8);
+const _: () = assert!(core::mem::size_of::<TSParseActionShift>() == 6);
+const _: () = assert!(core::mem::size_of::<TSParseAction>() == 8);
+const _: () = assert!(core::mem::size_of::<TSParseActionEntryData>() == 2);
+const _: () = assert!(core::mem::size_of::<TSParseActionEntry>() == 8);
+const _: () = assert!(core::mem::size_of::<TSLanguageMetadata>() == 3);
+const _: () = assert!(core::mem::size_of::<TSMapSlice>() == 4);
+#[cfg(target_pointer_width = "64")]
+const _: () = assert!(core::mem::size_of::<TableEntry>() == 16);
+#[cfg(target_pointer_width = "64")]
+const _: () = assert!(core::mem::size_of::<LookaheadIterator>() == 56);
 
 // ---------------------------------------------------------------------------
 // Helper: cast TSLanguage to our full layout mirror
@@ -375,17 +377,21 @@ extern "C" {
     fn fputs(s: *const i8, stream: *mut c_void) -> i32;
 }
 
-unsafe fn c_string_prefix_cmp(left: *const i8, right: *const i8, len: usize) -> std::cmp::Ordering {
+unsafe fn c_string_prefix_cmp(
+    left: *const i8,
+    right: *const i8,
+    len: usize,
+) -> core::cmp::Ordering {
     for i in 0..len {
         let left_byte = *left.add(i) as u8;
         let right_byte = *right.add(i) as u8;
         match left_byte.cmp(&right_byte) {
-            std::cmp::Ordering::Equal if left_byte == 0 => return std::cmp::Ordering::Equal,
-            std::cmp::Ordering::Equal => {}
+            core::cmp::Ordering::Equal if left_byte == 0 => return core::cmp::Ordering::Equal,
+            core::cmp::Ordering::Equal => {}
             ordering => return ordering,
         }
     }
-    std::cmp::Ordering::Equal
+    core::cmp::Ordering::Equal
 }
 
 // ===========================================================================
@@ -1000,8 +1006,8 @@ pub unsafe extern "C" fn ts_language_field_id_for_name(
     for i in 1..=count {
         let field_name = *l.field_names.add(i as usize);
         match c_string_prefix_cmp(name, field_name, name_length as usize) {
-            std::cmp::Ordering::Equal if *field_name.add(name_length as usize) == 0 => return i,
-            std::cmp::Ordering::Less => return 0,
+            core::cmp::Ordering::Equal if *field_name.add(name_length as usize) == 0 => return i,
+            core::cmp::Ordering::Less => return 0,
             _ => {}
         }
     }
@@ -1021,7 +1027,7 @@ pub unsafe extern "C" fn ts_lookahead_iterator_new(
     if u32::from(state) >= lang(self_).state_count {
         return ptr::null_mut();
     }
-    let iterator = malloc(std::mem::size_of::<LookaheadIterator>()).cast::<LookaheadIterator>();
+    let iterator = malloc(core::mem::size_of::<LookaheadIterator>()).cast::<LookaheadIterator>();
     ptr::write(iterator, language_lookaheads(self_, state));
     iterator
 }

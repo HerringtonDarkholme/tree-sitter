@@ -2,7 +2,7 @@
 #![allow(non_snake_case)]
 
 use core::ffi::{c_char, c_void};
-use std::ptr;
+use core::ptr;
 
 use crate::ffi::{
     TSInput, TSInputEncoding, TSInputEncodingUTF8, TSLanguage, TSLogTypeParse, TSLogger,
@@ -1105,7 +1105,7 @@ unsafe fn parser__pending_reduction_new_from_children(
 ) -> *mut PendingReduction {
     let metadata = ts_language_symbol_metadata(self_.language, symbol);
     let fragile = symbol == ts_builtin_sym_error || symbol == ts_builtin_sym_error_repeat;
-    let pending = malloc(std::mem::size_of::<PendingReduction>()).cast::<PendingReduction>();
+    let pending = malloc(core::mem::size_of::<PendingReduction>()).cast::<PendingReduction>();
     ptr::write(
         pending,
         pending_reduction_new_empty(
@@ -1144,7 +1144,7 @@ unsafe fn parser__pending_reduction_new_from_payloads(
 ) -> *mut PendingReduction {
     let metadata = ts_language_symbol_metadata(self_.language, symbol);
     let fragile = symbol == ts_builtin_sym_error || symbol == ts_builtin_sym_error_repeat;
-    let pending = malloc(std::mem::size_of::<PendingReduction>()).cast::<PendingReduction>();
+    let pending = malloc(core::mem::size_of::<PendingReduction>()).cast::<PendingReduction>();
     ptr::write(
         pending,
         pending_reduction_new_empty(
@@ -1722,6 +1722,7 @@ unsafe fn parser__resolve_lexed_symbol(
 }
 
 /// Build the concrete leaf token after the lexing loop succeeds.
+#[allow(clippy::too_many_arguments)]
 unsafe fn parser__new_leaf_lookahead(
     self_: &mut TSParser,
     parse_state: TSStateId,
@@ -1918,7 +1919,7 @@ unsafe fn parser__lex(
         }
 
         if self_.lexer.current_position.bytes == error_end_position.bytes {
-            if (self_.lexer.data.eof.unwrap())(std::ptr::addr_of!(self_.lexer.data)) {
+            if (self_.lexer.data.eof.unwrap())(core::ptr::addr_of!(self_.lexer.data)) {
                 self_.lexer.data.result_symbol = ts_builtin_sym_error;
                 break;
             }
@@ -2333,7 +2334,6 @@ unsafe fn parser__select_children(
     children: &SubtreeArray,
 ) -> bool {
     let scratch_trees = &mut self_.scratch_trees;
-    let children = children;
     array_assign(scratch_trees, children);
 
     let scratch_tree = subtree_new_node(
@@ -4239,7 +4239,7 @@ pub unsafe extern "C" fn ts_parser_parse_string_encoding(
         self_,
         old_tree,
         TSInput {
-            payload: std::ptr::addr_of!(input) as *mut c_void,
+            payload: core::ptr::addr_of!(input) as *mut c_void,
             read: Some(ts_string_input_read),
             encoding,
             decode: None,

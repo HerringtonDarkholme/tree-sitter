@@ -7,8 +7,8 @@
 //! different parse paths. Versions can be merged when they reach the same
 //! state, enabling efficient ambiguity handling.
 
-use std::ffi::c_void;
-use std::ptr;
+use core::ffi::c_void;
+use core::ptr;
 
 use crate::ffi::{TSLanguage, TSStateId, TSSymbol};
 
@@ -317,18 +317,27 @@ pub struct Stack {
 // Compile-time layout assertions (sizes from C on 64-bit)
 // ---------------------------------------------------------------------------
 
-const _: () = assert!(std::mem::size_of::<StackLink>() == 24);
-const _: () = assert!(std::mem::size_of::<StackLinkPayload>() == 16);
-const _: () = assert!(std::mem::size_of::<StackNode>() == 232);
-const _: () = assert!(std::mem::size_of::<StackSegment>() == 32);
-const _: () = assert!(std::mem::size_of::<StackFrame>() == 48);
-const _: () = assert!(std::mem::size_of::<StackIterator>() == 32);
-const _: () = assert!(std::mem::size_of::<StackStatus>() == 4);
-const _: () = assert!(std::mem::size_of::<StackSlice>() == 24);
-const _: () = assert!(std::mem::size_of::<StackSliceSpan>() == 12);
-const _: () = assert!(std::mem::size_of::<StackSummaryEntry>() == 20);
-const _: () = assert!(std::mem::size_of::<StackHead>() == 48);
-const _: () = assert!(std::mem::size_of::<Stack>() == 112);
+#[cfg(target_pointer_width = "64")]
+const _: () = assert!(core::mem::size_of::<StackLink>() == 24);
+#[cfg(target_pointer_width = "64")]
+const _: () = assert!(core::mem::size_of::<StackLinkPayload>() == 16);
+#[cfg(target_pointer_width = "64")]
+const _: () = assert!(core::mem::size_of::<StackNode>() == 232);
+#[cfg(target_pointer_width = "64")]
+const _: () = assert!(core::mem::size_of::<StackSegment>() == 32);
+#[cfg(target_pointer_width = "64")]
+const _: () = assert!(core::mem::size_of::<StackFrame>() == 48);
+#[cfg(target_pointer_width = "64")]
+const _: () = assert!(core::mem::size_of::<StackIterator>() == 32);
+const _: () = assert!(core::mem::size_of::<StackStatus>() == 4);
+#[cfg(target_pointer_width = "64")]
+const _: () = assert!(core::mem::size_of::<StackSlice>() == 24);
+const _: () = assert!(core::mem::size_of::<StackSliceSpan>() == 12);
+const _: () = assert!(core::mem::size_of::<StackSummaryEntry>() == 20);
+#[cfg(target_pointer_width = "64")]
+const _: () = assert!(core::mem::size_of::<StackHead>() == 48);
+#[cfg(target_pointer_width = "64")]
+const _: () = assert!(core::mem::size_of::<Stack>() == 112);
 
 pub type StackAction = u32;
 pub const StackActionNone: StackAction = 0;
@@ -405,7 +414,7 @@ unsafe fn stack_head_array_pair_mut(
     debug_assert!(first < self_.size);
     debug_assert!(second < self_.size);
 
-    let heads = std::slice::from_raw_parts_mut(self_.contents, self_.size as usize);
+    let heads = core::slice::from_raw_parts_mut(self_.contents, self_.size as usize);
     let (lower, upper) = if first < second {
         (first as usize, second as usize)
     } else {
@@ -673,7 +682,7 @@ unsafe fn stack_node_new_with_payload(
     let node: *mut StackNode = if pool.size > 0 {
         array_pop(pool)
     } else {
-        malloc(std::mem::size_of::<StackNode>()).cast::<StackNode>()
+        malloc(core::mem::size_of::<StackNode>()).cast::<StackNode>()
     };
 
     ptr::write(
@@ -1126,7 +1135,7 @@ unsafe fn stack_pop_count_linear(
     let mut node = stack_head(self_, version).node;
     let mut subtree_count = 0;
     let mut subtrees = array_new();
-    let reserve_count = subtree_alloc_size(count) / std::mem::size_of::<Subtree>();
+    let reserve_count = subtree_alloc_size(count) / core::mem::size_of::<Subtree>();
     array_reserve(&mut subtrees, u32::try_from(reserve_count).unwrap());
 
     while subtree_count < count {
@@ -1170,7 +1179,7 @@ unsafe fn stack_pop_count_linear_into(
     let mut node = stack_head(self_, version).node;
     let mut subtree_count = 0;
     let start = builder.subtrees.size;
-    let reserve_count = subtree_alloc_size(count) / std::mem::size_of::<Subtree>();
+    let reserve_count = subtree_alloc_size(count) / core::mem::size_of::<Subtree>();
     array_reserve(
         &mut builder.subtrees,
         start + u32::try_from(reserve_count).unwrap(),
@@ -1236,7 +1245,7 @@ unsafe fn stack_pop_count_payloads_linear_into(
     let mut node = stack_head(self_, version).node;
     let mut subtree_count = 0;
     let start = builder.payloads.size;
-    let reserve_count = subtree_alloc_size(count) / std::mem::size_of::<StackLinkPayload>();
+    let reserve_count = subtree_alloc_size(count) / core::mem::size_of::<StackLinkPayload>();
     array_reserve(
         &mut builder.payloads,
         start + u32::try_from(reserve_count).unwrap(),
@@ -1290,7 +1299,7 @@ unsafe fn stack_pop_payloads_into(
     };
 
     let reserve_count =
-        subtree_alloc_size(goal_subtree_count) / std::mem::size_of::<StackLinkPayload>();
+        subtree_alloc_size(goal_subtree_count) / core::mem::size_of::<StackLinkPayload>();
     array_reserve(
         &mut new_iterator.payloads,
         u32::try_from(reserve_count).unwrap(),
@@ -1417,7 +1426,8 @@ unsafe fn stack__iter(
     };
 
     if let Some(goal_subtree_count) = goal_subtree_count {
-        let reserve_count = subtree_alloc_size(goal_subtree_count) / std::mem::size_of::<Subtree>();
+        let reserve_count =
+            subtree_alloc_size(goal_subtree_count) / core::mem::size_of::<Subtree>();
         let subtrees = &mut new_iterator.subtrees;
         array_reserve(subtrees, u32::try_from(reserve_count).unwrap());
     }
@@ -1589,7 +1599,7 @@ unsafe fn summarize_stack_callback(payload: *mut c_void, iterator: &StackIterato
 
 /// Create a new parse stack.
 pub unsafe fn stack_new(subtree_pool: &mut SubtreePool) -> *mut Stack {
-    let self_ = malloc(std::mem::size_of::<Stack>()).cast::<Stack>();
+    let self_ = malloc(core::mem::size_of::<Stack>()).cast::<Stack>();
     ptr::write(
         self_,
         Stack {
@@ -1865,7 +1875,7 @@ pub unsafe fn stack_pop_all(self_: &mut Stack, version: StackVersion) -> StackSl
 
 /// Record a summary of parse states near the top of a version.
 pub unsafe fn stack_record_summary(self_: &mut Stack, version: StackVersion, max_depth: u32) {
-    let summary = malloc(std::mem::size_of::<StackSummary>()).cast::<StackSummary>();
+    let summary = malloc(core::mem::size_of::<StackSummary>()).cast::<StackSummary>();
     ptr::write(summary, array_new());
     let mut session = SummarizeStackSession { summary, max_depth };
     stack__iter(

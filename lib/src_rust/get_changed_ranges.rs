@@ -2,7 +2,7 @@
 #![allow(non_snake_case)]
 
 use core::cmp::Ordering;
-use std::ptr;
+use core::ptr;
 
 use crate::ffi::{TSInputEdit, TSLanguage, TSRange, TSSymbol};
 
@@ -72,7 +72,7 @@ struct VisibleState {
 
 #[inline]
 const unsafe fn range_array_slice(arr: &TSRangeArray) -> &[TSRange] {
-    std::slice::from_raw_parts(arr.contents, arr.size as usize)
+    core::slice::from_raw_parts(arr.contents, arr.size as usize)
 }
 
 #[inline]
@@ -80,7 +80,7 @@ pub const unsafe fn range_slice<'a>(ranges: *const TSRange, count: u32) -> &'a [
     if count == 0 {
         &[]
     } else {
-        std::slice::from_raw_parts(ranges, count as usize)
+        core::slice::from_raw_parts(ranges, count as usize)
     }
 }
 
@@ -333,7 +333,7 @@ impl DiffIterator {
                     array_push(
                         &mut self.cursor.stack,
                         TreeCursorEntry {
-                            subtree: std::ptr::from_ref::<Subtree>(child),
+                            subtree: core::ptr::from_ref::<Subtree>(child),
                             position,
                             child_index: i,
                             structural_child_index,
@@ -412,7 +412,7 @@ impl DiffIterator {
                 array_push(
                     &mut self.cursor.stack,
                     TreeCursorEntry {
-                        subtree: std::ptr::from_ref::<Subtree>(next_child),
+                        subtree: core::ptr::from_ref::<Subtree>(next_child),
                         position,
                         child_index,
                         structural_child_index,
@@ -585,112 +585,6 @@ pub unsafe extern "C" fn ts_range_edit(range: *mut TSRange, edit: *const TSInput
     range_edit_ref(range, edit);
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::ffi::TSPoint;
-
-    fn point(row: u32, column: u32) -> TSPoint {
-        TSPoint { row, column }
-    }
-
-    fn range(start_byte: u32, end_byte: u32) -> TSRange {
-        TSRange {
-            start_point: point(0, start_byte),
-            end_point: point(0, end_byte),
-            start_byte,
-            end_byte,
-        }
-    }
-
-    fn edit() -> TSInputEdit {
-        TSInputEdit {
-            start_byte: 5,
-            old_end_byte: 10,
-            new_end_byte: 12,
-            start_point: point(0, 5),
-            old_end_point: point(0, 10),
-            new_end_point: point(1, 2),
-        }
-    }
-
-    fn assert_range_eq(actual: TSRange, expected: TSRange) {
-        assert_eq!(actual.start_byte, expected.start_byte);
-        assert_eq!(actual.end_byte, expected.end_byte);
-        assert_eq!(actual.start_point.row, expected.start_point.row);
-        assert_eq!(actual.start_point.column, expected.start_point.column);
-        assert_eq!(actual.end_point.row, expected.end_point.row);
-        assert_eq!(actual.end_point.column, expected.end_point.column);
-    }
-
-    fn range_array(ranges: &mut [TSRange]) -> TSRangeArray {
-        TSRangeArray {
-            contents: ranges.as_mut_ptr(),
-            size: ranges.len() as u32,
-            capacity: ranges.len() as u32,
-        }
-    }
-
-    #[test]
-    fn edit_range_after_changed_range() {
-        let mut edited_range = range(14, 18);
-
-        range_edit_ref(&mut edited_range, &edit());
-
-        assert_range_eq(
-            edited_range,
-            TSRange {
-                start_point: point(1, 6),
-                end_point: point(1, 10),
-                start_byte: 16,
-                end_byte: 20,
-            },
-        );
-    }
-
-    #[test]
-    fn edit_range_overlapping_changed_range() {
-        let mut edited_range = range(7, 14);
-
-        range_edit_ref(&mut edited_range, &edit());
-
-        assert_range_eq(
-            edited_range,
-            TSRange {
-                start_point: point(0, 5),
-                end_point: point(1, 6),
-                start_byte: 5,
-                end_byte: 16,
-            },
-        );
-    }
-
-    #[test]
-    fn edit_range_before_changed_range() {
-        let mut edited_range = range(1, 4);
-
-        range_edit_ref(&mut edited_range, &edit());
-
-        assert_range_eq(edited_range, range(1, 4));
-    }
-
-    #[test]
-    fn range_array_intersects_overlapping_range() {
-        let mut ranges = [range(2, 4), range(7, 9), range(12, 15)];
-        let range_array = range_array(&mut ranges);
-
-        assert!(unsafe { range_array_intersects_ref(&range_array, 0, 8, 11) });
-    }
-
-    #[test]
-    fn range_array_intersects_respects_start_index() {
-        let mut ranges = [range(2, 4), range(7, 9), range(12, 15)];
-        let range_array = range_array(&mut ranges);
-
-        assert!(!unsafe { range_array_intersects_ref(&range_array, 2, 8, 11) });
-    }
-}
-
 pub unsafe fn subtree_get_changed_ranges_ref(
     old_tree: &Subtree,
     new_tree: &Subtree,
@@ -824,4 +718,110 @@ pub unsafe fn subtree_get_changed_ranges_ref(
     *new_cursor = new_iter.cursor;
     *ranges = results.contents;
     results.size
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ffi::TSPoint;
+
+    fn point(row: u32, column: u32) -> TSPoint {
+        TSPoint { row, column }
+    }
+
+    fn range(start_byte: u32, end_byte: u32) -> TSRange {
+        TSRange {
+            start_point: point(0, start_byte),
+            end_point: point(0, end_byte),
+            start_byte,
+            end_byte,
+        }
+    }
+
+    fn edit() -> TSInputEdit {
+        TSInputEdit {
+            start_byte: 5,
+            old_end_byte: 10,
+            new_end_byte: 12,
+            start_point: point(0, 5),
+            old_end_point: point(0, 10),
+            new_end_point: point(1, 2),
+        }
+    }
+
+    fn assert_range_eq(actual: TSRange, expected: TSRange) {
+        assert_eq!(actual.start_byte, expected.start_byte);
+        assert_eq!(actual.end_byte, expected.end_byte);
+        assert_eq!(actual.start_point.row, expected.start_point.row);
+        assert_eq!(actual.start_point.column, expected.start_point.column);
+        assert_eq!(actual.end_point.row, expected.end_point.row);
+        assert_eq!(actual.end_point.column, expected.end_point.column);
+    }
+
+    fn range_array(ranges: &mut [TSRange]) -> TSRangeArray {
+        TSRangeArray {
+            contents: ranges.as_mut_ptr(),
+            size: ranges.len() as u32,
+            capacity: ranges.len() as u32,
+        }
+    }
+
+    #[test]
+    fn edit_range_after_changed_range() {
+        let mut edited_range = range(14, 18);
+
+        range_edit_ref(&mut edited_range, &edit());
+
+        assert_range_eq(
+            edited_range,
+            TSRange {
+                start_point: point(1, 6),
+                end_point: point(1, 10),
+                start_byte: 16,
+                end_byte: 20,
+            },
+        );
+    }
+
+    #[test]
+    fn edit_range_overlapping_changed_range() {
+        let mut edited_range = range(7, 14);
+
+        range_edit_ref(&mut edited_range, &edit());
+
+        assert_range_eq(
+            edited_range,
+            TSRange {
+                start_point: point(0, 5),
+                end_point: point(1, 6),
+                start_byte: 5,
+                end_byte: 16,
+            },
+        );
+    }
+
+    #[test]
+    fn edit_range_before_changed_range() {
+        let mut edited_range = range(1, 4);
+
+        range_edit_ref(&mut edited_range, &edit());
+
+        assert_range_eq(edited_range, range(1, 4));
+    }
+
+    #[test]
+    fn range_array_intersects_overlapping_range() {
+        let mut ranges = [range(2, 4), range(7, 9), range(12, 15)];
+        let range_array = range_array(&mut ranges);
+
+        assert!(unsafe { range_array_intersects_ref(&range_array, 0, 8, 11) });
+    }
+
+    #[test]
+    fn range_array_intersects_respects_start_index() {
+        let mut ranges = [range(2, 4), range(7, 9), range(12, 15)];
+        let range_array = range_array(&mut ranges);
+
+        assert!(!unsafe { range_array_intersects_ref(&range_array, 2, 8, 11) });
+    }
 }
