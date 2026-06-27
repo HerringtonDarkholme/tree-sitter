@@ -51,6 +51,13 @@ fn extract_exports(src: &str) -> Vec<(String, String)> {
     while let Some(rel) = src[search_from..].find(MARKER) {
         let pos = search_from + rel;
         search_from = pos + MARKER.len();
+        // Only a line-leading `#[no_mangle]` is an attribute. Mentions inside
+        // comments or strings (e.g. a doc comment describing the porting plan)
+        // have non-whitespace before them on the line and must be ignored.
+        let line_start = src[..pos].rfind('\n').map_or(0, |n| n + 1);
+        if !src[line_start..pos].trim().is_empty() {
+            continue;
+        }
         let rest = &src[search_from..];
         // The function body opens at the first `{`; these extern fns have no
         // generics/where-clauses, so the first brace is unambiguously the body.
