@@ -2842,6 +2842,7 @@ unsafe fn ts_query_analyze_patterns(self_: &mut TSQuery, error_offset: &mut u32)
 // with the C symbols at link time). Tier 5 adds `#[no_mangle]` and removes
 // `query.c` in a single atomic step.
 
+#[no_mangle]
 pub unsafe extern "C" fn ts_query_new(
     language: *const TSLanguage,
     source: *const i8,
@@ -3006,6 +3007,7 @@ pub unsafe extern "C" fn ts_query_new(
     self_
 }
 
+#[no_mangle]
 pub unsafe extern "C" fn ts_query_delete(self_: *mut TSQuery) {
     if self_.is_null() {
         return;
@@ -3029,18 +3031,22 @@ pub unsafe extern "C" fn ts_query_delete(self_: *mut TSQuery) {
     free(self_.cast::<c_void>());
 }
 
+#[no_mangle]
 pub const unsafe extern "C" fn ts_query_pattern_count(self_: *const TSQuery) -> u32 {
     (*self_).patterns.size
 }
 
+#[no_mangle]
 pub const unsafe extern "C" fn ts_query_capture_count(self_: *const TSQuery) -> u32 {
     (*self_).captures.slices.size
 }
 
+#[no_mangle]
 pub const unsafe extern "C" fn ts_query_string_count(self_: *const TSQuery) -> u32 {
     (*self_).predicate_values.slices.size
 }
 
+#[no_mangle]
 pub unsafe extern "C" fn ts_query_capture_name_for_id(
     self_: *const TSQuery,
     index: u32,
@@ -3049,6 +3055,7 @@ pub unsafe extern "C" fn ts_query_capture_name_for_id(
     symbol_table_name_for_id(&(*self_).captures, index as u16, &mut *length).cast::<i8>()
 }
 
+#[no_mangle]
 pub unsafe extern "C" fn ts_query_capture_quantifier_for_id(
     self_: *const TSQuery,
     pattern_index: u32,
@@ -3058,6 +3065,7 @@ pub unsafe extern "C" fn ts_query_capture_quantifier_for_id(
     capture_quantifier_for_id(capture_quantifiers, capture_index as u16)
 }
 
+#[no_mangle]
 pub unsafe extern "C" fn ts_query_string_value_for_id(
     self_: *const TSQuery,
     index: u32,
@@ -3066,6 +3074,7 @@ pub unsafe extern "C" fn ts_query_string_value_for_id(
     symbol_table_name_for_id(&(*self_).predicate_values, index as u16, &mut *length).cast::<i8>()
 }
 
+#[no_mangle]
 pub unsafe extern "C" fn ts_query_predicates_for_pattern(
     self_: *const TSQuery,
     pattern_index: u32,
@@ -3079,6 +3088,7 @@ pub unsafe extern "C" fn ts_query_predicates_for_pattern(
     core::ptr::from_ref(array_get_ref(&(*self_).predicate_steps, slice.offset))
 }
 
+#[no_mangle]
 pub unsafe extern "C" fn ts_query_start_byte_for_pattern(
     self_: *const TSQuery,
     pattern_index: u32,
@@ -3086,6 +3096,7 @@ pub unsafe extern "C" fn ts_query_start_byte_for_pattern(
     array_get_ref(&(*self_).patterns, pattern_index).start_byte
 }
 
+#[no_mangle]
 pub unsafe extern "C" fn ts_query_end_byte_for_pattern(
     self_: *const TSQuery,
     pattern_index: u32,
@@ -3093,6 +3104,7 @@ pub unsafe extern "C" fn ts_query_end_byte_for_pattern(
     array_get_ref(&(*self_).patterns, pattern_index).end_byte
 }
 
+#[no_mangle]
 pub unsafe extern "C" fn ts_query_is_pattern_rooted(
     self_: *const TSQuery,
     pattern_index: u32,
@@ -3106,6 +3118,7 @@ pub unsafe extern "C" fn ts_query_is_pattern_rooted(
     true
 }
 
+#[no_mangle]
 pub unsafe extern "C" fn ts_query_is_pattern_non_local(
     self_: *const TSQuery,
     pattern_index: u32,
@@ -3117,6 +3130,7 @@ pub unsafe extern "C" fn ts_query_is_pattern_non_local(
     }
 }
 
+#[no_mangle]
 pub unsafe extern "C" fn ts_query_is_pattern_guaranteed_at_step(
     self_: *const TSQuery,
     byte_offset: u32,
@@ -3147,6 +3161,7 @@ unsafe fn ts_query_step_is_fallible(self_: &TSQuery, step_index: u16) -> bool {
         && (!next_step.parent_pattern_guaranteed || step.symbol == WILDCARD_SYMBOL)
 }
 
+#[no_mangle]
 pub unsafe extern "C" fn ts_query_disable_capture(
     self_: *mut TSQuery,
     name: *const i8,
@@ -3163,6 +3178,7 @@ pub unsafe extern "C" fn ts_query_disable_capture(
     }
 }
 
+#[no_mangle]
 pub unsafe extern "C" fn ts_query_disable_pattern(self_: *mut TSQuery, pattern_index: u32) {
     // Remove the given pattern from the pattern map. Its steps remain in the
     // `steps` array but will never be read.
@@ -3215,6 +3231,7 @@ const EMPTY_RANGE: TSRange = TSRange {
     end_byte: u32::MAX,
 };
 
+#[no_mangle]
 pub unsafe extern "C" fn ts_query_cursor_new() -> *mut TSQueryCursor {
     let self_ = malloc(size_of::<TSQueryCursor>()).cast::<TSQueryCursor>();
     core::ptr::write(
@@ -3247,6 +3264,7 @@ pub unsafe extern "C" fn ts_query_cursor_new() -> *mut TSQueryCursor {
     self_
 }
 
+#[no_mangle]
 pub unsafe extern "C" fn ts_query_cursor_delete(self_: *mut TSQueryCursor) {
     array_delete(&mut (*self_).states);
     array_delete(&mut (*self_).finished_states);
@@ -3255,20 +3273,24 @@ pub unsafe extern "C" fn ts_query_cursor_delete(self_: *mut TSQueryCursor) {
     free(self_.cast::<c_void>());
 }
 
+#[no_mangle]
 pub const unsafe extern "C" fn ts_query_cursor_did_exceed_match_limit(
     self_: *const TSQueryCursor,
 ) -> bool {
     (*self_).did_exceed_match_limit
 }
 
+#[no_mangle]
 pub const unsafe extern "C" fn ts_query_cursor_match_limit(self_: *const TSQueryCursor) -> u32 {
     (*self_).capture_list_pool.max_capture_list_count
 }
 
+#[no_mangle]
 pub unsafe extern "C" fn ts_query_cursor_set_match_limit(self_: *mut TSQueryCursor, limit: u32) {
     (*self_).capture_list_pool.max_capture_list_count = limit;
 }
 
+#[no_mangle]
 pub unsafe extern "C" fn ts_query_cursor_exec(
     self_: *mut TSQueryCursor,
     query: *const TSQuery,
@@ -3293,6 +3315,7 @@ pub unsafe extern "C" fn ts_query_cursor_exec(
     };
 }
 
+#[no_mangle]
 pub unsafe extern "C" fn ts_query_cursor_exec_with_options(
     self_: *mut TSQueryCursor,
     query: *const TSQuery,
@@ -3309,6 +3332,7 @@ pub unsafe extern "C" fn ts_query_cursor_exec_with_options(
     }
 }
 
+#[no_mangle]
 pub unsafe extern "C" fn ts_query_cursor_set_byte_range(
     self_: *mut TSQueryCursor,
     start_byte: u32,
@@ -3325,6 +3349,7 @@ pub unsafe extern "C" fn ts_query_cursor_set_byte_range(
     true
 }
 
+#[no_mangle]
 pub unsafe extern "C" fn ts_query_cursor_set_point_range(
     self_: *mut TSQueryCursor,
     start_point: TSPoint,
@@ -3341,6 +3366,7 @@ pub unsafe extern "C" fn ts_query_cursor_set_point_range(
     true
 }
 
+#[no_mangle]
 pub unsafe extern "C" fn ts_query_cursor_set_containing_byte_range(
     self_: *mut TSQueryCursor,
     start_byte: u32,
@@ -3357,6 +3383,7 @@ pub unsafe extern "C" fn ts_query_cursor_set_containing_byte_range(
     true
 }
 
+#[no_mangle]
 pub unsafe extern "C" fn ts_query_cursor_set_containing_point_range(
     self_: *mut TSQueryCursor,
     start_point: TSPoint,
@@ -3517,7 +3544,7 @@ unsafe fn ts_query_cursor_compare_captures(
 
 unsafe fn ts_query_cursor_add_state(self_: *mut TSQueryCursor, pattern: *const PatternEntry) {
     let step = array_get_ref(&(*(*self_).query).steps, u32::from((*pattern).step_index));
-    let start_depth = (*self_).depth - u32::from(step.depth);
+    let start_depth = (*self_).depth.wrapping_sub(u32::from(step.depth));
     let needs_parent = step.depth == 1;
 
     // Keep the states array in ascending order of start_depth and pattern_index.
@@ -3800,21 +3827,21 @@ unsafe fn ts_query_cursor_advance(self_: *mut TSQueryCursor, stop_on_definite_st
             match tree_cursor_goto_next_sibling_internal(&mut (*self_).cursor) {
                 TreeCursorStep::Visible => {
                     if !(*self_).on_visible_node {
-                        (*self_).depth += 1;
+                        (*self_).depth = (*self_).depth.wrapping_add(1);
                         (*self_).on_visible_node = true;
                     }
                     (*self_).ascending = false;
                 }
                 TreeCursorStep::Hidden => {
                     if (*self_).on_visible_node {
-                        (*self_).depth -= 1;
+                        (*self_).depth = (*self_).depth.wrapping_sub(1);
                         (*self_).on_visible_node = false;
                     }
                     (*self_).ascending = false;
                 }
                 TreeCursorStep::None => {
                     if ts_tree_cursor_goto_parent(tc_mut(&mut (*self_).cursor)) {
-                        (*self_).depth -= 1;
+                        (*self_).depth = (*self_).depth.wrapping_sub(1);
                     } else {
                         (*self_).halted = true;
                     }
@@ -3884,7 +3911,7 @@ unsafe fn ts_query_cursor_advance(self_: *mut TSQueryCursor, stop_on_definite_st
                             &(*(*self_).query).steps,
                             u32::from((*pattern).step_index),
                         );
-                        let start_depth = (*self_).depth - u32::from(step.depth);
+                        let start_depth = (*self_).depth.wrapping_sub(u32::from(step.depth));
                         if (if (*pattern).is_rooted {
                             node_intersects_range
                         } else {
@@ -3908,7 +3935,7 @@ unsafe fn ts_query_cursor_advance(self_: *mut TSQueryCursor, stop_on_definite_st
                     let mut step =
                         *array_get_ref(&(*(*self_).query).steps, u32::from((*pattern).step_index));
                     loop {
-                        let start_depth = (*self_).depth - u32::from(step.depth);
+                        let start_depth = (*self_).depth.wrapping_sub(u32::from(step.depth));
                         if (if (*pattern).is_rooted {
                             node_intersects_range
                         } else {
@@ -4216,7 +4243,7 @@ unsafe fn ts_query_cursor_advance(self_: *mut TSQueryCursor, stop_on_definite_st
             {
                 match tree_cursor_goto_first_child_internal(&mut (*self_).cursor) {
                     TreeCursorStep::Visible => {
-                        (*self_).depth += 1;
+                        (*self_).depth = (*self_).depth.wrapping_add(1);
                         (*self_).on_visible_node = true;
                         continue;
                     }
@@ -4233,6 +4260,7 @@ unsafe fn ts_query_cursor_advance(self_: *mut TSQueryCursor, stop_on_definite_st
     }
 }
 
+#[no_mangle]
 pub unsafe extern "C" fn ts_query_cursor_next_match(
     self_: *mut TSQueryCursor,
     match_: *mut TSQueryMatch,
@@ -4260,6 +4288,7 @@ pub unsafe extern "C" fn ts_query_cursor_next_match(
     true
 }
 
+#[no_mangle]
 pub unsafe extern "C" fn ts_query_cursor_remove_match(self_: *mut TSQueryCursor, match_id: u32) {
     for i in 0..(*self_).finished_states.size {
         let state = array_get_ref(&(*self_).finished_states, i);
@@ -4287,6 +4316,7 @@ pub unsafe extern "C" fn ts_query_cursor_remove_match(self_: *mut TSQueryCursor,
     }
 }
 
+#[no_mangle]
 pub unsafe extern "C" fn ts_query_cursor_next_capture(
     self_: *mut TSQueryCursor,
     match_: *mut TSQueryMatch,
@@ -4395,6 +4425,7 @@ pub unsafe extern "C" fn ts_query_cursor_next_capture(
     }
 }
 
+#[no_mangle]
 pub unsafe extern "C" fn ts_query_cursor_set_max_start_depth(
     self_: *mut TSQueryCursor,
     max_start_depth: u32,

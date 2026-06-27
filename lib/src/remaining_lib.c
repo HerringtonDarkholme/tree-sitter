@@ -9,7 +9,7 @@
 // node.c — replaced by src_rust/node.rs
 // parser.c — replaced by src_rust/parser.rs
 // point.c — replaced by src_rust/point.rs
-#include "./query.c"
+// query.c — replaced by src_rust/query.rs
 // stack.c — replaced by src_rust/stack.rs
 // subtree.c — replaced by src_rust/subtree.rs
 // tree_cursor.c — replaced by src_rust/tree_cursor.rs
