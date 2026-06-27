@@ -54,7 +54,9 @@ fn extract_exports(src: &str) -> Vec<(String, String)> {
         let rest = &src[search_from..];
         // The function body opens at the first `{`; these extern fns have no
         // generics/where-clauses, so the first brace is unambiguously the body.
-        let Some(brace) = rest.find('{') else { continue };
+        let Some(brace) = rest.find('{') else {
+            continue;
+        };
         let head = &rest[..brace];
         if !head.contains(" fn ") {
             continue;
@@ -97,7 +99,11 @@ fn abi_surface_is_frozen() {
 
     if std::env::var_os("UPDATE_ABI_GOLDEN").is_some() {
         fs::write(&golden, &current).unwrap();
-        eprintln!("updated {} ({} exports)", golden.display(), current.lines().count());
+        eprintln!(
+            "updated {} ({} exports)",
+            golden.display(),
+            current.lines().count()
+        );
         return;
     }
 
@@ -121,9 +127,17 @@ fn abi_surface_is_frozen() {
              If this change is INTENTIONAL, regenerate the snapshot:\n  \
              UPDATE_ABI_GOLDEN=1 cargo test -p tree-sitter --test abi_surface",
             added.len(),
-            added.iter().map(|l| format!("  + {l}")).collect::<Vec<_>>().join("\n"),
+            added
+                .iter()
+                .map(|l| format!("  + {l}"))
+                .collect::<Vec<_>>()
+                .join("\n"),
             removed.len(),
-            removed.iter().map(|l| format!("  - {l}")).collect::<Vec<_>>().join("\n"),
+            removed
+                .iter()
+                .map(|l| format!("  - {l}"))
+                .collect::<Vec<_>>()
+                .join("\n"),
         );
     }
 }
