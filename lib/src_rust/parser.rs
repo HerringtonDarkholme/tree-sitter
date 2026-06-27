@@ -4012,7 +4012,7 @@ pub unsafe extern "C" fn ts_parser_reset(self_: *mut TSParser) {
 /// Returning null means parsing was canceled, scanner setup failed, or wasm
 /// support was unavailable. In all cases parser-owned scratch state is reset
 /// before returning unless the parse is intentionally resumable.
-pub unsafe extern "C" fn ts_parser_parse(
+pub unsafe extern "C-unwind" fn ts_parser_parse(
     self_: *mut TSParser,
     old_tree: *const TSTree,
     input: TSInput,
@@ -4196,7 +4196,7 @@ pub unsafe extern "C" fn ts_parser_parse(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn ts_parser_parse_with_options(
+pub unsafe extern "C-unwind" fn ts_parser_parse_with_options(
     self_: *mut TSParser,
     old_tree: *const TSTree,
     input: TSInput,
@@ -4215,7 +4215,7 @@ pub unsafe extern "C" fn ts_parser_parse_with_options(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn ts_parser_parse_string(
+pub unsafe extern "C-unwind" fn ts_parser_parse_string(
     self_: *mut TSParser,
     old_tree: *const TSTree,
     string: *const i8,
@@ -4225,7 +4225,7 @@ pub unsafe extern "C" fn ts_parser_parse_string(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn ts_parser_parse_string_encoding(
+pub unsafe extern "C-unwind" fn ts_parser_parse_string_encoding(
     self_: *mut TSParser,
     old_tree: *const TSTree,
     string: *const i8,

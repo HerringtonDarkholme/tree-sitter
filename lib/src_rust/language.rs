@@ -80,8 +80,9 @@ pub struct TSLexer {
     pub lookahead: i32,
     /// Symbol selected by the generated lexer or external scanner.
     pub result_symbol: TSSymbol,
-    /// Consume or skip the current lookahead.
-    pub advance: Option<unsafe extern "C" fn(*mut Self, bool)>,
+    /// Consume or skip the current lookahead. `C-unwind` so a throwing host
+    /// logger invoked during advance can unwind out instead of aborting.
+    pub advance: Option<unsafe extern "C-unwind" fn(*mut Self, bool)>,
     /// Mark the current source position as the end of the token.
     pub mark_end: Option<unsafe extern "C" fn(*mut Self)>,
     /// Compute the current column, potentially by rescanning the line.
@@ -90,8 +91,9 @@ pub struct TSLexer {
     pub is_at_included_range_start: Option<unsafe extern "C" fn(*const Self) -> bool>,
     /// Report whether the visible input is exhausted.
     pub eof: Option<unsafe extern "C" fn(*const Self) -> bool>,
-    /// Optional variadic logger.
-    pub log: Option<unsafe extern "C" fn(*const Self, *const i8, ...)>,
+    /// Optional variadic logger. `C-unwind` so a throwing host logger can
+    /// unwind out of the parse instead of aborting at this boundary.
+    pub log: Option<unsafe extern "C-unwind" fn(*const Self, *const i8, ...)>,
 }
 
 /// `TSLanguageMetadata` (from parser.h)

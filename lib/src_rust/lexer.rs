@@ -444,7 +444,7 @@ unsafe fn lexer__do_advance(self_: &mut Lexer, skip: bool) {
 }
 
 /// Advance to the next character (with logging). `TSLexer` vtable callback.
-unsafe extern "C" fn ts_lexer__advance(lexer: *mut TSLexer, skip: bool) {
+unsafe extern "C-unwind" fn ts_lexer__advance(lexer: *mut TSLexer, skip: bool) {
     let self_ = lexer_mut(lexer);
     if self_.chunk.is_null() {
         return;
@@ -558,7 +558,11 @@ unsafe extern "C" fn ts_lexer__is_at_included_range_start(lexer: *const TSLexer)
 // The variadic log function is defined in lexer_log_shim.c because
 // Rust stable cannot define C-variadic functions. It's imported here
 // and assigned to TSLexer::log in lexer_init.
-extern "C" {
+//
+// `C-unwind`: the log callback may be a host function (e.g. a JS logger) that
+// throws/unwinds. Without this the unwind would hit a `nounwind` boundary and
+// abort instead of propagating out of the parse.
+extern "C-unwind" {
     fn ts_lexer__log_shim(_self: *const TSLexer, fmt: *const i8, ...);
 }
 
