@@ -426,6 +426,21 @@ pub unsafe fn array_push<T>(arr: &mut Array<T>, element: T) {
     arr.size += 1;
 }
 
+/// Grow the array's length by `count`, zero-initializing the new elements.
+///
+/// Mirrors the C `array_grow_by` macro: reserves capacity, zeroes the new
+/// trailing region, then bumps `size`. The new elements must be valid when
+/// represented as all-zero bytes (e.g. integers, or structs of such).
+#[inline]
+pub unsafe fn array_grow_by<T>(arr: &mut Array<T>, count: u32) {
+    if count == 0 {
+        return;
+    }
+    array_grow(arr, count);
+    ptr::write_bytes(arr.contents.add(arr.size as usize), 0, count as usize);
+    arr.size += count;
+}
+
 #[inline]
 pub unsafe fn array_pop<T>(arr: &mut Array<T>) -> T {
     arr.size -= 1;

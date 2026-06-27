@@ -34,7 +34,8 @@ pub mod tree_cursor;
 
 // Tier 4 — The engine
 pub mod parser;
-// query.c — not migrated, remains in C
+// query.c — port in progress in `query`, not yet activated (query.c still live)
+pub mod query;
 
 // Internal helpers (no corresponding .c file)
 mod raw_pointer;
