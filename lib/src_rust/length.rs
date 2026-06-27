@@ -4,10 +4,17 @@ use crate::ffi::TSPoint;
 
 use super::point::{point_add, point_sub};
 
+/// Combined byte and point distance.
+///
+/// Tree-sitter tracks both absolute byte offsets and `(row, column)` points.
+/// A `Length` represents a span in both coordinate systems so callers can
+/// update source positions without rescanning text.
 #[derive(Clone, Copy, Debug)]
 #[repr(C)]
 pub struct Length {
+    /// Byte distance.
     pub bytes: u32,
+    /// Row/column distance.
     pub extent: TSPoint,
 }
 
@@ -26,6 +33,7 @@ pub const LENGTH_UNDEFINED: Length = Length {
     extent: TSPoint { row: 0, column: 1 },
 };
 
+/// Sentinel larger than any concrete source length.
 pub const LENGTH_MAX: Length = Length {
     bytes: u32::MAX,
     extent: TSPoint {

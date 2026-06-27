@@ -24,34 +24,53 @@ use super::tree_cursor::{TreeCursor, TreeCursorEntry, TreeCursorEntryArray};
 // Types
 // ---------------------------------------------------------------------------
 
-/// `TSRangeArray` — Array(TSRange)
+/// Growable array of changed ranges.
 #[repr(C)]
 pub struct TSRangeArray {
+    /// Backing range storage.
     pub contents: *mut TSRange,
+    /// Number of initialized ranges.
     pub size: u32,
+    /// Allocated range capacity.
     pub capacity: u32,
 }
 
-/// Iterator — internal state for tree diffing
+/// Cursor used when diffing two syntax trees.
+///
+/// The iterator walks visible syntax ranges in source order. It can also stop
+/// on a node's padding so edits in leading whitespace are reported separately
+/// from edits in the node's content.
 struct Iterator {
+    /// Cursor stack pointing at the current subtree.
     cursor: TreeCursor,
+    /// Language metadata used for alias visibility.
     language: *const TSLanguage,
+    /// Number of visible ancestors currently on the stack.
     visible_depth: u32,
+    /// Whether the current iterator item is leading padding, not node content.
     in_padding: bool,
+    /// Last external token seen before the current iterator position.
     prev_external_token: Subtree,
 }
 
-/// `IteratorComparison` — result of comparing two iterators
+/// Result of comparing old and new iterator positions.
 #[derive(PartialEq, Eq)]
 enum IteratorComparison {
+    /// The visible nodes are definitely different.
     Differs,
+    /// The visible nodes match at this level, but children may differ.
     MayDiffer,
+    /// The visible nodes and reuse-sensitive metadata match.
     Matches,
 }
 
+/// Visible node state used for comparing old and new iterators.
 struct VisibleState {
+    /// Nearest visible or aliased subtree.
     tree: Subtree,
+    /// Alias symbol that makes a hidden node visible, or zero.
     alias_symbol: TSSymbol,
+    /// Start byte of `tree`.
     start_byte: u32,
 }
 
@@ -243,6 +262,7 @@ unsafe fn ts_range_array_add(self_: &mut TSRangeArray, start: Length, end: Lengt
     }
 }
 
+/// Create a diff iterator rooted at a subtree.
 unsafe fn iterator_new(
     cursor: &mut TreeCursor,
     tree: &Subtree,
@@ -273,6 +293,10 @@ const unsafe fn iterator_done(self_: &Iterator) -> bool {
     self_.cursor.stack.size == 0
 }
 
+/// Return the current item's start position.
+///
+/// For padding items this is the parent entry position. For node-content items,
+/// it is the position after leading padding.
 unsafe fn iterator_start_position(self_: &Iterator) -> Length {
     let entry = stack_slice(&self_.cursor.stack).last().unwrap_unchecked();
     if self_.in_padding {
@@ -282,6 +306,7 @@ unsafe fn iterator_start_position(self_: &Iterator) -> Length {
     }
 }
 
+/// Return the current item's end position.
 unsafe fn iterator_end_position(self_: &Iterator) -> Length {
     let entry = stack_slice(&self_.cursor.stack).last().unwrap_unchecked();
     let result = length_add(entry.position, ts_subtree_padding(*entry.subtree));
@@ -292,6 +317,10 @@ unsafe fn iterator_end_position(self_: &Iterator) -> Length {
     }
 }
 
+/// Determine whether the current cursor entry is publicly visible.
+///
+/// Hidden grammar nodes can still be visible through aliases, so this must check
+/// the parent production's alias sequence in addition to subtree visibility.
 unsafe fn iterator_tree_is_visible(self_: &Iterator) -> bool {
     let entries = stack_slice(&self_.cursor.stack);
     let entry = entries.last().unwrap_unchecked();
@@ -310,6 +339,7 @@ unsafe fn iterator_tree_is_visible(self_: &Iterator) -> bool {
     false
 }
 
+/// Find the nearest visible state at or above the iterator position.
 unsafe fn iterator_get_visible_state(self_: &Iterator) -> VisibleState {
     let mut result = VisibleState {
         tree: NULL_SUBTREE,
@@ -352,6 +382,7 @@ unsafe fn iterator_get_visible_state(self_: &Iterator) -> VisibleState {
     result
 }
 
+/// Move one level up in the diff cursor.
 unsafe fn iterator_ascend(self_: &mut Iterator) {
     if iterator_done(self_) {
         return;
@@ -370,6 +401,11 @@ unsafe fn iterator_ascend(self_: &mut Iterator) {
     self_.cursor.stack.size -= 1;
 }
 
+/// Descend to the child that spans `goal_position`.
+///
+/// If the child is visible and its padding starts after the goal, the iterator
+/// stops in padding. Otherwise it stops on the child content or keeps descending
+/// through hidden children.
 unsafe fn iterator_descend(self_: &mut Iterator, goal_position: u32) -> bool {
     if self_.in_padding {
         return false;
@@ -429,6 +465,7 @@ unsafe fn iterator_descend(self_: &mut Iterator, goal_position: u32) -> bool {
     false
 }
 
+/// Advance to the next visible range or padding range in source order.
 unsafe fn iterator_advance(self_: &mut Iterator) {
     if self_.in_padding {
         self_.in_padding = false;
@@ -491,6 +528,11 @@ unsafe fn iterator_advance(self_: &mut Iterator) {
     }
 }
 
+/// Compare the visible old/new states at the current iterator positions.
+///
+/// Definite differences can be reported immediately. "May differ" asks the diff
+/// loop to descend because external scanner state, parse states, edit flags, or
+/// error metadata prevent treating the whole subtree as identical.
 unsafe fn iterator_compare(old_iter: &Iterator, new_iter: &Iterator) -> IteratorComparison {
     let old_visible = iterator_get_visible_state(old_iter);
     let new_visible = iterator_get_visible_state(new_iter);
@@ -548,6 +590,8 @@ pub unsafe fn ts_range_array_get_changed_ranges_ref(
     new_ranges: &[TSRange],
     differences: &mut TSRangeArray,
 ) {
+    // Sweep the two sorted included-range lists and record the symmetric
+    // difference: spans that were visible in exactly one tree.
     let mut new_index = 0;
     let mut old_index = 0;
     let mut current_position = length_zero();
@@ -749,6 +793,9 @@ pub unsafe fn ts_subtree_get_changed_ranges_ref(
     included_range_differences_array: &TSRangeArray,
     ranges: &mut *mut TSRange,
 ) -> u32 {
+    // Walk both trees in lockstep. Matching subtrees can be skipped wholesale;
+    // maybe-matching subtrees are descended into; differing subtrees emit one
+    // changed range and advance both iterators past the differing span.
     let mut results = TSRangeArray {
         contents: ptr::null_mut(),
         size: 0,

@@ -29,14 +29,23 @@ const POINT_ZERO: POINT_ZERO_TYPE = POINT_ZERO_TYPE { row: 0, column: 0 };
 // Types
 // ---------------------------------------------------------------------------
 
-/// `TreeCursorEntry` — mirrors `tree_cursor.h`
+/// One stack frame in a tree cursor traversal.
+///
+/// A cursor stores the path from the root node to the current node. Each frame
+/// keeps enough sibling/position bookkeeping to move sideways or back upward
+/// without parent pointers in subtrees.
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct TreeCursorEntry {
+    /// Current subtree pointer for this depth.
     pub subtree: *const Subtree,
+    /// Start position of `subtree`.
     pub position: Length,
+    /// Raw child index in the parent, including hidden/extra children.
     pub child_index: u32,
+    /// Index among non-extra children, used for alias and field tables.
     pub structural_child_index: u32,
+    /// Visible descendant index for public cursor APIs.
     pub descendant_index: u32,
 }
 
@@ -53,23 +62,29 @@ impl TreeCursorEntry {
     }
 }
 
-/// Array(TreeCursorEntry) — inline repr
+/// Inline `Array(TreeCursorEntry)` representation.
 #[repr(C)]
 pub struct TreeCursorEntryArray {
+    /// Backing storage for cursor stack entries.
     pub contents: *mut TreeCursorEntry,
+    /// Number of initialized entries.
     pub size: u32,
+    /// Allocated entry capacity.
     pub capacity: u32,
 }
 
-/// `TreeCursor` — internal cursor (cast to/from `TSTreeCursor`)
+/// Internal cursor representation cast to/from public `TSTreeCursor`.
 #[repr(C)]
 pub struct TreeCursor {
+    /// Tree that owns all subtree pointers in `stack`.
     pub tree: *const TSTree,
+    /// Path from root to current cursor node.
     pub stack: TreeCursorEntryArray,
+    /// Alias to apply to the root node, or zero.
     pub root_alias_symbol: TSSymbol,
 }
 
-/// `TreeCursorStep` — result of internal navigation
+/// Result of internal navigation.
 #[repr(C)]
 #[derive(PartialEq, Eq, Clone, Copy)]
 pub enum TreeCursorStep {
@@ -78,14 +93,21 @@ pub enum TreeCursorStep {
     Visible = 2,
 }
 
-/// `CursorChildIterator` — internal iterator for children
+/// Child iterator that maintains cursor-specific position and alias state.
 struct CursorChildIterator {
+    /// Parent whose children are being scanned.
     parent: Subtree,
+    /// Owning tree, needed for language metadata.
     tree: *const TSTree,
+    /// Start position of the next child.
     position: Length,
+    /// Raw child index of the next child.
     child_index: u32,
+    /// Non-extra child index of the next child.
     structural_child_index: u32,
+    /// Visible descendant index of the next child.
     descendant_index: u32,
+    /// Alias sequence for the parent production.
     alias_sequence: *const TSSymbol,
 }
 
@@ -305,6 +327,12 @@ const unsafe fn length_backtrack(a: Length, b: Length) -> Length {
     }
 }
 
+/// Step the child iterator backward.
+///
+/// Reverse traversal reconstructs each previous child's start position by
+/// subtracting padding and size. If a multi-line span prevents precise column
+/// backtracking, the returned position becomes `LENGTH_UNDEFINED`, matching the
+/// C cursor behavior.
 unsafe fn ts_tree_cursor_child_iterator_previous(
     self_: &mut CursorChildIterator,
 ) -> Option<CursorChild> {
@@ -346,6 +374,11 @@ unsafe fn ts_tree_cursor_child_iterator_previous(
 }
 
 #[inline]
+/// Descend to the first visible child covering a byte/point target.
+///
+/// Hidden nodes are traversed when they contain visible descendants. If no
+/// matching visible child exists, the cursor stack is restored to its original
+/// depth.
 unsafe fn ts_tree_cursor_goto_first_child_for_byte_and_point(
     cursor: &mut TreeCursor,
     goal_byte: u32,
@@ -388,6 +421,11 @@ unsafe fn ts_tree_cursor_goto_first_child_for_byte_and_point(
     -1
 }
 
+/// Shared sibling navigation implementation.
+///
+/// The `advance` callback chooses next-vs-previous traversal. The cursor walks
+/// upward until it can find a visible sibling, or a hidden sibling that contains
+/// visible descendants. On failure, it restores the original stack.
 unsafe fn ts_tree_cursor_goto_sibling_internal(
     cursor: &mut TreeCursor,
     advance: unsafe fn(&mut CursorChildIterator) -> Option<CursorChild>,

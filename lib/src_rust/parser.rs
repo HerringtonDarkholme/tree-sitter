@@ -71,8 +71,8 @@ use super::stack::{
     ts_stack_last_external_token,
     ts_stack_link_payload_is_pending_reduction,
     ts_stack_link_payload_pending_reduction,
-    ts_stack_link_payload_retain,
     ts_stack_link_payload_release,
+    ts_stack_link_payload_retain,
     ts_stack_link_payload_subtree,
     ts_stack_merge,
     ts_stack_new,
@@ -373,13 +373,20 @@ macro_rules! TREE_NAME {
 // Types
 // ---------------------------------------------------------------------------
 
-/// `ReduceAction` — from `reduce_action.h`
+/// Candidate reduction used while searching recovery actions.
+///
+/// Recovery can scan many lookahead symbols for a parse state. This compact
+/// record deduplicates equivalent reduce actions before applying them.
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct ReduceAction {
+    /// Number of stack entries consumed by the reduce action.
     count: u32,
+    /// Grammar symbol produced by the reduction.
     symbol: TSSymbol,
+    /// Dynamic precedence delta for conflict resolution.
     dynamic_precedence: i32,
+    /// Production id used for alias/field metadata on the new subtree.
     production_id: u16,
 }
 
@@ -388,21 +395,33 @@ type ReduceActionSet = Array<ReduceAction>;
 
 type PendingReductionArray = Array<*mut PendingReduction>;
 
-/// `TokenCache` — cached lookahead token
+/// One-token cache shared by stack versions at the same byte offset.
+///
+/// GLR versions often ask the lexer for the same position and external scanner
+/// state. The cache stores the concrete token plus the last external token that
+/// determined scanner state, so another version can reuse it only when scanner
+/// state is equivalent.
 #[repr(C)]
 struct TokenCache {
+    /// Retained lookahead token.
     token: Subtree,
+    /// Retained token carrying the external scanner state used for `token`.
     last_external_token: Subtree,
+    /// Byte offset where `token` was lexed.
     byte_index: u32,
 }
 
-/// `ErrorStatus` — for comparing parse versions
+/// Summary used to compare and prune stack versions.
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct ErrorStatus {
+    /// Accumulated recovery/error cost.
     cost: u32,
+    /// Number of visible nodes since the last error.
     node_count: u32,
+    /// Dynamic precedence for tie-breaking.
     dynamic_precedence: i32,
+    /// Whether the version is currently in error recovery.
     is_in_error: bool,
 }
 
@@ -423,35 +442,66 @@ struct TSStringInput {
     length: u32,
 }
 
-/// `TSParser` — the main parser struct
+/// Main parser runtime state.
+///
+/// One `TSParser` owns all mutable state for a parse: lexer callbacks, GLR
+/// stack versions, old-tree reuse cursor, parser scratch arrays, external
+/// scanner state, and the final accepted tree. The public C API treats this as
+/// opaque; the `repr(C)` layout is preserved for parity with the C core.
 #[repr(C)]
 pub struct TSParser {
+    /// Input adapter and `TSLexer` callback surface.
     lexer: Lexer,
+    /// Persistent GLR parse stack.
     stack: *mut Stack,
+    /// Free lists used while releasing or mutating subtrees.
     tree_pool: SubtreePool,
+    /// Active language tables and callbacks.
     language: *const TSLanguage,
+    /// Optional wasm runtime for wasm languages.
     wasm_store: *mut TSWasmStore,
+    /// Scratch set of reductions considered during recovery.
     reduce_actions: ReduceActionSet,
+    /// Best accepted root found so far.
     finished_tree: Subtree,
+    /// Reusable pop-result builder for normal reductions without an old tree.
     reduce_builder: StackPopBuilder,
+    /// Parser-owned pending reduction descriptors awaiting cleanup.
     pending_reductions: PendingReductionArray,
+    /// Scratch arrays for stripping and comparing trailing extras.
     trailing_extras: SubtreeArray,
     trailing_extras2: SubtreeArray,
+    /// Scratch child array used for subtree comparisons.
     scratch_trees: SubtreeArray,
+    /// Cached lexer result for repeated same-position lookups.
     token_cache: TokenCache,
+    /// Arena that owns internal nodes in the returned tree.
     tree_arena: *mut TreeArena,
+    /// Cursor over the old tree for incremental node reuse.
     reusable_node: ReusableNode,
+    /// Language-owned external scanner payload.
     external_scanner_payload: *mut c_void,
+    /// Optional parse debug graph output.
     dot_graph_file: *mut c_void,
+    /// Number of accepted trees seen in this parse.
     accept_count: u32,
+    /// Progress-callback operation counter.
     operation_count: u32,
+    /// Retained old root while reparsing.
     old_tree: Subtree,
+    /// Included-range diffs between old and new parse inputs.
     included_range_differences: TSRangeArray,
+    /// Public parse cancellation/progress options.
     parse_options: TSParseOptions,
+    /// Mutable status passed to the progress callback.
     parse_state: TSParseState,
+    /// Cursor into `included_range_differences`.
     included_range_difference_index: u32,
+    /// Set when an external scanner reports an error.
     has_scanner_error: bool,
+    /// Set when balancing was canceled by the progress callback.
     canceled_balancing: bool,
+    /// Set once any accepted tree contains an error.
     has_error: bool,
 }
 
@@ -761,9 +811,7 @@ unsafe fn ts_parser__payload_has_external_tokens(payload: StackLinkPayload) -> b
 }
 
 #[inline]
-unsafe fn ts_parser__payload_has_external_scanner_state_change(
-    payload: StackLinkPayload,
-) -> bool {
+unsafe fn ts_parser__payload_has_external_scanner_state_change(payload: StackLinkPayload) -> bool {
     if ts_stack_link_payload_is_pending_reduction(payload) {
         (*ts_parser__payload_pending(payload)).flags
             & PENDING_REDUCTION_HAS_EXTERNAL_SCANNER_STATE_CHANGE
@@ -803,7 +851,9 @@ unsafe fn ts_parser__payload_size(payload: StackLinkPayload) -> Length {
 #[inline]
 unsafe fn ts_parser__payload_total_size(payload: StackLinkPayload) -> Length {
     if ts_stack_link_payload_is_pending_reduction(payload) {
-        let pending = ts_parser__payload_pending(payload).as_ref().unwrap_unchecked();
+        let pending = ts_parser__payload_pending(payload)
+            .as_ref()
+            .unwrap_unchecked();
         length_add(pending.padding, pending.size)
     } else {
         ts_subtree_total_size(ts_parser__payload_subtree(payload))
@@ -1732,6 +1782,130 @@ unsafe fn ts_parser__can_reuse_first_leaf(
     current_lex_mode.external_lex_state == 0 && table_entry.is_reusable
 }
 
+/// Build the error token produced after skipping unrecognized input.
+unsafe fn ts_parser__new_error_lookahead(
+    self_: &mut TSParser,
+    parse_state: TSStateId,
+    start_position: Length,
+    error_start_position: Length,
+    error_end_position: Length,
+    lookahead_end_byte: u32,
+    first_error_character: i32,
+) -> Subtree {
+    let padding = length_sub(error_start_position, start_position);
+    let size = length_sub(error_end_position, error_start_position);
+    let lookahead_bytes = lookahead_end_byte - error_end_position.bytes;
+    ts_subtree_new_error(
+        &mut self_.tree_pool,
+        first_error_character,
+        padding,
+        size,
+        lookahead_bytes,
+        parse_state,
+        self_.language,
+    )
+}
+
+/// Resolve the public symbol for a token found by internal or external lexing.
+///
+/// External scanners return an index into their symbol map. Internal lexing may
+/// return the grammar's word token, in which case the keyword lexer gets one
+/// chance to refine it to a reserved word that is valid in the current state.
+unsafe fn ts_parser__resolve_lexed_symbol(
+    self_: &mut TSParser,
+    parse_state: TSStateId,
+    found_external_token: bool,
+) -> (TSSymbol, bool) {
+    let lang = parser_language_full(self_.language);
+    let mut symbol = self_.lexer.data.result_symbol;
+    let mut is_keyword = false;
+
+    if found_external_token {
+        symbol = *lang.external_scanner.symbol_map.add(symbol as usize);
+    } else if symbol == lang.keyword_capture_token && symbol != 0 {
+        let end_byte = self_.lexer.token_end_position.bytes;
+        let token_start_position = self_.lexer.token_start_position;
+        ts_lexer_reset(&mut self_.lexer, token_start_position);
+        ts_lexer_start(&mut self_.lexer);
+
+        is_keyword = ts_parser__call_keyword_lex_fn(self_);
+
+        if is_keyword
+            && self_.lexer.token_end_position.bytes == end_byte
+            && (ts_language_has_actions(
+                self_.language,
+                parse_state,
+                self_.lexer.data.result_symbol,
+            ) || ts_language_is_reserved_word(
+                self_.language,
+                parse_state,
+                self_.lexer.data.result_symbol,
+            ))
+        {
+            symbol = self_.lexer.data.result_symbol;
+        }
+    }
+
+    (symbol, is_keyword)
+}
+
+/// Build the concrete leaf token after the lexing loop succeeds.
+unsafe fn ts_parser__new_leaf_lookahead(
+    self_: &mut TSParser,
+    parse_state: TSStateId,
+    start_position: Length,
+    lookahead_end_byte: u32,
+    found_external_token: bool,
+    called_get_column: bool,
+    external_scanner_state_len: u32,
+    external_scanner_state_changed: bool,
+) -> Subtree {
+    let padding = length_sub(self_.lexer.token_start_position, start_position);
+    let size = length_sub(
+        self_.lexer.token_end_position,
+        self_.lexer.token_start_position,
+    );
+    let lookahead_bytes = lookahead_end_byte - self_.lexer.token_end_position.bytes;
+    let (symbol, is_keyword) =
+        ts_parser__resolve_lexed_symbol(self_, parse_state, found_external_token);
+
+    let result = ts_subtree_new_leaf(
+        &mut self_.tree_pool,
+        symbol,
+        padding,
+        size,
+        lookahead_bytes,
+        parse_state,
+        found_external_token,
+        called_get_column,
+        is_keyword,
+        self_.language,
+    );
+
+    if found_external_token {
+        let mut_result = ts_subtree_to_mut_unsafe(result);
+        let external_scanner_state =
+            ptr::addr_of_mut!((*mut_result.ptr).data.external_scanner_state)
+                .cast::<ExternalScannerState>()
+                .as_mut()
+                .unwrap_unchecked();
+        ts_external_scanner_state_init(
+            external_scanner_state,
+            self_.lexer.debug_buffer.as_ptr(),
+            external_scanner_state_len,
+        );
+        (*mut_result.ptr).set_has_external_scanner_state_change(external_scanner_state_changed);
+    }
+
+    result
+}
+
+/// Scan from the current stack position and return one lookahead subtree.
+///
+/// The scanner first gives an external scanner a chance when the parse state
+/// enables one, then falls back to the generated lexer. If normal lexing fails,
+/// it switches to the error lex mode and consumes bytes until it can produce an
+/// error token or EOF.
 unsafe fn ts_parser__lex(
     self_: &mut TSParser,
     version: StackVersion,
@@ -1885,84 +2059,28 @@ unsafe fn ts_parser__lex(
         error_end_position = self_.lexer.current_position;
     }
 
-    let result;
-    if skipped_error {
-        let padding = length_sub(error_start_position, start_position);
-        let size = length_sub(error_end_position, error_start_position);
-        let lookahead_bytes = lookahead_end_byte - error_end_position.bytes;
-        result = ts_subtree_new_error(
-            &mut self_.tree_pool,
+    let result = if skipped_error {
+        ts_parser__new_error_lookahead(
+            self_,
+            parse_state,
+            start_position,
+            error_start_position,
+            error_end_position,
+            lookahead_end_byte,
             first_error_character,
-            padding,
-            size,
-            lookahead_bytes,
-            parse_state,
-            self_.language,
-        );
+        )
     } else {
-        let mut is_keyword = false;
-        let mut symbol = self_.lexer.data.result_symbol;
-        let padding = length_sub(self_.lexer.token_start_position, start_position);
-        let size = length_sub(
-            self_.lexer.token_end_position,
-            self_.lexer.token_start_position,
-        );
-        let lookahead_bytes = lookahead_end_byte - self_.lexer.token_end_position.bytes;
-
-        if found_external_token {
-            symbol = *lang.external_scanner.symbol_map.add(symbol as usize);
-        } else if symbol == lang.keyword_capture_token && symbol != 0 {
-            let end_byte = self_.lexer.token_end_position.bytes;
-            let token_start_position = self_.lexer.token_start_position;
-            ts_lexer_reset(&mut self_.lexer, token_start_position);
-            ts_lexer_start(&mut self_.lexer);
-
-            is_keyword = ts_parser__call_keyword_lex_fn(self_);
-
-            if is_keyword
-                && self_.lexer.token_end_position.bytes == end_byte
-                && (ts_language_has_actions(
-                    self_.language,
-                    parse_state,
-                    self_.lexer.data.result_symbol,
-                ) || ts_language_is_reserved_word(
-                    self_.language,
-                    parse_state,
-                    self_.lexer.data.result_symbol,
-                ))
-            {
-                symbol = self_.lexer.data.result_symbol;
-            }
-        }
-
-        result = ts_subtree_new_leaf(
-            &mut self_.tree_pool,
-            symbol,
-            padding,
-            size,
-            lookahead_bytes,
+        ts_parser__new_leaf_lookahead(
+            self_,
             parse_state,
+            start_position,
+            lookahead_end_byte,
             found_external_token,
             called_get_column,
-            is_keyword,
-            self_.language,
-        );
-
-        if found_external_token {
-            let mut_result = ts_subtree_to_mut_unsafe(result);
-            let external_scanner_state =
-                ptr::addr_of_mut!((*mut_result.ptr).data.external_scanner_state)
-                    .cast::<ExternalScannerState>()
-                    .as_mut()
-                    .unwrap_unchecked();
-            ts_external_scanner_state_init(
-                external_scanner_state,
-                self_.lexer.debug_buffer.as_ptr(),
-                external_scanner_state_len,
-            );
-            (*mut_result.ptr).set_has_external_scanner_state_change(external_scanner_state_changed);
-        }
-    }
+            external_scanner_state_len,
+            external_scanner_state_changed,
+        )
+    };
 
     LOG_LOOKAHEAD!(
         parser,
@@ -2020,6 +2138,88 @@ unsafe fn ts_parser__set_cached_token(
     cache.token = token;
     cache.byte_index = byte_index;
     cache.last_external_token = last_external_token;
+}
+
+/// Find the initial lookahead for one stack version.
+///
+/// The parser tries sources in cheapest-to-most-expensive order:
+///
+/// 1. Reuse a compatible subtree from the old tree during incremental parsing.
+/// 2. Reuse the parser's one-token cache for another version at this position.
+/// 3. Ask the lexer to scan a fresh token.
+///
+/// The returned `needs_lex` flag tells `ts_parser__advance` whether step 3 is
+/// still required. `did_reuse` records only old-tree reuse, because successful
+/// shifts must advance the reusable-node cursor.
+unsafe fn ts_parser__get_initial_lookahead(
+    self_: &mut TSParser,
+    version: StackVersion,
+    state: &mut TSStateId,
+    position: u32,
+    last_external_token: Subtree,
+    allow_node_reuse: bool,
+) -> (bool, Subtree, TableEntry, bool) {
+    let mut did_reuse = true;
+    let mut lookahead = NULL_SUBTREE;
+    let mut table_entry = TableEntry::empty();
+
+    if allow_node_reuse {
+        lookahead = ts_parser__reuse_node(
+            self_,
+            version,
+            state,
+            position,
+            last_external_token,
+            &mut table_entry,
+        );
+    }
+
+    if lookahead.ptr.is_null() {
+        did_reuse = false;
+        if let Some((token, cached_table_entry)) =
+            ts_parser__get_cached_token(self_, *state, position as usize, last_external_token)
+        {
+            lookahead = token;
+            table_entry = cached_table_entry;
+        }
+    }
+
+    let needs_lex = lookahead.ptr.is_null();
+    (did_reuse, lookahead, table_entry, needs_lex)
+}
+
+/// Lex a token for the current stack version and prepare its parse-table entry.
+///
+/// A null lookahead is meaningful when parsing a non-terminal extra: it asks the
+/// parser to consult the EOF entry for a forced reduction, after which lexing
+/// resumes from the new parse state.
+unsafe fn ts_parser__lex_lookahead(
+    self_: &mut TSParser,
+    version: StackVersion,
+    state: TSStateId,
+    position: u32,
+    last_external_token: Subtree,
+    lookahead: &mut Subtree,
+    table_entry: &mut TableEntry,
+) -> bool {
+    *lookahead = ts_parser__lex(self_, version, state);
+    if self_.has_scanner_error {
+        return false;
+    }
+
+    if !lookahead.ptr.is_null() {
+        ts_parser__set_cached_token(self_, position, last_external_token, *lookahead);
+        ts_language_table_entry(
+            self_.language,
+            state,
+            ts_subtree_symbol(*lookahead),
+            table_entry,
+        );
+    } else {
+        ts_language_table_entry(self_.language, state, ts_builtin_sym_end, table_entry);
+    }
+
+    true
 }
 
 unsafe fn ts_parser__has_included_range_difference(
@@ -2402,6 +2602,19 @@ unsafe fn ts_parser__shift(
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Apply one reduce action to a stack version.
+///
+/// Algorithm:
+/// - Pop `count` payloads from the target version. A GLR node can have multiple
+///   predecessor links, so one reduce can produce several child slices.
+/// - For slices that came from the same version, choose the best child list and
+///   release the others.
+/// - Build the parent subtree, compute the goto state, push the parent and any
+///   stripped trailing extras.
+/// - Try to merge the resulting stack version back into earlier versions.
+///
+/// The no-old-tree path writes pop results into `reduce_builder`, avoiding the
+/// allocation-heavy `StackSliceArray` used by the incremental path.
 unsafe fn ts_parser__reduce(
     self_: &mut TSParser,
     version: StackVersion,
@@ -2574,6 +2787,12 @@ unsafe fn ts_parser__reduce(
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Incremental parsing variant of `ts_parser__reduce`.
+///
+/// This path keeps concrete `StackSlice` arrays because old-tree reuse and
+/// breakdown can make the child ownership rules differ from the fresh parse
+/// path. It intentionally mirrors `ts_parser__reduce` so parity bugs are easier
+/// to audit.
 unsafe fn ts_parser__reduce_with_slices(
     self_: &mut TSParser,
     version: StackVersion,
@@ -3307,6 +3526,13 @@ unsafe fn ts_parser__check_progress(
     true
 }
 
+/// Advance one stack version until it shifts, accepts, recovers, pauses, or halts.
+///
+/// This is the parser action interpreter. It first obtains a lookahead from old
+/// tree reuse, token cache, or lexing. Then it repeatedly reads the parse-table
+/// entry for `(state, lookahead)` and executes its actions. Reductions keep the
+/// same lookahead and continue in the new goto state; shifts consume the
+/// lookahead and return to the outer parse loop.
 unsafe fn ts_parser__advance(
     self_: &mut TSParser,
     version: StackVersion,
@@ -3318,63 +3544,29 @@ unsafe fn ts_parser__advance(
     let position = ts_stack_position(stack, version).bytes;
     let last_external_token = ts_stack_last_external_token(stack, version);
 
-    let mut did_reuse = true;
-    let mut lookahead = NULL_SUBTREE;
-    let mut table_entry = TableEntry::empty();
-
-    // If possible, reuse a node from the previous syntax tree.
-    if allow_node_reuse {
-        lookahead = ts_parser__reuse_node(
+    let (did_reuse, mut lookahead, mut table_entry, mut needs_lex) =
+        ts_parser__get_initial_lookahead(
             self_,
             version,
             &mut state,
             position,
             last_external_token,
-            &mut table_entry,
+            allow_node_reuse,
         );
-    }
 
-    // If no node from the previous syntax tree could be reused, then try to
-    // reuse the token previously returned by the lexer.
-    if lookahead.ptr.is_null() {
-        did_reuse = false;
-        if let Some((token, cached_table_entry)) =
-            ts_parser__get_cached_token(self_, state, position as usize, last_external_token)
-        {
-            lookahead = token;
-            table_entry = cached_table_entry;
-        }
-    }
-
-    let mut needs_lex = lookahead.ptr.is_null();
     loop {
-        // Otherwise, re-run the lexer.
         if needs_lex {
             needs_lex = false;
-            lookahead = ts_parser__lex(self_, version, state);
-            if self_.has_scanner_error {
+            if !ts_parser__lex_lookahead(
+                self_,
+                version,
+                state,
+                position,
+                last_external_token,
+                &mut lookahead,
+                &mut table_entry,
+            ) {
                 return false;
-            }
-
-            if !lookahead.ptr.is_null() {
-                ts_parser__set_cached_token(self_, position, last_external_token, lookahead);
-                ts_language_table_entry(
-                    self_.language,
-                    state,
-                    ts_subtree_symbol(lookahead),
-                    &mut table_entry,
-                );
-            }
-            // When parsing a non-terminal extra, a null lookahead indicates the
-            // end of the rule. The reduction is stored in the EOF table entry.
-            // After the reduction, the lexer needs to be run again.
-            else {
-                ts_language_table_entry(
-                    self_.language,
-                    state,
-                    ts_builtin_sym_end,
-                    &mut table_entry,
-                );
             }
         }
 
@@ -3986,6 +4178,18 @@ pub unsafe extern "C" fn ts_parser_reset(self_: *mut TSParser) {
 // ---------------------------------------------------------------------------
 
 #[no_mangle]
+/// Parse one input document and return a new tree.
+///
+/// The driver owns the outer GLR loop:
+/// - initialize lexer, external scanner, arena, and optional old-tree reuse;
+/// - process every active stack version until none can advance normally;
+/// - condense/merge/prune stack versions;
+/// - recover when all versions are paused at errors;
+/// - balance the accepted tree and transfer arena ownership into `TSTree`.
+///
+/// Returning null means parsing was canceled, scanner setup failed, or wasm
+/// support was unavailable. In all cases parser-owned scratch state is reset
+/// before returning unless the parse is intentionally resumable.
 pub unsafe extern "C" fn ts_parser_parse(
     self_: *mut TSParser,
     old_tree: *const TSTree,

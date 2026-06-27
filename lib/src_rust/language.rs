@@ -50,25 +50,45 @@ pub const TSSymbolTypeAuxiliary: TSSymbolType = 3;
 /// Mirrors the `external_scanner` sub-struct inside `TSLanguage`.
 #[repr(C)]
 pub struct TSExternalScanner {
+    /// Per-external-lex-state bitmap of valid external tokens.
     pub states: *const bool,
+    /// Maps external scanner result indices to grammar symbols.
     pub symbol_map: *const TSSymbol,
+    /// Optional scanner instance constructor.
     pub create: Option<unsafe extern "C" fn() -> *mut c_void>,
+    /// Optional scanner instance destructor.
     pub destroy: Option<unsafe extern "C" fn(*mut c_void)>,
+    /// Main external scanning callback.
     pub scan: Option<unsafe extern "C" fn(*mut c_void, *mut TSLexer, *const bool) -> bool>,
+    /// Serialize scanner state into the parser's fixed buffer.
     pub serialize: Option<unsafe extern "C" fn(*mut c_void, *mut i8) -> u32>,
+    /// Restore scanner state before scanning a stack version.
     pub deserialize: Option<unsafe extern "C" fn(*mut c_void, *const i8, u32)>,
 }
 
-/// `TSLexer` struct (from parser.h). Needed for function pointer types.
+/// Generated-lexer callback surface from `parser.h`.
+///
+/// Generated lexers and external scanners mutate this struct while scanning a
+/// token. The first fields carry token state; the function pointers route back
+/// into `lexer.rs` for input movement, column calculation, EOF checks, and
+/// optional logging.
 #[repr(C)]
 pub struct TSLexer {
+    /// Current decoded codepoint, or zero at EOF.
     pub lookahead: i32,
+    /// Symbol selected by the generated lexer or external scanner.
     pub result_symbol: TSSymbol,
+    /// Consume or skip the current lookahead.
     pub advance: Option<unsafe extern "C" fn(*mut Self, bool)>,
+    /// Mark the current source position as the end of the token.
     pub mark_end: Option<unsafe extern "C" fn(*mut Self)>,
+    /// Compute the current column, potentially by rescanning the line.
     pub get_column: Option<unsafe extern "C" fn(*mut Self) -> u32>,
+    /// Report whether the lexer is at an included-range boundary.
     pub is_at_included_range_start: Option<unsafe extern "C" fn(*const Self) -> bool>,
+    /// Report whether the visible input is exhausted.
     pub eof: Option<unsafe extern "C" fn(*const Self) -> bool>,
+    /// Optional variadic logger.
     pub log: Option<unsafe extern "C" fn(*const Self, *const i8, ...)>,
 }
 
@@ -165,41 +185,77 @@ pub use super::subtree::TSFieldMapEntry;
 /// Used to read fields at correct offsets via pointer cast.
 #[repr(C)]
 pub struct TSLanguageFull {
+    /// ABI version used to interpret optional/legacy fields.
     pub abi_version: u32,
+    /// Total number of symbols in the grammar.
     pub symbol_count: u32,
+    /// Number of alias symbols.
     pub alias_count: u32,
+    /// Number of terminal symbols.
     pub token_count: u32,
+    /// Number of external scanner tokens.
     pub external_token_count: u32,
+    /// Number of parse states.
     pub state_count: u32,
+    /// States below this count use the dense parse table.
     pub large_state_count: u32,
+    /// Number of productions with field/alias metadata.
     pub production_id_count: u32,
+    /// Number of named fields.
     pub field_count: u32,
+    /// Maximum alias sequence length for any production.
     pub max_alias_sequence_length: u16,
+    /// Dense large-state parse table.
     pub parse_table: *const u16,
+    /// Compressed small-state parse table entries.
     pub small_parse_table: *const u16,
+    /// Offset/count map into `small_parse_table` per small state.
     pub small_parse_table_map: *const u32,
+    /// Shared parse action lists addressed by table values.
     pub parse_actions: *const TSParseActionEntry,
+    /// Null-terminated symbol names.
     pub symbol_names: *const *const i8,
+    /// Null-terminated field names.
     pub field_names: *const *const i8,
+    /// Production-to-field-map slice table.
     pub field_map_slices: *const TSMapSlice,
+    /// Field map entries for named children.
     pub field_map_entries: *const TSFieldMapEntry,
+    /// Visibility/name/supertype metadata per symbol.
     pub symbol_metadata: *const TSSymbolMetadata,
+    /// Map from internal to public symbol ids.
     pub public_symbol_map: *const TSSymbol,
+    /// Production alias-map slice table.
     pub alias_map: *const u16,
+    /// Alias symbols for production children.
     pub alias_sequences: *const TSSymbol,
+    /// Lex state metadata per parse state.
     pub lex_modes: *const TSLexerMode,
+    /// Generated main lexer callback.
     pub lex_fn: Option<unsafe extern "C" fn(*mut TSLexer, TSStateId) -> bool>,
+    /// Generated keyword lexer callback.
     pub keyword_lex_fn: Option<unsafe extern "C" fn(*mut TSLexer, TSStateId) -> bool>,
+    /// Default word token that keyword lexing can refine.
     pub keyword_capture_token: TSSymbol,
+    /// Optional external scanner descriptor.
     pub external_scanner: TSExternalScanner,
+    /// Primary states for public node state APIs.
     pub primary_state_ids: *const TSStateId,
+    /// Language name.
     pub name: *const i8,
+    /// Reserved-word table for ABI >= 15.
     pub reserved_words: *const TSSymbol,
+    /// Width of each reserved-word set.
     pub max_reserved_word_set_size: u16,
+    /// Number of supertype symbols.
     pub supertype_count: u32,
+    /// Supertype symbol list.
     pub supertype_symbols: *const TSSymbol,
+    /// Supertype-to-subtype slice table.
     pub supertype_map_slices: *const TSMapSlice,
+    /// Supertype subtype entries.
     pub supertype_map_entries: *const TSSymbol,
+    /// Language semantic version metadata.
     pub metadata: TSLanguageMetadata,
 }
 
@@ -210,8 +266,11 @@ pub struct TSLanguageFull {
 /// Result of looking up a parse table entry for a (state, symbol) pair.
 #[repr(C)]
 pub struct TableEntry {
+    /// Pointer into `TSLanguageFull::parse_actions`.
     pub actions: *const TSParseAction,
+    /// Number of actions for this state/symbol.
     pub action_count: u32,
+    /// Whether a token from another lex state can be reused here.
     pub is_reusable: bool,
 }
 
@@ -229,18 +288,30 @@ impl TableEntry {
 /// Iterator over valid lookahead symbols for a given parse state.
 #[repr(C)]
 pub struct LookaheadIterator {
+    /// Language whose tables are being scanned.
     pub language: *const TSLanguage,
+    /// Current raw table cursor.
     pub data: *const u16,
+    /// End of the current small-state symbol group.
     pub group_end: *const u16,
+    /// Parse state being inspected.
     pub state: TSStateId,
+    /// Parse-table value for the current symbol.
     pub table_value: u16,
+    /// Section index in the small parse table.
     pub section_index: u16,
+    /// Remaining grouped-symbol count in the current section.
     pub group_count: u16,
+    /// Whether this iterator is scanning small-state data.
     pub is_small_state: bool,
 
+    /// Current symbol's action list.
     pub actions: *const TSParseAction,
+    /// Current lookahead symbol.
     pub symbol: TSSymbol,
+    /// Shift/goto state for current symbol when applicable.
     pub next_state: TSStateId,
+    /// Number of current actions.
     pub action_count: u16,
 }
 

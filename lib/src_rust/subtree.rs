@@ -37,23 +37,31 @@ pub const ts_builtin_sym_error_repeat: TSSymbol = ts_builtin_sym_error - 1;
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct TSSymbolMetadata {
+    /// Whether the symbol contributes a visible node to public traversal.
     pub visible: bool,
+    /// Whether the symbol is named rather than anonymous punctuation/token text.
     pub named: bool,
+    /// Whether the symbol is a supertype.
     pub supertype: bool,
 }
 
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct TSFieldMapEntry {
+    /// Field id applied to the child.
     pub field_id: u16,
+    /// Child index within the production.
     pub child_index: u8,
+    /// Whether this field was inherited through hidden nodes.
     pub inherited: bool,
 }
 
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct TSMapSlice {
+    /// Offset into the corresponding flat table.
     pub index: u16,
+    /// Number of entries in the slice.
     pub length: u16,
 }
 
@@ -65,7 +73,9 @@ const EXTERNAL_SCANNER_STATE_INLINE_SIZE: usize = 24;
 
 #[repr(C)]
 pub struct ExternalScannerState {
+    /// Inline or heap state bytes, selected by `length`.
     data: ExternalScannerStateData,
+    /// Serialized byte count.
     pub length: u32,
 }
 
@@ -74,7 +84,9 @@ unsafe impl Sync for ExternalScannerState {}
 
 #[repr(C)]
 pub union ExternalScannerStateData {
+    /// Heap storage when serialized state exceeds inline capacity.
     pub long_data: *mut u8,
+    /// Inline storage for the common small scanner-state case.
     pub short_data: [u8; EXTERNAL_SCANNER_STATE_INLINE_SIZE],
 }
 
@@ -229,13 +241,21 @@ impl SubtreeInlineData {
 
 #[repr(C)]
 pub struct SubtreeHeapData {
+    /// Intrusive reference count for heap-owned subtrees.
     pub ref_count: u32, // volatile / atomic
+    /// Leading padding before this subtree's content.
     pub padding: Length,
+    /// Content size excluding padding and lookahead bytes.
     pub size: Length,
+    /// Bytes scanned past token end to recognize this subtree.
     pub lookahead_bytes: u32,
+    /// Accumulated error cost for recovery comparison.
     pub error_cost: u32,
+    /// Number of direct children. Zero means leaf payload in `data`.
     pub child_count: u32,
+    /// Grammar symbol for this subtree.
     pub symbol: TSSymbol,
+    /// Parse state recorded on this subtree.
     pub parse_state: TSStateId,
 
     /// Packed bitfield flags (11 bits used, matches C bitfield layout)
@@ -443,27 +463,39 @@ impl SubtreeHeapData {
 
 #[repr(C)]
 pub union SubtreeHeapDataContent {
+    /// Aggregate child metadata for internal nodes.
     pub children: SubtreeChildrenData,
+    /// Serialized scanner state for external-token leaves.
     pub external_scanner_state: std::mem::ManuallyDrop<ExternalScannerState>,
+    /// First skipped character for error leaves.
     pub lookahead_char: i32,
 }
 
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct SubtreeChildrenData {
+    /// Number of direct visible children.
     pub visible_child_count: u32,
+    /// Number of direct named children.
     pub named_child_count: u32,
+    /// Number of visible descendants below this node.
     pub visible_descendant_count: u32,
+    /// Dynamic precedence accumulated from children.
     pub dynamic_precedence: i32,
+    /// Repetition nesting depth for balancing repeated nodes.
     pub repeat_depth: u16,
+    /// Production id used for fields and aliases.
     pub production_id: u16,
+    /// First leaf summary for reuse and node state APIs.
     pub first_leaf: FirstLeaf,
 }
 
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct FirstLeaf {
+    /// Symbol of the first leaf under this subtree.
     pub symbol: TSSymbol,
+    /// Parse state of the first leaf under this subtree.
     pub parse_state: TSStateId,
 }
 
@@ -474,14 +506,18 @@ pub struct FirstLeaf {
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub union Subtree {
+    /// Inline representation when `data.is_inline()` is set.
     pub data: SubtreeInlineData,
+    /// Heap representation otherwise.
     pub ptr: *const SubtreeHeapData,
 }
 
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub union MutableSubtree {
+    /// Inline representation when `data.is_inline()` is set.
     pub data: SubtreeInlineData,
+    /// Mutable heap representation otherwise.
     pub ptr: *mut SubtreeHeapData,
 }
 
@@ -500,15 +536,21 @@ const _: () = assert!(std::mem::size_of::<FirstLeaf>() == 4);
 
 #[repr(C)]
 pub struct SubtreeArray {
+    /// Child storage.
     pub contents: *mut Subtree,
+    /// Number of initialized children.
     pub size: u32,
+    /// Allocated child capacity.
     pub capacity: u32,
 }
 
 #[repr(C)]
 pub struct MutableSubtreeArray {
+    /// Mutable subtree storage.
     pub contents: *mut MutableSubtree,
+    /// Number of initialized entries.
     pub size: u32,
+    /// Allocated entry capacity.
     pub capacity: u32,
 }
 
@@ -518,22 +560,36 @@ pub struct MutableSubtreeArray {
 
 #[repr(C)]
 pub struct SubtreePool {
+    /// Free list of heap subtree allocations.
     pub free_trees: MutableSubtreeArray,
+    /// Scratch stack used by iterative release/compress operations.
     pub tree_stack: MutableSubtreeArray,
 }
 
+/// Arena for tree-owned internal nodes.
+///
+/// Parser reductions can allocate accepted internal nodes in this arena. The
+/// returned `TSTree` retains the arena, so copying a tree only bumps the arena
+/// refcount instead of cloning every internal node.
 #[repr(C)]
 pub struct TreeArena {
+    /// Shared ownership count across copied trees.
     ref_count: AtomicU32,
+    /// Singly linked list of allocated pages.
     pages: *mut TreeArenaPage,
+    /// Page currently used for bump allocation.
     current_page: *mut TreeArenaPage,
 }
 
 #[repr(C)]
 struct TreeArenaPage {
+    /// Next older page in the arena list.
     next: *mut TreeArenaPage,
+    /// Bump allocation buffer.
     contents: *mut u8,
+    /// Bytes currently used in `contents`.
     size: usize,
+    /// Allocated byte capacity.
     capacity: usize,
 }
 
@@ -542,8 +598,11 @@ struct TreeArenaPage {
 // ---------------------------------------------------------------------------
 
 struct Edit {
+    /// Edited range start in old coordinates.
     start: Length,
+    /// Edited range end in old coordinates.
     old_end: Length,
+    /// Edited range end in new coordinates.
     new_end: Length,
 }
 
@@ -876,10 +935,12 @@ pub unsafe fn ts_tree_arena_release(arena: *mut TreeArena) {
     ts_free(arena.cast::<c_void>());
 }
 
-unsafe fn ts_tree_arena_alloc(arena: *mut TreeArena, size: usize, alignment: usize) -> *mut c_void {
-    debug_assert!(!arena.is_null());
-    let arena = arena.as_mut().unwrap_unchecked();
-
+/// Try to satisfy an arena allocation from the current bump page.
+unsafe fn ts_tree_arena_try_current_page(
+    arena: &mut TreeArena,
+    size: usize,
+    alignment: usize,
+) -> *mut c_void {
     if !arena.current_page.is_null() {
         let page = arena.current_page.as_mut().unwrap_unchecked();
         let offset = align_up(page.size, alignment);
@@ -888,7 +949,15 @@ unsafe fn ts_tree_arena_alloc(arena: *mut TreeArena, size: usize, alignment: usi
             return page.contents.add(offset).cast::<c_void>();
         }
     }
+    ptr::null_mut()
+}
 
+/// Allocate a new arena page and return the first allocation from it.
+unsafe fn ts_tree_arena_alloc_new_page(
+    arena: &mut TreeArena,
+    size: usize,
+    alignment: usize,
+) -> *mut c_void {
     let capacity = TREE_ARENA_PAGE_SIZE.max(size + alignment);
     let page = ts_malloc(std::mem::size_of::<TreeArenaPage>()).cast::<TreeArenaPage>();
     let contents = ts_malloc(capacity).cast::<u8>();
@@ -904,6 +973,23 @@ unsafe fn ts_tree_arena_alloc(arena: *mut TreeArena, size: usize, alignment: usi
     arena.pages = page;
     arena.current_page = page;
     contents.cast::<c_void>()
+}
+
+/// Allocate bytes from the tree arena.
+///
+/// Internal nodes are stored as `[Subtree children...][SubtreeHeapData]`. The
+/// arena uses page-sized bump allocation because accepted trees free all arena
+/// nodes together when the last copied `TSTree` is deleted.
+unsafe fn ts_tree_arena_alloc(arena: *mut TreeArena, size: usize, alignment: usize) -> *mut c_void {
+    debug_assert!(!arena.is_null());
+    let arena = arena.as_mut().unwrap_unchecked();
+
+    let result = ts_tree_arena_try_current_page(arena, size, alignment);
+    if !result.is_null() {
+        return result;
+    }
+
+    ts_tree_arena_alloc_new_page(arena, size, alignment)
 }
 
 // ===========================================================================
@@ -1378,6 +1464,12 @@ unsafe fn ts_subtree_set_has_changes(self_: &mut MutableSubtree) {
 // --- #34: new_leaf ---
 
 #[allow(clippy::too_many_arguments)]
+/// Create a leaf subtree.
+///
+/// Small leaves are packed directly into the `Subtree` word when the symbol,
+/// padding, size, and lookahead byte counts fit the inline limits. Larger leaves
+/// or leaves carrying external scanner state use `SubtreeHeapData` from the
+/// parser's subtree pool.
 pub unsafe fn ts_subtree_new_leaf(
     pool: &mut SubtreePool,
     symbol: TSSymbol,
@@ -1467,6 +1559,10 @@ pub unsafe fn ts_subtree_new_leaf(
 
 // --- #35: new_error ---
 
+/// Create an error leaf for skipped input.
+///
+/// Error leaves are marked fragile on both sides so later incremental parsing
+/// does not over-trust their boundaries.
 pub unsafe fn ts_subtree_new_error(
     pool: &mut SubtreePool,
     lookahead_char: i32,
@@ -1526,6 +1622,11 @@ pub unsafe fn ts_subtree_clone(self_: Subtree) -> MutableSubtree {
 
 // --- #37: new_node ---
 
+/// Create a heap internal node by moving child storage into the node allocation.
+///
+/// The child array is resized so the `SubtreeHeapData` header can live directly
+/// after the child slice, matching the C memory layout:
+/// `[child_0, child_1, ... child_n][SubtreeHeapData]`.
 pub unsafe fn ts_subtree_new_node(
     symbol: TSSymbol,
     children: *mut SubtreeArray,
@@ -1589,6 +1690,10 @@ pub unsafe fn ts_subtree_new_node(
     result
 }
 
+/// Create an arena-owned internal node.
+///
+/// This has the same memory layout as `ts_subtree_new_node`, but allocation
+/// comes from the returned tree's arena instead of the transient subtree pool.
 pub unsafe fn ts_subtree_new_node_in_arena(
     arena: *mut TreeArena,
     symbol: TSSymbol,

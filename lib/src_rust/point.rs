@@ -56,6 +56,11 @@ pub const fn point_eq(a: TSPoint, b: TSPoint) -> bool {
     a.row == b.row && a.column == b.column
 }
 
+/// Apply an input edit to a byte/point pair.
+///
+/// Positions after the old edit end are translated by the edit delta. Positions
+/// inside the replaced range collapse to the new edit end, which is the same
+/// convention used for subtree and range edits.
 pub fn point_edit(point: &mut TSPoint, byte: &mut u32, edit: &TSInputEdit) {
     let start_byte = *byte;
     let start_point = *point;

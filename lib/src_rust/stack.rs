@@ -52,6 +52,12 @@ pub const PENDING_REDUCTION_DEPENDS_ON_COLUMN: u16 = 1 << 7;
 pub type StackVersion = u32;
 pub const STACK_VERSION_NONE: StackVersion = u32::MAX;
 
+/// Payload carried by an edge in the parse stack graph.
+///
+/// A stack link usually owns a concrete `Subtree`, but reduction work can also
+/// be represented by a `PendingReduction` descriptor. The active variant is
+/// selected by `StackLinkPayload::flags`; this mirrors the compact C union
+/// representation and keeps every stack edge one pointer-sized payload.
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub union StackLinkPayloadValue {
@@ -59,6 +65,11 @@ pub union StackLinkPayloadValue {
     pub pending_reduction: *mut PendingReduction,
 }
 
+/// Tagged edge payload for a `StackLink`.
+///
+/// `STACK_LINK_PAYLOAD_IS_PENDING_LINK` means the payload is part of a pending
+/// path during stack popping. `STACK_LINK_PAYLOAD_IS_PENDING_REDUCTION` changes
+/// the union arm from `subtree` to `pending_reduction`.
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct StackLinkPayload {
@@ -66,6 +77,11 @@ pub struct StackLinkPayload {
     pub flags: u8,
 }
 
+/// Directed edge from a stack node to one predecessor.
+///
+/// The edge payload is the syntax node that was shifted/reduced between the
+/// predecessor and the current node. Multiple links model GLR ambiguity: the
+/// same parse state/position can be reached through different child lists.
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct StackLink {
@@ -73,30 +89,59 @@ pub struct StackLink {
     pub payload: StackLinkPayload,
 }
 
+/// Node in the persistent GLR stack graph.
+///
+/// A parser version points at one `StackNode` head. Pushing creates a new node
+/// linked to the previous head; popping walks backward through links and may
+/// fork when a node has multiple predecessors. Cached aggregate fields describe
+/// the best path through the node and are used for pruning and merging.
 #[repr(C)]
 pub struct StackNode {
+    /// Parse state at this stack depth.
     pub state: TSStateId,
+    /// Source position reached by the best path to this node.
     pub position: Length,
+    /// Inline predecessor links. Ambiguous nodes can carry several links.
     pub links: [StackLink; MAX_LINK_COUNT],
+    /// Number of initialized entries in `links`.
     pub link_count: u16,
+    /// Intrusive reference count from stack heads and successor links.
     pub ref_count: u32,
+    /// Accumulated parse error cost for pruning worse versions.
     pub error_cost: u32,
+    /// Approximate visible node count since the last error.
     pub node_count: u32,
+    /// Accumulated dynamic precedence along the best path.
     pub dynamic_precedence: i32,
 }
 
+/// Deferred representation of a reduce action.
+///
+/// Pending reductions let the stack carry a reduction descriptor as an edge
+/// payload before it is materialized into a concrete `Subtree`. The descriptor
+/// stores enough aggregate metadata for stack comparison, pruning, and further
+/// reductions without forcing immediate node allocation.
 #[repr(C)]
 pub struct PendingReduction {
+    /// Intrusive count from stack payloads referencing this descriptor.
     pub ref_count: u32,
+    /// Parent grammar symbol produced by the reduction.
     pub symbol: TSSymbol,
     pub production_id: u16,
+    /// Parse state recorded on the produced subtree when materialized.
     pub parse_state: TSStateId,
+    /// Number of children consumed by the reduce action.
     pub child_count: u32,
+    /// Concrete children when the reduction has already collected subtrees.
     pub children: SubtreeArray,
+    /// Payload children when the reduction stays lazy across stack edges.
     pub payload_children: StackLinkPayloadArray,
+    /// Leading padding and content size of the would-be subtree.
     pub padding: Length,
     pub size: Length,
+    /// Lexer lookahead distance attached to the produced subtree.
     pub lookahead_bytes: u32,
+    /// Cached subtree metadata used before materialization.
     pub error_cost: u32,
     pub node_count: u32,
     pub visible_child_count: u32,
@@ -106,15 +151,22 @@ pub struct PendingReduction {
     pub repeat_depth: u16,
     pub first_leaf_symbol: TSSymbol,
     pub first_leaf_parse_state: TSStateId,
+    /// Bitset of `PENDING_REDUCTION_*` flags matching subtree properties.
     pub flags: u16,
+    /// Concrete subtree once this descriptor has been forced.
     pub materialized: Subtree,
 }
 
+/// DFS cursor used by stack pop operations.
 #[repr(C)]
 pub struct StackIterator {
+    /// Current graph node being visited.
     pub node: *mut StackNode,
+    /// Child subtrees collected so far along this pop path.
     pub subtrees: SubtreeArray,
+    /// Number of non-null subtree payloads traversed.
     pub subtree_count: u32,
+    /// Whether this iterator is walking pending links.
     pub is_pending: bool,
 }
 
@@ -146,13 +198,21 @@ pub const STACK_SEGMENT_BASE_SEGMENT: StackSegmentBaseKind = 1;
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct StackSegment {
+    /// Base graph node when `base_kind == STACK_SEGMENT_BASE_GRAPH`.
     pub base_node: *mut StackNode,
+    /// Base segment id when `base_kind == STACK_SEGMENT_BASE_SEGMENT`.
     pub base_segment: StackSegmentId,
+    /// Top frame index in the base segment.
     pub base_top: u32,
+    /// First frame in `Stack::frames` owned by this segment.
     pub start: u32,
+    /// Number of frames in this segment.
     pub len: u32,
+    /// Number of stack heads/segments sharing this segment.
     pub ref_count: u32,
+    /// Whether the base is a graph node or another segment.
     pub base_kind: StackSegmentBaseKind,
+    /// Once sealed, frames are immutable and can be shared.
     pub sealed: bool,
 }
 
@@ -161,12 +221,17 @@ pub type StackSegmentArray = Array<StackSegment>;
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct StackFrame {
+    /// Payload shifted between this frame and the previous frame.
     pub payload: StackLinkPayload,
+    /// Source position after applying `payload`.
     pub position: Length,
+    /// Aggregates copied from graph nodes for pruning/comparison.
     pub error_cost: u32,
     pub node_count: u32,
     pub dynamic_precedence: i32,
+    /// Parse state at this frame.
     pub state: TSStateId,
+    /// Segment-local flags.
     pub flags: u8,
 }
 
@@ -217,23 +282,38 @@ pub type StackSummary = Array<StackSummaryEntry>;
 
 #[repr(C)]
 pub struct StackHead {
+    /// Current top node for this parser version.
     pub node: *mut StackNode,
+    /// Optional recovery summary, recorded lazily.
     pub summary: *mut StackSummary,
+    /// Node-count checkpoint used by recovery progress heuristics.
     pub node_count_at_last_error: u32,
+    /// Last token carrying external scanner state for this version.
     pub last_external_token: Subtree,
+    /// Lookahead saved when this version is paused for error recovery.
     pub lookahead_when_paused: Subtree,
+    /// Active versions parse normally; paused versions wait for recovery;
+    /// halted versions are removed by stack condensation.
     pub status: StackStatus,
 }
 
 #[repr(C)]
 pub struct Stack {
+    /// One head per active/paused/halted GLR version.
     pub heads: Array<StackHead>,
+    /// Experimental linearized stack storage for shared frame segments.
     pub segments: StackSegmentArray,
+    /// Backing storage for segment frames.
     pub frames: StackFrameArray,
+    /// Scratch pop results returned to the parser.
     pub slices: StackSliceArray,
+    /// Reusable DFS iterators for pop operations.
     pub iterators: Array<StackIterator>,
+    /// Free list for recently released stack nodes.
     pub node_pool: StackNodeArray,
+    /// Initial root node shared by all versions.
     pub base_node: *mut StackNode,
+    /// Parser-owned subtree pool used when releasing link payloads.
     pub subtree_pool: *mut SubtreePool,
 }
 
@@ -669,9 +749,7 @@ const unsafe fn stack_link_payload_pending_reduction(
 }
 
 #[inline]
-pub const unsafe fn ts_stack_link_payload_is_pending_reduction(
-    payload: StackLinkPayload,
-) -> bool {
+pub const unsafe fn ts_stack_link_payload_is_pending_reduction(payload: StackLinkPayload) -> bool {
     stack_link_payload_is_pending_reduction(payload)
 }
 
@@ -893,7 +971,14 @@ unsafe fn stack_link_payload_is_equivalent(
     ) && stack_link_payload_is_pending(left) == stack_link_payload_is_pending(right)
 }
 
-/// Add a link to a stack node, merging if possible.
+/// Add one predecessor edge to a stack node, merging equivalent paths.
+///
+/// If an equivalent edge already exists, the function either keeps the existing
+/// payload or replaces it when the new path has higher dynamic precedence. If
+/// the predecessor node itself represents the same state/position/error cost,
+/// its links are folded into the existing predecessor to keep the graph shallow.
+/// This is the core local compaction step that prevents GLR branching from
+/// turning every ambiguity into a completely separate stack.
 unsafe fn stack_node_add_link(
     self_: &mut StackNode,
     link: StackLink,
@@ -1221,6 +1306,12 @@ pub unsafe fn ts_stack_pop_builder_release_payload_span(
     }
 }
 
+/// Fast pop path for an unbranched stack chain.
+///
+/// The parser asks for `count` non-extra payloads. While every node has exactly
+/// one predecessor, this can walk a straight linked list, retain payloads, then
+/// reverse the collected child array into left-to-right order. Encountering a
+/// branched node returns `None` so the caller can use the full DFS pop path.
 unsafe fn ts_stack_pop_count_linear(
     self_: &mut Stack,
     version: StackVersion,
@@ -1271,6 +1362,11 @@ unsafe fn ts_stack_pop_count_linear(
     Some(ptr::read(&self_.slices))
 }
 
+/// Builder-writing variant of `ts_stack_pop_count_linear`.
+///
+/// Fresh parses use parser-owned `StackPopBuilder` scratch storage to avoid
+/// allocating a temporary `StackSliceArray` for every reduce. The traversal and
+/// fallback condition are the same as `ts_stack_pop_count_linear`.
 unsafe fn ts_stack_pop_count_linear_into(
     self_: &mut Stack,
     version: StackVersion,

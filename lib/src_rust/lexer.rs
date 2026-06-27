@@ -47,12 +47,19 @@ static DEFAULT_RANGE: TSRange = TSRange {
 // Types
 // ---------------------------------------------------------------------------
 
-/// Column tracking state — tracks the column position, which requires
-/// backtracking to the start of the line to count characters.
+/// Cached column tracking state.
+///
+/// `TSLexer::get_column` is an expensive callback because byte offsets and
+/// columns differ for multi-byte encodings. When the cache is invalid, the
+/// lexer rewinds to the start of the current line and advances back to the
+/// original byte position to count columns. Normal `advance` calls keep this
+/// cache valid as long as they move forward from that known position.
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct ColumnData {
+    /// Last computed column value for `current_position`.
     pub value: u32,
+    /// Whether `value` still corresponds to `current_position`.
     pub valid: bool,
 }
 
@@ -60,24 +67,40 @@ pub struct ColumnData {
 /// plus all internal state needed for buffered reading and range tracking.
 #[repr(C)]
 pub struct Lexer {
+    /// Callback surface passed to generated lexers and external scanners.
     pub data: TSLexer,
+    /// Current read cursor in bytes and row/column coordinates.
     pub current_position: Length,
+    /// Start position of the token currently being scanned.
     pub token_start_position: Length,
+    /// Last marked end position for the token currently being scanned.
     pub token_end_position: Length,
 
+    /// Sorted ranges that should be visible to this parse.
     pub included_ranges: *mut TSRange,
+    /// Borrowed chunk returned by `TSInput::read`; owned by the caller.
     pub chunk: *const i8,
+    /// Source reader and encoding callbacks.
     pub input: TSInput,
+    /// Optional logging callback.
     pub logger: TSLogger,
 
+    /// Number of included ranges. A single default range is the common case.
     pub included_range_count: u32,
+    /// Included range containing, or immediately following, `current_position`.
     pub current_included_range_index: u32,
+    /// Byte offset where `chunk` starts in the full source document.
     pub chunk_start: u32,
+    /// Byte length of the current `chunk`.
     pub chunk_size: u32,
+    /// Width in bytes of `data.lookahead`; zero means no lookahead is loaded.
     pub lookahead_size: u32,
+    /// Whether the current token asked for column data.
     pub did_get_column: bool,
+    /// Cached column value used by `TSLexer::get_column`.
     pub column_data: ColumnData,
 
+    /// Scratch buffer shared with external scanner serialization and logging.
     pub debug_buffer: [u8; TREE_SITTER_SERIALIZATION_BUFFER_SIZE],
 }
 
@@ -130,11 +153,7 @@ fn ts_lexer__clear_chunk(self_: &mut Lexer) {
 
 unsafe fn ts_lexer__included_range(self_: &Lexer, index: usize) -> &TSRange {
     debug_assert!(index < self_.included_range_count as usize);
-    self_
-        .included_ranges
-        .add(index)
-        .as_ref()
-        .unwrap_unchecked()
+    self_.included_ranges.add(index).as_ref().unwrap_unchecked()
 }
 
 /// Call the input callback to obtain a new chunk of source code.
@@ -281,8 +300,11 @@ unsafe fn ts_lexer_goto(self_: &mut Lexer, position: Length) {
     }
 }
 
-/// Actually advances the lexer. Does not log anything.
-unsafe fn ts_lexer__do_advance(self_: &mut Lexer, skip: bool) {
+/// Advance byte/point coordinates by the currently loaded lookahead character.
+///
+/// This step only moves the logical position. It does not load a new input
+/// chunk or decode the next character.
+unsafe fn ts_lexer__advance_position(self_: &mut Lexer) {
     if self_.lookahead_size != 0 {
         if self_.data.lookahead == '\n' as i32 {
             self_.current_position.extent.row += 1;
@@ -298,8 +320,14 @@ unsafe fn ts_lexer__do_advance(self_: &mut Lexer, skip: bool) {
         }
         self_.current_position.bytes += self_.lookahead_size;
     }
+}
 
-    let mut has_current_range = true;
+/// Move from exhausted included ranges to the next visible range.
+///
+/// Returns `false` when the lexer has advanced beyond all included ranges and
+/// should report EOF. Ranges can be disjoint, so moving across a boundary may
+/// jump `current_position` forward without consuming bytes from the input.
+unsafe fn ts_lexer__seek_visible_range(self_: &mut Lexer) -> bool {
     loop {
         let range_index = self_.current_included_range_index as usize;
         let current_range = ts_lexer__included_range(self_, range_index);
@@ -319,15 +347,15 @@ unsafe fn ts_lexer__do_advance(self_: &mut Lexer, skip: bool) {
                 extent: next_range.start_point,
             };
         } else {
-            has_current_range = false;
-            break;
+            return false;
         }
     }
 
-    if skip {
-        self_.token_start_position = self_.current_position;
-    }
+    true
+}
 
+/// Load the next source chunk if needed, then decode the next lookahead.
+unsafe fn ts_lexer__load_next_lookahead(self_: &mut Lexer, has_current_range: bool) {
     if has_current_range {
         if self_.current_position.bytes < self_.chunk_start
             || self_.current_position.bytes >= self_.chunk_start + self_.chunk_size
@@ -340,6 +368,18 @@ unsafe fn ts_lexer__do_advance(self_: &mut Lexer, skip: bool) {
         self_.data.lookahead = 0;
         self_.lookahead_size = 1;
     }
+}
+
+/// Actually advances the lexer. Does not log anything.
+unsafe fn ts_lexer__do_advance(self_: &mut Lexer, skip: bool) {
+    ts_lexer__advance_position(self_);
+    let has_current_range = ts_lexer__seek_visible_range(self_);
+
+    if skip {
+        self_.token_start_position = self_.current_position;
+    }
+
+    ts_lexer__load_next_lookahead(self_, has_current_range);
 }
 
 /// Advance to the next character (with logging). `TSLexer` vtable callback.

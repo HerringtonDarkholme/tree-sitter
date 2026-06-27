@@ -39,22 +39,39 @@ use crate::ffi::TSInputEdit;
 // Types from tree.h
 // ---------------------------------------------------------------------------
 
-/// `ParentCacheEntry` — used for parent lookups (defined in tree.h)
+/// Cached parent lookup entry used by node APIs.
+///
+/// Trees do not store parent pointers in every subtree. Parent lookups walk the
+/// tree and can populate this small cache with the child pointer, its parent,
+/// the child's start position, and the alias visible at that child.
 #[repr(C)]
 pub struct ParentCacheEntry {
+    /// Child subtree pointer that was searched.
     pub child: *const Subtree,
+    /// Parent subtree containing `child`.
     pub parent: *const Subtree,
+    /// Start position of `child`.
     pub position: Length,
+    /// Alias symbol applied to `child`, or zero when none.
     pub alias_symbol: TSSymbol,
 }
 
-/// `TSTree` — the main tree struct (defined in tree.h)
+/// Owned parse tree returned by the parser.
+///
+/// The tree retains the root subtree, a copied language reference, the included
+/// ranges used for parsing, and optionally the arena that owns internal nodes
+/// created during the Rust parser's normal parse path.
 #[repr(C)]
 pub struct TSTree {
+    /// Root syntax subtree, retained by the tree.
     pub root: Subtree,
+    /// Language used to parse this tree.
     pub language: *const TSLanguage,
+    /// Copied included ranges for incremental diffing and public APIs.
     pub included_ranges: *mut TSRange,
+    /// Number of entries in `included_ranges`.
     pub included_range_count: u32,
+    /// Shared arena for arena-owned internal nodes.
     pub arena: *mut TreeArena,
 }
 
@@ -80,6 +97,10 @@ unsafe fn ts_tree_init_ref(
     }
 }
 
+/// Copy a tree by retaining shared immutable storage.
+///
+/// Subtrees and arenas are reference counted, so copying a tree is cheap and
+/// does not clone the entire syntax graph.
 unsafe fn ts_tree_copy_ref(tree: &TSTree) -> *mut TSTree {
     ts_subtree_retain(tree.root);
     ts_tree_arena_retain(tree.arena);
@@ -92,6 +113,7 @@ unsafe fn ts_tree_copy_ref(tree: &TSTree) -> *mut TSTree {
     )
 }
 
+/// Release all owned references and buffers for a tree.
 unsafe fn ts_tree_delete_ref(tree: &mut TSTree) {
     let mut pool = ts_subtree_pool_new(0);
     ts_subtree_release(&mut pool, tree.root);
@@ -152,6 +174,11 @@ const fn tree_cursor_empty() -> TreeCursor {
     }
 }
 
+/// Apply an edit to the tree's ranges and root subtree.
+///
+/// The edit rewrites byte/point positions in-place where possible and marks
+/// affected subtrees as changed so an incremental parse can decide what to
+/// reuse.
 unsafe fn ts_tree_edit_ref(tree: &mut TSTree, edit: &TSInputEdit) {
     let included_ranges = if tree.included_range_count == 0 {
         &mut []

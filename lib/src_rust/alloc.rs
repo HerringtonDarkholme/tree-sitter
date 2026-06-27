@@ -3,7 +3,7 @@
 
 use core::ffi::c_void;
 
-// Default allocator functions that abort on failure
+// Default allocator functions that abort on failure.
 unsafe fn ts_malloc_default(size: usize) -> *mut c_void {
     let result = unsafe { libc_malloc(size) };
     if size > 0 && result.is_null() {
@@ -45,8 +45,11 @@ extern "C" {
     fn libc_free(ptr: *mut c_void);
 }
 
-// Global function pointers for allocation — these are the symbols that C code calls
-// through the ts_malloc/ts_calloc/ts_realloc/ts_free macros.
+// Global allocation hooks.
+//
+// These symbols match the C core's allocator variables. Remaining C code and
+// Rust runtime code both go through this indirection, so `ts_set_allocator`
+// changes allocation behavior consistently across the mixed runtime.
 #[no_mangle]
 pub static mut ts_current_malloc: unsafe extern "C" fn(usize) -> *mut c_void = ts_malloc_default_c;
 #[no_mangle]
@@ -58,7 +61,7 @@ pub static mut ts_current_realloc: unsafe extern "C" fn(*mut c_void, usize) -> *
 #[no_mangle]
 pub static mut ts_current_free: unsafe extern "C" fn(*mut c_void) = libc_free_c;
 
-// C-ABI wrapper functions for the defaults
+// C-ABI wrapper functions for the defaults.
 unsafe extern "C" fn ts_malloc_default_c(size: usize) -> *mut c_void {
     unsafe { ts_malloc_default(size) }
 }
@@ -76,6 +79,11 @@ unsafe extern "C" fn libc_free_c(ptr: *mut c_void) {
 }
 
 #[no_mangle]
+/// Replace the runtime allocator hooks.
+///
+/// Passing `None` for a hook restores that operation to the default libc-backed
+/// allocator. This mirrors the public C API and intentionally updates global
+/// mutable function pointers.
 pub unsafe extern "C" fn ts_set_allocator(
     new_malloc: Option<unsafe extern "C" fn(usize) -> *mut c_void>,
     new_calloc: Option<unsafe extern "C" fn(usize, usize) -> *mut c_void>,
@@ -90,7 +98,7 @@ pub unsafe extern "C" fn ts_set_allocator(
     }
 }
 
-// Convenience wrappers for internal Rust code
+// Convenience wrappers for internal Rust code.
 #[inline]
 pub unsafe fn ts_malloc(size: usize) -> *mut c_void {
     unsafe { (ts_current_malloc)(size) }

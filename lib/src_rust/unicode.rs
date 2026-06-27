@@ -120,9 +120,11 @@ pub fn utf16be_next(string: &[u8], offset: usize) -> (u32, i32) {
     (2, -1)
 }
 
-// C-compatible decode functions matching TSDecodeFunction signature:
-// uint32_t (*)(const uint8_t *string, uint32_t length, int32_t *code_point)
-
+/// C-compatible UTF-8 decoder matching `TSDecodeFunction`.
+///
+/// Generated parsers call through this signature when the input encoding is
+/// UTF-8. The function decodes from the start of the provided chunk and writes
+/// either a codepoint or `TS_DECODE_ERROR`.
 pub unsafe extern "C" fn ts_decode_utf8(
     string: *const u8,
     length: u32,
@@ -142,6 +144,7 @@ pub unsafe extern "C" fn ts_decode_utf8(
     consumed
 }
 
+/// C-compatible UTF-16 little-endian decoder matching `TSDecodeFunction`.
 pub unsafe extern "C" fn ts_decode_utf16_le(
     string: *const u8,
     length: u32,
@@ -161,6 +164,7 @@ pub unsafe extern "C" fn ts_decode_utf16_le(
     consumed
 }
 
+/// C-compatible UTF-16 big-endian decoder matching `TSDecodeFunction`.
 pub unsafe extern "C" fn ts_decode_utf16_be(
     string: *const u8,
     length: u32,

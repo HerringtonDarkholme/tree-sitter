@@ -26,13 +26,23 @@ use super::tree::{ts_tree_root_node_ref, TSTree};
 // Types
 // ---------------------------------------------------------------------------
 
-/// `NodeChildIterator` — internal iterator for walking children
+/// Internal child iterator for public `TSNode` navigation.
+///
+/// This iterator walks raw subtree children while tracking source position,
+/// structural child index, and aliases. Public node APIs then decide whether to
+/// expose each child or descend through hidden nodes.
 struct NodeChildIterator {
+    /// Parent subtree whose children are being scanned.
     parent: Subtree,
+    /// Owning tree for language metadata and node construction.
     tree: *const TSTree,
+    /// Start position of the next child.
     position: Length,
+    /// Raw child index, including hidden and extra children.
     child_index: u32,
+    /// Index among non-extra children, used for fields and aliases.
     structural_child_index: u32,
+    /// Alias symbols for the parent production.
     alias_sequence: *const TSSymbol,
 }
 
@@ -181,6 +191,11 @@ const unsafe fn node_children<'a>(parent: Subtree) -> &'a [Subtree] {
     )
 }
 
+/// Advance the child iterator and construct a `TSNode` for the raw child.
+///
+/// The iterator applies padding before each non-first child, resolves aliases
+/// from the production's alias sequence, and leaves `position` at the child's
+/// end after returning.
 unsafe fn ts_node_child_iterator_next(self_: &mut NodeChildIterator, result: &mut TSNode) -> bool {
     if self_.parent.ptr.is_null() || self_.child_index == (*self_.parent.ptr).child_count {
         return false;
@@ -281,6 +296,11 @@ unsafe fn ts_node__child(self_: TSNode, mut child_index: u32, include_anonymous:
     ts_node__null()
 }
 
+/// Check whether an empty descendant at the end of a subtree aliases `other`.
+///
+/// Empty nodes make sibling navigation ambiguous because multiple nodes can end
+/// at the same byte. This recursive check lets previous-sibling logic decide
+/// whether an equal end byte means "inside this child" or "before this child".
 unsafe fn ts_subtree_has_trailing_empty_descendant(self_: Subtree, other: Subtree) -> bool {
     let count = ts_subtree_child_count(self_);
     if count == 0 {
@@ -303,6 +323,11 @@ unsafe fn ts_subtree_has_trailing_empty_descendant(self_: Subtree, other: Subtre
     false
 }
 
+/// Find the previous visible/named sibling.
+///
+/// The search walks upward through parents and keeps the nearest earlier
+/// relevant candidate. Hidden nodes with relevant descendants are entered so
+/// sibling APIs skip implementation-only nodes while preserving source order.
 unsafe fn ts_node__prev_sibling(self_: TSNode, include_anonymous: bool) -> TSNode {
     let self_subtree = ts_node__subtree(self_);
     let self_is_empty = ts_subtree_total_bytes(self_subtree) == 0;
@@ -370,6 +395,10 @@ unsafe fn ts_node__prev_sibling(self_: TSNode, include_anonymous: bool) -> TSNod
     ts_node__null()
 }
 
+/// Find the next visible/named sibling.
+///
+/// This mirrors `ts_node__prev_sibling`, but tracks the nearest later candidate
+/// while walking through hidden nodes that contain the original target.
 unsafe fn ts_node__next_sibling(self_: TSNode, include_anonymous: bool) -> TSNode {
     let target_end_byte = node_end_byte(self_);
 
@@ -433,6 +462,11 @@ unsafe fn ts_node__next_sibling(self_: TSNode, include_anonymous: bool) -> TSNod
     ts_node__null()
 }
 
+/// Find the first visible/named child whose end byte is after `goal`.
+///
+/// Hidden children are searched recursively. A saved iterator lets the search
+/// resume at the original depth after exploring a hidden child that did not
+/// produce a match.
 unsafe fn ts_node__first_child_for_byte(
     self_: TSNode,
     goal: u32,
@@ -480,6 +514,11 @@ unsafe fn ts_node__first_child_for_byte(
     ts_node__null()
 }
 
+/// Find the smallest visible/named descendant covering a byte range.
+///
+/// The search descends while a child fully contains the target range and keeps
+/// the last relevant node seen, so hidden implementation nodes are skipped in
+/// the returned result.
 unsafe fn ts_node__descendant_for_byte_range(
     self_: TSNode,
     range_start: u32,
@@ -532,6 +571,7 @@ unsafe fn ts_node__descendant_for_byte_range(
     last_visible_node
 }
 
+/// Point-coordinate variant of `ts_node__descendant_for_byte_range`.
 unsafe fn ts_node__descendant_for_point_range(
     self_: TSNode,
     range_start: TSPoint,
