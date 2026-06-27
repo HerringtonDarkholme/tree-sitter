@@ -36,7 +36,10 @@ fn main() {
     let core_src_path = core_impl.source_path(&src_path);
     let wasm_path = core_src_path.join("wasm");
 
-    if target.starts_with("wasm32-unknown") {
+    // Only bare wasm32-unknown-unknown lacks a libc and needs the bundled
+    // stdlib shims. wasm32-unknown-emscripten ships a full libc, so adding them
+    // there causes duplicate-symbol link errors (fprintf, fwrite, ...).
+    if target == "wasm32-unknown-unknown" {
         configure_wasm_build(&mut config);
     }
 
@@ -46,27 +49,34 @@ fn main() {
         println!("cargo:rerun-if-changed={}", path.to_str().unwrap());
     }
 
-    config
-        .flag_if_supported("-std=c11")
-        .flag_if_supported("-fvisibility=hidden")
-        .flag_if_supported("-Wshadow")
-        .flag_if_supported("-Wno-unused-parameter")
-        .flag_if_supported("-Wno-incompatible-pointer-types")
-        .include(&core_src_path)
-        .include(&wasm_path)
-        .include(&include_path)
-        .define("_POSIX_C_SOURCE", "200112L")
-        .define("_DEFAULT_SOURCE", None)
-        .define("_BSD_SOURCE", None)
-        .define("_DARWIN_C_SOURCE", None)
-        .warnings(false)
-        .file(core_src_path.join(core_impl.library_source()));
+    // The emscripten core deliberately compiles no C here: emscripten provides a
+    // libc, and the web binding's emcc step links the lexer log shim itself (see
+    // crates/xtask/src/build_wasm.rs). This keeps the emscripten staticlib build
+    // free of any C toolchain, so it can be produced by plain `cargo` even when
+    // emcc is only reachable via Docker.
+    if target != "wasm32-unknown-emscripten" {
+        config
+            .flag_if_supported("-std=c11")
+            .flag_if_supported("-fvisibility=hidden")
+            .flag_if_supported("-Wshadow")
+            .flag_if_supported("-Wno-unused-parameter")
+            .flag_if_supported("-Wno-incompatible-pointer-types")
+            .include(&core_src_path)
+            .include(&wasm_path)
+            .include(&include_path)
+            .define("_POSIX_C_SOURCE", "200112L")
+            .define("_DEFAULT_SOURCE", None)
+            .define("_BSD_SOURCE", None)
+            .define("_DARWIN_C_SOURCE", None)
+            .warnings(false)
+            .file(core_src_path.join(core_impl.library_source()));
 
-    if core_impl == CoreImpl::Rust {
-        config.file(src_path.join("lexer_log_shim.c"));
+        if core_impl == CoreImpl::Rust {
+            config.file(src_path.join("lexer_log_shim.c"));
+        }
+
+        config.compile("tree-sitter");
     }
-
-    config.compile("tree-sitter");
 
     println!("cargo:include={}", include_path.display());
 }

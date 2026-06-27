@@ -89,6 +89,13 @@ const ARCH_OS: Result<&str, LoaderError> = Err(LoaderError::WasiSDKPlatform);
 const ARCH_OS: Result<&str, LoaderError> = Err(LoaderError::WasiSDKPlatform);
 
 pub fn run_wasm(args: &BuildWasm) -> Result<()> {
+    // The parser engine now lives in Rust. Build it as an emscripten staticlib
+    // so emcc can link it with the binding glue, in place of lib/src/lib.c.
+    let core_staticlib = build_core_staticlib(args)?;
+    let core_staticlib = core_staticlib
+        .to_str()
+        .ok_or_else(|| anyhow!("core staticlib path is not valid UTF-8"))?;
+
     let mut emscripten_flags = if args.debug {
         vec!["-O0", "--minify", "0"]
     } else {
@@ -214,7 +221,6 @@ pub fn run_wasm(args: &BuildWasm) -> Result<()> {
     #[rustfmt::skip]
     emscripten_flags.extend([
         "-gsource-map=inline",
-        "-fno-exceptions",
         "-std=c11",
         "-s", "WASM=1",
         "-s", "MODULARIZE=1",
@@ -240,7 +246,13 @@ pub fn run_wasm(args: &BuildWasm) -> Result<()> {
         "--js-library", "lib/binding_web/lib/imports.js",
         "--pre-js",     "lib/binding_web/lib/prefix.js",
         "-o",           if args.cjs { binding_file!(".cjs") } else { binding_file!(".mjs") },
-        "lib/src/lib.c",
+        core_staticlib,
+        // These C files are linked here rather than compiled into the staticlib, so
+        // the staticlib build needs no C toolchain (see build.rs). They supply the
+        // symbols the Rust core references via FFI: the variadic lexer log shim, and
+        // wasm_store.c's no-wasmtime stubs (ts_language_is_wasm, ts_wasm_store_*).
+        "lib/src/lexer_log_shim.c",
+        "lib/src/wasm_store.c",
         "lib/binding_web/lib/tree-sitter.c",
     ]);
     if args.emit_tsd {
@@ -256,6 +268,77 @@ pub fn run_wasm(args: &BuildWasm) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Build the Rust core as a `wasm32-unknown-emscripten` staticlib.
+///
+/// This replaces the former `lib/src/lib.c` amalgamation: the parser engine
+/// lives in Rust now, so emcc links this archive (which also contains the
+/// `ts_lexer__log_shim` C shim, compiled by emcc via the crate's build script)
+/// together with the binding glue. Requires `emcc` on `PATH` and the
+/// `wasm32-unknown-emscripten` target installed.
+fn build_core_staticlib(args: &BuildWasm) -> Result<PathBuf> {
+    let profile = if args.debug { "debug" } else { "release" };
+    let mut cmd = Command::new("cargo");
+    cmd.args([
+        "rustc",
+        "--package",
+        "tree-sitter",
+        "--target",
+        "wasm32-unknown-emscripten",
+        "--crate-type",
+        "staticlib",
+    ]);
+    if !args.debug {
+        cmd.arg("--release");
+    }
+    bail_on_err(
+        &cmd.output()?,
+        "Failed to build the Tree-sitter core as a wasm32-unknown-emscripten staticlib",
+    )?;
+    let staticlib = PathBuf::from(format!(
+        "target/wasm32-unknown-emscripten/{profile}/libtree_sitter.a"
+    ));
+    // Strip debug info from the archive: the precompiled Rust std bundled into it
+    // carries DWARF referencing /rustc/... paths, which makes emcc emit a source
+    // map that crashes wasm-opt. Use rust-objcopy (from the llvm-tools component,
+    // always present with the Rust toolchain) so the staticlib build needs no
+    // emscripten — the Docker/Podman emcc path keeps working; only the final link
+    // needs emcc. (`rustc -Cstrip` does not strip bundled archive members.)
+    bail_on_err(
+        &Command::new(rust_objcopy()?)
+            .arg("--strip-debug")
+            .arg(&staticlib)
+            .output()?,
+        "Failed to strip debug info from the core staticlib",
+    )?;
+    Ok(staticlib)
+}
+
+/// Locate `rust-objcopy` from the active toolchain's `llvm-tools` component.
+fn rust_objcopy() -> Result<PathBuf> {
+    let sysroot = Command::new("rustc")
+        .args(["--print", "sysroot"])
+        .output()?;
+    let sysroot = String::from_utf8(sysroot.stdout)?.trim().to_string();
+    let version = Command::new("rustc").arg("-vV").output()?;
+    let version = String::from_utf8(version.stdout)?;
+    let host = version
+        .lines()
+        .find_map(|line| line.strip_prefix("host: "))
+        .ok_or_else(|| anyhow!("could not determine the host target triple from `rustc -vV`"))?;
+    let path = PathBuf::from(sysroot)
+        .join("lib/rustlib")
+        .join(host)
+        .join("bin")
+        .join("rust-objcopy");
+    if !path.exists() {
+        return Err(anyhow!(
+            "rust-objcopy not found at {}; install it with `rustup component add llvm-tools`",
+            path.display()
+        ));
+    }
+    Ok(path)
 }
 
 fn build_wasm(cmd: &mut Command, edit_tsd: bool) -> Result<()> {

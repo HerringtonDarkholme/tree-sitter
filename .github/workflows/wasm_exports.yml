@@ -23,6 +23,10 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
+          # The web bindings build the Rust core as a wasm32-unknown-emscripten
+          # staticlib; llvm-tools provides rust-objcopy to strip its debug info.
+          target: wasm32-unknown-emscripten
+          components: llvm-tools
 
       - name: Install wasm-objdump
         run: sudo apt-get update -y && sudo apt-get install -y wabt
