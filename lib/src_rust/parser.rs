@@ -54,6 +54,7 @@ use super::stack::{
     stack_pop_builder_new,
     stack_pop_count,
     stack_pop_count_into,
+    stack_pop_count_linear_in_place,
     stack_pop_error,
     stack_pop_pending,
     stack_position,
@@ -407,6 +408,7 @@ pub struct TSParser {
     scratch_trees: SubtreeArray,
     /// Cached lexer result for repeated same-position lookups.
     token_cache: TokenCache,
+    deterministic_reduction_count: u32,
     /// Arena that owns internal nodes in the returned tree.
     tree_arena: *mut TreeArena,
     /// Cursor over the old tree for incremental node reuse.
@@ -1669,6 +1671,69 @@ unsafe fn parser_shift(
     }
 }
 
+const IN_PLACE_REDUCTION_WARMUP: u32 = 5_000;
+
+unsafe fn parser_reduce_in_place_after_warmup(
+    self_: &mut TSParser,
+    version: StackVersion,
+    symbol: TSSymbol,
+    count: u32,
+    dynamic_precedence: i32,
+    production_id: u16,
+    end_of_non_terminal_extra: bool,
+) -> bool {
+    if !self_.old_tree.ptr.is_null()
+        || stack_version_count(ptr_ref(self_.stack)) != 1
+        || self_.deterministic_reduction_count < IN_PLACE_REDUCTION_WARMUP
+        || count == 0
+    {
+        return false;
+    }
+
+    let stack = ptr_mut(self_.stack);
+    if !stack_pop_count_linear_in_place(stack, version, count, &mut self_.reduce_builder) {
+        return false;
+    }
+
+    let mut children = SubtreeArray {
+        contents: self_.reduce_builder.subtrees.contents,
+        size: self_.reduce_builder.subtrees.size,
+        capacity: self_.reduce_builder.subtrees.capacity,
+    };
+    subtree_array_remove_trailing_extras(&mut children, &mut self_.trailing_extras);
+
+    let parent =
+        parser_new_node_from_builder_span(self_, symbol, &children, u32::from(production_id));
+    let state = stack_state(stack, version);
+    let next_state = if symbol != TS_BUILTIN_SYM_ERROR
+        && symbol != TS_BUILTIN_SYM_ERROR_REPEAT
+        && u32::from(symbol) >= language_full(self_.language).token_count
+    {
+        language_lookup(self_.language, state, symbol)
+    } else {
+        ts_language_next_state(self_.language, state, symbol)
+    };
+    if end_of_non_terminal_extra && next_state == state {
+        (*parent.ptr).set_extra(true);
+    }
+    (*parent.ptr).parse_state = state;
+    (*parent.ptr).data.children.dynamic_precedence += dynamic_precedence;
+
+    stack_push(stack, version, subtree_from_mut(parent), false, next_state);
+    for j in 0..self_.trailing_extras.size {
+        stack_push(
+            stack,
+            version,
+            *array_get_ref(&self_.trailing_extras, j),
+            false,
+            next_state,
+        );
+    }
+
+    self_.reduce_builder.subtrees.size = 0;
+    true
+}
+
 #[allow(clippy::too_many_arguments)]
 /// Apply one reduce action to a stack version.
 ///
@@ -2632,22 +2697,42 @@ unsafe fn parser_apply_parse_actions(
                 let reduce = action.reduce;
                 let is_fragile = table_entry.action_count > 1;
                 let end_of_non_terminal_extra = lookahead.ptr.is_null();
+                if table_entry.action_count == 1
+                    && self_.old_tree.ptr.is_null()
+                    && stack_version_count(ptr_ref(self_.stack)) == 1
+                {
+                    self_.deterministic_reduction_count =
+                        self_.deterministic_reduction_count.saturating_add(1);
+                }
                 LOG!(
                     parser,
                     c"reduce sym:%s, child_count:%u".as_ptr().cast::<i8>(),
                     SYM_NAME!(parser, reduce.symbol),
                     u32::from(reduce.child_count)
                 );
-                let reduction_version = parser_reduce(
-                    self_,
-                    version,
-                    reduce.symbol,
-                    u32::from(reduce.child_count),
-                    i32::from(reduce.dynamic_precedence),
-                    reduce.production_id,
-                    is_fragile,
-                    end_of_non_terminal_extra,
-                );
+                let reduction_version = if table_entry.action_count == 1
+                    && parser_reduce_in_place_after_warmup(
+                        self_,
+                        version,
+                        reduce.symbol,
+                        u32::from(reduce.child_count),
+                        i32::from(reduce.dynamic_precedence),
+                        reduce.production_id,
+                        end_of_non_terminal_extra,
+                    ) {
+                    version
+                } else {
+                    parser_reduce(
+                        self_,
+                        version,
+                        reduce.symbol,
+                        u32::from(reduce.child_count),
+                        i32::from(reduce.dynamic_precedence),
+                        reduce.production_id,
+                        is_fragile,
+                        end_of_non_terminal_extra,
+                    )
+                };
                 did_reduce = true;
                 if reduction_version != STACK_VERSION_NONE {
                     last_reduction_version = reduction_version;
@@ -3119,6 +3204,7 @@ pub unsafe extern "C" fn ts_parser_new() -> *mut TSParser {
                 last_external_token: NULL_SUBTREE,
                 byte_index: 0,
             },
+            deterministic_reduction_count: 0,
             tree_arena: ptr::null_mut(),
             reusable_node: ReusableNode::new(),
             external_scanner_payload: ptr::null_mut(),
@@ -3286,6 +3372,7 @@ pub unsafe extern "C" fn ts_parser_reset(self_: *mut TSParser) {
     }
 
     parser.reusable_node.clear();
+    parser.deterministic_reduction_count = 0;
     lexer_reset(&mut parser.lexer, length_zero());
     stack_clear(ptr_mut(parser.stack));
     parser_set_cached_token(parser, 0, NULL_SUBTREE, NULL_SUBTREE);

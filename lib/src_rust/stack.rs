@@ -889,6 +889,67 @@ unsafe fn stack_pop_count_linear_into(
     true
 }
 
+pub unsafe fn stack_pop_count_linear_in_place(
+    self_: &mut Stack,
+    version: StackVersion,
+    count: u32,
+    builder: &mut StackPopBuilder,
+) -> bool {
+    stack_pop_builder_clear(builder);
+
+    let mut node = stack_head(self_, version).node;
+    let mut subtree_count = 0;
+    let start = builder.subtrees.size;
+    let reserve_count = subtree_alloc_size(count) / core::mem::size_of::<Subtree>();
+    array_reserve(
+        &mut builder.subtrees,
+        start + u32::try_from(reserve_count).unwrap(),
+    );
+
+    while subtree_count < count {
+        let current_node = ptr_ref(node);
+        if current_node.link_count != 1 {
+            let subtrees = &mut builder.subtrees;
+            for i in start..subtrees.size {
+                subtree_release(ptr_mut(self_.subtree_pool), *array_get_ref(subtrees, i));
+            }
+            subtrees.size = start;
+            return false;
+        }
+
+        let link = current_node.links[0];
+        node = link.node;
+        let subtree = stack_link_payload_subtree(link.payload);
+        if stack_link_payload_is_null(link.payload) {
+            subtree_count += 1;
+        } else {
+            array_push(&mut builder.subtrees, subtree);
+            stack_link_payload_retain(link.payload);
+
+            if !stack_link_payload_extra(link.payload) {
+                subtree_count += 1;
+            }
+        }
+    }
+
+    let size = builder.subtrees.size - start;
+    stack_pop_builder_reverse_subtrees(builder, start, size);
+
+    stack_node_retain(ptr_mut(node));
+    let old_head_node = {
+        let head = stack_head_mut(self_, version);
+        let old_head_node = head.node;
+        head.node = node;
+        old_head_node
+    };
+    stack_node_release(
+        ptr_mut(old_head_node),
+        &mut self_.node_pool,
+        ptr_mut(self_.subtree_pool),
+    );
+    true
+}
+
 /// Core iteration function for walking the stack graph.
 unsafe fn stack_iter(
     stack: &mut Stack,

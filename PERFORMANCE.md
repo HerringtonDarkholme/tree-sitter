@@ -163,6 +163,1801 @@ broader baseline replaces it.
 
 ## Checkpoints
 
+### 2026-06-28 EDT - rejected linear-tail and progress-callback trials
+
+- Repo head: `f087bc4f`
+- Trial status: not kept. Source experiments were reverted after measurement.
+
+Linear-tail stack experiment:
+
+- Hypothesis: keep straight-line stack pushes in per-version tail storage and
+  materialize persistent graph nodes only when branching, recovery, debugging,
+  or fallback stack iteration forces it. This directly tested the current
+  architecture direction of avoiding persistent graph-node allocation for
+  straight segments while preserving GLR branching.
+- Command:
+
+```sh
+TREE_SITTER_CORE_IMPL=rust TREE_SITTER_BENCHMARK_KIND_FILTER=normal TREE_SITTER_BENCHMARK_REPETITION_COUNT=20 cargo bench benchmark -p tree-sitter-cli --offline
+```
+
+- The all-language direct benchmark later failed on an unrelated PHP grammar
+  dynamic-library lock permission error, but it had already measured several
+  normal workloads.
+
+| Workload | Linear-tail Rust speed | Prior instrumented Rust speed | Movement |
+| --- | ---: | ---: | ---: |
+| JavaScript normal | 11032 bytes/ms | 19222 bytes/ms | -42.61% |
+| Go normal | 11929 bytes/ms | 17769 bytes/ms | -32.87% |
+| C++ normal | 7174 bytes/ms | 9338 bytes/ms | -23.17% |
+| Java normal | 8589 bytes/ms | 12917 bytes/ms | -33.51% |
+
+Interpretation:
+
+- This version of a linear-tail stack is decisively worse. It avoids some
+  immediate graph-node allocation, but per-head tail arrays, tail-prefix
+  cloning, and forced materialization on merge/fallback add more overhead than
+  they remove.
+- Do not retry this shape as a per-version dynamic tail array. A future
+  straight-segment design would need fixed inline storage or a representation
+  that avoids both persistent node allocation and per-version tail cloning.
+
+Progress-callback hot-loop branch experiment:
+
+- Hypothesis: `parser_check_progress` should return before incrementing and
+  wrapping `operation_count` when no progress callback is installed. Normal
+  benchmarks have no callback, so the existing arithmetic is pure hot-loop work.
+- Patch shape:
+
+```rust
+if self_.parse_options.progress_callback.is_none() {
+    return true;
+}
+```
+
+- Trial command with the patch:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-perf-gate-fresh cargo xtask perf-gate --language typescript --language javascript --language python --language go --language rust --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+- Baseline rerun command after reverting the patch:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-perf-gate-baseline cargo xtask perf-gate --language typescript --language javascript --language python --language go --language rust --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Patched Rust | Patched C | Patched delta | Baseline Rust | Baseline C | Baseline delta |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| TypeScript normal | 28641.7 | 22254.3 | +28.70% | 27842.6 | 24249.4 | +14.82% |
+| JavaScript normal | 19169.6 | 15939.7 | +20.26% | 19323.9 | 15770.1 | +22.54% |
+| Python normal | 12248.5 | 11200.2 | +9.36% | 12725.4 | 10555.1 | +20.56% |
+| Go normal | 16841.6 | 13171.7 | +27.86% | 16721.7 | 13456.1 | +24.27% |
+| Rust normal | 19756.6 | 15945.7 | +23.90% | 20209.7 | 16659.7 | +21.31% |
+| C++ normal | 7610.9 | 9955.5 | -23.55% | 7959.9 | 10574.3 | -24.72% |
+| Java normal | 10157.6 | 11134.9 | -8.78% | 10250.6 | 11290.0 | -9.21% |
+| Overall normal | 18936.9 | 15781.8 | +19.99% | 19043.6 | 15952.8 | +19.37% |
+
+Interpretation:
+
+- The patched run's overall Rust-vs-C delta is slightly higher, but absolute
+  Rust throughput is lower overall and lower in JavaScript, Python, Rust, C++,
+  and Java. The apparent delta gain mostly comes from C-side movement between
+  runs.
+- This is not a reliable kept optimization. The patch was reverted.
+- The main remaining target-language misses are still C++ and Java normal
+  parsing, while the full seven-language normal aggregate is already near the
+  20% target because TypeScript, JavaScript, Go, and Rust are strong.
+
+C++ normal sample profile:
+
+- Command:
+
+```sh
+TREE_SITTER_CORE_IMPL=rust TREE_SITTER_BENCHMARK_LANGUAGE_FILTER=cpp TREE_SITTER_BENCHMARK_KIND_FILTER=normal TREE_SITTER_BENCHMARK_REPETITION_COUNT=10000 target/release/deps/benchmark-cbf7a217e4c2dbe8 >/private/tmp/tree-sitter-cpp-profile2-bench.out 2>/private/tmp/tree-sitter-cpp-profile2-bench.err & pid=$!; sleep 0.1; sample $pid 5 -file /private/tmp/tree-sitter-cpp-profile2.sample >/private/tmp/tree-sitter-cpp-sample2.out 2>/private/tmp/tree-sitter-cpp-sample2.err; wait $pid
+```
+
+- Benchmark result during sampling:
+
+| Workload | Speed |
+| --- | ---: |
+| C++ `marker-index.h` | 13301 bytes/ms |
+| C++ `rule.cc` | 12387 bytes/ms |
+| C++ normal average | 12844 bytes/ms |
+
+- Sample: 3850 main-thread samples from `/usr/bin/sample`.
+
+| Area | Samples | Approx share |
+| --- | ---: | ---: |
+| Generated `ts_lex` in `cpp.dylib` | 1557 | 40.44% |
+| `ts_lex_keywords` in `cpp.dylib` | 123 | 3.19% |
+| `parser_reduce` region | 894 | 23.22% |
+| `subtree_new_node_in_arena` under reduce | 341 | 8.86% |
+| `subtree_summarize_children` under arena node creation | 272 | 7.06% |
+| `stack_pop_count_into` under reduce | 140 | 3.64% |
+| `stack_node_new` under reduce | 87 | 2.26% |
+| `stack_renumber_version` region | 137 | 3.56% |
+| `parser_balance_subtree` region | 97 | 2.52% |
+| `parser_shift` region | 81 | 2.10% |
+
+Interpretation:
+
+- C++ is lexer-heavy enough that a parser-only reduction or stack experiment
+  cannot plausibly close the C++ gap by itself. This supports the existing
+  future-candidate note about generated-lexer contract work once parser
+  construction work is not the dominant remaining issue.
+- The parser-side C++ cost still matches the old profile: reduction
+  construction, arena node creation, child summarization, stack pop, and stack
+  node creation. The rejected linear-tail stack trial made this worse, so the
+  next parser-side attempt should remove materialization/summarization work
+  rather than wrap stack pushes in another side structure.
+
+Java normal sample profile and UTF-8 direct-decode trial:
+
+- Java sample command:
+
+```sh
+TREE_SITTER_CORE_IMPL=rust TREE_SITTER_BENCHMARK_LANGUAGE_FILTER=java TREE_SITTER_BENCHMARK_KIND_FILTER=normal TREE_SITTER_BENCHMARK_REPETITION_COUNT=10000 target/release/deps/benchmark-cbf7a217e4c2dbe8 >/private/tmp/tree-sitter-java-profile-bench.out 2>/private/tmp/tree-sitter-java-profile-bench.err & pid=$!; sleep 0.1; sample $pid 5 -file /private/tmp/tree-sitter-java-profile.sample >/private/tmp/tree-sitter-java-sample.out 2>/private/tmp/tree-sitter-java-sample.err; wait $pid
+```
+
+- Benchmark result during sampling:
+
+| Workload | Speed |
+| --- | ---: |
+| Java `LargeService.java` | 14309 bytes/ms |
+| Java `Service.java` | 15363 bytes/ms |
+
+- Sample: 1490 main-thread samples from `/usr/bin/sample`.
+
+| Area | Samples | Approx share |
+| --- | ---: | ---: |
+| Generated `ts_lex` in `java.dylib` | 472 | 31.68% |
+| `ts_lex_keywords` in `java.dylib` | 59 | 3.96% |
+| `lexer_do_advance` under generated lexers | 140 | 9.40% |
+| `parser_reduce` region | 377 | 25.30% |
+| `subtree_new_node_in_arena` under reduce | 161 | 10.81% |
+| `subtree_summarize_children` under arena node creation | 129 | 8.66% |
+| `stack_pop_count_into` under reduce | 56 | 3.76% |
+| `stack_node_new` under reduce | 48 | 3.22% |
+| `stack_renumber_version` region | 56 | 3.76% |
+| `parser_balance_subtree` region | 29 | 1.95% |
+
+- Trial: specialize `lexer_get_lookahead` for UTF-8, handling ASCII directly
+  and calling `utf8_next` without the C-compatible decoder function pointer.
+- Command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-utf8-fastpath cargo xtask perf-gate --language typescript --language javascript --language python --language go --language rust --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Trial Rust | Trial C | Trial delta | Baseline Rust | Baseline C | Baseline delta |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| TypeScript normal | 26930.6 | 23079.6 | +16.69% | 27842.6 | 24249.4 | +14.82% |
+| JavaScript normal | 17672.6 | 16356.6 | +8.05% | 19323.9 | 15770.1 | +22.54% |
+| Python normal | 13355.7 | 11072.9 | +20.62% | 12725.4 | 10555.1 | +20.56% |
+| Go normal | 16912.2 | 13451.1 | +25.73% | 16721.7 | 13456.1 | +24.27% |
+| Rust normal | 19614.4 | 15822.2 | +23.97% | 20209.7 | 16659.7 | +21.31% |
+| C++ normal | 7088.2 | 10473.5 | -32.32% | 7959.9 | 10574.3 | -24.72% |
+| Java normal | 11015.7 | 11236.2 | -1.96% | 10250.6 | 11290.0 | -9.21% |
+| Overall normal | 18513.7 | 16072.7 | +15.19% | 19043.6 | 15952.8 | +19.37% |
+
+Interpretation:
+
+- Java confirms that generated lexing and lexer callbacks are meaningful for
+  weak languages, but parser reduction/materialization is still a similarly
+  large bucket.
+- The direct UTF-8 lookahead trial is not keepable. It improves Java and
+  Python in this run, but regresses JavaScript and C++ enough to lower the
+  seven-language aggregate. The likely issue is that moving UTF-8 dispatch into
+  the hot lookahead function worsens code layout or branch prediction more than
+  the ASCII direct path saves.
+- Do not retry this exact shape. A lexer-side attempt needs stronger evidence
+  from generated-lexer call patterns or a contract-level change that reduces
+  callback frequency, not just a different internal UTF-8 decoder branch.
+
+Stack-node pool reset trial:
+
+- Hypothesis: `stack_node_new_with_payload` fully initializes the eight inline
+  `StackLink` slots on every push. Nodes reused from `node_pool` already contain
+  valid old `StackLink` values that are unreachable behind the reset
+  `link_count`, so the pooled-node path can reset only live scalar fields and
+  avoid rewriting the whole links array.
+- Command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-stack-node-reuse cargo xtask perf-gate --language typescript --language javascript --language python --language go --language rust --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Trial Rust | Trial C | Trial delta | Baseline Rust | Baseline C | Baseline delta |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| TypeScript normal | 28884.0 | 22573.7 | +27.95% | 27842.6 | 24249.4 | +14.82% |
+| JavaScript normal | 19527.4 | 16305.7 | +19.76% | 19323.9 | 15770.1 | +22.54% |
+| Python normal | 13324.6 | 10439.5 | +27.64% | 12725.4 | 10555.1 | +20.56% |
+| Go normal | 16600.8 | 13537.3 | +22.63% | 16721.7 | 13456.1 | +24.27% |
+| Rust normal | 20569.3 | 16722.4 | +23.00% | 20209.7 | 16659.7 | +21.31% |
+| C++ normal | 7570.9 | 10381.7 | -27.07% | 7959.9 | 10574.3 | -24.72% |
+| Java normal | 9757.2 | 11264.3 | -13.38% | 10250.6 | 11290.0 | -9.21% |
+| Overall normal | 19402.1 | 15851.7 | +22.40% | 19043.6 | 15952.8 | +19.37% |
+
+Interpretation:
+
+- The aggregate looks better, but the two target misses both regress in
+  absolute Rust throughput: C++ drops from 7959.9 to 7570.9 bytes/ms, and Java
+  drops from 10250.6 to 9757.2 bytes/ms.
+- This is not a keepable universal optimization. It was reverted. The result is
+  consistent with earlier node-pool tuning notes: changing node allocation/reset
+  behavior can move aggregate noise or help easy workloads without closing the
+  weak-language gap.
+
+Arena-source child summarization trial:
+
+- Hypothesis: fresh reductions build arena nodes by copying child subtrees into
+  the arena and then immediately reading those arena children back during
+  `subtree_summarize_children`. The reduction-builder child span is already hot,
+  so summarizing from that source span could reduce cache traffic while keeping
+  the same arena layout.
+- Patch shape: factor the summarization body to accept an explicit
+  `&[Subtree]`; have `subtree_new_node_in_arena` summarize from the incoming
+  child span after initializing the heap data, while still copying the children
+  into the arena allocation for storage.
+- Command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-arena-source-summary cargo xtask perf-gate --language typescript --language javascript --language python --language go --language rust --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Trial Rust | Trial C | Trial delta | Baseline Rust | Baseline C | Baseline delta |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| TypeScript normal | 28164.8 | 22503.3 | +25.16% | 27842.6 | 24249.4 | +14.82% |
+| JavaScript normal | 18497.8 | 15382.8 | +20.25% | 19323.9 | 15770.1 | +22.54% |
+| Python normal | 12820.5 | 10630.4 | +20.60% | 12725.4 | 10555.1 | +20.56% |
+| Go normal | 16148.4 | 13273.3 | +21.66% | 16721.7 | 13456.1 | +24.27% |
+| Rust normal | 19806.2 | 15634.6 | +26.68% | 20209.7 | 16659.7 | +21.31% |
+| C++ normal | 7767.8 | 9744.9 | -20.29% | 7959.9 | 10574.3 | -24.72% |
+| Java normal | 9199.1 | 11139.0 | -17.42% | 10250.6 | 11290.0 | -9.21% |
+| Overall normal | 18697.7 | 15484.2 | +20.75% | 19043.6 | 15952.8 | +19.37% |
+
+Interpretation:
+
+- The change does not close the weak-language gap and lowers the absolute
+  seven-language Rust average. It was reverted.
+- The likely cost is worse code shape around the already-large summarizer, not
+  cold arena reads. Future summarizer work should remove fields or defer
+  materialization rather than redirecting the same summarization work to a
+  different child slice.
+
+Fresh C++ sample and in-place reduction trial:
+
+- C++ sample command:
+
+```sh
+TREE_SITTER_CORE_IMPL=rust TREE_SITTER_BENCHMARK_LANGUAGE_FILTER=cpp TREE_SITTER_BENCHMARK_KIND_FILTER=normal TREE_SITTER_BENCHMARK_REPETITION_COUNT=20000 target/release/deps/benchmark-cbf7a217e4c2dbe8 >/private/tmp/tree-sitter-cpp-profile3-bench.out 2>/private/tmp/tree-sitter-cpp-profile3-bench.err & pid=$!; sleep 0.1; sample $pid 5 -file /private/tmp/tree-sitter-cpp-profile3.sample >/private/tmp/tree-sitter-cpp-sample3.out 2>/private/tmp/tree-sitter-cpp-sample3.err; wait $pid
+```
+
+- Benchmark result during sampling:
+
+| Workload | Speed |
+| --- | ---: |
+| C++ `marker-index.h` | 13522 bytes/ms |
+| C++ `rule.cc` | 12594 bytes/ms |
+
+- `sample` again showed generated `ts_lex`, reduction construction,
+  `subtree_summarize_children`, `lexer_do_advance`, `stack_node_new`,
+  `stack_pop_count_into`, `ts_lex_keywords`, and `stack_renumber_version`.
+  Parse-table lookup/action dispatch did not appear as a named hot symbol.
+- Trial: for fresh parses with one active version and non-fragile reduce
+  actions, pop a linear stack chain in place instead of creating a temporary
+  version and immediately renumbering it back over the original version.
+- Full seven-language command for the broad variant:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-reduce-in-place cargo xtask perf-gate --language typescript --language javascript --language python --language go --language rust --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Broad trial Rust | Broad trial C | Broad trial delta | Baseline Rust | Baseline C | Baseline delta |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| TypeScript normal | 28809.3 | 23176.7 | +24.30% | 27842.6 | 24249.4 | +14.82% |
+| JavaScript normal | 19509.1 | 16366.1 | +19.20% | 19323.9 | 15770.1 | +22.54% |
+| Python normal | 13414.3 | 11273.5 | +18.99% | 12725.4 | 10555.1 | +20.56% |
+| Go normal | 16712.0 | 13347.7 | +25.21% | 16721.7 | 13456.1 | +24.27% |
+| Rust normal | 21178.3 | 16179.2 | +30.90% | 20209.7 | 16659.7 | +21.31% |
+| C++ normal | 8025.0 | 10241.9 | -21.65% | 7959.9 | 10574.3 | -24.72% |
+| Java normal | 9376.7 | 11256.3 | -16.70% | 10250.6 | 11290.0 | -9.21% |
+| Overall normal | 19492.0 | 16139.3 | +20.77% | 19043.6 | 15952.8 | +19.37% |
+
+- Narrowed trial: same idea, but only for reductions with `count > 1`.
+- Targeted weak-language command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-reduce-in-place-count2 cargo xtask perf-gate --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Narrow trial Rust | Narrow trial C | Narrow trial delta |
+| --- | ---: | ---: | ---: |
+| C++ normal | 7084.8 | 10278.2 | -31.07% |
+| Java normal | 9220.3 | 11469.1 | -19.61% |
+| C++ + Java normal | 7422.6 | 10492.3 | -29.26% |
+
+Interpretation:
+
+- The broad in-place reduction variant improved aggregate throughput and
+  slightly improved C++, but it regressed Java too much to keep.
+- Restricting the change to reductions with more than one child made both C++
+  and Java worse, so the problem is not simply over-applying it to cheap
+  one-child reductions.
+- Do not retry active-head in-place reduction with immediate release of the old
+  stack path. The useful future version of this idea would need delayed old-head
+  release or a different stack representation that avoids both temporary
+  version creation and eager release churn.
+
+- Delayed-release variant: add a stack-owned retired-node list, rewrite the
+  active head in place, and release retired heads only at `stack_clear`.
+- Targeted weak-language command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-reduce-in-place-deferred-cpp-java cargo xtask perf-gate --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Delayed trial Rust | Delayed trial C | Delayed trial delta |
+| --- | ---: | ---: | ---: |
+| C++ normal | 6666.6 | 10382.8 | -35.79% |
+| Java normal | 7117.0 | 11024.9 | -35.45% |
+| C++ + Java normal | 6750.5 | 10503.0 | -35.73% |
+
+Interpretation:
+
+- Delaying release made the weak languages much worse, probably by increasing
+  live stack/subtree pressure until reset. This closes the active-head in-place
+  reduction family for now.
+- Future stack work should avoid creating the old head in the first place,
+  rather than creating it and deciding whether to release it immediately or
+  later.
+
+Lexer no-log advance callback split:
+
+- Hypothesis: generated lexers call `TSLexer::advance` frequently, and normal
+  benchmarks have no logger. Split `ts_lexer__advance` into no-log and logging
+  callbacks, install the no-log callback by default, and switch callback
+  pointers in `ts_parser_set_logger`.
+- Validation before benchmarking:
+
+```sh
+cargo fmt --check --all
+cargo check -p tree-sitter --lib --offline
+cargo test -p tree-sitter --lib --offline
+```
+
+- Targeted lexer-heavy command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-lexer-advance-nolog-cpp-java-js cargo xtask perf-gate --language cpp --language java --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Trial Rust | Trial C | Trial delta |
+| --- | ---: | ---: | ---: |
+| C++ normal | 6439.8 | 10299.9 | -37.48% |
+| Java normal | 9231.2 | 10813.9 | -14.64% |
+| JavaScript normal | 19215.4 | 15656.1 | +22.73% |
+| C++ + Java + JavaScript normal | 17926.8 | 15347.2 | +16.81% |
+
+Interpretation:
+
+- Splitting the callback makes C++ substantially worse and does not recover
+  Java. It was reverted.
+- The likely cost is worse generated-lexer call target/code layout rather than
+  the removed logger branch. Future lexer work should target callback
+  frequency or generated lexer structure, not another internal advance callback
+  split.
+
+Lexer single-range `mark_end` fast path:
+
+- Hypothesis: generated lexers call `TSLexer::mark_end` frequently, and normal
+  benchmarks use one included range. In that case the included-range-boundary
+  check cannot select a previous range, so `mark_end` can directly assign
+  `token_end_position = current_position`.
+- Validation before benchmarking:
+
+```sh
+cargo fmt --check --all
+cargo check -p tree-sitter --lib --offline
+cargo test -p tree-sitter --lib --offline
+```
+
+- Targeted lexer-heavy command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-mark-end-single-range-cpp-java-js cargo xtask perf-gate --language cpp --language java --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Trial Rust | Trial C | Trial delta |
+| --- | ---: | ---: | ---: |
+| C++ normal | 6623.0 | 9726.8 | -31.91% |
+| Java normal | 8881.8 | 11195.8 | -20.67% |
+| JavaScript normal | 19033.8 | 16108.4 | +18.16% |
+| C++ + Java + JavaScript normal | 17807.9 | 15724.6 | +13.25% |
+
+Interpretation:
+
+- The one-range `mark_end` fast path regressed the targeted workloads and was
+  reverted.
+- The generated-lexer callback hot spot is not helped by small branch removal
+  in individual callbacks. Treat lexer callback micro-fast-paths as closed
+  unless a future profile shows a different callback shape.
+
+Lexer cold logging helper:
+
+- Hypothesis: keep the same `TSLexer::advance` callback target, but move the
+  logging-only formatting block into a `#[cold]` helper so the no-logger hot
+  function is smaller without changing generated-lexer call targets.
+- Validation before benchmarking:
+
+```sh
+cargo fmt --check --all
+cargo check -p tree-sitter --lib --offline
+cargo test -p tree-sitter --lib --offline
+```
+
+- Targeted lexer-heavy command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-lexer-cold-log-cpp-java-js cargo xtask perf-gate --language cpp --language java --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Trial Rust | Trial C | Trial delta |
+| --- | ---: | ---: | ---: |
+| C++ normal | 6951.5 | 6445.1 | +7.86% |
+| Java normal | 9130.2 | 11144.3 | -18.07% |
+| JavaScript normal | 19280.8 | 15825.7 | +21.83% |
+| C++ + Java + JavaScript normal | 18097.4 | 15074.7 | +20.05% |
+
+Interpretation:
+
+- The positive C++ delta is not useful because the C-side comparison was
+  anomalously slow. Absolute Rust throughput regressed for C++ and Java versus
+  the current baseline, so the patch was reverted.
+- Moving the logging block out of line does not solve the generated-lexer
+  callback cost. Do not pursue another callback-local logging/code-layout
+  variant without a new profile.
+
+Fresh current-source baseline and inline first arena page trial:
+
+- Current-source baseline command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-current-baseline-7lang cargo xtask perf-gate --language typescript --language javascript --language python --language go --language rust --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Current Rust | Current C | Current delta |
+| --- | ---: | ---: | ---: |
+| TypeScript normal | 27035.9 | 23104.0 | +17.02% |
+| JavaScript normal | 18443.7 | 15472.0 | +19.21% |
+| Python normal | 12746.9 | 10793.5 | +18.10% |
+| Go normal | 16900.8 | 13936.0 | +21.27% |
+| Rust normal | 20789.3 | 17013.5 | +22.19% |
+| C++ normal | 7800.2 | 10493.3 | -25.67% |
+| Java normal | 10960.9 | 11472.3 | -4.46% |
+| Overall normal | 18714.4 | 15886.8 | +17.80% |
+
+- Trial: embed the first `TreeArenaPage` and a 16KB first-page buffer inside
+  `TreeArena`, replacing the arena-struct + first-page-header +
+  first-page-buffer allocation sequence with one arena allocation for common
+  one-page parses.
+- Validation before benchmarking:
+
+```sh
+cargo fmt --check --all
+cargo check -p tree-sitter --lib --offline
+cargo test -p tree-sitter --lib --offline
+```
+
+- Targeted fixed-overhead/weak-language command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-inline-arena-page-python-cpp-java cargo xtask perf-gate --language python --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Trial Rust | Trial C | Trial delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 12566.9 | 10506.1 | +19.62% |
+| C++ normal | 6857.4 | 10646.2 | -35.59% |
+| Java normal | 8810.0 | 10646.0 | -17.25% |
+| Python + C++ + Java normal | 11809.1 | 10517.9 | +12.28% |
+
+Interpretation:
+
+- The inline first arena page did not fix Python's tiny-fixture overhead and
+  substantially regressed C++ and Java. It was reverted.
+- Avoid embedding the first arena page. The returned tree holding a larger
+  arena object appears worse than paying the separate first-page allocation.
+  Future fixed-overhead work should target parse/tree lifecycle or benchmarked
+  tiny-file-specific operations, not arena object size.
+
+Python normal sample profile:
+
+- Command:
+
+```sh
+TREE_SITTER_CORE_IMPL=rust TREE_SITTER_BENCHMARK_LANGUAGE_FILTER=python TREE_SITTER_BENCHMARK_KIND_FILTER=normal TREE_SITTER_BENCHMARK_REPETITION_COUNT=30000 target/release/deps/benchmark-cbf7a217e4c2dbe8 >/private/tmp/tree-sitter-python-profile-bench.out 2>/private/tmp/tree-sitter-python-profile-bench.err & pid=$!; sleep 0.1; sample $pid 5 -file /private/tmp/tree-sitter-python-profile.sample >/private/tmp/tree-sitter-python-sample.out 2>/private/tmp/tree-sitter-python-sample.err; wait $pid
+```
+
+- The run was interrupted after the `sample` report was written because the
+  full 12-case, 30000-repetition benchmark would have taken longer than needed
+  for the profile. The partial benchmark output covered seven Python normal
+  fixtures before interruption.
+- Sample: 3833 main-thread samples from `/usr/bin/sample`.
+
+| Area | Samples | Approx share |
+| --- | ---: | ---: |
+| `ts_parser_parse` top-of-stack frames | 867 | 22.62% |
+| `lexer_do_advance` | 452 | 11.79% |
+| `parser_reduce` | 377 | 9.84% |
+| `subtree_summarize_children` | 303 | 7.90% |
+| Generated `ts_lex` in `python.dylib` | 263 | 6.86% |
+| Python external scanner `scan` | 178 | 4.64% |
+| `subtree_release` | 173 | 4.51% |
+| `stack_node_new` | 168 | 4.38% |
+| `stack_pop_count_into` | 129 | 3.37% |
+| Python external scanner `deserialize` | 65 | 1.70% |
+| `subtree_new_node_in_arena` | 54 | 1.41% |
+| `parser_balance_subtree` | 51 | 1.33% |
+| `stack_node_release` | 49 | 1.28% |
+| `subtree_new_leaf` | 49 | 1.28% |
+| `stack_renumber_version` | 35 | 0.91% |
+| `parser_shift` | 31 | 0.81% |
+
+Interpretation:
+
+- Python remains split across runtime lexer callbacks, generated lexer/external
+  scanner work, reduction, child summarization, and stack mutation. This
+  matches the broader seven-language profile instead of revealing a new
+  Python-only tree-lifecycle bottleneck.
+- `subtree_release` and `ts_tree_delete` are visible because the tiny fixtures
+  amplify parse/tree lifecycle overhead, but release is not dominant enough to
+  justify another refcount-ordering or arena-release micro-optimization. The
+  earlier closed guidance on refcount and node-pool tuning still applies.
+- The next Python-relevant work should still remove a parser phase or reduce
+  lexer callback frequency. A specialized tree-delete path for arena-owned
+  roots is unlikely to close the remaining gap on its own.
+
+Stack-node live-field initialization trial:
+
+- Trial: change `stack_node_new_with_payload` so each new node initializes only
+  live scalar fields and the first link slot instead of writing all eight
+  inline `StackLink` slots. This is broader than the earlier pooled-node reset
+  trial because it also avoids dead-link writes for freshly allocated nodes.
+- Validation before benchmarking:
+
+```sh
+cargo fmt --check --all
+cargo check -p tree-sitter --lib --offline
+cargo test -p tree-sitter --lib --offline
+```
+
+- Initial seven-language command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-stack-node-live-init cargo xtask perf-gate --language typescript --language javascript --language python --language go --language rust --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Trial Rust | Trial C | Trial delta |
+| --- | ---: | ---: | ---: |
+| TypeScript normal | 30290.5 | 24666.9 | +22.80% |
+| JavaScript normal | 18909.9 | 15370.3 | +23.03% |
+| Python normal | 13539.1 | 11243.7 | +20.41% |
+| Go normal | 17423.0 | 13764.1 | +26.58% |
+| Rust normal | 21098.9 | 17072.3 | +23.59% |
+| C++ normal | 8112.2 | 9924.6 | -18.26% |
+| Java normal | 9594.2 | 11723.6 | -18.16% |
+| Overall normal | 19695.3 | 16160.8 | +21.87% |
+
+- A safety issue was found in the initial patch: zero-link nodes could leave
+  `links[0]` uninitialized even though `stack_error_cost` can inspect that slot
+  for zero-link error-state nodes. The patch was tightened to initialize
+  `links[0]` and skip only slots 1 through 7.
+- Focused rerun command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-stack-node-live-init-pcj cargo xtask perf-gate --language python --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Tightened trial Rust | Tightened trial C | Tightened trial delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 13785.9 | 10766.6 | +28.04% |
+| C++ normal | 7063.5 | 10366.2 | -31.86% |
+| Java normal | 10023.1 | 11364.5 | -11.80% |
+| Python + C++ + Java normal | 12866.3 | 10747.7 | +19.71% |
+
+Interpretation:
+
+- The idea is not keepable despite improving Python. C++ and Java are worse
+  than the current-source baseline, and the focused rerun stays below the
+  target aggregate for the weak-language set.
+- Avoid another stack-node initialization or node-pool reset variant unless a
+  new profile shows a different bottleneck. The stack-node write cost is real,
+  but reducing dead-link initialization does not preserve broad throughput.
+
+Arena child copy and summary fusion trial:
+
+- Trial: in `subtree_new_node_in_arena`, copy child pointers into the arena
+  allocation while computing the parent summary, replacing the separate
+  `ptr::copy_nonoverlapping` plus `subtree_summarize_children` pass with one
+  source-slice walk.
+- Validation before benchmarking:
+
+```sh
+cargo fmt --check --all
+cargo check -p tree-sitter --lib --offline
+cargo test -p tree-sitter --lib --offline
+```
+
+- Focused weak-language command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-arena-copy-summary-pcj cargo xtask perf-gate --language python --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Trial Rust | Trial C | Trial delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 13033.2 | 10487.0 | +24.28% |
+| C++ normal | 7803.3 | 10554.5 | -26.07% |
+| Java normal | 10229.4 | 11435.6 | -10.55% |
+| Python + C++ + Java normal | 12406.8 | 10506.2 | +18.09% |
+
+Interpretation:
+
+- The fused loop does not beat the existing memcpy plus summary pass on the
+  languages that need help. Python is slightly above the current baseline and
+  C++ is effectively neutral, but Java regresses and the combined weak-language
+  set stays below target.
+- Keep the existing bulk child copy. Future reduction-construction work must
+  remove materialization or summarization, not just fuse pointer copy with the
+  summary loop.
+
+Deterministic in-place reduction trial:
+
+- Trial: for fresh parses with exactly one stack version and exactly one reduce
+  action, pop a straight-line stack chain directly into the current version,
+  build the parent, and continue with the same version. This avoids creating a
+  separate reduction version only to immediately `stack_renumber_version` it
+  back over the original version. Branched stack pops fall back to the existing
+  GLR reduction path.
+- Validation before benchmarking:
+
+```sh
+cargo fmt --check --all
+cargo check -p tree-sitter --lib --offline
+cargo test -p tree-sitter --lib --offline
+```
+
+- Initial seven-language command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-deterministic-in-place-reduce cargo xtask perf-gate --language typescript --language javascript --language python --language go --language rust --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Trial Rust | Trial C | Trial delta |
+| --- | ---: | ---: | ---: |
+| TypeScript normal | 29381.6 | 25037.1 | +17.35% |
+| JavaScript normal | 21340.3 | 16263.7 | +31.21% |
+| Python normal | 13197.5 | 10483.2 | +25.89% |
+| Go normal | 16220.6 | 12953.1 | +25.23% |
+| Rust normal | 20875.9 | 16895.3 | +23.56% |
+| C++ normal | 7984.5 | 10693.2 | -25.33% |
+| Java normal | 9615.8 | 11599.5 | -17.10% |
+| Overall normal | 19914.6 | 16087.0 | +23.79% |
+
+- Follow-up variant: only use the in-place path for reductions with more than
+  one child. This tested whether unary reductions lacked enough avoided work to
+  pay for immediate stack mutation.
+- Focused weak-language command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-in-place-reduce-count2-pcj cargo xtask perf-gate --language python --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Multi-child trial Rust | Multi-child trial C | Multi-child trial delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 12800.8 | 11020.5 | +16.15% |
+| C++ normal | 7891.3 | 10424.4 | -24.30% |
+| Java normal | 11246.1 | 11427.3 | -1.59% |
+| Python + C++ + Java normal | 12250.5 | 10984.1 | +11.53% |
+
+Interpretation:
+
+- The architecture direction has real signal: the broad deterministic in-place
+  path materially improves JavaScript and Python and clears the seven-language
+  aggregate target in that run.
+- It is still not keepable. The broad guard regresses Java and Go absolute Rust
+  throughput versus the current-source baseline; the multi-child guard recovers
+  Java but loses the Python and aggregate gain.
+- A future version needs a better safety/profitability predicate than
+  "single action" or child count. Useful candidates are reduction-chain shape,
+  whether the old version would merge with the reduction version, and whether
+  the language/state tends to produce branchy reductions. Do not reapply this
+  exact guard.
+
+Deterministic in-place reduction warm-up trial:
+
+- Instrumentation: count deterministic fresh reductions by child-count bucket
+  and whether the stack could pop the reduction through a linear chain.
+- Commands:
+
+```sh
+TREE_SITTER_REDUCE_STATS=1 TREE_SITTER_CORE_IMPL=rust TREE_SITTER_BENCHMARK_LANGUAGE_FILTER=python TREE_SITTER_BENCHMARK_KIND_FILTER=normal TREE_SITTER_BENCHMARK_REPETITION_COUNT=5 cargo bench benchmark -p tree-sitter-cli --offline
+TREE_SITTER_REDUCE_STATS=1 TREE_SITTER_CORE_IMPL=rust TREE_SITTER_BENCHMARK_LANGUAGE_FILTER=java TREE_SITTER_BENCHMARK_KIND_FILTER=normal TREE_SITTER_BENCHMARK_REPETITION_COUNT=5 target/release/deps/benchmark-cbf7a217e4c2dbe8
+TREE_SITTER_REDUCE_STATS=1 TREE_SITTER_CORE_IMPL=rust TREE_SITTER_BENCHMARK_LANGUAGE_FILTER=cpp TREE_SITTER_BENCHMARK_KIND_FILTER=normal TREE_SITTER_BENCHMARK_REPETITION_COUNT=5 target/release/deps/benchmark-cbf7a217e4c2dbe8
+TREE_SITTER_REDUCE_STATS=1 TREE_SITTER_CORE_IMPL=rust TREE_SITTER_BENCHMARK_LANGUAGE_FILTER=go TREE_SITTER_BENCHMARK_KIND_FILTER=normal TREE_SITTER_BENCHMARK_REPETITION_COUNT=5 target/release/deps/benchmark-cbf7a217e4c2dbe8
+```
+
+| Workload | Deterministic buckets 0,1,2,3,4,5,6,7+ | Linear buckets 0,1,2,3,4,5,6,7+ |
+| --- | --- | --- |
+| Python normal | `[0, 164670, 64655, 32310, 10500, 3220, 2075, 305]` | `[0, 164625, 64655, 32285, 10500, 3220, 2075, 305]` |
+| Java normal | `[0, 2580, 730, 840, 290, 10, 0, 30]` | `[0, 2545, 730, 835, 280, 10, 0, 30]` |
+| C++ normal | `[0, 8000, 4500, 2725, 640, 55, 0, 0]` | `[0, 7995, 4485, 2715, 635, 55, 0, 0]` |
+| Go normal | `[0, 72830, 35400, 26930, 4520, 1525, 265, 40]` | `[0, 66700, 34060, 24890, 4455, 1460, 255, 40]` |
+
+- Interpretation: Python and Go have very high deterministic-linear volume,
+  while Java has little. A warm-up threshold can avoid applying the in-place
+  path to small/Java-like parses while still enabling large deterministic
+  workloads.
+
+- Trial: reintroduce deterministic in-place reduction only after
+  `10_000` deterministic single-version reductions in the current parse.
+- Focused weak-language command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-in-place-warmup-pgcj cargo xtask perf-gate --language python --language go --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Warm-up 10k Rust | Warm-up 10k C | Warm-up 10k delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 12934.1 | 10494.8 | +23.24% |
+| Go normal | 17077.9 | 13929.9 | +22.60% |
+| C++ normal | 7491.3 | 10514.2 | -28.75% |
+| Java normal | 10741.2 | 11580.7 | -7.25% |
+| Python + Go + C++ + Java normal | 14355.6 | 12031.2 | +19.32% |
+
+- Seven-language command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-in-place-warmup-7lang cargo xtask perf-gate --language typescript --language javascript --language python --language go --language rust --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Warm-up 10k Rust | Warm-up 10k C | Warm-up 10k delta |
+| --- | ---: | ---: | ---: |
+| TypeScript normal | 28330.9 | 24961.6 | +13.50% |
+| JavaScript normal | 20191.7 | 15196.9 | +32.87% |
+| Python normal | 12990.0 | 10578.9 | +22.79% |
+| Go normal | 16690.3 | 13522.2 | +23.43% |
+| Rust normal | 20457.0 | 16378.1 | +24.90% |
+| C++ normal | 7711.8 | 10507.2 | -26.60% |
+| Java normal | 10399.3 | 11237.7 | -7.46% |
+| Overall normal | 19448.0 | 15863.6 | +22.60% |
+
+- Follow-up threshold trials:
+
+| Threshold | Workload | Trial Rust | Trial C | Trial delta |
+| ---: | --- | ---: | ---: | ---: |
+| 50,000 | Overall seven-language normal | 19371.6 | 16269.0 | +19.07% |
+| 25,000 | Python + Go + C++ + Java normal | 13524.6 | 12129.9 | +11.50% |
+
+Interpretation:
+
+- The `10_000` warm-up is the best measured in-place reduction variant so far.
+  It preserves the aggregate seven-language target and avoids the catastrophic
+  Java collapse from the broad in-place trial.
+- It is still not perfect: C++ remains weak and Java's absolute Rust throughput
+  is below the current-source baseline. Treat this as a candidate performance
+  win, not a completed architecture solution.
+- Higher thresholds skip too much of the profitable path and fall below target.
+  The warm-up predicate is crude but better than action-count or child-count
+  alone.
+
+Validation status for the kept candidate source:
+
+```sh
+cargo fmt --check --all
+cargo check -p tree-sitter --lib --offline
+cargo test --all
+cargo test -p tree-sitter-cli --lib tests::detect_language::detect_language_by_double_barrel_file_extension -- --nocapture
+cargo test -p tree-sitter-cli --lib tests::detect_language::detect_language_by_double_barrel_file_extension -- --exact # clean f087bc4f worktree
+cargo test -p tree-sitter --lib
+```
+
+- `cargo fmt --check --all`: passed.
+- `cargo check -p tree-sitter --lib --offline`: passed.
+- `cargo test -p tree-sitter --lib`: passed.
+- `cargo test --all`: failed in the CLI language-detection tests only:
+  `detect_language_by_double_barrel_file_extension`,
+  `detect_language_by_first_line_regex`,
+  `detect_language_without_file_extension`, and
+  `detect_language_without_filename`.
+- The focused double-barrel detect-language test also fails by itself with
+  `left: None` and `right: Some("source.blade")`.
+- The same focused test was reproduced in a clean detached worktree at
+  `f087bc4f`, so the CLI detect-language failure is baseline behavior for this
+  checkout and not caused by the current parser/stack diff.
+
+Action-trace instrumentation and deterministic-chain in-place trial:
+
+- Temporary instrumentation: `TREE_SITTER_ACTION_TRACE_STATS=1`, counting
+  consecutive deterministic single-version reductions before the next terminal
+  action. The probe was removed after measurement.
+- Command template:
+
+```sh
+TREE_SITTER_ACTION_TRACE_STATS=1 TREE_SITTER_CORE_IMPL=rust TREE_SITTER_BENCHMARK_LANGUAGE_FILTER=<language> TREE_SITTER_BENCHMARK_KIND_FILTER=normal TREE_SITTER_BENCHMARK_REPETITION_COUNT=5 target/release/deps/benchmark-cbf7a217e4c2dbe8
+```
+
+| Workload | Reduce-chain buckets 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15+ | Max chain |
+| --- | --- | ---: |
+| TypeScript normal | `[0, 26255, 31610, 18700, 17600, 5105, 5240, 1615, 1315, 65, 55, 15, 10, 0, 0, 0]` | 12 |
+| JavaScript normal | `[0, 53335, 43110, 33985, 24345, 11040, 7795, 2455, 1120, 245, 105, 25, 10, 0, 5, 5]` | 16 |
+| Python normal | `[0, 45355, 23210, 13205, 10150, 12260, 4385, 1910, 315, 155, 25, 25, 0, 25, 0, 0]` | 13 |
+| Go normal | `[0, 16710, 12805, 10175, 5340, 2165, 2315, 2125, 890, 55, 10, 0, 0, 0, 0, 0]` | 10 |
+| Rust normal | `[0, 10200, 7285, 9520, 7240, 1430, 500, 240, 40, 15, 10, 10, 0, 0, 0, 10]` | 48 |
+| C++ normal | `[0, 3125, 1915, 1260, 720, 310, 120, 5, 0, 0, 0, 0, 0, 0, 0, 0]` | 7 |
+| Java normal | `[0, 335, 415, 210, 220, 185, 75, 50, 10, 0, 0, 0, 0, 0, 0, 0]` | 8 |
+
+- Trial: replace the whole-parse `10_000` warm-up predicate with a local
+  deterministic-chain predicate, enabling in-place reduction only from the
+  third reduction in a deterministic chain onward.
+- Focused command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-in-place-chain3-pgcj cargo xtask perf-gate --language python --language go --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Chain>=3 trial Rust | Chain>=3 trial C | Trial delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 5713.9 | 6911.3 | -17.33% |
+| Go normal | 9435.7 | 8407.7 | +12.23% |
+| C++ normal | 5106.3 | 6140.4 | -16.84% |
+| Java normal | 6369.1 | 6207.3 | +2.61% |
+| Python + Go + C++ + Java normal | 7140.8 | 7565.5 | -5.61% |
+
+Interpretation:
+
+- Do not pursue the local chain-threshold predicate. It avoids many isolated
+  reductions, but Python collapses and the weak-language aggregate falls below
+  C.
+- The chain histogram weakens the case for an action-trace cache as a universal
+  fix. C++ and Java have short chains and low total deterministic-chain volume,
+  while the large-chain languages are already the ones helped by the broader
+  `10_000` warm-up predicate.
+- Future action-trace work would need to remove a much larger phase than
+  action dispatch, such as combining goto lookup, stack mutation, and parent
+  construction for a whole precomputed trace. A cache that only skips action
+  table dispatch is unlikely to move the target languages.
+
+Single-allocation tree-arena page trial:
+
+- Trial: allocate each `TreeArenaPage` header and its bump buffer in one
+  allocation instead of allocating the page header and contents separately. This
+  targets allocation count in fresh arena-backed reduction construction without
+  embedding a larger first page in `TreeArena`.
+- Focused command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-arena-singlealloc-pgcj cargo xtask perf-gate --language python --language go --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Single-allocation page Rust | Single-allocation page C | Trial delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 12482.0 | 10400.0 | +20.02% |
+| Go normal | 16657.5 | 13607.7 | +22.41% |
+| C++ normal | 7614.8 | 10526.7 | -27.66% |
+| Java normal | 5007.2 | 10905.3 | -54.08% |
+| Python + Go + C++ + Java normal | 13801.1 | 11845.9 | +16.50% |
+
+Interpretation:
+
+- This is not keepable. It preserves Python and Go but collapses Java and keeps
+  C++ weak.
+- Along with the rejected inline-first-page trial, this closes arena page-shape
+  tuning for now. The remaining reduction-construction cost is not solved by
+  reducing arena page allocation count.
+
+Subtree and tree-arena refcount ordering trial:
+
+- Trial: replace `SeqCst` refcount operations with the standard intrusive
+  refcount pattern: relaxed increments, release decrements, and an acquire
+  fence before freeing on the final decrement. This targeted retain/release
+  traffic in reduction and stack cleanup without changing ownership semantics.
+- Focused command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-refcount-order-pgcj cargo xtask perf-gate --language python --language go --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Refcount-order trial Rust | Refcount-order trial C | Trial delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 12218.3 | 10986.2 | +11.21% |
+| Go normal | 16824.7 | 13330.3 | +26.21% |
+| C++ normal | 7581.0 | 10480.8 | -27.67% |
+| Java normal | 10637.3 | 10526.6 | +1.05% |
+| Python + Go + C++ + Java normal | 13873.7 | 12053.1 | +15.10% |
+
+Interpretation:
+
+- This is not keepable. Go and Java move positively in this run, but Python
+  regresses enough that the focused aggregate misses the target.
+- Do not weaken refcount ordering as a standalone optimization. If refcount
+  traffic is revisited, the stronger candidate is reducing retains/releases or
+  avoiding concrete subtree materialization, not changing atomic ordering.
+
+Byte-position in-place reduction gate trial:
+
+- Trial: replace the `10_000` deterministic-reduction warm-up with a byte
+  progress predicate, enabling in-place reductions only after the stack position
+  reaches 16 KiB. This was meant to skip the small C++/Java benchmark files
+  entirely while enabling large TypeScript/JavaScript/Python/Go/Rust files.
+- Focused command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-in-place-byte16k-pgcj cargo xtask perf-gate --language python --language go --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Byte>=16KiB trial Rust | Byte>=16KiB trial C | Trial delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 12967.1 | 10900.5 | +18.96% |
+| Go normal | 16801.6 | 14006.9 | +19.95% |
+| C++ normal | 7695.0 | 10199.9 | -24.56% |
+| Java normal | 9761.5 | 10472.7 | -6.79% |
+| Python + Go + C++ + Java normal | 14280.5 | 12268.3 | +16.40% |
+
+Interpretation:
+
+- This is not keepable. It protects small C++/Java parses from the broad
+  in-place path, but it skips too much profitable work in Python and Go and
+  falls below the current `10_000` reduction warm-up result.
+- Do not replace the reduction-count warm-up with a simple byte-position gate.
+  Any future gate needs to combine parse size with reduction density or
+  language/state shape, not just input progress.
+
+Warm-up dispatch rewrite trial:
+
+- Trial: keep the `10_000` deterministic-reduction warm-up but avoid calling
+  the in-place helper before the threshold is reached. The dispatch computed
+  the deterministic fresh single-version predicate once, incremented the
+  counter, and called the in-place helper only after the counter crossed the
+  warm-up threshold.
+- Focused command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-in-place-warmup-dispatch-pgcj cargo xtask perf-gate --language python --language go --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Dispatch rewrite Rust | Dispatch rewrite C | Trial delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 13317.9 | 10650.6 | +25.04% |
+| Go normal | 14825.7 | 13183.5 | +12.46% |
+| C++ normal | 7787.0 | 10610.4 | -26.61% |
+| Java normal | 9509.8 | 11359.5 | -16.28% |
+| Python + Go + C++ + Java normal | 13665.7 | 11823.9 | +15.58% |
+
+Interpretation:
+
+- This is not keepable. The refactor helps Python in this run but loses too
+  much Go and Java throughput.
+- Keep the original helper-gated `10_000` warm-up shape. Its duplicated checks
+  appear cheaper than the altered hot-loop code shape for the broader focused
+  set.
+
+Warm-up counter plain-increment micro-trial:
+
+- Trial idea: replace `deterministic_reduction_count.saturating_add(1)` with a
+  plain increment in the warm-up counter.
+- Status: abandoned before measurement. The benchmark run was interrupted, and
+  the code was restored to `saturating_add` for defensive correctness.
+- Do not retry this as a performance optimization unless the counter is
+  redesigned to make overflow behavior explicit.
+
+Warm-up threshold `5_000` follow-up:
+
+- Trial: keep the in-place deterministic reduction path and lower the
+  deterministic-reduction warm-up from `10_000` to `5_000`. The counter remains
+  a `saturating_add` counter; overflow behavior is correctness-sensitive and is
+  not part of the optimization.
+- Validation after keeping the candidate:
+
+```sh
+cargo fmt --check --all
+cargo check -p tree-sitter --lib --offline
+git diff --check
+cargo test --all
+```
+
+- `cargo fmt --check --all`, `cargo check -p tree-sitter --lib --offline`, and
+  `git diff --check` pass.
+- `cargo test --all` still fails in the four known baseline CLI
+  `detect_language` tests:
+  `detect_language_by_double_barrel_file_extension`,
+  `detect_language_by_first_line_regex`,
+  `detect_language_without_file_extension`, and
+  `detect_language_without_filename`.
+- Focused command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-in-place-warmup5k-pgcj cargo xtask perf-gate --language python --language go --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Warm-up 5k Rust | Warm-up 5k C | Trial delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 12915.6 | 10554.3 | +22.37% |
+| Go normal | 17183.5 | 13952.7 | +23.16% |
+| C++ normal | 7893.7 | 10669.4 | -26.02% |
+| Java normal | 10552.9 | 11266.9 | -6.34% |
+| Python + Go + C++ + Java normal | 14427.9 | 12078.5 | +19.45% |
+
+- Seven-language command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-in-place-warmup5k-7lang cargo xtask perf-gate --language typescript --language javascript --language python --language go --language rust --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Warm-up 5k Rust | Warm-up 5k C | Trial delta |
+| --- | ---: | ---: | ---: |
+| TypeScript normal | 29343.7 | 23814.9 | +23.22% |
+| JavaScript normal | 20985.3 | 16459.3 | +27.50% |
+| Python normal | 13458.5 | 11261.9 | +19.50% |
+| Go normal | 16665.9 | 13067.3 | +27.54% |
+| Rust normal | 19788.7 | 15831.6 | +24.99% |
+| C++ normal | 11990.9 | 9949.9 | +20.51% |
+| Java normal | 13473.3 | 11650.1 | +15.65% |
+| Overall normal | 20143.0 | 16166.4 | +24.60% |
+
+Interpretation:
+
+- Keep the `5_000` threshold for now. It is slightly better than the `10_000`
+  threshold on the focused weak-language set and materially better on the
+  seven-language gate in this run.
+- The focused run still shows C++ and Java behind C, so this should not be
+  treated as a complete fix for those languages. It is the strongest broad
+  candidate so far and should be validated again after any nearby stack or
+  reduction changes.
+
+Unary in-place pop fast-path trial:
+
+- Trial: inside the kept warmed in-place reduction path, specialize one-child
+  pops where the top stack link is already the single non-extra child. This
+  bypasses reserve-size math and subtree reversal for the common unary
+  reduction case, while falling back to the existing loop for extras or
+  branched stack nodes.
+- Fresh focused baseline command on the kept `5_000` candidate:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-current-pgcj cargo xtask perf-gate --language python --language go --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Current Rust | Current C | Current delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 13096.4 | 11246.5 | +16.45% |
+| Go normal | 16226.7 | 13400.4 | +21.09% |
+| C++ normal | 7253.3 | 10418.6 | -30.38% |
+| Java normal | 9425.6 | 8664.2 | +8.79% |
+| Python + Go + C++ + Java normal | 14071.6 | 12193.1 | +15.41% |
+
+- Focused trial command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-unary-in-place-fast-pgcj cargo xtask perf-gate --language python --language go --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Unary fast Rust | Unary fast C | Trial delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 13597.8 | 10940.3 | +24.29% |
+| Go normal | 15722.5 | 13628.0 | +15.37% |
+| C++ normal | 7584.6 | 10318.5 | -26.50% |
+| Java normal | 10659.8 | 11738.2 | -9.19% |
+| Python + Go + C++ + Java normal | 14178.0 | 12156.2 | +16.63% |
+
+- Seven-language trial command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-unary-in-place-fast-7lang cargo xtask perf-gate --language typescript --language javascript --language python --language go --language rust --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Unary fast Rust | Unary fast C | Trial delta |
+| --- | ---: | ---: | ---: |
+| TypeScript normal | 27570.5 | 23000.6 | +19.87% |
+| JavaScript normal | 20876.5 | 16587.3 | +25.86% |
+| Python normal | 13623.8 | 11132.0 | +22.38% |
+| Go normal | 16751.3 | 13504.7 | +24.04% |
+| Rust normal | 19967.4 | 16575.9 | +20.46% |
+| C++ normal | 7522.6 | 10346.0 | -27.29% |
+| Java normal | 8990.7 | 11847.7 | -24.11% |
+| Overall normal | 19674.4 | 16201.9 | +21.43% |
+
+Interpretation:
+
+- This is not keepable. The focused set improved slightly against a fresh
+  baseline, but the broader gate is worse than the kept `5_000` threshold run
+  and Java regresses substantially.
+- Do not add a top-link unary fast path inside the warmed in-place pop helper.
+  The likely cost is worse branch/code layout in the already-sensitive stack
+  pop path, not reserve/reversal overhead.
+
+In-place pop no-pre-reserve trial:
+
+- Trial: remove the explicit `array_reserve` call from
+  `stack_pop_count_linear_in_place`, relying on `array_push` to grow the
+  parser-owned scratch builder as needed. This tested whether the per-reduction
+  `subtree_alloc_size` and reserve-capacity check cost more than the extra
+  push-time growth checks.
+- Focused command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-in-place-no-reserve-pgcj cargo xtask perf-gate --language python --language go --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | No-reserve Rust | No-reserve C | Trial delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 12858.5 | 10495.0 | +22.52% |
+| Go normal | 15342.9 | 13988.8 | +9.68% |
+| C++ normal | 8211.6 | 10519.1 | -21.94% |
+| Java normal | 11179.8 | 11466.3 | -2.50% |
+| Python + Go + C++ + Java normal | 13727.1 | 12053.1 | +13.89% |
+
+Interpretation:
+
+- This is not keepable. It helps C++ and Java in this focused run, but loses
+  too much Python and Go throughput and lowers the focused aggregate.
+- Keep the explicit reserve in the in-place stack pop helper. The scratch
+  builder's pre-reserve is still beneficial for the broad language set.
+
+Warm-up threshold sweep follow-up:
+
+- Trial: sweep lower warm-up thresholds after keeping `5_000`, while preserving
+  the `saturating_add` counter and the same in-place stack/subtree ownership
+  behavior.
+- `2_500` focused command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-in-place-warmup2500-pgcj cargo xtask perf-gate --language python --language go --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Warm-up 2.5k Rust | Warm-up 2.5k C | Trial delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 13268.5 | 10609.2 | +25.07% |
+| Go normal | 16960.4 | 13749.1 | +23.36% |
+| C++ normal | 6215.2 | 10303.5 | -39.68% |
+| Java normal | 10926.5 | 11822.9 | -7.58% |
+| Python + Go + C++ + Java normal | 14306.0 | 12019.7 | +19.02% |
+
+- `2_500` seven-language command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-in-place-warmup2500-7lang cargo xtask perf-gate --language typescript --language javascript --language python --language go --language rust --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Warm-up 2.5k Rust | Warm-up 2.5k C | Trial delta |
+| --- | ---: | ---: | ---: |
+| TypeScript normal | 28744.0 | 22694.7 | +26.66% |
+| JavaScript normal | 20620.2 | 16120.9 | +27.91% |
+| Python normal | 13626.7 | 10894.5 | +25.08% |
+| Go normal | 16856.4 | 13447.1 | +25.35% |
+| Rust normal | 21363.4 | 16380.6 | +30.42% |
+| C++ normal | 7746.0 | 10318.6 | -24.93% |
+| Java normal | 11133.5 | 11729.4 | -5.08% |
+| Overall normal | 19920.0 | 15918.1 | +25.14% |
+
+- Immediate `5_000` A/B seven-language command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-in-place-warmup5k-7lang-ab cargo xtask perf-gate --language typescript --language javascript --language python --language go --language rust --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Warm-up 5k Rust | Warm-up 5k C | A/B delta |
+| --- | ---: | ---: | ---: |
+| TypeScript normal | 28342.0 | 23291.0 | +21.69% |
+| JavaScript normal | 20399.7 | 15988.6 | +27.59% |
+| Python normal | 13336.5 | 11206.6 | +19.01% |
+| Go normal | 16677.5 | 13591.2 | +22.71% |
+| Rust normal | 21187.0 | 16507.8 | +28.35% |
+| C++ normal | 8029.1 | 10320.0 | -22.20% |
+| Java normal | 11403.2 | 11168.7 | +2.10% |
+| Overall normal | 19679.1 | 16096.4 | +22.26% |
+
+- `3_500` focused command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-in-place-warmup3500-pgcj cargo xtask perf-gate --language python --language go --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Warm-up 3.5k Rust | Warm-up 3.5k C | Trial delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 12920.6 | 10426.0 | +23.93% |
+| Go normal | 17082.2 | 13778.9 | +23.97% |
+| C++ normal | 7763.6 | 10362.9 | -25.08% |
+| Java normal | 11171.0 | 11388.0 | -1.91% |
+| Python + Go + C++ + Java normal | 14388.0 | 11924.7 | +20.66% |
+
+- `3_500` seven-language command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-in-place-warmup3500-7lang cargo xtask perf-gate --language typescript --language javascript --language python --language go --language rust --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Warm-up 3.5k Rust | Warm-up 3.5k C | Trial delta |
+| --- | ---: | ---: | ---: |
+| TypeScript normal | 29514.3 | 23688.0 | +24.60% |
+| JavaScript normal | 20762.1 | 16277.8 | +27.55% |
+| Python normal | 13488.2 | 11171.1 | +20.74% |
+| Go normal | 16940.2 | 13755.3 | +23.15% |
+| Rust normal | 21055.2 | 16612.3 | +26.74% |
+| C++ normal | 7512.6 | 10685.4 | -29.69% |
+| Java normal | 10938.1 | 11366.6 | -3.77% |
+| Overall normal | 20019.4 | 16289.9 | +22.89% |
+
+- `4_500` focused command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-in-place-warmup4500-pgcj cargo xtask perf-gate --language python --language go --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Warm-up 4.5k Rust | Warm-up 4.5k C | Trial delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 13181.7 | 10632.2 | +23.98% |
+| Go normal | 14481.1 | 13090.3 | +10.62% |
+| C++ normal | 5931.1 | 10242.6 | -42.09% |
+| Java normal | 9528.4 | 11359.3 | -16.12% |
+| Python + Go + C++ + Java normal | 13213.4 | 11759.6 | +12.36% |
+
+Interpretation:
+
+- Keep `5_000`. The lower thresholds can raise the broad aggregate in some
+  runs, but they do so while making C++ and Java worse. The immediate `5_000`
+  A/B run is the only threshold in this sweep with Java ahead of C and the
+  least-bad C++ result.
+- Do not lower the threshold solely to chase overall aggregate delta. The goal
+  is broader language coverage, and lower thresholds shift work toward the
+  already-strong TypeScript/JavaScript/Python/Go/Rust group.
+
+In-place trailing-extra fast-path trial:
+
+- Trial: in `parser_reduce_in_place_after_warmup`, check the last child first
+  and call `subtree_array_remove_trailing_extras` only when that child is
+  actually extra. This targeted the common no-trailing-extra case in the warmed
+  deterministic path, while leaving the general reduction path unchanged.
+- Focused command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-in-place-trailing-fast-pgcj cargo xtask perf-gate --language python --language go --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Trailing-fast Rust | Trailing-fast C | Trial delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 12640.8 | 10451.3 | +20.95% |
+| Go normal | 14212.5 | 13710.3 | +3.66% |
+| C++ normal | 7595.5 | 10445.5 | -27.28% |
+| Java normal | 10266.6 | 11661.1 | -11.96% |
+| Python + Go + C++ + Java normal | 13071.2 | 11918.8 | +9.67% |
+
+Interpretation:
+
+- This is not keepable. Avoiding the generic remover in the no-extra case
+  lowers the focused aggregate and hurts Go and Java substantially.
+- Keep the existing `subtree_array_remove_trailing_extras` call in the in-place
+  reduce helper. The extra branch and changed code layout cost more than the
+  skipped empty-removal work.
+
+In-place reduction next-state shortcut trial:
+
+- Trial: in `parser_reduce_in_place_after_warmup`, keep the builtin error
+  guard but otherwise assume reduce-action symbols are nonterminals and call
+  `language_lookup` directly. This avoids loading `token_count` and calling
+  `ts_language_next_state` for normal warmed reductions.
+- Focused command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-in-place-nextstate-direct-pgcj cargo xtask perf-gate --language python --language go --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Direct next-state Rust | Direct next-state C | Trial delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 11854.8 | 10979.7 | +7.97% |
+| Go normal | 16682.6 | 13561.3 | +23.02% |
+| C++ normal | 7317.6 | 10402.1 | -29.65% |
+| Java normal | 9704.6 | 11328.1 | -14.33% |
+| Python + Go + C++ + Java normal | 13571.2 | 12150.4 | +11.69% |
+
+Interpretation:
+
+- This is not keepable. The extra condition in the current next-state path is
+  cheaper than the altered code shape, and Python/Java regress substantially.
+- Keep the existing `language_full(...).token_count` guard and
+  `ts_language_next_state` fallback in warmed in-place reductions.
+
+Warm-up threshold `7_500` follow-up:
+
+- Trial: raise the kept warmed in-place threshold from `5_000` to `7_500` to
+  see whether delaying activation protects C++ and Java while preserving most
+  gains in larger TypeScript/JavaScript/Python/Go/Rust files. The older
+  `10_000` threshold had already been measured; this tested a midpoint above
+  the kept value.
+- Focused command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-in-place-warmup7500-pgcj cargo xtask perf-gate --language python --language go --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Warm-up 7.5k Rust | Warm-up 7.5k C | Trial delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 12681.9 | 10045.7 | +26.24% |
+| Go normal | 16356.6 | 13752.5 | +18.94% |
+| C++ normal | 7798.1 | 10203.0 | -23.57% |
+| Java normal | 11237.0 | 11132.4 | +0.94% |
+| Python + Go + C++ + Java normal | 13993.4 | 11680.9 | +19.80% |
+
+- Seven-language command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-in-place-warmup7500-7lang cargo xtask perf-gate --language typescript --language javascript --language python --language go --language rust --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Warm-up 7.5k Rust | Warm-up 7.5k C | Trial delta |
+| --- | ---: | ---: | ---: |
+| TypeScript normal | 28900.5 | 23007.9 | +25.61% |
+| JavaScript normal | 20759.6 | 16438.7 | +26.29% |
+| Python normal | 13297.0 | 10817.3 | +22.92% |
+| Go normal | 13733.3 | 10953.7 | +25.38% |
+| Rust normal | 17238.5 | 13223.0 | +30.37% |
+| C++ normal | 6747.9 | 8252.7 | -18.23% |
+| Java normal | 8002.3 | 8671.4 | -7.72% |
+| Overall normal | 18729.4 | 15097.9 | +24.05% |
+
+Interpretation:
+
+- This is not keepable. The focused set is close, but the full gate loses too
+  much absolute Rust throughput and still regresses Java.
+- Keep `5_000` as the best measured balance between broad aggregate throughput
+  and weak-language coverage.
+
+Unique-path ownership-transfer pop trial:
+
+- Trial: add a warmed in-place pop variant that activates only when every
+  popped stack node is uniquely owned (`ref_count == 1`) and linear
+  (`link_count == 1`). In that case, collect child payloads without retaining
+  them, move the stack head to the predecessor, and free the popped stack nodes
+  without releasing their payloads. Shared GLR paths fall back to the existing
+  retain/release helper.
+- Safety validation before benchmarking:
+
+```sh
+cargo test -p tree-sitter --lib --offline
+```
+
+- Focused command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-in-place-transfer-pgcj cargo xtask perf-gate --language python --language go --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Transfer Rust | Transfer C | Trial delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 13198.5 | 10605.4 | +24.45% |
+| Go normal | 16444.8 | 13545.2 | +21.41% |
+| C++ normal | 7778.5 | 10245.3 | -24.08% |
+| Java normal | 10606.3 | 11228.6 | -5.54% |
+| Python + Go + C++ + Java normal | 14290.4 | 11928.9 | +19.80% |
+
+- Seven-language command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-in-place-transfer-7lang cargo xtask perf-gate --language typescript --language javascript --language python --language go --language rust --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Transfer Rust | Transfer C | Trial delta |
+| --- | ---: | ---: | ---: |
+| TypeScript normal | 28895.4 | 23394.0 | +23.52% |
+| JavaScript normal | 20985.8 | 15924.6 | +31.78% |
+| Python normal | 13474.6 | 11199.3 | +20.32% |
+| Go normal | 16581.7 | 13379.6 | +23.93% |
+| Rust normal | 18949.6 | 15962.0 | +18.72% |
+| C++ normal | 6348.0 | 10131.2 | -37.34% |
+| Java normal | 9873.1 | 11767.4 | -16.10% |
+| Overall normal | 19678.3 | 16008.9 | +22.92% |
+
+Interpretation:
+
+- This is not keepable. It removes retain/release churn on uniquely-owned
+  straight stack paths, but C++ and Java regress substantially in the full gate,
+  and Rust also loses throughput.
+- Do not retry this exact ownership-transfer shape. A future transfer design
+  would need stronger language/state predicates or a stack representation that
+  avoids changing the hot helper's code shape for weak languages.
+
+Adaptive in-place failure fuse trial:
+
+- Trial: add a parser-local counter for failed warmed in-place pop probes. Once
+  a parse exceeds the failure limit, skip the in-place helper and use the
+  baseline reduction path for the rest of the parse. This tested whether branchy
+  languages like C++ and Java were paying repeated failed-probe costs after the
+  warm-up threshold.
+- `128`-failure focused command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-in-place-failure-fuse128-pgcj cargo xtask perf-gate --language python --language go --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Fuse 128 Rust | Fuse 128 C | Trial delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 12919.6 | 10796.2 | +19.67% |
+| Go normal | 15978.5 | 13954.7 | +14.50% |
+| C++ normal | 7822.3 | 10603.6 | -26.23% |
+| Java normal | 10690.3 | 10182.8 | +4.98% |
+| Python + Go + C++ + Java normal | 13969.2 | 12204.1 | +14.46% |
+
+- `16`-failure focused command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-in-place-failure-fuse16-pgcj cargo xtask perf-gate --language python --language go --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Fuse 16 Rust | Fuse 16 C | Trial delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 12922.5 | 9857.1 | +31.10% |
+| Go normal | 16193.2 | 13639.2 | +18.73% |
+| C++ normal | 7478.6 | 10699.9 | -30.11% |
+| Java normal | 11173.4 | 11418.4 | -2.15% |
+| Python + Go + C++ + Java normal | 14022.5 | 11547.7 | +21.43% |
+
+- `16`-failure seven-language command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-in-place-failure-fuse16-7lang cargo xtask perf-gate --language typescript --language javascript --language python --language go --language rust --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Fuse 16 Rust | Fuse 16 C | Trial delta |
+| --- | ---: | ---: | ---: |
+| TypeScript normal | 28175.4 | 23614.9 | +19.31% |
+| JavaScript normal | 19446.5 | 16317.5 | +19.18% |
+| Python normal | 13536.7 | 11157.7 | +21.32% |
+| Go normal | 16859.3 | 13558.5 | +24.34% |
+| Rust normal | 20237.0 | 16007.7 | +26.42% |
+| C++ normal | 5539.7 | 10538.0 | -47.43% |
+| Java normal | 8706.1 | 11438.0 | -23.88% |
+| Overall normal | 19174.5 | 16205.0 | +18.32% |
+
+Interpretation:
+
+- This is not keepable. The adaptive fuse can make a focused run look better
+  through C-side movement, but the broad gate collapses C++ and Java and lowers
+  the aggregate below the target.
+- Failed in-place probes are not the main weak-language cost, or the extra
+  parser state/branch overwhelms any skipped probes. Do not retry a simple
+  failure-count fuse without first measuring failed-probe rates by language.
+
+In-place pop cold-cleanup trial:
+
+- Trial: move the rare partial-retain cleanup path in
+  `stack_pop_count_linear_in_place` into a `#[cold]` helper. This keeps the
+  success loop smaller without changing reserve sizing, child collection,
+  retain/release behavior, or stack mutation order.
+- Focused command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-in-place-cold-cleanup-pgcj cargo xtask perf-gate --language python --language go --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Cold-cleanup Rust | Cold-cleanup C | Trial delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 12328.1 | 9556.0 | +29.01% |
+| Go normal | 16325.6 | 13592.0 | +20.11% |
+| C++ normal | 8019.0 | 10510.0 | -23.70% |
+| Java normal | 11122.7 | 11220.4 | -0.87% |
+| Python + Go + C++ + Java normal | 13808.9 | 11335.7 | +21.82% |
+
+- Seven-language command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-in-place-cold-cleanup-7lang cargo xtask perf-gate --language typescript --language javascript --language python --language go --language rust --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Cold-cleanup Rust | Cold-cleanup C | Trial delta |
+| --- | ---: | ---: | ---: |
+| TypeScript normal | 30679.1 | 23539.3 | +30.33% |
+| JavaScript normal | 20899.2 | 15431.8 | +35.43% |
+| Python normal | 12763.0 | 10462.7 | +21.99% |
+| Go normal | 16205.0 | 13061.8 | +24.06% |
+| Rust normal | 21044.1 | 16914.0 | +24.42% |
+| C++ normal | 7975.6 | 10417.6 | -23.44% |
+| Java normal | 10253.5 | 11358.0 | -9.72% |
+| Overall normal | 19841.9 | 15636.3 | +26.90% |
+
+Interpretation:
+
+- This is not keepable. The aggregate delta is high, but Java coverage gets
+  worse and the absolute Rust average does not beat the strongest kept `5_000`
+  warmed in-place run.
+- Keep the cleanup inline in `stack_pop_count_linear_in_place`; splitting the
+  failure path is another code-layout tradeoff that does not preserve broad
+  language coverage.
+
+Single-slice reduction fast path trial:
+
+- Trial: preserve the existing "pop into a new reduction version, then
+  renumber it over the original version" semantics, but specialize the
+  single-version, straight-line, single-slice case inside the parser. This
+  avoids the full `parser_reduce` loop over pop slices, same-version
+  child-selection, max-version handling, and merge scan while leaving stack
+  mutation order closer to the baseline than the in-place trial.
+- Validation before benchmarking:
+
+```sh
+cargo fmt --check --all
+cargo check -p tree-sitter --lib --offline
+cargo test -p tree-sitter --lib --offline
+```
+
+- Focused weak-language command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-single-slice-reduce-pcj cargo xtask perf-gate --language python --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Single-slice trial Rust | Single-slice trial C | Single-slice trial delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 12971.9 | 10589.5 | +22.50% |
+| C++ normal | 7844.5 | 9881.4 | -20.61% |
+| Java normal | 9857.9 | 11141.9 | -11.52% |
+| Python + C++ + Java normal | 12353.5 | 10546.5 | +17.13% |
+
+- Follow-up variant: only use the single-slice fast path for unary reductions,
+  so a failed linear probe only checks the top stack link rather than walking a
+  deeper reduction chain before falling back.
+- Focused weak-language command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-single-slice-unary-pcj cargo xtask perf-gate --language python --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Unary-only trial Rust | Unary-only trial C | Unary-only trial delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 12781.8 | 10435.5 | +22.48% |
+| C++ normal | 7787.1 | 10536.5 | -26.09% |
+| Java normal | 10557.9 | 11323.7 | -6.76% |
+| Python + C++ + Java normal | 12202.7 | 10456.1 | +16.70% |
+
+Interpretation:
+
+- Keeping baseline stack mutation order avoids the most severe Java regression
+  from the broad in-place trial, but it also loses the large JavaScript/Python
+  gains that made the in-place direction interesting.
+- Failed linear probes are not the whole problem. Restricting to unary
+  reductions improves Java relative to the broad single-slice variant but still
+  misses the weak-language target and does not improve C++.
+- Do not keep this single-slice wrapper. A successful reduction-control change
+  likely needs to skip more of the outer action-loop machinery or use
+  profile-guided state/reduction-chain predicates, not just replace the inner
+  `parser_reduce` loop for straight pops.
+
+Multi-entry token-cache trial:
+
+- Trial: expand the parser's retained token cache from one entry to a small
+  round-robin cache, keeping the existing byte-position, external-scanner-state,
+  and `parser_can_reuse_first_leaf` predicates. This tests whether GLR versions
+  in branchy languages revisit several nearby lexed positions and can avoid
+  generated lexer or external scanner calls.
+- Validation before benchmarking:
+
+```sh
+cargo fmt --check --all
+cargo check -p tree-sitter --lib --offline
+cargo test -p tree-sitter --lib --offline
+```
+
+- Four-entry focused command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-token-cache4-pcjg cargo xtask perf-gate --language python --language cpp --language java --language go --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | 4-entry Rust | 4-entry C | 4-entry delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 12306.1 | 10818.2 | +13.75% |
+| C++ normal | 7961.9 | 10323.4 | -22.87% |
+| Java normal | 10927.8 | 11368.6 | -3.88% |
+| Go normal | 16664.1 | 13973.1 | +19.26% |
+| Python + C++ + Java + Go normal | 13911.3 | 12223.5 | +13.81% |
+
+- Two-entry focused command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-token-cache2-pcjg cargo xtask perf-gate --language python --language cpp --language java --language go --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | 2-entry Rust | 2-entry C | 2-entry delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 13061.1 | 11285.7 | +15.73% |
+| C++ normal | 7691.2 | 10605.4 | -27.48% |
+| Java normal | 10845.8 | 11399.9 | -4.86% |
+| Go normal | 17156.3 | 13091.5 | +31.05% |
+| Python + C++ + Java + Go normal | 14479.2 | 12121.1 | +19.45% |
+
+Interpretation:
+
+- The cache-size signal is mixed. Remembering more tokens can help Go and Java,
+  but the lookup/retention overhead and changed replacement behavior hurt
+  Python and C++ enough that neither capacity is keepable.
+- A broader token cache is not a universal fix for repeated lexing. Future
+  lexing work should measure cache hit rates by language/state before changing
+  cache shape again, or target callback frequency directly.
+
+External scanner state-cache trial:
+
+- Trial: cache the serialized state currently loaded in the external scanner
+  payload. Before `deserialize`, compare the requested `last_external_token`
+  state to the cached live scanner state and skip `deserialize` when they match.
+  Invalidate the cache after failed or ignored external scans, and refresh it
+  after successful `serialize`.
+- Validation before benchmarking:
+
+```sh
+cargo fmt --check --all
+cargo check -p tree-sitter --lib --offline
+cargo test -p tree-sitter --lib --offline
+```
+
+- Focused external-scanner/weak-language command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-scanner-state-cache-pgcj cargo xtask perf-gate --language python --language go --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Trial Rust | Trial C | Trial delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 4676.9 | 10812.9 | -56.75% |
+| Go normal | 15653.6 | 13157.2 | +18.97% |
+| C++ normal | 7981.5 | 10703.5 | -25.43% |
+| Java normal | 10786.7 | 11377.2 | -5.19% |
+| Python + Go + C++ + Java normal | 7533.2 | 11905.0 | -36.72% |
+
+Interpretation:
+
+- This is decisively worse. Python collapses, so maintaining and comparing the
+  cached serialized scanner state costs more than any skipped deserializes, or
+  it disrupts scanner-state locality enough to increase total scan work.
+- Do not keep a live external-scanner state cache. If external scanner work is
+  revisited, measure deserialize/serialize hit opportunities first and prefer
+  scanner-specific or grammar-level evidence over a generic payload-state cache.
+
+Lexer single-included-range advance trial:
+
+- Trial: specialize `lexer_do_advance` for the common case where
+  `included_range_count == 1`, bypassing the general `lexer_seek_visible_range`
+  loop while preserving the existing chunk loading and lookahead decoding path.
+  This targets the profiled `lexer_do_advance` cost without changing generated
+  lexer callbacks or UTF-8 decoding.
+- Validation before benchmarking:
+
+```sh
+cargo fmt --check --all
+cargo check -p tree-sitter --lib --offline
+cargo test -p tree-sitter --lib --offline
+```
+
+- Focused lexer/weak-language command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-single-range-advance-pgcj cargo xtask perf-gate --language python --language go --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Trial Rust | Trial C | Trial delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 12658.7 | 11086.4 | +14.18% |
+| Go normal | 16986.5 | 12984.6 | +30.82% |
+| C++ normal | 7530.7 | 10112.4 | -25.53% |
+| Java normal | 9415.9 | 11624.8 | -19.00% |
+| Python + Go + C++ + Java normal | 14154.0 | 11951.6 | +18.43% |
+
+Interpretation:
+
+- Bypassing the general included-range loop helps Go in this run, but Python
+  and Java regress and the focused weak-language set misses the target.
+- Do not keep this single-range `advance` specialization. Along with the
+  rejected `mark_end`, logging-layout, and UTF-8 callback trials, this reinforces
+  that individual lexer callback micro-fast-paths are not stable enough; future
+  lexer work needs to reduce callback frequency or change generated lexer
+  structure with profile proof.
+
+Reduction goto-cache trial:
+
+- Trial: add a parser-owned cache for the most recent non-terminal
+  `(state, symbol) -> next_state` lookup used after reductions. This targets
+  `language_lookup` calls in the reduction path without changing language table
+  layout or generated parsers.
+- Validation before benchmarking:
+
+```sh
+cargo fmt --check --all
+cargo check -p tree-sitter --lib --offline
+cargo test -p tree-sitter --lib --offline
+```
+
+- Seven-language command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-goto-cache-7lang cargo xtask perf-gate --language typescript --language javascript --language python --language go --language rust --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Trial Rust | Trial C | Trial delta |
+| --- | ---: | ---: | ---: |
+| TypeScript normal | 29913.5 | 24856.2 | +20.35% |
+| JavaScript normal | 20096.5 | 15630.7 | +28.57% |
+| Python normal | 12957.3 | 10779.7 | +20.20% |
+| Go normal | 15587.2 | 13803.4 | +12.92% |
+| Rust normal | 14553.7 | 17023.3 | -14.51% |
+| C++ normal | 2509.9 | 10635.8 | -76.40% |
+| Java normal | 4779.6 | 11460.9 | -58.30% |
+| Overall normal | 17912.8 | 16159.1 | +10.85% |
+
+Interpretation:
+
+- This is not keepable. C++ and Java collapse, and Rust regresses hard. The
+  extra parser state and cache branch are far more expensive than any repeated
+  goto lookup reuse in these workloads.
+- Do not pursue a one-entry reduction goto cache. Future parse-table work needs
+  measured hit rates or a layout/algorithm change that removes table scanning,
+  not an ad hoc cache on the parser hot path.
+
+### 2026-06-28 EDT - parse instrumentation probe
+
+- Repo head: `f087bc4f`
+- Instrumentation: `TREE_SITTER_PARSE_STATS=1`, aggregate report emitted when
+  the parser is deleted. This does not edit benchmark source code.
+- Whole-language normal parse command template:
+
+```sh
+TREE_SITTER_PARSE_STATS=1 TREE_SITTER_CORE_IMPL=rust TREE_SITTER_BENCHMARK_LANGUAGE_FILTER=<language> TREE_SITTER_BENCHMARK_KIND_FILTER=normal TREE_SITTER_BENCHMARK_REPETITION_COUNT=20 cargo bench benchmark -p tree-sitter-cli --offline
+```
+
+- Languages: TypeScript, JavaScript, Python, Go, Rust, C++, Java.
+
+| Workload | Cases | Avg speed | Single-version samples | Single-version advances | Linear reduce candidates | Multi-slice reduces | Avg reduction-chain length | Max reduction-chain length |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| TypeScript normal | 11 | 25597 bytes/ms | 94.96% | 94.11% | 94.57% | 0.41% | 2.77 | 12 |
+| JavaScript normal | 2 | 19222 bytes/ms | 96.93% | 96.44% | 95.78% | 1.00% | 2.72 | 16 |
+| Python normal | 12 | 10447 bytes/ms | 99.00% | 98.77% | 98.50% | 0.02% | 2.63 | 13 |
+| Go normal | 4 | 17769 bytes/ms | 58.51% | 54.57% | 52.59% | 8.25% | 3.04 | 11 |
+| Rust normal | 2 | 17609 bytes/ms | 100.00% | 100.00% | 100.00% | 0.00% | 2.90 | 48 |
+| C++ normal | 2 | 9338 bytes/ms | 82.39% | 78.31% | 75.92% | 0.35% | 2.32 | 7 |
+| Java normal | 2 | 12917 bytes/ms | 74.55% | 68.66% | 83.17% | 1.57% | 2.82 | 8 |
+
+Materialization counts over 20 repetitions:
+
+| Workload | Materialized nodes | Arena nodes | Heap nodes | 1 child | 2 children | 3 children | 4 children | 5+ children |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| TypeScript normal | 1318280 | 1318280 | 0 | 776760 | 267740 | 211480 | 45820 | 16480 |
+| JavaScript normal | 2040280 | 2040280 | 0 | 1172720 | 351700 | 411440 | 88900 | 15520 |
+| Python normal | 1199780 | 1199780 | 0 | 669500 | 331020 | 133140 | 43060 | 23060 |
+| Go normal | 1290880 | 1290880 | 0 | 710560 | 261200 | 253660 | 53400 | 12060 |
+| Rust normal | 423680 | 423680 | 0 | 264180 | 81200 | 51880 | 18300 | 8120 |
+| C++ normal | 91880 | 91880 | 0 | 47000 | 27160 | 14680 | 2820 | 220 |
+| Java normal | 23340 | 23340 | 0 | 13560 | 3780 | 4620 | 1220 | 160 |
+
+Interpretation:
+
+- The straight-line/common-path stack opportunity is real for TypeScript,
+  JavaScript, Python, and Rust normal parses: at least 94% of stack samples and
+  reduce pops are single-version candidates in those workloads.
+- Go is the important counterexample. It spends 45.43% of advances in
+  multi-version states and 8.25% of reduce-pop calls are multi-slice. A
+  single-version-only fast path is not enough for the universal target.
+- C++ and Java sit between those groups. They still have a majority linear
+  path, but stack branching is common enough that a replacement stack model
+  must preserve cheap branching and merge behavior rather than treating it as a
+  rare fallback.
+- The next stack experiment should remove persistent graph-node allocation for
+  straight segments while keeping branching first-class. Prior stack-pop
+  micro-optimizations do not address this.
+- Reduction chains are short but frequent. This supports investigating
+  action-trace execution for deterministic reduce chains followed by a terminal
+  action.
+- Every internal node in these fresh parses is arena-backed after `f087bc4f`, so
+  additional allocator tuning is unlikely to explain the remaining gap.
+
 ### 2026-06-25 16:17 EDT
 
 - Repo head: `3d976f95`
