@@ -1442,7 +1442,9 @@ unsafe fn parser_select_tree(self_: &mut TSParser, left: Subtree, right: Subtree
         return false;
     }
 
-    if subtree_error_cost(right) < subtree_error_cost(left) {
+    let left_error_cost = subtree_error_cost(left);
+    let right_error_cost = subtree_error_cost(right);
+    if right_error_cost < left_error_cost {
         LOG!(
             parser,
             c"select_smaller_error symbol:%s, over_symbol:%s"
@@ -1454,7 +1456,7 @@ unsafe fn parser_select_tree(self_: &mut TSParser, left: Subtree, right: Subtree
         return true;
     }
 
-    if subtree_error_cost(left) < subtree_error_cost(right) {
+    if left_error_cost < right_error_cost {
         LOG!(
             parser,
             c"select_smaller_error symbol:%s, over_symbol:%s"
@@ -1466,35 +1468,37 @@ unsafe fn parser_select_tree(self_: &mut TSParser, left: Subtree, right: Subtree
         return false;
     }
 
-    if subtree_dynamic_precedence(right) > subtree_dynamic_precedence(left) {
+    let left_dynamic_precedence = subtree_dynamic_precedence(left);
+    let right_dynamic_precedence = subtree_dynamic_precedence(right);
+    if right_dynamic_precedence > left_dynamic_precedence {
         LOG!(
             parser,
             c"select_higher_precedence symbol:%s, prec:%d, over_symbol:%s, other_prec:%d"
                 .as_ptr()
                 .cast::<i8>(),
             SYM_NAME!(parser, subtree_symbol(right)),
-            subtree_dynamic_precedence(right),
+            right_dynamic_precedence,
             SYM_NAME!(parser, subtree_symbol(left)),
-            subtree_dynamic_precedence(left)
+            left_dynamic_precedence
         );
         return true;
     }
 
-    if subtree_dynamic_precedence(left) > subtree_dynamic_precedence(right) {
+    if left_dynamic_precedence > right_dynamic_precedence {
         LOG!(
             parser,
             c"select_higher_precedence symbol:%s, prec:%d, over_symbol:%s, other_prec:%d"
                 .as_ptr()
                 .cast::<i8>(),
             SYM_NAME!(parser, subtree_symbol(left)),
-            subtree_dynamic_precedence(left),
+            left_dynamic_precedence,
             SYM_NAME!(parser, subtree_symbol(right)),
-            subtree_dynamic_precedence(right)
+            right_dynamic_precedence
         );
         return false;
     }
 
-    if subtree_error_cost(left) > 0 {
+    if left_error_cost > 0 {
         return true;
     }
 

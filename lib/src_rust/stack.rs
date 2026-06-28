@@ -549,17 +549,23 @@ unsafe fn stack_subtree_is_equivalent(left: Subtree, right: Subtree) -> bool {
         return false;
     }
 
-    if subtree_symbol(left) != subtree_symbol(right) {
+    let left_symbol = subtree_symbol(left);
+    let right_symbol = subtree_symbol(right);
+    if left_symbol != right_symbol {
         return false;
     }
 
-    if subtree_error_cost(left) > 0 && subtree_error_cost(right) > 0 {
+    let left_error_cost = subtree_error_cost(left);
+    let right_error_cost = subtree_error_cost(right);
+    if left_error_cost > 0 && right_error_cost > 0 {
         return true;
     }
 
+    let left_child_count = subtree_child_count(left);
+    let right_child_count = subtree_child_count(right);
     subtree_padding(left).bytes == subtree_padding(right).bytes
         && subtree_size(left).bytes == subtree_size(right).bytes
-        && subtree_child_count(left) == subtree_child_count(right)
+        && left_child_count == right_child_count
         && subtree_extra(left) == subtree_extra(right)
         && subtree_external_scanner_state_eq(&left, &right)
 }

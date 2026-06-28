@@ -3318,6 +3318,38 @@ change only replaces internal Rust-owned calls with direct helpers and leaves
 the generated-parser ABI callback table intact, no ABI or parser-table risk was
 identified.
 
+## 2026-06-28 subtree comparison input caching
+
+- Change: cache per-comparison subtree fields in `parser_select_tree`,
+  `stack_subtree_is_equivalent`, and `subtree_compare` instead of loading the
+  same error cost, dynamic precedence, symbol, or child count multiple times
+  while making one comparison decision.
+- Scope: shared ambiguity, stack merge, and subtree comparison code. This is a
+  small readability/idiom cleanup with potential benefit in GLR-heavy and error
+  paths, not an architecture-level normal-parse speedup.
+- Validation:
+  - `cargo fmt --check --all`
+  - `cargo check -p tree-sitter --lib --offline`
+  - `cargo clippy -p tree-sitter --lib --offline --all-targets -- -D warnings`
+  - `git diff --check`
+  - `cargo test --all` reached the established local baseline: 265 CLI tests
+    passed and the same four `detect_language` tests failed.
+- Benchmark command:
+
+```sh
+env TMPDIR=/private/tmp/tree-sitter-comparison-cache-tsjs cargo xtask perf-gate --kind all --language typescript --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 29569.2 | 20749.4 | +42.51% |
+| TypeScript error parses | 34 | 1699.9 | 1606.6 | +5.80% |
+| JavaScript normal parses | 2 | 19701.6 | 16121.7 | +22.21% |
+| JavaScript error parses | 39 | 2115.8 | 1948.6 | +8.58% |
+| Overall parser throughput | 86 | 2367.3 | 2204.2 | +7.40% |
+
+No per-case regressions above 5% were reported in this run.
+
 ### 2026-06-25 18:45 EDT
 
 - Repo head: `9a0904a5`

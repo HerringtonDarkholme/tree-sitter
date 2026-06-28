@@ -1932,14 +1932,19 @@ pub unsafe fn subtree_compare(left: Subtree, right: Subtree, pool: &mut SubtreeP
         let right = subtree_from_mut(array_pop(&mut pool.tree_stack));
         let left = subtree_from_mut(array_pop(&mut pool.tree_stack));
 
+        let left_symbol = subtree_symbol(left);
+        let right_symbol = subtree_symbol(right);
+        let left_child_count = subtree_child_count(left);
+        let right_child_count = subtree_child_count(right);
+
         let mut result = 0i32;
-        if subtree_symbol(left) < subtree_symbol(right) {
+        if left_symbol < right_symbol {
             result = -1;
-        } else if subtree_symbol(right) < subtree_symbol(left) {
+        } else if right_symbol < left_symbol {
             result = 1;
-        } else if subtree_child_count(left) < subtree_child_count(right) {
+        } else if left_child_count < right_child_count {
             result = -1;
-        } else if subtree_child_count(right) < subtree_child_count(left) {
+        } else if right_child_count < left_child_count {
             result = 1;
         }
         if result != 0 {
@@ -1947,10 +1952,9 @@ pub unsafe fn subtree_compare(left: Subtree, right: Subtree, pool: &mut SubtreeP
             return result;
         }
 
-        let count = subtree_child_count(left);
         let left_children = subtree_children_slice(left);
         let right_children = subtree_children_slice(right);
-        let mut i = count;
+        let mut i = left_child_count;
         while i > 0 {
             i -= 1;
             let left_child = *left_children.get_unchecked(i as usize);
