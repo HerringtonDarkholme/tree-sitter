@@ -163,6 +163,110 @@ broader baseline replaces it.
 
 ## Checkpoints
 
+### 2026-06-28 EDT - rejected last-external-token identity trial
+
+- Repo head: `7f5e1067`
+- Trial status: not kept. Source experiment was reverted after measurement.
+- Hypothesis: `stack_set_last_external_token` could skip the retain/release
+  pair when the stack head already points at the same external-token subtree.
+  External-token leaves are heap-backed, so pointer identity is a plausible
+  equality check for this assignment.
+- Patch shape:
+
+```rust
+if head.last_external_token.ptr == token.ptr {
+    return;
+}
+```
+
+- Focused trial command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-last-external-token-noop-pgcj cargo xtask perf-gate --language python --language go --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+- Focused same-window baseline command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-last-external-token-baseline-pgcj cargo xtask perf-gate --language python --language go --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+Focused Rust throughput moved up in all four languages, but the broader
+seven-language run did not confirm a universal gain.
+
+| Workload | Patched Rust bytes/ms | Baseline Rust bytes/ms | Movement |
+| --- | ---: | ---: | ---: |
+| Python normal | 13500.4 | 12877.5 | +4.84% |
+| Go normal | 17154.5 | 16135.2 | +6.32% |
+| C++ normal | 7957.9 | 7547.7 | +5.43% |
+| Java normal | 10772.2 | 9570.7 | +12.55% |
+| Overall focused normal | 14744.6 | 13960.7 | +5.62% |
+
+- Broad trial command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-last-external-token-noop-7lang cargo xtask perf-gate --language typescript --language javascript --language python --language go --language rust --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+- Broad same-window baseline command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-last-external-token-baseline-7lang cargo xtask perf-gate --language typescript --language javascript --language python --language go --language rust --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Patched Rust bytes/ms | Baseline Rust bytes/ms | Movement |
+| --- | ---: | ---: | ---: |
+| TypeScript normal | 28675.0 | 29217.7 | -1.86% |
+| JavaScript normal | 20891.7 | 20058.4 | +4.15% |
+| Python normal | 13566.4 | 13459.8 | +0.79% |
+| Go normal | 15979.7 | 17110.2 | -6.61% |
+| Rust normal | 20060.6 | 20779.6 | -3.46% |
+| C++ normal | 7919.8 | 7707.3 | +2.76% |
+| Java normal | 9498.5 | 9783.8 | -2.92% |
+| Overall broad normal | 19691.6 | 19784.5 | -0.47% |
+
+Interpretation:
+
+- The identity branch is too workload-sensitive to keep. It looks useful in a
+  narrow focused run, but the broad run regresses TypeScript, Go, Rust, Java,
+  and overall absolute Rust throughput.
+- Do not retry this as a plain hot-path branch. Any future external-token work
+  needs profile evidence that repeated assignment is common enough to justify
+  the branch, or a representation that avoids the assignment path entirely.
+
+### 2026-06-28 EDT - parser shift-state readability cleanup
+
+- Repo head: `7f5e1067` plus local cleanup.
+- Change status: kept as readability cleanup, not claimed as a measured
+  performance win.
+- Change: collapse `parser_shift_for_action` to compute `next_state` once and
+  call `parser_shift` once after optional lookahead breakdown. This removes a
+  shadowed `next_state` binding and duplicate shift call while preserving the
+  same state choices.
+- Regression-check command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-shift-state-cleanup-7lang cargo xtask perf-gate --language typescript --language javascript --language python --language go --language rust --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Cleanup Rust bytes/ms | Immediate baseline Rust bytes/ms | Movement |
+| --- | ---: | ---: | ---: |
+| TypeScript normal | 30371.7 | 29217.7 | +3.95% |
+| JavaScript normal | 20921.4 | 20058.4 | +4.30% |
+| Python normal | 12679.2 | 13459.8 | -5.80% |
+| Go normal | 16266.6 | 17110.2 | -4.93% |
+| Rust normal | 20214.2 | 20779.6 | -2.72% |
+| C++ normal | 7595.8 | 7707.3 | -1.45% |
+| Java normal | 11184.3 | 9783.8 | +14.32% |
+| Overall broad normal | 19732.7 | 19784.5 | -0.26% |
+
+Interpretation:
+
+- The aggregate movement is noise-level and does not support calling this a
+  performance optimization.
+- The code shape is simpler and avoids a duplicated hot-path call site, so it
+  is acceptable as a readability-only change.
+
 ### 2026-06-28 EDT - rejected linear-tail and progress-callback trials
 
 - Repo head: `f087bc4f`

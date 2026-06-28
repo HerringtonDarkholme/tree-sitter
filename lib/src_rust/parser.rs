@@ -2633,7 +2633,7 @@ unsafe fn parser_shift_for_action(
     action: TSParseAction,
 ) {
     let shift = action.shift;
-    let next_state;
+    let mut next_state;
     if shift.extra {
         next_state = state;
         LOG!(parser, c"shift_extra".as_ptr().cast::<i8>());
@@ -2648,11 +2648,9 @@ unsafe fn parser_shift_for_action(
 
     if subtree_child_count(*lookahead) > 0 {
         parser_breakdown_lookahead(self_, lookahead, state);
-        let next_state = ts_language_next_state(self_.language, state, subtree_symbol(*lookahead));
-        parser_shift(self_, version, next_state, *lookahead, shift.extra);
-    } else {
-        parser_shift(self_, version, next_state, *lookahead, shift.extra);
+        next_state = ts_language_next_state(self_.language, state, subtree_symbol(*lookahead));
     }
+    parser_shift(self_, version, next_state, *lookahead, shift.extra);
 }
 
 unsafe fn parser_recover_for_action(
