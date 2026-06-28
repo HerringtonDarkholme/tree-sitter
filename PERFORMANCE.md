@@ -1675,6 +1675,150 @@ Interpretation:
   failure path is another code-layout tradeoff that does not preserve broad
   language coverage.
 
+Parser token-count cache trial:
+
+- Trial: cache `language_full(self_.language).token_count` in `TSParser` during
+  `ts_parser_set_language`, then use that parser-local field in the three
+  reduction next-state branches. This tested whether avoiding repeated language
+  metadata loads in reduction hot paths improves broad parser throughput.
+- Focused command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-parser-token-count-cache-pgcj cargo xtask perf-gate --language python --language go --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Token-cache Rust | Token-cache C | Trial delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 13850.1 | 10265.2 | +34.92% |
+| Go normal | 16169.1 | 13321.9 | +21.37% |
+| C++ normal | 7751.0 | 10188.3 | -23.92% |
+| Java normal | 10375.1 | 11555.6 | -10.22% |
+| Python + Go + C++ + Java normal | 14501.3 | 11648.0 | +24.50% |
+
+- Seven-language trial command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-parser-token-count-cache-7lang cargo xtask perf-gate --language typescript --language javascript --language python --language go --language rust --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Token-cache Rust | Token-cache C | Trial delta |
+| --- | ---: | ---: | ---: |
+| TypeScript normal | 29464.0 | 23380.6 | +26.02% |
+| JavaScript normal | 20296.0 | 15626.3 | +29.88% |
+| Python normal | 13129.2 | 10618.0 | +23.65% |
+| Go normal | 16253.5 | 13204.7 | +23.09% |
+| Rust normal | 21183.4 | 16880.2 | +25.49% |
+| C++ normal | 8152.9 | 10547.0 | -22.70% |
+| Java normal | 10982.4 | 11503.3 | -4.53% |
+| Overall normal | 19656.7 | 15758.7 | +24.74% |
+
+- Same-window seven-language baseline command after reverting the cache:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-postcommit-7lang-ab cargo xtask perf-gate --language typescript --language javascript --language python --language go --language rust --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Baseline Rust | Baseline C | Baseline delta |
+| --- | ---: | ---: | ---: |
+| TypeScript normal | 29048.9 | 23772.1 | +22.20% |
+| JavaScript normal | 20904.8 | 16129.2 | +29.61% |
+| Python normal | 12339.7 | 10836.7 | +13.87% |
+| Go normal | 16817.0 | 13150.2 | +27.88% |
+| Rust normal | 20301.4 | 15756.0 | +28.85% |
+| C++ normal | 7677.7 | 10251.0 | -25.10% |
+| Java normal | 9819.3 | 11279.8 | -12.95% |
+| Overall normal | 19551.4 | 15956.6 | +22.53% |
+
+Interpretation:
+
+- This is not universal enough to keep. It improves the overall aggregate and
+  helps TypeScript, Python, Rust, C++, and Java in the same-window broad
+  comparison, but JavaScript and Go lose absolute Rust throughput.
+- Do not commit this as a universal parser improvement. It may be worth
+  revisiting only if paired with another change that recovers JavaScript and Go.
+
+Parser shift leaf/extra guard-order trial:
+
+- Trial: in `parser_shift`, evaluate the leaf check before comparing the
+  incoming `extra` flag with `subtree_extra(lookahead)`. This tested whether
+  avoiding a metadata read for non-leaf lookaheads is useful on reduction-heavy
+  workloads.
+- Focused command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-shift-leaf-extra-order-pgcj cargo xtask perf-gate --language python --language go --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Guard-order Rust | Guard-order C | Trial delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 12780.1 | 10616.0 | +20.38% |
+| Go normal | 15309.4 | 13884.3 | +10.26% |
+| C++ normal | 7942.7 | 10537.4 | -24.62% |
+| Java normal | 10755.0 | 11482.1 | -6.33% |
+| Python + Go + C++ + Java normal | 13642.6 | 12084.0 | +12.90% |
+
+Interpretation:
+
+- This is not keepable. Compared with the current post-commit focused
+  baseline, Java improved but Python, Go, C++, and the aggregate Rust
+  throughput regressed.
+- Preserve the original condition order in `parser_shift`; this helper sees
+  enough leaf lookaheads that the attempted short-circuit does not pay for
+  broad parser throughput.
+
+Subtree/stack slice cleanup trials:
+
+- Trial: replace manual pointer reverse/copy loops in `subtree_array_reverse`,
+  `stack_pop_builder_reverse_subtrees`, and
+  `stack_pop_builder_append_subtrees` with slice `reverse()` and
+  `copy_from_slice`, along with slice iteration in `subtree_array_copy` and
+  `subtree_array_clear`.
+- Focused command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-array-slice-cleanup-pgcj cargo xtask perf-gate --language python --language go --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Full slice-cleanup Rust | Full slice-cleanup C | Trial delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 12900.9 | 10116.9 | +27.52% |
+| Go normal | 16304.9 | 13546.9 | +20.36% |
+| C++ normal | 7500.1 | 10541.5 | -28.85% |
+| Java normal | 10112.2 | 10948.6 | -7.64% |
+| Python + Go + C++ + Java normal | 14041.5 | 11658.5 | +20.44% |
+
+Interpretation:
+
+- This is not keepable as a full parser hot-path change. The slice-based
+  reversal/copy version was readable, but C++ and Java moved the wrong way
+  versus the current focused baseline.
+- Keep the manual reverse/copy loops in the stack and subtree reversal paths.
+
+- Reduced cleanup: keep only the slice-based `subtree_array_copy` and
+  `subtree_array_clear` loops. This removes manual pointer indexing from
+  subtree array maintenance without changing the reduction reversal path.
+- Focused command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-subtree-copy-clear-slices-pgcj cargo xtask perf-gate --language python --language go --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Copy/clear slice Rust | Copy/clear slice C | Trial delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 13335.9 | 10608.3 | +25.71% |
+| Go normal | 15717.9 | 12697.5 | +23.79% |
+| C++ normal | 7930.2 | 10403.6 | -23.77% |
+| Java normal | 9861.0 | 10850.5 | -9.12% |
+| Python + Go + C++ + Java normal | 14073.9 | 11583.4 | +21.50% |
+
+Interpretation:
+
+- This is not a performance optimization claim. The focused signal is mixed
+  and close to the current parser baseline, so the value is readability and
+  more idiomatic Rust in array copy/clear maintenance.
+- Keep the reduced cleanup only if the full validation suite passes with no new
+  failures.
+
 Single-slice reduction fast path trial:
 
 - Trial: preserve the existing "pop into a new reduction version, then

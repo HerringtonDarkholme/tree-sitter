@@ -691,16 +691,23 @@ pub unsafe fn subtree_array_copy(self_: &SubtreeArray, dest: &mut SubtreeArray) 
     if self_.capacity > 0 {
         dest.contents =
             calloc(self_.capacity as usize, core::mem::size_of::<Subtree>()).cast::<Subtree>();
-        ptr::copy_nonoverlapping(self_.contents, dest.contents, self_.size as usize);
-        for i in 0..self_.size {
-            subtree_retain(*dest.contents.add(i as usize));
+        if self_.size > 0 {
+            let source = core::slice::from_raw_parts(self_.contents, self_.size as usize);
+            let destination = core::slice::from_raw_parts_mut(dest.contents, self_.size as usize);
+            destination.copy_from_slice(source);
+            for tree in destination {
+                subtree_retain(*tree);
+            }
         }
     }
 }
 
 pub unsafe fn subtree_array_clear(pool: &mut SubtreePool, self_: &mut SubtreeArray) {
-    for i in 0..self_.size {
-        subtree_release(pool, *self_.contents.add(i as usize));
+    if self_.size > 0 {
+        let trees = core::slice::from_raw_parts(self_.contents, self_.size as usize);
+        for tree in trees {
+            subtree_release(pool, *tree);
+        }
     }
     self_.size = 0;
 }
