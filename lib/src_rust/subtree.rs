@@ -740,12 +740,9 @@ pub unsafe fn subtree_array_remove_trailing_extras(
 }
 
 pub unsafe fn subtree_array_reverse(self_: &mut SubtreeArray) {
-    let limit = self_.size / 2;
-    for i in 0..limit {
-        let reverse_index = self_.size as usize - 1 - i as usize;
-        let a = self_.contents.add(i as usize);
-        let b = self_.contents.add(reverse_index);
-        ptr::swap(a, b);
+    if self_.size > 0 {
+        let trees = core::slice::from_raw_parts_mut(self_.contents, self_.size as usize);
+        trees.reverse();
     }
 }
 

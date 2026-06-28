@@ -1819,6 +1819,416 @@ Interpretation:
 - Keep the reduced cleanup only if the full validation suite passes with no new
   failures.
 
+Stack linear-pop payload-cache trial:
+
+- Trial: in `stack_pop_count_linear`, `stack_pop_count_linear_into`, and
+  `stack_pop_count_linear_in_place`, read the `Subtree` from the link payload
+  once and use that local value for the null, retain, and `extra` checks. This
+  tested whether reducing repeated payload helper calls in the common straight
+  stack path improves broad reduction throughput.
+- Focused command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-stack-pop-payload-cache-pgcj cargo xtask perf-gate --language python --language go --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Payload-cache Rust | Payload-cache C | Trial delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 13562.3 | 10959.0 | +23.75% |
+| Go normal | 16734.4 | 13651.3 | +22.59% |
+| C++ normal | 8188.7 | 10612.6 | -22.84% |
+| Java normal | 10910.9 | 11125.7 | -1.93% |
+| Python + Go + C++ + Java normal | 14641.9 | 12183.6 | +20.18% |
+
+- Seven-language trial command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-stack-pop-payload-cache-7lang-rerun cargo xtask perf-gate --language typescript --language javascript --language python --language go --language rust --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Payload-cache Rust | Payload-cache C | Trial delta |
+| --- | ---: | ---: | ---: |
+| TypeScript normal | 27831.4 | 23264.5 | +19.63% |
+| JavaScript normal | 19974.1 | 15662.7 | +27.53% |
+| Python normal | 12891.6 | 10535.4 | +22.36% |
+| Go normal | 16009.5 | 12995.5 | +23.19% |
+| Rust normal | 20062.4 | 15668.5 | +28.04% |
+| C++ normal | 6020.4 | 10252.0 | -41.28% |
+| Java normal | 10951.9 | 10897.8 | +0.50% |
+| Overall normal | 18974.4 | 15605.7 | +21.59% |
+
+- Same-window seven-language baseline after reverting the payload-cache trial:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-stack-pop-payload-cache-baseline-7lang cargo xtask perf-gate --language typescript --language javascript --language python --language go --language rust --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Baseline Rust | Baseline C | Baseline delta |
+| --- | ---: | ---: | ---: |
+| TypeScript normal | 31621.9 | 24828.8 | +27.36% |
+| JavaScript normal | 21267.5 | 15497.5 | +37.23% |
+| Python normal | 12923.9 | 10771.3 | +19.99% |
+| Go normal | 16097.2 | 12980.6 | +24.01% |
+| Rust normal | 21285.8 | 16954.6 | +25.55% |
+| C++ normal | 8092.6 | 10597.5 | -23.64% |
+| Java normal | 10198.5 | 11563.4 | -11.80% |
+| Overall normal | 20115.2 | 15914.6 | +26.40% |
+
+Interpretation:
+
+- This is not keepable. The focused subset improved, but the same-window broad
+  baseline is faster overall and notably faster for TypeScript, JavaScript,
+  Rust, and C++.
+- Avoid treating cached payload locals as a universal stack optimization unless
+  paired with a larger straight-stack representation change.
+
+Reduction-chain trace and one-entry table-cache trial:
+
+- Temporary instrumentation: added parser-local counters under
+  `TREE_SITTER_TRACE_REDUCTION_CHAINS` to count consecutive reduction chains in
+  `parser_advance`. The instrumentation was removed after measurement.
+- Trace command:
+
+```sh
+for lang in typescript javascript python go rust cpp java; do TREE_SITTER_TRACE_REDUCTION_CHAINS=1 TREE_SITTER_CORE_IMPL=rust cargo xtask benchmark --language "$lang" --repetition-count 1 --kind normal; done
+```
+
+- Representative trace observations:
+
+| Language/example | Chains | Reductions | Max chain | Zero | Single | 2-3 | 4+ |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| TypeScript `parser.ts` | 42407 | 58892 | 12 | 20762 | 6170 | 8784 | 6691 |
+| JavaScript `jquery.js` | 48516 | 63539 | 16 | 25603 | 6693 | 9697 | 6523 |
+| Python `python3.8_grammar.py` | 11568 | 16022 | 13 | 5362 | 2148 | 2436 | 1622 |
+| Go `proc.go` | 29500 | 30503 | 11 | 19321 | 3005 | 4045 | 3129 |
+| Rust `ast.rs` | 12082 | 17714 | 11 | 5791 | 1829 | 2079 | 2383 |
+| C++ `rule.cc` | 2420 | 2778 | 7 | 1150 | 523 | 565 | 182 |
+| Java `LargeService.java` | 906 | 949 | 8 | 577 | 100 | 112 | 117 |
+
+Interpretation:
+
+- Long deterministic reduction chains are common enough to justify future
+  action-trace work, especially in TypeScript, JavaScript, Python, Go, and
+  Rust.
+- C++ and Java have fewer and shorter chains, so any trace executor must keep a
+  low-overhead fallback. A chain-only optimization that adds overhead to every
+  table lookup is unlikely to be universal.
+
+- Follow-up trial: add a parser-local one-entry cache for parse-table lookups
+  keyed by `(state, lookahead_symbol)`, route parser table lookups through it,
+  and invalidate it on language changes. This tested whether repeated
+  reduction-chain continuation lookups are a cheap stepping stone toward an
+  action-trace executor.
+- Focused command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-table-entry-cache1-pgcj cargo xtask perf-gate --language python --language go --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Table-cache Rust | Table-cache C | Trial delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 12686.3 | 10278.2 | +23.43% |
+| Go normal | 15352.8 | 13007.5 | +18.03% |
+| C++ normal | 7759.3 | 10701.7 | -27.50% |
+| Java normal | 10920.0 | 11153.7 | -2.10% |
+| Python + Go + C++ + Java normal | 13596.4 | 11547.4 | +17.74% |
+
+Interpretation:
+
+- This is not keepable. The one-entry table cache adds overhead without enough
+  hit rate in the focused set, regressing Python, Go, C++, and the aggregate
+  versus the current parser baseline.
+- Future action-trace work should cache whole deterministic reduce/continue
+  sequences or generated table decisions, not individual table entries.
+
+- Follow-up trial: replace the one-entry cache with a 16-slot direct-mapped
+  cache keyed by `(state ^ lookahead_symbol)`. This tested whether the one-entry
+  failure was just poor hit rate.
+- Focused command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-table-entry-cache16-pgcj cargo xtask perf-gate --language python --language go --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Table-cache16 Rust | Table-cache16 C | Trial delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 13828.0 | 10427.9 | +32.61% |
+| Go normal | 15142.7 | 13086.8 | +15.71% |
+| C++ normal | 7711.8 | 10005.3 | -22.92% |
+| Java normal | 10816.2 | 10768.8 | +0.44% |
+| Python + Go + C++ + Java normal | 14053.4 | 11630.4 | +20.83% |
+
+Interpretation:
+
+- This is still not keepable. Python and Java improved in this run, but Go
+  regressed sharply and the focused aggregate did not beat the current parser
+  baseline.
+- Treat individual parse-table entry caching as closed for now. The trace data
+  points to whole-chain execution, not small lookup caches.
+
+Single-active-version condense skip trial:
+
+- Trial: in the outer parse loop, skip `parser_condense_stack` when there is
+  exactly one active stack version and no finished tree. In that state
+  condensation cannot merge versions, remove halted versions, resume recovery,
+  enforce max-version limits, or terminate against a finished tree. This tested
+  whether removing an entire GLR maintenance phase helps deterministic normal
+  parses.
+- Focused command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-skip-single-active-condense-pgcj cargo xtask perf-gate --language python --language go --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Condense-skip Rust | Condense-skip C | Trial delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 13531.3 | 10613.3 | +27.49% |
+| Go normal | 16075.3 | 13098.6 | +22.73% |
+| C++ normal | 7648.2 | 9886.8 | -22.64% |
+| Java normal | 10367.2 | 10334.0 | +0.32% |
+| Python + Go + C++ + Java normal | 14294.1 | 11726.9 | +21.89% |
+
+- Seven-language trial command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-skip-single-active-condense-7lang cargo xtask perf-gate --language typescript --language javascript --language python --language go --language rust --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Condense-skip Rust | Condense-skip C | Trial delta |
+| --- | ---: | ---: | ---: |
+| TypeScript normal | 31142.7 | 24157.8 | +28.91% |
+| JavaScript normal | 21170.5 | 16161.9 | +30.99% |
+| Python normal | 13346.3 | 11239.8 | +18.74% |
+| Go normal | 17269.6 | 13820.4 | +24.96% |
+| Rust normal | 19121.7 | 15755.7 | +21.36% |
+| C++ normal | 7879.3 | 9921.4 | -20.58% |
+| Java normal | 10249.0 | 10531.9 | -2.69% |
+| Overall normal | 20303.7 | 16283.2 | +24.69% |
+
+- Same-window seven-language baseline after reverting the skip:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-skip-single-active-condense-baseline-7lang cargo xtask perf-gate --language typescript --language javascript --language python --language go --language rust --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Baseline Rust | Baseline C | Baseline delta |
+| --- | ---: | ---: | ---: |
+| TypeScript normal | 28989.1 | 24855.5 | +16.63% |
+| JavaScript normal | 21135.5 | 15483.0 | +36.51% |
+| Python normal | 13080.5 | 10637.8 | +22.96% |
+| Go normal | 16310.5 | 13094.6 | +24.56% |
+| Rust normal | 19910.8 | 16960.2 | +17.40% |
+| C++ normal | 7624.5 | 10744.6 | -29.04% |
+| Java normal | 9390.8 | 11378.4 | -17.47% |
+| Overall normal | 19707.4 | 15902.4 | +23.93% |
+
+- Confirmation command with the skip reapplied:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-skip-single-active-condense-confirm cargo xtask perf-gate --language rust --language typescript --language go --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Confirmation Rust | Confirmation C | Trial delta |
+| --- | ---: | ---: | ---: |
+| Rust normal | 18632.9 | 14835.4 | +25.60% |
+| TypeScript normal | 28871.7 | 24404.7 | +18.30% |
+| Go normal | 17072.3 | 13507.4 | +26.39% |
+| C++ normal | 7178.7 | 10407.5 | -31.02% |
+| Java normal | 9832.0 | 11045.0 | -10.98% |
+| Rust + TypeScript + Go + C++ + Java normal | 21764.5 | 18277.4 | +19.08% |
+
+Interpretation:
+
+- This is not keepable. The same-window seven-language run was overall
+  positive, but the confirmation run did not preserve TypeScript, Rust, C++,
+  or Java throughput.
+- Keep `parser_condense_stack` in the outer loop. If this direction is retried,
+  it needs a more explicit parser state flag proving condensation is a no-op,
+  not just a repeated version/status predicate in the hot loop.
+
+Single-version halted-count shortcut trial:
+
+- Trial: in `parser_reduce` and `parser_reduce_with_slices`, skip
+  `stack_halted_version_count` when `initial_version_count == 1`, because a
+  single active reduction version cannot have a halted peer.
+- Focused command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-reduce-halted-count-single-pgcj cargo xtask perf-gate --language python --language go --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Halted-count shortcut Rust | Halted-count shortcut C | Trial delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 13704.2 | 10618.6 | +29.06% |
+| Go normal | 16028.3 | 13312.8 | +20.40% |
+| C++ normal | 7708.3 | 9943.6 | -22.48% |
+| Java normal | 9984.4 | 10967.3 | -8.96% |
+| Python + Go + C++ + Java normal | 14360.6 | 11826.4 | +21.43% |
+
+- Seven-language command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-reduce-halted-count-single-7lang cargo xtask perf-gate --language typescript --language javascript --language python --language go --language rust --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Halted-count shortcut Rust | Halted-count shortcut C | Trial delta |
+| --- | ---: | ---: | ---: |
+| TypeScript normal | 28575.1 | 23277.2 | +22.76% |
+| JavaScript normal | 19438.1 | 15966.7 | +21.74% |
+| Python normal | 13397.9 | 10983.5 | +21.98% |
+| Go normal | 16678.6 | 13360.6 | +24.83% |
+| Rust normal | 20825.7 | 16372.5 | +27.20% |
+| C++ normal | 7666.5 | 10672.1 | -28.16% |
+| Java normal | 8640.8 | 10401.8 | -16.93% |
+| Overall normal | 19374.9 | 15967.0 | +21.34% |
+
+Interpretation:
+
+- This is not keepable. The shortcut is logically valid but worsens
+  seven-language aggregate throughput and hurts JavaScript and Java badly.
+- Leave `stack_halted_version_count` in the reduction path. The branch and code
+  shape cost more than the avoided one-version scan.
+
+Explicit advance-result condense skip trial:
+
+- Trial: replace the bool return from `parser_advance` with an
+  `AdvanceResult` carrying whether the terminal action requires stack
+  condensation. Normal shift completion reports no condensation needed; accept,
+  recover, pause, and merged-reduction halt report that condensation is needed.
+  The outer loop then skips `parser_condense_stack` only after a progress-making
+  pass with no condense requests and exactly one stack version.
+- Focused command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-advance-result-condense-pgcj cargo xtask perf-gate --language python --language go --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Advance-result Rust | Advance-result C | Trial delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 12271.2 | 10115.9 | +21.31% |
+| Go normal | 16445.5 | 13011.7 | +26.39% |
+| C++ normal | 7664.3 | 9976.4 | -23.18% |
+| Java normal | 9984.7 | 11607.8 | -13.98% |
+| Python + Go + C++ + Java normal | 13768.5 | 11431.5 | +20.44% |
+
+Interpretation:
+
+- This is not keepable. The explicit status avoids some post-advance stack
+  checks, but the enum plumbing and changed action-dispatch shape regress
+  Python, Java, and the focused aggregate.
+- The condense-skip direction should stay closed unless a larger outer-loop
+  rewrite removes more than just the no-op condensation call.
+
+Cold parser-path layout trial:
+
+- Trial: mark rare normal-parse paths with `#[cold]`: incremental
+  `parser_reduce_with_slices`, `parser_accept`, error recovery helpers,
+  `parser_recover_for_action`, `parser_try_breakdown_reused_top`, and
+  `parser_pause_with_error`. This tested whether code layout hints improve the
+  normal parser hot loop without changing behavior.
+- Focused command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-parser-cold-paths-pgcj cargo xtask perf-gate --language python --language go --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Cold-path Rust | Cold-path C | Trial delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 12726.4 | 11170.2 | +13.93% |
+| Go normal | 17048.1 | 13982.4 | +21.93% |
+| C++ normal | 7521.5 | 10358.1 | -27.39% |
+| Java normal | 10217.5 | 10941.4 | -6.62% |
+| Python + Go + C++ + Java normal | 14226.2 | 12421.0 | +14.53% |
+
+- Seven-language command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-parser-cold-paths-7lang cargo xtask perf-gate --language typescript --language javascript --language python --language go --language rust --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Cold-path Rust | Cold-path C | Trial delta |
+| --- | ---: | ---: | ---: |
+| TypeScript normal | 30723.2 | 23889.4 | +28.61% |
+| JavaScript normal | 19720.1 | 15931.6 | +23.78% |
+| Python normal | 13034.1 | 10908.4 | +19.49% |
+| Go normal | 16493.1 | 13513.0 | +22.05% |
+| Rust normal | 20549.6 | 16407.8 | +25.24% |
+| C++ normal | 7245.2 | 10174.1 | -28.79% |
+| Java normal | 9180.5 | 11193.3 | -17.98% |
+| Overall normal | 19568.1 | 16052.1 | +21.90% |
+
+Interpretation:
+
+- This is not keepable. The code-layout hints improve or preserve some
+  languages in isolation, but C++/Java and the seven-language aggregate are not
+  competitive with current baselines.
+- Avoid broad `#[cold]` annotations as a parser performance strategy unless a
+  profile identifies a specific out-of-line path with stable instruction-cache
+  pressure.
+
+Stack node inline link-capacity trial:
+
+- Trial: reduce `MAX_LINK_COUNT` from 8 to 4, shrinking 64-bit `StackNode`
+  size from 232 bytes to 136 bytes. This tested whether the stack node pays too
+  much cache and allocation cost for high inline link capacity in mostly
+  deterministic parses.
+- Focused command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-stack-max-link-4-pgcj cargo xtask perf-gate --language python --language go --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Link-cap-4 Rust | Link-cap-4 C | Trial delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 13105.4 | 11010.2 | +19.03% |
+| Go normal | 17501.8 | 13817.9 | +26.66% |
+| C++ normal | 13062.4 | 10749.1 | +21.52% |
+| Java normal | 14826.6 | 11498.6 | +28.94% |
+| Python + Go + C++ + Java normal | 15065.0 | 12289.3 | +22.59% |
+
+- Seven-language trial command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-stack-max-link-4-7lang cargo xtask perf-gate --language typescript --language javascript --language python --language go --language rust --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Link-cap-4 Rust | Link-cap-4 C | Trial delta |
+| --- | ---: | ---: | ---: |
+| TypeScript normal | 30792.1 | 23491.2 | +31.08% |
+| JavaScript normal | 19995.0 | 15459.5 | +29.34% |
+| Python normal | 13351.3 | 10904.8 | +22.44% |
+| Go normal | 13840.9 | 12728.6 | +8.74% |
+| Rust normal | 20973.6 | 16368.6 | +28.13% |
+| C++ normal | 7834.4 | 10421.6 | -24.82% |
+| Java normal | 10298.3 | 11815.8 | -12.84% |
+| Overall normal | 19125.5 | 15666.0 | +22.08% |
+
+- Same-window seven-language baseline after reverting the link-cap trial:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-stack-max-link-4-baseline-7lang cargo xtask perf-gate --language typescript --language javascript --language python --language go --language rust --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Baseline Rust | Baseline C | Baseline delta |
+| --- | ---: | ---: | ---: |
+| TypeScript normal | 27509.7 | 22393.3 | +22.85% |
+| JavaScript normal | 19998.5 | 15966.1 | +25.26% |
+| Python normal | 12999.4 | 10990.6 | +18.28% |
+| Go normal | 16792.5 | 13473.0 | +24.64% |
+| Rust normal | 19702.2 | 16147.4 | +22.01% |
+| C++ normal | 7259.4 | 10437.7 | -30.45% |
+| Java normal | 10341.8 | 11197.6 | -7.64% |
+| Overall normal | 19220.1 | 15844.8 | +21.30% |
+
+Interpretation:
+
+- This is not keepable. The focused subset looked strong, but the
+  seven-language trial lost to the same-window baseline overall and regressed
+  Go and Java materially.
+- The current inline link capacity should stay at 8. A future smaller-node
+  design would need to preserve high-link behavior with a different spill path
+  instead of just lowering the inline capacity.
+
 Single-slice reduction fast path trial:
 
 - Trial: preserve the existing "pop into a new reduction version, then
