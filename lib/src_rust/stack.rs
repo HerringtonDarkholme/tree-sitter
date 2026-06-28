@@ -185,6 +185,8 @@ pub struct Stack {
     pub iterators: Array<StackIterator>,
     /// Free list for recently released stack nodes.
     pub node_pool: StackNodeArray,
+    /// Number of heads whose status is `Halted`.
+    pub halted_version_count: u32,
     /// Initial root node shared by all versions.
     pub base_node: *mut StackNode,
     /// Parser-owned subtree pool used when releasing link payloads.
@@ -211,7 +213,7 @@ const _: () = assert!(core::mem::size_of::<StackSummaryEntry>() == 20);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(core::mem::size_of::<StackHead>() == 48);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(core::mem::size_of::<Stack>() == 80);
+const _: () = assert!(core::mem::size_of::<Stack>() == 88);
 
 pub type StackAction = u32;
 pub const STACK_ACTION_NONE: StackAction = 0;
@@ -1147,6 +1149,7 @@ pub unsafe fn stack_new(subtree_pool: &mut SubtreePool) -> *mut Stack {
             slices: array_new(),
             iterators: array_new(),
             node_pool: array_new(),
+            halted_version_count: 0,
             base_node: ptr::null_mut(),
             subtree_pool,
         },
@@ -1203,14 +1206,8 @@ pub const fn stack_version_count(self_: &Stack) -> u32 {
 }
 
 /// Get the number of halted versions.
-pub unsafe fn stack_halted_version_count(self_: &Stack) -> u32 {
-    let mut count = 0u32;
-    for i in 0..self_.heads.size {
-        if stack_head(self_, i).status == StackStatus::Halted {
-            count += 1;
-        }
-    }
-    count
+pub const fn stack_halted_version_count(self_: &Stack) -> u32 {
+    self_.halted_version_count
 }
 
 /// Get the state at the top of a version.
@@ -1447,6 +1444,9 @@ pub unsafe fn stack_remove_version(self_: &mut Stack, version: StackVersion) {
     let heads = &mut self_.heads;
     let node_pool = &mut self_.node_pool;
     let subtree_pool = ptr_mut(self_.subtree_pool);
+    if array_get_ref(heads, version).status == StackStatus::Halted {
+        self_.halted_version_count -= 1;
+    }
     stack_head_delete(array_get_mut(heads, version), node_pool, subtree_pool);
     array_erase(heads, version);
 }
@@ -1463,6 +1463,9 @@ pub unsafe fn stack_renumber_version(stack: &mut Stack, v1: StackVersion, v2: St
     let node_pool = &mut stack.node_pool;
     let subtree_pool = ptr_mut(stack.subtree_pool);
     let (source_head, target_head) = stack_head_array_pair_mut(heads, v1, v2);
+    if target_head.status == StackStatus::Halted {
+        stack.halted_version_count -= 1;
+    }
     if !target_head.summary.is_null() && source_head.summary.is_null() {
         source_head.summary = target_head.summary;
         target_head.summary = ptr::null_mut();
@@ -1489,6 +1492,9 @@ pub unsafe fn stack_copy_version(stack: &mut Stack, version: StackVersion) -> St
     stack_node_retain(ptr_mut(head.node));
     if !head.last_external_token.ptr.is_null() {
         subtree_retain(head.last_external_token);
+    }
+    if head.status == StackStatus::Halted {
+        stack.halted_version_count += 1;
     }
     head.summary = ptr::null_mut();
     stack.heads.size - 1
@@ -1540,11 +1546,17 @@ pub unsafe fn stack_can_merge(
 
 /// Halt a version.
 pub unsafe fn stack_halt(self_: &mut Stack, version: StackVersion) {
-    stack_head_mut(self_, version).status = StackStatus::Halted;
+    if stack_head(self_, version).status != StackStatus::Halted {
+        self_.halted_version_count += 1;
+        stack_head_mut(self_, version).status = StackStatus::Halted;
+    }
 }
 
 /// Pause a version with a lookahead token.
 pub unsafe fn stack_pause(stack: &mut Stack, version: StackVersion, lookahead: Subtree) {
+    if stack_head(stack, version).status == StackStatus::Halted {
+        stack.halted_version_count -= 1;
+    }
     let head = stack_head_mut(stack, version);
     head.status = StackStatus::Paused;
     head.lookahead_when_paused = lookahead;
@@ -1586,6 +1598,7 @@ pub unsafe fn stack_clear(self_: &mut Stack) {
         stack_head_delete(array_get_mut(heads, i), node_pool, subtree_pool);
     }
     array_clear(heads);
+    self_.halted_version_count = 0;
     array_push(
         heads,
         StackHead {
@@ -1792,4 +1805,44 @@ pub unsafe fn stack_print_dot_graph(
 
     array_delete(&mut visited_nodes);
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core_impl::subtree::{subtree_pool_delete, subtree_pool_new};
+
+    #[test]
+    fn halted_version_count_tracks_status_changes() {
+        unsafe {
+            let mut pool = subtree_pool_new(0);
+            let stack = stack_new(&mut pool);
+            let stack = ptr_mut(stack);
+
+            assert_eq!(stack_halted_version_count(stack), 0);
+
+            let halted = stack_copy_version(stack, 0);
+            stack_halt(stack, halted);
+            assert_eq!(stack_halted_version_count(stack), 1);
+
+            let halted_copy = stack_copy_version(stack, halted);
+            assert_eq!(stack_halted_version_count(stack), 2);
+
+            stack_pause(stack, halted_copy, NULL_SUBTREE);
+            assert_eq!(stack_halted_version_count(stack), 1);
+            let _ = stack_resume(stack, halted_copy);
+            assert_eq!(stack_halted_version_count(stack), 1);
+
+            stack_halt(stack, halted_copy);
+            assert_eq!(stack_halted_version_count(stack), 2);
+            stack_remove_version(stack, halted_copy);
+            assert_eq!(stack_halted_version_count(stack), 1);
+
+            stack_clear(stack);
+            assert_eq!(stack_halted_version_count(stack), 0);
+
+            stack_delete(stack);
+            subtree_pool_delete(&mut pool);
+        }
+    }
 }

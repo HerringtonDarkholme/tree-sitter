@@ -3443,6 +3443,72 @@ The trial was reverted. Keep the existing local branch condition in the reduce
 paths unless a future same-window A/B run proves the hoist is not responsible
 for the broader regression shape.
 
+## 2026-06-28 cached halted version count
+
+- Change: add a private `Stack::halted_version_count` field and maintain it
+  across stack halt, pause, copy, remove, renumber, and clear operations.
+  `stack_halted_version_count` is now O(1) instead of scanning every stack head
+  in reduce paths.
+- Scope: private GLR stack data layout. The `Stack` layout assertion changes
+  from 80 to 88 bytes on 64-bit targets. No public ABI structs or parser table
+  semantics change.
+- Validation:
+  - `cargo fmt --check --all`
+  - `cargo check -p tree-sitter --lib --offline`
+  - `cargo clippy -p tree-sitter --lib --offline --all-targets -- -D warnings`
+  - `cargo test -p tree-sitter halted_version_count_tracks_status_changes --offline`
+  - `git diff --check`
+  - `cargo test --all` reached the established local baseline: 265 CLI tests
+    passed and the same four `detect_language` tests failed. The new stack
+    invariant test passed inside this run.
+
+Normal P/G/C++/Java benchmark command:
+
+```sh
+env TMPDIR=/private/tmp/tree-sitter-halted-count-pgcj cargo xtask perf-gate --kind normal --language python --language go --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| Python normal parses | 12 | 13060.5 | 11233.7 | +16.26% |
+| Go normal parses | 4 | 16222.9 | 13833.3 | +17.27% |
+| C++ normal parses | 2 | 8230.9 | 10169.0 | -19.06% |
+| Java normal parses | 2 | 9619.3 | 11329.1 | -15.09% |
+| Overall parser throughput | 20 | 14163.5 | 12389.3 | +14.32% |
+
+Per-case regressions over 5% in the P/G/C++/Java run:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `cpp normal marker-index.h` | 6225.9 | 10514.8 | 40.79% |
+| `go normal letter_test.go` | 7809.8 | 12519.7 | 37.62% |
+| `java normal LargeService.java` | 9102.6 | 11626.8 | 21.71% |
+
+TypeScript/JavaScript all-kind benchmark command:
+
+```sh
+env TMPDIR=/private/tmp/tree-sitter-halted-count-tsjs cargo xtask perf-gate --kind all --language typescript --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 28883.3 | 22581.0 | +27.91% |
+| TypeScript error parses | 34 | 1695.2 | 1582.4 | +7.13% |
+| JavaScript normal parses | 2 | 19220.3 | 16403.4 | +17.17% |
+| JavaScript error parses | 39 | 2091.5 | 1933.3 | +8.18% |
+| Overall parser throughput | 86 | 2352.0 | 2180.6 | +7.86% |
+
+Per-case regressions over 5% in the TypeScript/JavaScript run:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `typescript error compound-statement-without-trailing-newline.py` | 867.2 | 918.2 | 5.55% |
+
+This change is kept because it removes a repeated stack-head scan from reduce
+paths, has direct invariant coverage, and both targeted report-only runs remain
+positive overall. The known C++/Java weak cases remain below C and should not
+be treated as solved by this change.
+
 ### 2026-06-25 18:45 EDT
 
 - Repo head: `9a0904a5`
