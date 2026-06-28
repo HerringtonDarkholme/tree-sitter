@@ -463,6 +463,51 @@ Interpretation:
 - Keep using the direct `ts_language_is_wasm` checks unless future profiling
   shows wasm detection as a stable hot symbol across multiple broad runs.
 
+### 2026-06-28 EDT - rejected balance progress guard trial
+
+- Repo head: `ba8c1a40`
+- Trial status: not kept. Source experiment was reverted after measurement.
+- Hypothesis: normal benchmarks have no progress callback, but
+  `parser_balance_subtree` calls `parser_check_progress` for every visited
+  subtree and during repeat compression. Guard those calls once with
+  `parse_options.progress_callback.is_some()` inside balancing, without
+  changing the main parse-loop progress checks.
+- Validation before benchmarking: `cargo fmt --check --all`,
+  `cargo check -p tree-sitter --lib --offline`,
+  `cargo clippy -p tree-sitter --lib --offline --all-targets -- -D warnings`,
+  and `cargo test -p tree-sitter --lib --offline` passed.
+- Trial command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-balance-progress-guard-7lang cargo xtask perf-gate --language typescript --language javascript --language python --language go --language rust --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+- Same-window baseline command after reverting the guard:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-balance-progress-guard-baseline-7lang cargo xtask perf-gate --language typescript --language javascript --language python --language go --language rust --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Guard Rust bytes/ms | Baseline Rust bytes/ms | Movement |
+| --- | ---: | ---: | ---: |
+| TypeScript normal | 30707.2 | 29824.7 | +2.96% |
+| JavaScript normal | 19285.3 | 18969.2 | +1.67% |
+| Python normal | 13041.0 | 13361.2 | -2.40% |
+| Go normal | 16231.8 | 17146.0 | -5.33% |
+| Rust normal | 20428.5 | 20914.4 | -2.32% |
+| C++ normal | 7890.8 | 7382.6 | +6.88% |
+| Java normal | 11104.3 | 10160.6 | +9.29% |
+| Overall broad normal | 19429.2 | 19490.4 | -0.31% |
+
+Interpretation:
+
+- The localized guard does help the current weak languages C++ and Java in
+  this run, but it regresses Go, Rust, and Python and slightly lowers aggregate
+  absolute Rust throughput.
+- Do not keep a balance-only no-progress guard as a universal optimization.
+  Future balancing work still needs to avoid the traversal or compression work
+  itself, not just skip callback accounting in no-callback parses.
+
 ### 2026-06-28 EDT - rejected linear-tail and progress-callback trials
 
 - Repo head: `f087bc4f`
