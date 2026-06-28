@@ -163,6 +163,66 @@ broader baseline replaces it.
 
 ## Checkpoints
 
+### 2026-06-28 EDT - rejected no-log lexer advance callback
+
+- Repo head: `824f4010`
+- Trial status: not kept. Source experiment was reverted after measurement.
+- Hypothesis: generated lexers call the `TSLexer::advance` callback for every
+  consumed character. Normal benchmarks have no parser logger, but the current
+  callback still checks `logger.log.is_some()` on every advance. Installing a
+  no-log callback when no logger is configured could remove that hot branch
+  without changing generated grammar code or the public `TSLexer` ABI.
+- Patch shape:
+
+```rust
+data.advance = Some(ts_lexer__advance_no_log);
+
+unsafe extern "C-unwind" fn ts_lexer__advance_no_log(
+    lexer: *mut TSLexer,
+    skip: bool,
+) {
+    lexer_do_advance(lexer_mut(lexer), skip);
+}
+```
+
+`ts_parser_set_logger` routed through a lexer helper that restored the logging
+callback when a logger was installed.
+
+- Focused trial command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-lexer-nolog-advance-pgcj cargo xtask perf-gate --language python --language go --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | No-log callback Rust | No-log callback C | Trial delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 13298.9 | 11150.4 | +19.27% |
+| Go normal | 16370.8 | 13036.3 | +25.58% |
+| C++ normal | 7657.9 | 9968.5 | -23.18% |
+| Java normal | 9552.7 | 11682.8 | -18.23% |
+| Python + Go + C++ + Java normal | 14282.4 | 12000.8 | +19.01% |
+
+- Same-window baseline command after reverting:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-lexer-nolog-advance-baseline-pgcj cargo xtask perf-gate --language python --language go --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Baseline Rust | Baseline C | Baseline delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 13104.9 | 10686.1 | +22.63% |
+| Go normal | 15923.7 | 13980.4 | +13.90% |
+| C++ normal | 8123.0 | 10629.6 | -23.58% |
+| Java normal | 9958.2 | 10819.5 | -7.96% |
+| Python + Go + C++ + Java normal | 14062.8 | 12159.4 | +15.65% |
+
+- Interpretation: the no-log callback improves Python and Go absolute Rust
+  throughput, but regresses C++ and Java. Because those are the languages where
+  generated lexing and callback overhead matter most, this is not a keepable
+  universal change. Do not retry logger-branch removal as a callback split; any
+  lexer-boundary improvement needs to reduce callback frequency or generated
+  lexer work, not just alter the callback target.
+
 ### 2026-06-28 EDT - rejected reduction merge split scan
 
 - Repo head: `b21228eb`
