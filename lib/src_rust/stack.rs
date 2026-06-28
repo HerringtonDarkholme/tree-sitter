@@ -851,21 +851,17 @@ unsafe fn stack_pop_count_linear_into(
 ) -> bool {
     let mut node = stack_head(self_, version).node;
     let mut subtree_count = 0;
-    let start = builder.subtrees.size;
     let reserve_count = subtree_alloc_size(count) / core::mem::size_of::<Subtree>();
-    array_reserve(
-        &mut builder.subtrees,
-        start + u32::try_from(reserve_count).unwrap(),
-    );
+    array_reserve(&mut builder.subtrees, u32::try_from(reserve_count).unwrap());
 
     while subtree_count < count {
         let current_node = ptr_ref(node);
         if current_node.link_count != 1 {
             let subtrees = &mut builder.subtrees;
-            for i in start..subtrees.size {
+            for i in 0..subtrees.size {
                 subtree_release(ptr_mut(self_.subtree_pool), *array_get_ref(subtrees, i));
             }
-            subtrees.size = start;
+            subtrees.size = 0;
             return false;
         }
 
@@ -884,10 +880,10 @@ unsafe fn stack_pop_count_linear_into(
         }
     }
 
-    let size = builder.subtrees.size - start;
-    stack_pop_builder_reverse_subtrees(builder, start, size);
+    let size = builder.subtrees.size;
+    stack_pop_builder_reverse_subtrees(builder, 0, size);
     let slice = StackSliceSpan {
-        start,
+        start: 0,
         size,
         version: STACK_VERSION_NONE,
     };
@@ -905,21 +901,17 @@ pub unsafe fn stack_pop_count_linear_in_place(
 
     let mut node = stack_head(self_, version).node;
     let mut subtree_count = 0;
-    let start = builder.subtrees.size;
     let reserve_count = subtree_alloc_size(count) / core::mem::size_of::<Subtree>();
-    array_reserve(
-        &mut builder.subtrees,
-        start + u32::try_from(reserve_count).unwrap(),
-    );
+    array_reserve(&mut builder.subtrees, u32::try_from(reserve_count).unwrap());
 
     while subtree_count < count {
         let current_node = ptr_ref(node);
         if current_node.link_count != 1 {
             let subtrees = &mut builder.subtrees;
-            for i in start..subtrees.size {
+            for i in 0..subtrees.size {
                 subtree_release(ptr_mut(self_.subtree_pool), *array_get_ref(subtrees, i));
             }
-            subtrees.size = start;
+            subtrees.size = 0;
             return false;
         }
 
@@ -938,8 +930,8 @@ pub unsafe fn stack_pop_count_linear_in_place(
         }
     }
 
-    let size = builder.subtrees.size - start;
-    stack_pop_builder_reverse_subtrees(builder, start, size);
+    let size = builder.subtrees.size;
+    stack_pop_builder_reverse_subtrees(builder, 0, size);
 
     stack_node_retain(ptr_mut(node));
     let old_head_node = {

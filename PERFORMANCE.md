@@ -3350,6 +3350,51 @@ env TMPDIR=/private/tmp/tree-sitter-comparison-cache-tsjs cargo xtask perf-gate 
 
 No per-case regressions above 5% were reported in this run.
 
+## 2026-06-28 linear pop builder zero-start cleanup
+
+- Change: simplify `stack_pop_count_linear_into` and
+  `stack_pop_count_linear_in_place` around the builder invariant that both
+  scratch arrays have just been cleared. The linear builder paths now reserve,
+  reverse, and release from offset zero directly instead of carrying a
+  redundant `start` value that is always zero in these call paths.
+- Scope: fresh normal reduction stack-pop builder paths. This is a small
+  hot-path readability/idiom cleanup; it does not change the stack graph or
+  reduction algorithm.
+- Validation:
+  - `cargo fmt --check --all`
+  - `cargo check -p tree-sitter --lib --offline`
+  - `cargo clippy -p tree-sitter --lib --offline --all-targets -- -D warnings`
+  - `git diff --check`
+  - `cargo test --all` reached the established local baseline: 265 CLI tests
+    passed and the same four `detect_language` tests failed.
+- Benchmark command:
+
+```sh
+env TMPDIR=/private/tmp/tree-sitter-builder-zero-start-pgcj cargo xtask perf-gate --kind normal --language python --language go --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| Python normal parses | 12 | 13374.8 | 10413.4 | +28.44% |
+| Go normal parses | 4 | 14800.4 | 13130.7 | +12.72% |
+| C++ normal parses | 2 | 7733.6 | 10303.8 | -24.94% |
+| Java normal parses | 2 | 11034.8 | 11363.5 | -2.89% |
+| Overall parser throughput | 20 | 13697.8 | 11658.6 | +17.49% |
+
+Per-case regressions over 5%:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `python normal compound-statement-without-trailing-newline.py` | 573.3 | 1470.8 | 61.02% |
+| `cpp normal marker-index.h` | 5692.0 | 10734.8 | 46.98% |
+| `python normal simple-statements-without-trailing-newline.py` | 5502.1 | 5854.4 | 6.02% |
+| `java normal LargeService.java` | 10563.9 | 11206.9 | 5.74% |
+
+The C++ weakness and small Java/Python outliers remain consistent with earlier
+normal-parse reports. This cleanup is kept because it removes redundant
+bookkeeping in the private linear builder paths without changing parser
+semantics or ABI.
+
 ### 2026-06-25 18:45 EDT
 
 - Repo head: `9a0904a5`
