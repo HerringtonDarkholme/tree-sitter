@@ -163,6 +163,69 @@ broader baseline replaces it.
 
 ## Checkpoints
 
+### 2026-06-28 EDT - rejected deterministic reduction runner
+
+- Repo head: `cb452fb9`
+- Trial status: not kept. Source experiment was reverted after measurement.
+- Hypothesis: deterministic normal parses can have several single-action
+  reductions before the next shift. Running those reductions in a tight
+  parser-local loop could avoid repeatedly returning through
+  `parser_apply_parse_actions`, `parser_continue_after_reduction`, and the
+  outer `parser_advance` loop. This is different from the earlier
+  deterministic-chain in-place predicate trial: it targets generic action-loop
+  churn around the reduction chain while preserving the existing warmed
+  in-place reduction predicate and the required `saturating_add` counter update
+  on every deterministic reduction.
+- Patch shape: add a `parser_run_deterministic_reductions` helper enabled only
+  for fresh parses with one stack version, one reduce action, and no progress
+  callback. It repeatedly applied the reduce, renumbered the resulting version
+  when needed, updated the parse state, and looked up the next table entry
+  until a non-reduce action or a null-lookahead relex boundary.
+- Validation before benchmarking:
+
+```sh
+cargo fmt --all
+cargo check -p tree-sitter --lib --offline
+cargo test -p tree-sitter --lib --offline
+```
+
+- Focused weak-language command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-deterministic-runner-pgcj cargo xtask perf-gate --language python --language go --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Runner Rust | Runner C | Runner delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 13089.6 | 10246.6 | +27.75% |
+| Go normal | 16370.0 | 13008.9 | +25.84% |
+| C++ normal | 5750.4 | 10728.1 | -46.40% |
+| Java normal | 10160.6 | 11205.7 | -9.33% |
+| Python + Go + C++ + Java normal | 13900.3 | 11531.7 | +20.54% |
+
+- Same-window baseline after reverting:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-deterministic-runner-baseline-pgcj cargo xtask perf-gate --language python --language go --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Baseline Rust | Baseline C | Baseline delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 12456.5 | 10255.7 | +21.46% |
+| Go normal | 16653.1 | 13080.7 | +27.31% |
+| C++ normal | 7275.7 | 10623.9 | -31.52% |
+| Java normal | 10595.1 | 11500.1 | -7.87% |
+| Python + Go + C++ + Java normal | 13910.9 | 11564.2 | +20.29% |
+
+- Interpretation: the runner improves Python but materially regresses Go,
+  C++, and Java absolute Rust throughput. The C++ collapse shows that even a
+  localized deterministic control-flow shortcut can disturb code layout or
+  branch behavior in the weak language that already spends heavy time in
+  generated lexing and reduction construction. Do not retry this as an
+  action-loop-only optimization. A future deterministic-region executor would
+  need to remove parent materialization or stack-node creation across the
+  region, not just keep the same reductions inside a tighter parser loop.
+
 ### 2026-06-28 EDT - current C++ and Java profile refresh
 
 - Repo head: `162ab9fb`
