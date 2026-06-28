@@ -3395,6 +3395,54 @@ normal-parse reports. This cleanup is kept because it removes redundant
 bookkeeping in the private linear builder paths without changing parser
 semantics or ABI.
 
+## 2026-06-28 rejected reduce symbol-kind hoist
+
+- Trial: hoist the `symbol` classification used to choose
+  `language_lookup` versus `ts_language_next_state` once per reduce call in
+  the fresh, in-place, and incremental reduce paths.
+- Result: rejected. The change compiled and passed focused validation, but the
+  normal-parse P/G/C++/Java report-only gate showed much broader per-case
+  regressions than the surrounding baseline runs.
+- Validation before benchmark:
+  - `cargo fmt --check --all`
+  - `cargo check -p tree-sitter --lib --offline`
+  - `cargo clippy -p tree-sitter --lib --offline --all-targets -- -D warnings`
+  - `git diff --check`
+  - `cargo test --all` reached the established local baseline: 265 CLI tests
+    passed and the same four `detect_language` tests failed.
+- Benchmark command:
+
+```sh
+env TMPDIR=/private/tmp/tree-sitter-reduce-symbol-kind-pgcj cargo xtask perf-gate --kind normal --language python --language go --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| Python normal parses | 12 | 9903.7 | 9975.1 | -0.72% |
+| Go normal parses | 4 | 15938.2 | 13876.9 | +14.85% |
+| C++ normal parses | 2 | 8132.8 | 10723.5 | -24.16% |
+| Java normal parses | 2 | 7783.2 | 11558.2 | -32.66% |
+| Overall parser throughput | 20 | 12157.0 | 11709.3 | +3.82% |
+
+Per-case regressions over 5%:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `python normal compound-statement-without-trailing-newline.py` | 157.1 | 1851.0 | 91.52% |
+| `python normal mixed-spaces-tabs.py` | 3215.2 | 5869.3 | 45.22% |
+| `cpp normal marker-index.h` | 6308.9 | 11316.5 | 44.25% |
+| `java normal LargeService.java` | 7262.6 | 11394.9 | 36.26% |
+| `go normal letter_test.go` | 8114.6 | 12564.9 | 35.42% |
+| `python normal crlf-line-endings.py` | 2270.1 | 3010.4 | 24.59% |
+| `python normal python2-grammar-crlf.py` | 6527.1 | 7949.4 | 17.89% |
+| `python normal simple-statements-without-trailing-newline.py` | 4561.0 | 4942.8 | 7.73% |
+| `python normal python3.8_grammar.py` | 10259.2 | 11070.1 | 7.32% |
+| `python normal multiple-newlines.py` | 4062.3 | 4375.7 | 7.16% |
+
+The trial was reverted. Keep the existing local branch condition in the reduce
+paths unless a future same-window A/B run proves the hoist is not responsible
+for the broader regression shape.
+
 ### 2026-06-25 18:45 EDT
 
 - Repo head: `9a0904a5`
