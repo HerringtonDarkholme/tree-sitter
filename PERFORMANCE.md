@@ -163,6 +163,71 @@ broader baseline replaces it.
 
 ## Checkpoints
 
+### 2026-06-28 EDT - current C++ and Java profile refresh
+
+- Repo head: `162ab9fb`
+- Purpose: refresh weak-language profiles after the latest parser and lexer
+  trials. No source changes were made.
+- C++ command:
+
+```sh
+TREE_SITTER_CORE_IMPL=rust TREE_SITTER_BENCHMARK_LANGUAGE_FILTER=cpp TREE_SITTER_BENCHMARK_KIND_FILTER=normal TREE_SITTER_BENCHMARK_REPETITION_COUNT=30000 target/release/deps/benchmark-cbf7a217e4c2dbe8 >/private/tmp/tree-sitter-cpp-current-bench.out 2>/private/tmp/tree-sitter-cpp-current-bench.err & pid=$!; sleep 0.2; sample $pid 5 -file /private/tmp/tree-sitter-cpp-current.sample >/private/tmp/tree-sitter-cpp-current-sample.out 2>/private/tmp/tree-sitter-cpp-current-sample.err; wait $pid
+```
+
+- Java command:
+
+```sh
+TREE_SITTER_CORE_IMPL=rust TREE_SITTER_BENCHMARK_LANGUAGE_FILTER=java TREE_SITTER_BENCHMARK_KIND_FILTER=normal TREE_SITTER_BENCHMARK_REPETITION_COUNT=60000 target/release/deps/benchmark-cbf7a217e4c2dbe8 >/private/tmp/tree-sitter-java-current-bench.out 2>/private/tmp/tree-sitter-java-current-bench.err & pid=$!; sleep 0.2; sample $pid 5 -file /private/tmp/tree-sitter-java-current.sample >/private/tmp/tree-sitter-java-current-sample.out 2>/private/tmp/tree-sitter-java-current-sample.err; wait $pid
+```
+
+Benchmark speeds during sampling:
+
+| Workload | Case | Speed |
+| --- | --- | ---: |
+| C++ normal | `marker-index.h` | 13817 bytes/ms |
+| C++ normal | `rule.cc` | 12642 bytes/ms |
+| Java normal | `LargeService.java` | 14946 bytes/ms |
+| Java normal | `Service.java` | 17036 bytes/ms |
+
+Top-of-stack samples from `sample`:
+
+| Area | C++ samples | Java samples |
+| --- | ---: | ---: |
+| `ts_lex` | 722 | 789 |
+| `lexer_do_advance` | 223 | 345 |
+| `subtree_summarize_children` | 317 | 316 |
+| `parser_reduce` | 306 | 212 |
+| `stack_node_new` | 176 | 214 |
+| `stack_pop_count_into` | 102 | 145 |
+| `subtree_release` | 112 | 111 |
+| `stack_node_release` | 93 | 103 |
+| `ts_lex_keywords` | 69 | 58 |
+| `stack_renumber_version` | 52 | 45 |
+| `parser_balance_subtree` | 45 | 44 |
+| `lexer_start` | 37 | 48 |
+| `lexer_goto` | 28 | 30 |
+| `ts_lexer__eof` | 21 | 30 |
+| `ts_lexer__advance` | 21 | 24 |
+| `ts_lexer__mark_end` | 24 | 16 |
+
+Interpretation:
+
+- The weak-language profile remains split between generated lexing/callbacks
+  and reduction materialization. C++ is still generated-lexer-heavy; Java has a
+  similar generated-lexer bucket plus a large `lexer_do_advance` share.
+- The recent no-log callback, single-range advance, `mark_end`, UTF-8 decoder,
+  and lexer field-layout trials all failed to produce a stable universal win.
+  The current profile supports the existing conclusion: future lexer work must
+  reduce callback frequency or alter generated lexer structure, not add another
+  callback-local branch tweak.
+- Parser-side work still needs to remove concrete parent materialization or
+  persistent stack-node churn. `subtree_summarize_children`,
+  `stack_node_new`, `stack_pop_count_into`, and `stack_node_release` remain
+  substantial in both languages, but local variants of these operations are
+  already closed. The next parser-side architecture attempt should combine
+  stack mutation and parent construction for a larger deterministic region, or
+  defer concrete subtree construction at a tested ownership boundary.
+
 ### 2026-06-28 EDT - rejected no-log lexer advance callback
 
 - Repo head: `824f4010`
