@@ -125,6 +125,7 @@ use super::subtree::{
     subtree_to_mut_unsafe,
     subtree_total_bytes,
     subtree_total_size,
+    tree_arena_new,
     tree_arena_release,
     ExternalScannerState,
     MutableSubtree,
@@ -3371,12 +3372,14 @@ pub unsafe extern "C-unwind" fn ts_parser_parse(
             ts_parser_reset(self_);
             return result;
         }
-        // Reused subtrees can point into the old tree's arena. A returned tree
-        // currently stores only one arena pointer, so mixing a fresh arena with
-        // reused old-arena nodes can leave dangling pointers after the old tree
-        // is dropped. Keep parser-created nodes heap-backed until returned
-        // trees can retain all arenas they reference.
-        parser.tree_arena = ptr::null_mut();
+        // Fresh parses can return one arena-backed tree. Incremental parses can
+        // mix new nodes with reused nodes from the old tree's arena, but a
+        // returned tree currently retains only one arena pointer.
+        parser.tree_arena = if old_tree.is_null() {
+            tree_arena_new()
+        } else {
+            ptr::null_mut()
+        };
 
         if let Some(old_tree) = old_tree.as_ref() {
             subtree_retain(old_tree.root);

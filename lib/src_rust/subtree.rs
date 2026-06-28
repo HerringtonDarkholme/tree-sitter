@@ -753,7 +753,6 @@ const fn align_up(value: usize, alignment: usize) -> usize {
     (value + alignment - 1) & !(alignment - 1)
 }
 
-#[cfg(test)]
 pub unsafe fn tree_arena_new() -> *mut TreeArena {
     let arena = malloc(core::mem::size_of::<TreeArena>()).cast::<TreeArena>();
     ptr::write(
