@@ -33,10 +33,10 @@ use super::alloc::{calloc, free, malloc};
 use super::language::{
     language_alias_at, language_aliases_for_symbol, language_field_map, language_lookaheads,
     language_public_symbol, language_state_is_primary, language_symbol_count, language_token_count,
-    lookahead_iterator__next, ts_language_abi_version, ts_language_copy, ts_language_delete,
+    lookahead_iterator_next, ts_language_abi_version, ts_language_copy, ts_language_delete,
     ts_language_field_id_for_name, ts_language_state_count, ts_language_subtypes,
-    ts_language_symbol_for_name, ts_language_symbol_metadata, TSParseActionTypeReduce,
-    TSParseActionTypeShift, LANGUAGE_VERSION_WITH_RESERVED_WORDS,
+    ts_language_symbol_for_name, ts_language_symbol_metadata, LANGUAGE_VERSION_WITH_RESERVED_WORDS,
+    TSPARSE_ACTION_TYPE_REDUCE, TSPARSE_ACTION_TYPE_SHIFT,
 };
 use super::node::{
     ts_node_child_by_field_id, ts_node_end_byte, ts_node_end_point, ts_node_is_missing,
@@ -2086,7 +2086,7 @@ unsafe fn ts_query_perform_analysis(
             // Follow every possible path in the parse table, visiting only states
             // that are part of the subgraph for the current symbol.
             let mut lookahead_iterator = language_lookaheads(self_.language, parse_state);
-            while lookahead_iterator__next(&mut lookahead_iterator) {
+            while lookahead_iterator_next(&mut lookahead_iterator) {
                 let sym = lookahead_iterator.symbol;
 
                 let mut successor = AnalysisSubgraphNode {
@@ -2099,7 +2099,7 @@ unsafe fn ts_query_perform_analysis(
                     let action = lookahead_iterator
                         .actions
                         .add((lookahead_iterator.action_count - 1) as usize);
-                    if (*action).type_ == TSParseActionTypeShift {
+                    if (*action).type_ == TSPARSE_ACTION_TYPE_SHIFT {
                         if !(*action).shift.extra {
                             successor.state = (*action).shift.state;
                             successor.child_index += 1;
@@ -2439,11 +2439,11 @@ unsafe fn ts_query_analyze_patterns(self_: &mut TSQuery, error_offset: &mut u32)
     for state_u32 in 1..ts_language_state_count(self_.language) {
         let state = state_u32 as u16;
         let mut lookahead_iterator = language_lookaheads(self_.language, state);
-        while lookahead_iterator__next(&mut lookahead_iterator) {
+        while lookahead_iterator_next(&mut lookahead_iterator) {
             if lookahead_iterator.action_count != 0 {
                 for i in 0..lookahead_iterator.action_count {
                     let action = lookahead_iterator.actions.add(i as usize);
-                    if (*action).type_ == TSParseActionTypeReduce {
+                    if (*action).type_ == TSPARSE_ACTION_TYPE_REDUCE {
                         let mut aliases: *const TSSymbol = core::ptr::null();
                         let mut aliases_end: *const TSSymbol = core::ptr::null();
                         language_aliases_for_symbol(
@@ -2474,7 +2474,8 @@ unsafe fn ts_query_analyze_patterns(self_: &mut TSQuery, error_offset: &mut u32)
                             }
                             symbol = symbol.add(1);
                         }
-                    } else if (*action).type_ == TSParseActionTypeShift && !(*action).shift.extra {
+                    } else if (*action).type_ == TSPARSE_ACTION_TYPE_SHIFT && !(*action).shift.extra
+                    {
                         let next_state = (*action).shift.state;
                         state_predecessor_map_add(&mut predecessor_map, next_state, state);
                     }

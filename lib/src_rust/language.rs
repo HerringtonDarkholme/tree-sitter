@@ -1,5 +1,3 @@
-#![allow(non_upper_case_globals, non_snake_case)]
-
 //! Rust replacement for language.c/h — Language metadata and parse table access.
 //!
 //! This module provides:
@@ -31,11 +29,11 @@ const TS_BUILTIN_SYM_ERROR: TSSymbol = u16::MAX;
 const TS_BUILTIN_SYM_ERROR_REPEAT: TSSymbol = TS_BUILTIN_SYM_ERROR - 1;
 
 pub type TSSymbolType = u32;
-pub const TSSymbolTypeRegular: TSSymbolType = 0;
-pub const TSSymbolTypeAnonymous: TSSymbolType = 1;
-pub const TSSymbolTypeSupertype: TSSymbolType = 2;
+pub const TS_SYMBOL_TYPE_REGULAR: TSSymbolType = 0;
+pub const TS_SYMBOL_TYPE_ANONYMOUS: TSSymbolType = 1;
+pub const TS_SYMBOL_TYPE_SUPERTYPE: TSSymbolType = 2;
 
-pub const TSSymbolTypeAuxiliary: TSSymbolType = 3;
+pub const TS_SYMBOL_TYPE_AUXILIARY: TSSymbolType = 3;
 
 // ---------------------------------------------------------------------------
 // TSLanguage field access
@@ -123,10 +121,10 @@ pub struct TSLexerMode {
 }
 
 /// `TSParseActionType` enum
-pub const TSParseActionTypeShift: u8 = 0;
-pub const TSParseActionTypeReduce: u8 = 1;
-pub const TSParseActionTypeAccept: u8 = 2;
-pub const TSParseActionTypeRecover: u8 = 3;
+pub const TSPARSE_ACTION_TYPE_SHIFT: u8 = 0;
+pub const TSPARSE_ACTION_TYPE_REDUCE: u8 = 1;
+pub const TSPARSE_ACTION_TYPE_ACCEPT: u8 = 2;
+pub const TSPARSE_ACTION_TYPE_RECOVER: u8 = 3;
 
 /// `TSParseAction` — a union in C. We use repr(C) with manual field access.
 /// The C union has:
@@ -455,7 +453,7 @@ pub unsafe fn language_has_reduce_action(
 ) -> bool {
     let mut entry = TableEntry::empty();
     language_table_entry(self_, state, symbol, &mut entry);
-    entry.action_count > 0 && (*entry.actions).type_ == TSParseActionTypeReduce
+    entry.action_count > 0 && (*entry.actions).type_ == TSPARSE_ACTION_TYPE_REDUCE
 }
 
 /// Check if a (state, symbol) has any actions.
@@ -506,7 +504,7 @@ pub unsafe fn language_lookaheads(self_: *const TSLanguage, state: TSStateId) ->
 
 /// Advance a lookahead iterator to the next valid symbol.
 #[inline]
-pub unsafe fn lookahead_iterator__next(self_: &mut LookaheadIterator) -> bool {
+pub unsafe fn lookahead_iterator_next(self_: &mut LookaheadIterator) -> bool {
     let l = lang(self_.language);
 
     if self_.is_small_state {
@@ -908,7 +906,7 @@ pub unsafe extern "C" fn ts_language_next_state(
         let actions = language_actions(self_, state, symbol, &mut count);
         if count > 0 {
             let action = *actions.add(count as usize - 1);
-            if action.type_ == TSParseActionTypeShift {
+            if action.type_ == TSPARSE_ACTION_TYPE_SHIFT {
                 return if action.shift.extra {
                     state
                 } else {
@@ -974,13 +972,13 @@ pub const unsafe extern "C" fn ts_language_symbol_type(
 ) -> TSSymbolType {
     let metadata = ts_language_symbol_metadata(self_, symbol);
     if metadata.named && metadata.visible {
-        TSSymbolTypeRegular
+        TS_SYMBOL_TYPE_REGULAR
     } else if metadata.visible {
-        TSSymbolTypeAnonymous
+        TS_SYMBOL_TYPE_ANONYMOUS
     } else if metadata.supertype {
-        TSSymbolTypeSupertype
+        TS_SYMBOL_TYPE_SUPERTYPE
     } else {
-        TSSymbolTypeAuxiliary
+        TS_SYMBOL_TYPE_AUXILIARY
     }
 }
 
@@ -1073,7 +1071,7 @@ pub unsafe extern "C" fn ts_lookahead_iterator_reset(
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_lookahead_iterator_next(self_: *mut LookaheadIterator) -> bool {
-    lookahead_iterator__next(ptr_mut(self_))
+    lookahead_iterator_next(ptr_mut(self_))
 }
 
 #[no_mangle]

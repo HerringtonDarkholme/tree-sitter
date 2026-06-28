@@ -1,5 +1,3 @@
-#![allow(non_snake_case)]
-
 //! Rust replacement for stack.c/h — GLR parse stack with version management.
 //!
 //! This module implements the branching parse stack used by the GLR parser.
@@ -246,6 +244,7 @@ extern "C" {
     // Windows MSVC has no `stderr` symbol; the CRT exposes the standard streams
     // through __acrt_iob_func (stderr is index 2).
     #[cfg(target_os = "windows")]
+    #[allow(non_snake_case)]
     fn __acrt_iob_func(index: u32) -> *mut c_void;
 }
 
@@ -374,7 +373,7 @@ unsafe fn stack_node_release(
 }
 
 /// Count visible nodes in a subtree for progress tracking.
-unsafe fn stack__subtree_node_count(subtree: Subtree) -> u32 {
+unsafe fn stack_subtree_node_count(subtree: Subtree) -> u32 {
     let mut count = subtree_visible_descendant_count(subtree);
     if subtree_visible(subtree) {
         count += 1;
@@ -439,7 +438,7 @@ const unsafe fn stack_link_payload_dynamic_precedence(payload: StackLinkPayload)
 
 #[inline]
 unsafe fn stack_link_payload_node_count(payload: StackLinkPayload) -> u32 {
-    stack__subtree_node_count(stack_link_payload_subtree(payload))
+    stack_subtree_node_count(stack_link_payload_subtree(payload))
 }
 
 #[inline]
@@ -542,7 +541,7 @@ unsafe fn stack_node_new(
 }
 
 /// Check if two subtrees are equivalent for merging purposes.
-unsafe fn stack__subtree_is_equivalent(left: Subtree, right: Subtree) -> bool {
+unsafe fn stack_subtree_is_equivalent(left: Subtree, right: Subtree) -> bool {
     if left.ptr == right.ptr {
         return true;
     }
@@ -570,7 +569,7 @@ unsafe fn stack_link_payload_is_equivalent(
     left: StackLinkPayload,
     right: StackLinkPayload,
 ) -> bool {
-    stack__subtree_is_equivalent(
+    stack_subtree_is_equivalent(
         stack_link_payload_subtree(left),
         stack_link_payload_subtree(right),
     ) && stack_link_payload_is_pending(left) == stack_link_payload_is_pending(right)
@@ -682,7 +681,7 @@ unsafe fn stack_head_delete(
 }
 
 /// Add a new version to the stack, cloning metadata from an existing version.
-unsafe fn stack__add_version(
+unsafe fn stack_add_version(
     self_: &mut Stack,
     original_version: StackVersion,
     node: &mut StackNode,
@@ -707,7 +706,7 @@ unsafe fn stack__add_version(
 }
 
 /// Add a slice to the stack's slice array, finding or creating a version.
-unsafe fn stack__add_slice(
+unsafe fn stack_add_slice(
     self_: &mut Stack,
     original_version: StackVersion,
     node: &mut StackNode,
@@ -726,7 +725,7 @@ unsafe fn stack__add_slice(
         }
     }
 
-    let version = stack__add_version(self_, original_version, node);
+    let version = stack_add_version(self_, original_version, node);
     let slice = StackSlice {
         subtrees: ptr::read(subtrees),
         version,
@@ -783,7 +782,7 @@ unsafe fn stack_pop_builder_add_slice(
         }
     }
 
-    slice.version = stack__add_version(self_, original_version, node);
+    slice.version = stack_add_version(self_, original_version, node);
     array_push(&mut builder.slices, slice);
 }
 
@@ -829,7 +828,7 @@ unsafe fn stack_pop_count_linear(
     }
 
     subtree_array_reverse(&mut subtrees);
-    stack__add_slice(self_, version, ptr_mut(node), &subtrees);
+    stack_add_slice(self_, version, ptr_mut(node), &subtrees);
     Some(ptr::read(&self_.slices))
 }
 
@@ -891,7 +890,7 @@ unsafe fn stack_pop_count_linear_into(
 }
 
 /// Core iteration function for walking the stack graph.
-unsafe fn stack__iter(
+unsafe fn stack_iter(
     stack: &mut Stack,
     version: StackVersion,
     callback: StackCallback,
@@ -937,7 +936,7 @@ unsafe fn stack__iter(
                     subtree_array_copy(&source_subtrees, &mut subtrees);
                 }
                 subtree_array_reverse(&mut subtrees);
-                stack__add_slice(stack, version, ptr_mut(node), &subtrees);
+                stack_add_slice(stack, version, ptr_mut(node), &subtrees);
             }
 
             if should_stop {
@@ -998,7 +997,7 @@ unsafe fn stack__iter(
     ptr::read(&stack.slices)
 }
 
-// Callbacks for stack__iter
+// Callbacks for stack_iter
 unsafe fn pop_count_callback(payload: *mut c_void, iterator: &StackIterator) -> StackAction {
     let goal_subtree_count = *ptr_ref(payload.cast::<u32>());
     if iterator.subtree_count == goal_subtree_count {
@@ -1238,7 +1237,7 @@ pub unsafe fn stack_pop_count(
         return result;
     }
 
-    stack__iter(
+    stack_iter(
         self_,
         version,
         pop_count_callback,
@@ -1259,7 +1258,7 @@ pub unsafe fn stack_pop_count_into(
         return;
     }
 
-    let pop = stack__iter(
+    let pop = stack_iter(
         self_,
         version,
         pop_count_callback,
@@ -1283,7 +1282,7 @@ pub unsafe fn stack_pop_error(self_: &mut Stack, version: StackVersion) -> Subtr
         let subtree = stack_link_payload_subtree(payload);
         if !stack_link_payload_is_null(payload) && subtree_is_error(subtree) {
             let mut found_error = false;
-            let pop = stack__iter(
+            let pop = stack_iter(
                 self_,
                 version,
                 pop_error_callback,
@@ -1304,7 +1303,7 @@ pub unsafe fn stack_pop_error(self_: &mut Stack, version: StackVersion) -> Subtr
 
 /// Pop pending entries from a version.
 pub unsafe fn stack_pop_pending(self_: &mut Stack, version: StackVersion) -> StackSliceArray {
-    let mut pop = stack__iter(
+    let mut pop = stack_iter(
         self_,
         version,
         pop_pending_callback,
@@ -1321,7 +1320,7 @@ pub unsafe fn stack_pop_pending(self_: &mut Stack, version: StackVersion) -> Sta
 
 /// Pop all entries from a version.
 pub unsafe fn stack_pop_all(self_: &mut Stack, version: StackVersion) -> StackSliceArray {
-    stack__iter(self_, version, pop_all_callback, ptr::null_mut(), Some(0))
+    stack_iter(self_, version, pop_all_callback, ptr::null_mut(), Some(0))
 }
 
 /// Record a summary of parse states near the top of a version.
@@ -1329,7 +1328,7 @@ pub unsafe fn stack_record_summary(self_: &mut Stack, version: StackVersion, max
     let summary = malloc(core::mem::size_of::<StackSummary>()).cast::<StackSummary>();
     ptr::write(summary, array_new());
     let mut session = SummarizeStackSession { summary, max_depth };
-    stack__iter(
+    stack_iter(
         self_,
         version,
         summarize_stack_callback,

@@ -1,5 +1,3 @@
-#![allow(non_snake_case)]
-
 //! Rust replacement for lexer.c/h — Input buffering and character decoding.
 //!
 //! This module implements the `Lexer` struct which wraps `TSLexer` and provides:
@@ -175,50 +173,51 @@ unsafe fn lexer_mut<'a>(lexer: *mut TSLexer) -> &'a mut Lexer {
 }
 
 /// Sets the column data to the given value and marks it valid.
-fn lexer__set_column_data(self_: &mut Lexer, val: u32) {
+fn lexer_set_column_data(self_: &mut Lexer, val: u32) {
     self_.column_data.valid = true;
     self_.column_data.value = val;
 }
 
 /// Increments the value of the column data; no-op if invalid.
-fn lexer__increment_column_data(self_: &mut Lexer) {
+fn lexer_increment_column_data(self_: &mut Lexer) {
     if self_.column_data.valid {
         self_.column_data.value += 1;
     }
 }
 
 /// Marks the column data as invalid.
-fn lexer__invalidate_column_data(self_: &mut Lexer) {
+fn lexer_invalidate_column_data(self_: &mut Lexer) {
     self_.column_data.valid = false;
     self_.column_data.value = 0;
 }
 
 /// Check if the lexer has reached EOF.
+#[allow(non_snake_case)]
 unsafe extern "C" fn ts_lexer__eof(lexer: *const TSLexer) -> bool {
     let self_ = lexer_ref(lexer);
-    lexer__is_eof(self_)
+    lexer_is_eof(self_)
 }
 
 #[inline]
-const fn lexer__is_eof(self_: &Lexer) -> bool {
+const fn lexer_is_eof(self_: &Lexer) -> bool {
     self_.current_included_range_index == self_.included_range_count
 }
 
 /// Clear the currently stored chunk of source code.
-fn lexer__clear_chunk(self_: &mut Lexer) {
+fn lexer_clear_chunk(self_: &mut Lexer) {
     self_.chunk = ptr::null();
     self_.chunk_size = 0;
     self_.chunk_start = 0;
 }
 
-unsafe fn lexer__included_range(self_: &Lexer, index: usize) -> &TSRange {
+unsafe fn lexer_included_range(self_: &Lexer, index: usize) -> &TSRange {
     debug_assert!(index < self_.included_range_count as usize);
     debug_assert!(!self_.included_ranges.is_null());
     ptr_ref(self_.included_ranges.add(index))
 }
 
 /// Call the input callback to obtain a new chunk of source code.
-unsafe fn lexer__get_chunk(self_: &mut Lexer) {
+unsafe fn lexer_get_chunk(self_: &mut Lexer) {
     self_.chunk_start = self_.current_position.bytes;
     self_.chunk = (self_.input.read.unwrap_unchecked())(
         self_.input.payload,
@@ -233,7 +232,7 @@ unsafe fn lexer__get_chunk(self_: &mut Lexer) {
 }
 
 /// Decode the next unicode character in the current chunk.
-unsafe fn lexer__get_lookahead(self_: &mut Lexer) {
+unsafe fn lexer_get_lookahead(self_: &mut Lexer) {
     let position_in_chunk = self_.current_position.bytes - self_.chunk_start;
     let mut size = self_.chunk_size - position_in_chunk;
 
@@ -260,7 +259,7 @@ unsafe fn lexer__get_lookahead(self_: &mut Lexer) {
     // If this chunk ended in the middle of a multi-byte character,
     // try again with a fresh chunk.
     if self_.data.lookahead == TS_DECODE_ERROR && size < 4 {
-        lexer__get_chunk(self_);
+        lexer_get_chunk(self_);
         chunk = self_.chunk.cast::<u8>();
         size = self_.chunk_size;
         self_.lookahead_size = decode(chunk, size, &mut self_.data.lookahead);
@@ -274,13 +273,13 @@ unsafe fn lexer__get_lookahead(self_: &mut Lexer) {
 /// Move the lexer to a given position, finding the right included range.
 unsafe fn lexer_goto(self_: &mut Lexer, position: Length) {
     if position.bytes != self_.current_position.bytes {
-        lexer__invalidate_column_data(self_);
+        lexer_invalidate_column_data(self_);
     }
 
     self_.current_position = position;
 
     if self_.included_range_count == 1 {
-        let included_range = *lexer__included_range(self_, 0);
+        let included_range = *lexer_included_range(self_, 0);
         if included_range.end_byte > self_.current_position.bytes
             && included_range.end_byte > included_range.start_byte
         {
@@ -295,7 +294,7 @@ unsafe fn lexer_goto(self_: &mut Lexer, position: Length) {
                 && (self_.current_position.bytes < self_.chunk_start
                     || self_.current_position.bytes >= self_.chunk_start + self_.chunk_size)
             {
-                lexer__clear_chunk(self_);
+                lexer_clear_chunk(self_);
             }
             self_.lookahead_size = 0;
             self_.data.lookahead = 0;
@@ -305,7 +304,7 @@ unsafe fn lexer_goto(self_: &mut Lexer, position: Length) {
                 bytes: included_range.end_byte,
                 extent: included_range.end_point,
             };
-            lexer__clear_chunk(self_);
+            lexer_clear_chunk(self_);
             self_.lookahead_size = 1;
             self_.data.lookahead = 0;
         }
@@ -315,7 +314,7 @@ unsafe fn lexer_goto(self_: &mut Lexer, position: Length) {
     // Move to the first valid position at or after the given position.
     let found_included_range = 'range_search: {
         for i in 0..self_.included_range_count {
-            let included_range = lexer__included_range(self_, i as usize);
+            let included_range = lexer_included_range(self_, i as usize);
             if included_range.end_byte > self_.current_position.bytes
                 && included_range.end_byte > included_range.start_byte
             {
@@ -340,7 +339,7 @@ unsafe fn lexer_goto(self_: &mut Lexer, position: Length) {
             && (self_.current_position.bytes < self_.chunk_start
                 || self_.current_position.bytes >= self_.chunk_start + self_.chunk_size)
         {
-            lexer__clear_chunk(self_);
+            lexer_clear_chunk(self_);
         }
 
         self_.lookahead_size = 0;
@@ -350,12 +349,12 @@ unsafe fn lexer_goto(self_: &mut Lexer, position: Length) {
         // state - past the end of the included ranges.
         self_.current_included_range_index = self_.included_range_count;
         let last_range_index = self_.included_range_count as usize - 1;
-        let last_included_range = lexer__included_range(self_, last_range_index);
+        let last_included_range = lexer_included_range(self_, last_range_index);
         self_.current_position = Length {
             bytes: last_included_range.end_byte,
             extent: last_included_range.end_point,
         };
-        lexer__clear_chunk(self_);
+        lexer_clear_chunk(self_);
         self_.lookahead_size = 1;
         self_.data.lookahead = 0;
     }
@@ -365,17 +364,17 @@ unsafe fn lexer_goto(self_: &mut Lexer, position: Length) {
 ///
 /// This step only moves the logical position. It does not load a new input
 /// chunk or decode the next character.
-fn lexer__advance_position(self_: &mut Lexer) {
+fn lexer_advance_position(self_: &mut Lexer) {
     if self_.lookahead_size != 0 {
         if self_.data.lookahead == '\n' as i32 {
             self_.current_position.extent.row += 1;
             self_.current_position.extent.column = 0;
-            lexer__set_column_data(self_, 0);
+            lexer_set_column_data(self_, 0);
         } else {
             let is_bom =
                 self_.current_position.bytes == 0 && self_.data.lookahead == BYTE_ORDER_MARK;
             if !is_bom {
-                lexer__increment_column_data(self_);
+                lexer_increment_column_data(self_);
             }
             self_.current_position.extent.column += self_.lookahead_size;
         }
@@ -388,10 +387,10 @@ fn lexer__advance_position(self_: &mut Lexer) {
 /// Returns `false` when the lexer has advanced beyond all included ranges and
 /// should report EOF. Ranges can be disjoint, so moving across a boundary may
 /// jump `current_position` forward without consuming bytes from the input.
-unsafe fn lexer__seek_visible_range(self_: &mut Lexer) -> bool {
+unsafe fn lexer_seek_visible_range(self_: &mut Lexer) -> bool {
     loop {
         let range_index = self_.current_included_range_index as usize;
-        let current_range = lexer__included_range(self_, range_index);
+        let current_range = lexer_included_range(self_, range_index);
         if self_.current_position.bytes < current_range.end_byte
             && current_range.end_byte != current_range.start_byte
         {
@@ -402,7 +401,7 @@ unsafe fn lexer__seek_visible_range(self_: &mut Lexer) -> bool {
         }
         if self_.current_included_range_index < self_.included_range_count {
             let next_range_index = self_.current_included_range_index as usize;
-            let next_range = lexer__included_range(self_, next_range_index);
+            let next_range = lexer_included_range(self_, next_range_index);
             self_.current_position = Length {
                 bytes: next_range.start_byte,
                 extent: next_range.start_point,
@@ -416,34 +415,35 @@ unsafe fn lexer__seek_visible_range(self_: &mut Lexer) -> bool {
 }
 
 /// Load the next source chunk if needed, then decode the next lookahead.
-unsafe fn lexer__load_next_lookahead(self_: &mut Lexer, has_current_range: bool) {
+unsafe fn lexer_load_next_lookahead(self_: &mut Lexer, has_current_range: bool) {
     if has_current_range {
         if self_.current_position.bytes < self_.chunk_start
             || self_.current_position.bytes >= self_.chunk_start + self_.chunk_size
         {
-            lexer__get_chunk(self_);
+            lexer_get_chunk(self_);
         }
-        lexer__get_lookahead(self_);
+        lexer_get_lookahead(self_);
     } else {
-        lexer__clear_chunk(self_);
+        lexer_clear_chunk(self_);
         self_.data.lookahead = 0;
         self_.lookahead_size = 1;
     }
 }
 
 /// Actually advances the lexer. Does not log anything.
-unsafe fn lexer__do_advance(self_: &mut Lexer, skip: bool) {
-    lexer__advance_position(self_);
-    let has_current_range = lexer__seek_visible_range(self_);
+unsafe fn lexer_do_advance(self_: &mut Lexer, skip: bool) {
+    lexer_advance_position(self_);
+    let has_current_range = lexer_seek_visible_range(self_);
 
     if skip {
         self_.token_start_position = self_.current_position;
     }
 
-    lexer__load_next_lookahead(self_, has_current_range);
+    lexer_load_next_lookahead(self_, has_current_range);
 }
 
 /// Advance to the next character (with logging). `TSLexer` vtable callback.
+#[allow(non_snake_case)]
 unsafe extern "C-unwind" fn ts_lexer__advance(lexer: *mut TSLexer, skip: bool) {
     let self_ = lexer_mut(lexer);
     if self_.chunk.is_null() {
@@ -477,20 +477,21 @@ unsafe extern "C-unwind" fn ts_lexer__advance(lexer: *mut TSLexer, skip: bool) {
         }
     }
 
-    lexer__do_advance(self_, skip);
+    lexer_do_advance(self_, skip);
 }
 
 /// Mark that a token match has completed. `TSLexer` vtable callback.
+#[allow(non_snake_case)]
 unsafe extern "C" fn ts_lexer__mark_end(lexer: *mut TSLexer) {
     let self_ = lexer_mut(lexer);
-    if !lexer__is_eof(self_) {
+    if !lexer_is_eof(self_) {
         // If the lexer is right at the beginning of included range,
         // then the token should be considered to end at the *end* of the
         // previous included range, rather than here.
         let range_index = self_.current_included_range_index as usize;
-        let current_included_range = lexer__included_range(self_, range_index);
+        let current_included_range = lexer_included_range(self_, range_index);
         if range_index > 0 && self_.current_position.bytes == current_included_range.start_byte {
-            let previous_included_range = lexer__included_range(self_, range_index - 1);
+            let previous_included_range = lexer_included_range(self_, range_index - 1);
             self_.token_end_position = Length {
                 bytes: previous_included_range.end_byte,
                 extent: previous_included_range.end_point,
@@ -502,6 +503,7 @@ unsafe extern "C" fn ts_lexer__mark_end(lexer: *mut TSLexer) {
 }
 
 /// Get the current column number. `TSLexer` vtable callback.
+#[allow(non_snake_case)]
 unsafe extern "C" fn ts_lexer__get_column(lexer: *mut TSLexer) -> u32 {
     let self_ = lexer_mut(lexer);
 
@@ -520,19 +522,19 @@ unsafe extern "C" fn ts_lexer__get_column(lexer: *mut TSLexer) -> u32 {
             },
         };
         lexer_goto(self_, start_of_col);
-        lexer__set_column_data(self_, 0);
-        lexer__get_chunk(self_);
+        lexer_set_column_data(self_, 0);
+        lexer_get_chunk(self_);
 
-        if !lexer__is_eof(self_) {
-            lexer__get_lookahead(self_);
+        if !lexer_is_eof(self_) {
+            lexer_get_lookahead(self_);
 
             // Advance to the recorded position
             while self_.current_position.bytes < goal_byte
-                && !lexer__is_eof(self_)
+                && !lexer_is_eof(self_)
                 && !self_.chunk.is_null()
             {
-                lexer__do_advance(self_, false);
-                if lexer__is_eof(self_) {
+                lexer_do_advance(self_, false);
+                if lexer_is_eof(self_) {
                     break;
                 }
             }
@@ -544,11 +546,12 @@ unsafe extern "C" fn ts_lexer__get_column(lexer: *mut TSLexer) -> u32 {
 
 /// Is the lexer at a boundary between two disjoint included ranges?
 /// `TSLexer` vtable callback.
+#[allow(non_snake_case)]
 unsafe extern "C" fn ts_lexer__is_at_included_range_start(lexer: *const TSLexer) -> bool {
     let self_ = lexer_ref(lexer);
     if self_.current_included_range_index < self_.included_range_count {
         let range_index = self_.current_included_range_index as usize;
-        let current_range = lexer__included_range(self_, range_index);
+        let current_range = lexer_included_range(self_, range_index);
         self_.current_position.bytes == current_range.start_byte
     } else {
         false
@@ -563,6 +566,7 @@ unsafe extern "C" fn ts_lexer__is_at_included_range_start(lexer: *const TSLexer)
 // throws/unwinds. Without this the unwind would hit a `nounwind` boundary and
 // abort instead of propagating out of the parse.
 extern "C-unwind" {
+    #[allow(non_snake_case)]
     fn ts_lexer__log_shim(_self: *const TSLexer, fmt: *const i8, ...);
 }
 
@@ -578,7 +582,7 @@ pub unsafe fn lexer_delete(self_: &mut Lexer) {
 /// Set the input source for the lexer.
 pub unsafe fn lexer_set_input(self_: &mut Lexer, input: TSInput) {
     self_.input = input;
-    lexer__clear_chunk(self_);
+    lexer_clear_chunk(self_);
     lexer_goto(self_, self_.current_position);
 }
 
@@ -595,18 +599,18 @@ pub unsafe fn lexer_start(self_: &mut Lexer) {
     self_.token_end_position = LENGTH_UNDEFINED;
     self_.data.result_symbol = 0;
     self_.did_get_column = false;
-    if !lexer__is_eof(self_) {
+    if !lexer_is_eof(self_) {
         if self_.chunk_size == 0 {
-            lexer__get_chunk(self_);
+            lexer_get_chunk(self_);
         }
         if self_.lookahead_size == 0 {
-            lexer__get_lookahead(self_);
+            lexer_get_lookahead(self_);
         }
         if self_.current_position.bytes == 0 {
             if self_.data.lookahead == BYTE_ORDER_MARK {
                 ts_lexer__advance(&mut self_.data, true);
             }
-            lexer__set_column_data(self_, 0);
+            lexer_set_column_data(self_, 0);
         }
     }
 }
