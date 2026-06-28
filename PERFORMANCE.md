@@ -508,6 +508,46 @@ Interpretation:
   Future balancing work still needs to avoid the traversal or compression work
   itself, not just skip callback accounting in no-callback parses.
 
+### 2026-06-28 EDT - rejected balance candidate-list trial
+
+- Repo head: `d1d384cf`
+- Trial status: not kept. Source experiment was reverted after measurement.
+- Hypothesis: remove the full final-tree balancing traversal for fresh
+  arena-backed parses by recording arena nodes whose `repeat_depth > 0` when
+  they are constructed. At accept time, balance only those candidates instead of
+  walking every owned internal node. Incremental parses and canceled balancing
+  resumes kept the existing traversal path.
+- Validation before benchmarking: `cargo fmt --check --all`,
+  `cargo check -p tree-sitter --lib --offline`,
+  `cargo clippy -p tree-sitter --lib --offline --all-targets -- -D warnings`,
+  and `cargo test -p tree-sitter --lib --offline` passed.
+- Trial command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-balance-candidates-7lang cargo xtask perf-gate --language typescript --language javascript --language python --language go --language rust --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Candidate-list Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: |
+| TypeScript normal | 29773.7 | 23715.4 | +25.55% |
+| JavaScript normal | 20417.7 | 15522.5 | +31.54% |
+| Python normal | 13022.0 | 10772.7 | +20.88% |
+| Go normal | 15923.7 | 13139.0 | +21.19% |
+| Rust normal | 19743.4 | 15826.5 | +24.75% |
+| C++ normal | 6175.5 | 10422.1 | -40.75% |
+| Java normal | 9823.3 | 11215.7 | -12.41% |
+| Overall broad normal | 19382.0 | 15744.4 | +23.10% |
+
+Interpretation:
+
+- Recording candidates during node construction costs more than the final
+  traversal saves, and it severely regresses C++ and Java.
+- The candidate list can also include dead arena nodes from abandoned parse
+  paths, which likely explains part of the extra work.
+- Do not keep parser-owned balance candidate recording. Future balancing work
+  needs a membership-aware representation or a way to avoid producing deep
+  repeat chains in the first place.
+
 ### 2026-06-28 EDT - rejected linear-tail and progress-callback trials
 
 - Repo head: `f087bc4f`
