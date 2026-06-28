@@ -267,6 +267,101 @@ Interpretation:
 - The code shape is simpler and avoids a duplicated hot-path call site, so it
   is acceptable as a readability-only change.
 
+### 2026-06-28 EDT - rejected cold parser path annotations
+
+- Repo head: `476ef5e0`
+- Trial status: not kept. Source experiment was reverted after measurement.
+- Hypothesis: annotate rare parser paths with `#[cold]` so normal parses keep
+  recovery, incremental reduction, accept, and old-tree breakdown code farther
+  from the hot action interpreter.
+- Annotated functions in the trial:
+  `parser_reduce_with_slices`, `parser_accept`, `parser_recover_to_state`,
+  `parser_recover`, `parser_handle_error`, `parser_recover_for_action`,
+  `parser_halt_after_merged_reduction`, `parser_try_breakdown_reused_top`, and
+  `parser_pause_with_error`.
+- Trial command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-cold-parser-paths-7lang cargo xtask perf-gate --language typescript --language javascript --language python --language go --language rust --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+- Same-window baseline command after reverting the annotations:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-cold-parser-paths-baseline-7lang cargo xtask perf-gate --language typescript --language javascript --language python --language go --language rust --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Cold-path Rust bytes/ms | Baseline Rust bytes/ms | Movement |
+| --- | ---: | ---: | ---: |
+| TypeScript normal | 29416.2 | 29309.6 | +0.36% |
+| JavaScript normal | 20024.0 | 19375.2 | +3.35% |
+| Python normal | 13158.7 | 13679.2 | -3.81% |
+| Go normal | 16753.5 | 16738.6 | +0.09% |
+| Rust normal | 20708.0 | 21060.8 | -1.68% |
+| C++ normal | 7351.0 | 7798.5 | -5.74% |
+| Java normal | 10488.6 | 10008.1 | +4.80% |
+| Overall broad normal | 19610.8 | 19590.4 | +0.10% |
+
+Interpretation:
+
+- The aggregate movement is too small to trust, and C++ regressed materially.
+- Do not keep broad `#[cold]` annotations on parser rare paths as a performance
+  optimization. If code-layout work is retried, use a profile-driven split of a
+  specific large function or generated code section rather than broad manual
+  annotations.
+
+### 2026-06-28 EDT - rejected parser hot-pointer layout trial
+
+- Repo head: `476ef5e0`
+- Trial status: not kept. Source experiment was reverted after measurement.
+- Hypothesis: move the small hot `language` and `stack` fields ahead of the
+  large `Lexer` field in `TSParser`, reducing displacement when the action
+  interpreter repeatedly reads language tables and stack heads.
+- Patch shape:
+
+```rust
+pub struct TSParser {
+    language: *const TSLanguage,
+    stack: *mut Stack,
+    lexer: Lexer,
+    ...
+}
+```
+
+- Validation before benchmarking: `cargo fmt --check --all`,
+  `cargo check -p tree-sitter --lib --offline`, and
+  `cargo test -p tree-sitter --test abi_surface --offline` all passed.
+- Trial command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-parser-hot-pointers-layout-7lang cargo xtask perf-gate --language typescript --language javascript --language python --language go --language rust --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+- Same-window baseline command after reverting the layout change:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-parser-hot-pointers-layout-baseline-7lang cargo xtask perf-gate --language typescript --language javascript --language python --language go --language rust --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Layout Rust bytes/ms | Baseline Rust bytes/ms | Movement |
+| --- | ---: | ---: | ---: |
+| TypeScript normal | 29168.7 | 29405.6 | -0.81% |
+| JavaScript normal | 20163.5 | 21301.2 | -5.34% |
+| Python normal | 12972.0 | 12995.9 | -0.18% |
+| Go normal | 15962.1 | 16097.3 | -0.84% |
+| Rust normal | 20771.6 | 20216.0 | +2.75% |
+| C++ normal | 7670.5 | 7794.8 | -1.59% |
+| Java normal | 9814.7 | 9959.0 | -1.45% |
+| Overall broad normal | 19397.2 | 19769.2 | -1.88% |
+
+Interpretation:
+
+- Moving `language` and `stack` ahead of `Lexer` is not useful. It regresses the
+  seven-language aggregate and most individual languages, especially
+  JavaScript.
+- Keep the lexer-first parser layout. Future parser layout work needs measured
+  field access/cacheline data, not manual hot-pointer grouping.
+
 ### 2026-06-28 EDT - rejected linear-tail and progress-callback trials
 
 - Repo head: `f087bc4f`
