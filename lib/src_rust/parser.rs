@@ -22,7 +22,7 @@ use super::language::{
     language_has_actions, language_has_reduce_action, language_is_reserved_word,
     language_lex_mode_for_state, language_lookup, language_table_entry, ts_language_copy,
     ts_language_delete, ts_language_next_state, ts_language_symbol_metadata,
-    ts_language_symbol_name, TSLexer, TSLexerMode,
+    ts_language_symbol_name, TSLexer, TSLexerMode, TSParseAction,
     TSParseActionTypeAccept as TSPARSE_ACTION_TYPE_ACCEPT,
     TSParseActionTypeRecover as TSPARSE_ACTION_TYPE_RECOVER,
     TSParseActionTypeReduce as TSPARSE_ACTION_TYPE_REDUCE,
@@ -3316,6 +3316,14 @@ unsafe fn parser__handle_error(self_: &mut TSParser, version: StackVersion, look
 // Internal helpers — advance & condense
 // ---------------------------------------------------------------------------
 
+enum ParseActionsResult {
+    Done,
+    Reductions {
+        did_reduce: bool,
+        last_reduction_version: StackVersion,
+    },
+}
+
 unsafe fn parser__check_progress(
     self_: &mut TSParser,
     lookahead: Option<&mut Subtree>,
@@ -3344,6 +3352,234 @@ unsafe fn parser__check_progress(
         return false;
     }
     true
+}
+
+unsafe fn parser__shift_for_action(
+    self_: &mut TSParser,
+    parser: *mut TSParser,
+    version: StackVersion,
+    state: TSStateId,
+    lookahead: &mut Subtree,
+    action: TSParseAction,
+) {
+    let shift = action.shift;
+    let next_state;
+    if shift.extra {
+        next_state = state;
+        LOG!(parser, c"shift_extra".as_ptr().cast::<i8>());
+    } else {
+        next_state = shift.state;
+        LOG!(
+            parser,
+            c"shift state:%u".as_ptr().cast::<i8>(),
+            u32::from(next_state)
+        );
+    }
+
+    if subtree_child_count(*lookahead) > 0 {
+        parser__breakdown_lookahead(self_, lookahead, state);
+        let next_state = ts_language_next_state(self_.language, state, subtree_symbol(*lookahead));
+        parser__shift(self_, version, next_state, *lookahead, shift.extra);
+    } else {
+        parser__shift(self_, version, next_state, *lookahead, shift.extra);
+    }
+}
+
+unsafe fn parser__recover_for_action(
+    self_: &mut TSParser,
+    version: StackVersion,
+    lookahead: &mut Subtree,
+) {
+    if subtree_child_count(*lookahead) > 0 {
+        parser__breakdown_lookahead(self_, lookahead, ERROR_STATE);
+    }
+    parser__recover(self_, version, *lookahead);
+}
+
+unsafe fn parser__apply_parse_actions(
+    self_: &mut TSParser,
+    parser: *mut TSParser,
+    version: StackVersion,
+    state: TSStateId,
+    did_reuse: bool,
+    lookahead: &mut Subtree,
+    table_entry: &TableEntry,
+) -> ParseActionsResult {
+    let mut did_reduce = false;
+    let mut last_reduction_version = STACK_VERSION_NONE;
+
+    for i in 0..table_entry.action_count {
+        let action = *table_entry.actions.add(i as usize);
+
+        match action.type_ {
+            TSPARSE_ACTION_TYPE_SHIFT => {
+                if action.shift.repetition {
+                    break;
+                }
+                parser__shift_for_action(self_, parser, version, state, lookahead, action);
+                if did_reuse {
+                    self_.reusable_node.advance();
+                }
+                return ParseActionsResult::Done;
+            }
+
+            TSPARSE_ACTION_TYPE_REDUCE => {
+                let reduce = action.reduce;
+                let is_fragile = table_entry.action_count > 1;
+                let end_of_non_terminal_extra = lookahead.ptr.is_null();
+                LOG!(
+                    parser,
+                    c"reduce sym:%s, child_count:%u".as_ptr().cast::<i8>(),
+                    SYM_NAME!(parser, reduce.symbol),
+                    u32::from(reduce.child_count)
+                );
+                let reduction_version = parser__reduce(
+                    self_,
+                    version,
+                    reduce.symbol,
+                    u32::from(reduce.child_count),
+                    i32::from(reduce.dynamic_precedence),
+                    reduce.production_id,
+                    is_fragile,
+                    end_of_non_terminal_extra,
+                );
+                did_reduce = true;
+                if reduction_version != STACK_VERSION_NONE {
+                    last_reduction_version = reduction_version;
+                }
+            }
+
+            TSPARSE_ACTION_TYPE_ACCEPT => {
+                LOG!(parser, c"accept".as_ptr().cast::<i8>());
+                parser__accept(self_, version, *lookahead);
+                return ParseActionsResult::Done;
+            }
+
+            TSPARSE_ACTION_TYPE_RECOVER => {
+                parser__recover_for_action(self_, version, lookahead);
+                if did_reuse {
+                    self_.reusable_node.advance();
+                }
+                return ParseActionsResult::Done;
+            }
+
+            _ => {}
+        }
+    }
+
+    ParseActionsResult::Reductions {
+        did_reduce,
+        last_reduction_version,
+    }
+}
+
+unsafe fn parser__continue_after_reduction(
+    self_: &mut TSParser,
+    parser: *mut TSParser,
+    version: StackVersion,
+    last_reduction_version: StackVersion,
+    state: &mut TSStateId,
+    lookahead: Subtree,
+    table_entry: &mut TableEntry,
+) -> bool {
+    stack_renumber_version(ptr_mut(self_.stack), last_reduction_version, version);
+    LOG_STACK!(parser);
+    *state = stack_state(ptr_ref(self_.stack), version);
+
+    // At the end of a non-terminal extra rule, the lexer will return a null
+    // subtree, because the parser needs to perform a fixed reduction regardless
+    // of the lookahead node. After that reduction, run the lexer again from the
+    // current parse state.
+    if lookahead.ptr.is_null() {
+        true
+    } else {
+        language_table_entry(
+            self_.language,
+            *state,
+            subtree_leaf_symbol(lookahead),
+            table_entry,
+        );
+        false
+    }
+}
+
+unsafe fn parser__halt_after_merged_reduction(
+    self_: &mut TSParser,
+    version: StackVersion,
+    lookahead: Subtree,
+) {
+    if !lookahead.ptr.is_null() {
+        subtree_release(&mut self_.tree_pool, lookahead);
+    }
+    stack_halt(ptr_mut(self_.stack), version);
+}
+
+unsafe fn parser__try_keyword_fallback(
+    self_: &mut TSParser,
+    parser: *mut TSParser,
+    state: TSStateId,
+    lookahead: &mut Subtree,
+    table_entry: &mut TableEntry,
+) -> bool {
+    let keyword_capture_token = language_full(self_.language).keyword_capture_token;
+    if !subtree_is_keyword(*lookahead)
+        || subtree_symbol(*lookahead) == keyword_capture_token
+        || language_is_reserved_word(self_.language, state, subtree_symbol(*lookahead))
+    {
+        return false;
+    }
+
+    language_table_entry(self_.language, state, keyword_capture_token, table_entry);
+    if table_entry.action_count == 0 {
+        return false;
+    }
+
+    LOG!(
+        parser,
+        c"switch from_keyword:%s, to_word_token:%s"
+            .as_ptr()
+            .cast::<i8>(),
+        TREE_NAME!(parser, *lookahead),
+        SYM_NAME!(parser, keyword_capture_token)
+    );
+
+    let mut mutable_lookahead = subtree_make_mut(&mut self_.tree_pool, *lookahead);
+    subtree_set_symbol(
+        &mut mutable_lookahead,
+        keyword_capture_token,
+        self_.language,
+    );
+    *lookahead = subtree_from_mut(mutable_lookahead);
+    true
+}
+
+unsafe fn parser__try_breakdown_reused_top(
+    self_: &mut TSParser,
+    version: StackVersion,
+    state: &mut TSStateId,
+    lookahead: Subtree,
+) -> bool {
+    if !parser__breakdown_top_of_stack(self_, version) {
+        return false;
+    }
+
+    *state = stack_state(ptr_ref(self_.stack), version);
+    subtree_release(&mut self_.tree_pool, lookahead);
+    true
+}
+
+unsafe fn parser__pause_with_error(
+    self_: &mut TSParser,
+    parser: *mut TSParser,
+    version: StackVersion,
+    lookahead: Subtree,
+) {
+    LOG!(
+        parser,
+        c"detect_error lookahead:%s".as_ptr().cast::<i8>(),
+        TREE_NAME!(parser, lookahead)
+    );
+    stack_pause(ptr_mut(self_.stack), version, lookahead);
 }
 
 /// Advance one stack version until it shifts, accepts, recovers, pauses, or halts.
@@ -3395,177 +3631,57 @@ unsafe fn parser__advance(
             return false;
         }
 
-        // Process each parse action for the current lookahead token in
-        // the current state. If there are multiple actions, then this is
-        // an ambiguous state. REDUCE actions always create a new stack
-        // version, whereas SHIFT actions update the existing stack version
-        // and terminate this loop.
-        let mut did_reduce = false;
-        let mut last_reduction_version = STACK_VERSION_NONE;
-        for i in 0..table_entry.action_count {
-            let action = *table_entry.actions.add(i as usize);
-
-            match action.type_ {
-                TSPARSE_ACTION_TYPE_SHIFT => {
-                    if action.shift.repetition {
-                        break;
-                    }
-                    let next_state;
-                    if action.shift.extra {
-                        next_state = state;
-                        LOG!(parser, c"shift_extra".as_ptr().cast::<i8>());
-                    } else {
-                        next_state = action.shift.state;
-                        LOG!(
-                            parser,
-                            c"shift state:%u".as_ptr().cast::<i8>(),
-                            u32::from(next_state)
-                        );
-                    }
-
-                    if subtree_child_count(lookahead) > 0 {
-                        parser__breakdown_lookahead(self_, &mut lookahead, state);
-                        let next_state = ts_language_next_state(
-                            self_.language,
-                            state,
-                            subtree_symbol(lookahead),
-                        );
-                        parser__shift(self_, version, next_state, lookahead, action.shift.extra);
-                    } else {
-                        parser__shift(self_, version, next_state, lookahead, action.shift.extra);
-                    }
-                    if did_reuse {
-                        self_.reusable_node.advance();
-                    }
-                    return true;
-                }
-
-                TSPARSE_ACTION_TYPE_REDUCE => {
-                    let is_fragile = table_entry.action_count > 1;
-                    let end_of_non_terminal_extra = lookahead.ptr.is_null();
-                    LOG!(
-                        parser,
-                        c"reduce sym:%s, child_count:%u".as_ptr().cast::<i8>(),
-                        SYM_NAME!(parser, action.reduce.symbol),
-                        u32::from(action.reduce.child_count)
-                    );
-                    let reduction_version = parser__reduce(
-                        self_,
-                        version,
-                        action.reduce.symbol,
-                        u32::from(action.reduce.child_count),
-                        i32::from(action.reduce.dynamic_precedence),
-                        action.reduce.production_id,
-                        is_fragile,
-                        end_of_non_terminal_extra,
-                    );
-                    did_reduce = true;
-                    if reduction_version != STACK_VERSION_NONE {
-                        last_reduction_version = reduction_version;
-                    }
-                }
-
-                TSPARSE_ACTION_TYPE_ACCEPT => {
-                    LOG!(parser, c"accept".as_ptr().cast::<i8>());
-                    parser__accept(self_, version, lookahead);
-                    return true;
-                }
-
-                TSPARSE_ACTION_TYPE_RECOVER => {
-                    if subtree_child_count(lookahead) > 0 {
-                        parser__breakdown_lookahead(self_, &mut lookahead, ERROR_STATE);
-                    }
-
-                    parser__recover(self_, version, lookahead);
-                    if did_reuse {
-                        self_.reusable_node.advance();
-                    }
-                    return true;
-                }
-
-                _ => {}
-            }
-        }
+        let ParseActionsResult::Reductions {
+            did_reduce,
+            last_reduction_version,
+        } = parser__apply_parse_actions(
+            self_,
+            parser,
+            version,
+            state,
+            did_reuse,
+            &mut lookahead,
+            &table_entry,
+        )
+        else {
+            return true;
+        };
 
         // If a reduction was performed, then replace the current stack version
         // with one of the stack versions created by a reduction, and continue
         // processing this version of the stack with the same lookahead symbol.
         if last_reduction_version != STACK_VERSION_NONE {
-            stack_renumber_version(ptr_mut(self_.stack), last_reduction_version, version);
-            LOG_STACK!(parser);
-            state = stack_state(ptr_ref(self_.stack), version);
-
-            // At the end of a non-terminal extra rule, the lexer will return a
-            // null subtree, because the parser needs to perform a fixed reduction
-            // regardless of the lookahead node. After performing that reduction,
-            // (and completing the non-terminal extra rule) run the lexer again based
-            // on the current parse state.
-            if lookahead.ptr.is_null() {
-                needs_lex = true;
-            } else {
-                language_table_entry(
-                    self_.language,
-                    state,
-                    subtree_leaf_symbol(lookahead),
-                    &mut table_entry,
-                );
-            }
-
+            needs_lex = parser__continue_after_reduction(
+                self_,
+                parser,
+                version,
+                last_reduction_version,
+                &mut state,
+                lookahead,
+                &mut table_entry,
+            );
             continue;
         }
 
         // A reduction was performed, but was merged into an existing stack version.
         // This version can be discarded.
         if did_reduce {
-            if !lookahead.ptr.is_null() {
-                subtree_release(&mut self_.tree_pool, lookahead);
-            }
-            stack_halt(ptr_mut(self_.stack), version);
+            parser__halt_after_merged_reduction(self_, version, lookahead);
             return true;
         }
 
         // If the current lookahead token is a keyword that is not valid, but the
         // default word token *is* valid, then treat the lookahead token as the word
         // token instead.
-        let keyword_capture_token = language_full(self_.language).keyword_capture_token;
-        if subtree_is_keyword(lookahead)
-            && subtree_symbol(lookahead) != keyword_capture_token
-            && !language_is_reserved_word(self_.language, state, subtree_symbol(lookahead))
-        {
-            language_table_entry(
-                self_.language,
-                state,
-                keyword_capture_token,
-                &mut table_entry,
-            );
-            if table_entry.action_count > 0 {
-                LOG!(
-                    parser,
-                    c"switch from_keyword:%s, to_word_token:%s"
-                        .as_ptr()
-                        .cast::<i8>(),
-                    TREE_NAME!(parser, lookahead),
-                    SYM_NAME!(parser, keyword_capture_token)
-                );
-
-                let mut mutable_lookahead = subtree_make_mut(&mut self_.tree_pool, lookahead);
-                subtree_set_symbol(
-                    &mut mutable_lookahead,
-                    keyword_capture_token,
-                    self_.language,
-                );
-                lookahead = subtree_from_mut(mutable_lookahead);
-                continue;
-            }
+        if parser__try_keyword_fallback(self_, parser, state, &mut lookahead, &mut table_entry) {
+            continue;
         }
 
         // If the current lookahead token is not valid and the previous subtree on
         // the stack was reused from an old tree, then it wasn't actually valid to
         // reuse that previous subtree. Remove it from the stack, and in its place,
         // push each of its children. Then try again to process the current lookahead.
-        if parser__breakdown_top_of_stack(self_, version) {
-            state = stack_state(ptr_ref(self_.stack), version);
-            subtree_release(&mut self_.tree_pool, lookahead);
+        if parser__try_breakdown_reused_top(self_, version, &mut state, lookahead) {
             needs_lex = true;
             continue;
         }
@@ -3575,12 +3691,7 @@ unsafe fn parser__advance(
         // versions that exist. If some other version advances successfully, then
         // this version can simply be removed. But if all versions end up paused,
         // then error recovery is needed.
-        LOG!(
-            parser,
-            c"detect_error lookahead:%s".as_ptr().cast::<i8>(),
-            TREE_NAME!(parser, lookahead)
-        );
-        stack_pause(ptr_mut(self_.stack), version, lookahead);
+        parser__pause_with_error(self_, parser, version, lookahead);
         return true;
     }
 }

@@ -33,11 +33,14 @@ pub mod node;
 pub mod tree;
 pub mod tree_cursor;
 
-// Tier 4 — The engine
+// Tier 4 — Active engine runtime
 pub mod parser;
-// query.c — port in progress in `query`, not yet activated (query.c still live)
+
+// Legacy/inactive query port. The live query implementation still comes from
+// the C runtime, so this module is kept compiling but is not part of current
+// readability work.
 pub mod query;
 
-// Internal helpers (no corresponding .c file)
+// Internal helpers for the active Rust runtime (no corresponding .c file).
 mod reduce_action;
 mod reusable_node;
