@@ -17,6 +17,119 @@ Use strict mode before release:
 cargo xtask perf-gate --offline
 ```
 
+## Trial History Summary
+
+The former `PERFORMANCE_TRIALS.md` file has been merged here as the compact
+history for raw normal parsing performance work in the Rust runtime.
+
+Target languages: TypeScript, JavaScript, Python, Go, Rust, C++, Java.
+
+Current status:
+
+- Universal 20% normal-parse target: not met.
+- Kept gains: arena-backed reduction parents for fresh normal parses and the
+  parser-owned fresh reduction stack-pop builder.
+- Current direction: architecture investigation before more code trials. The
+  next attempt must remove a hot phase from normal parsing, not add another
+  partial fast path.
+- Avoid for now: small local fast paths, refcount-order tweaks, node-pool
+  tuning, benchmark-harness edits, dormant storage foundations, and SIMD
+  without a reusable-runtime scan-loop profile.
+
+The hot loop remains:
+
+```text
+ts_parser__advance -> ts_parser__reduce
+  -> stack pop / child collection
+  -> parent allocation and child copy
+  -> child summarization
+  -> stack push / merge
+```
+
+Normal parsing repeatedly crosses four expensive boundaries:
+
+- Persistent stack graph traversal collects children from backward links.
+- Concrete child arrays are formed and retained before each parent exists.
+- Every reduction eagerly allocates parent storage and summarizes child
+  metadata immediately.
+- The concrete parent is pushed back into the graph and then participates in
+  version merge, recovery, and accept logic.
+
+Closed or removed directions:
+
+- broad metadata caching in `ts_subtree_summarize_children`
+- single-child, no-alias, raw-pointer, and zero-child summarizer fast paths
+- direct graph builder collection and linear reduce-pop variants
+- stack-pop reserve, reversal, trailing-extra, and control-flow tweaks
+- broad descriptor/lazy-reduction wiring
+- payload-aware accept/finalization through the reduce builder
+- arena-backed heap leaves, inline leaf symbol changes, and zero-child pools
+- global slab allocators, parser-local small child-block free lists, and larger
+  tree-arena pages
+- compact stack-node and page-backed extra-link storage
+- refcount ordering, retain inline, and direct-release fast paths
+- lexer/token micro-optimizations without generated-lexer profile proof
+- broad parse-table and stack helper inlining
+- balancing deferral and benchmark allocator resets
+- dormant `StackSegment` / `StackFrame` storage foundations
+
+Useful measurements from the trial log:
+
+- C++ normal flamegraph samples were split between reduction construction and
+  generated lexer work: `ts_parser__reduce` 24.7%, `ts_lex` 22.2%,
+  `ts_subtree_new_node_in_arena` 12.0%,
+  `ts_subtree_summarize_children` 9.5%, `ts_lex_keywords` 7.9%,
+  `ts_parser__balance_subtree` 4.2%, `ts_stack_renumber_version` 4.0%, and
+  `ts_stack_pop_count_into` 3.7%.
+- Stack-node link-count probes showed mostly one-link nodes, but compacting
+  graph-node layout alone did not produce a universal win and regressed Go.
+- Descriptor lazy-candidate counters looked promising for TypeScript,
+  JavaScript, Python, Rust, and Java, but Go hit much more multi-version and
+  multi-pop pressure. A single-version-only lazy path cannot satisfy a
+  universal target.
+- Linear-stack coverage counters showed direct child collection is already
+  mostly linear outside Go. Future stack work must remove the persistent-node
+  path for straight segments, not just replace stack-pop graph traversal.
+
+Reflections from the trial sequence:
+
+1. Allocation work helped only when it improved ownership and locality. Pools,
+   larger pages, leaf arenas, and refcount tuning did not generalize.
+2. Local reduce fast paths are exhausted. Future reduce work must remove a full
+   phase, not just make one branch cheaper.
+3. Lexer work needs profile proof that reusable runtime code is the bottleneck;
+   generated lexers and external scanners often dominate lexer samples.
+4. Descriptor foundation code was not itself a measured win. Partial lazy wiring
+   exposed concrete-subtree assumptions in reduce, recovery, accept, merge, and
+   final materialization, so it was backed out instead of tuned.
+5. Representation-boundary work must be validated one ownership boundary at a
+   time. Reduce, merge/recovery, and accept/finalization need explicit tested
+   models before any future lazy-reduction attempt.
+6. Do not keep dormant foundations. The segmented stack and descriptor payload
+   scaffolding were removed after failing to produce a measured performance
+   improvement.
+
+Future architecture candidates should be ranked by removed phase:
+
+1. A linear/common-path stack representation that avoids persistent graph-node
+   allocation for straight segments while preserving first-class branching,
+   merge, recovery, old-tree reuse, and GLR semantics.
+2. A stack-native parse forest that materializes concrete `SubtreeHeapData` only
+   at accept or forced boundaries.
+3. Action-trace execution for deterministic state/lookahead runs that contain
+   normal reductions followed by one shift or accept.
+4. Generated-lexer contract work if parser construction drops but C++, JS, or
+   TS remain lexer-bound.
+
+Process rules:
+
+- Check this file before every new performance trial.
+- Closed trials may be revisited only when the hypothesis, profile, or
+  architecture changes.
+- Do not edit benchmark source code.
+- Use `cargo test --all` for kept production code.
+- Add benchmark commands and results to this log.
+
 ## Baseline
 
 ### 2026-06-23 17:07 EDT
