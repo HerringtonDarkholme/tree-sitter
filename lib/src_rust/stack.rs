@@ -184,55 +184,6 @@ struct StackPayloadIterator {
 pub type StackNodeArray = Array<*mut StackNode>;
 pub type StackLinkPayloadArray = Array<StackLinkPayload>;
 
-pub type StackSegmentId = u32;
-pub const STACK_SEGMENT_ID_NONE: StackSegmentId = u32::MAX;
-
-pub type StackSegmentBaseKind = u8;
-pub const STACK_SEGMENT_BASE_GRAPH: StackSegmentBaseKind = 0;
-pub const STACK_SEGMENT_BASE_SEGMENT: StackSegmentBaseKind = 1;
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct StackSegment {
-    /// Base graph node when `base_kind == STACK_SEGMENT_BASE_GRAPH`.
-    pub base_node: *mut StackNode,
-    /// Base segment id when `base_kind == STACK_SEGMENT_BASE_SEGMENT`.
-    pub base_segment: StackSegmentId,
-    /// Top frame index in the base segment.
-    pub base_top: u32,
-    /// First frame in `Stack::frames` owned by this segment.
-    pub start: u32,
-    /// Number of frames in this segment.
-    pub len: u32,
-    /// Number of stack heads/segments sharing this segment.
-    pub ref_count: u32,
-    /// Whether the base is a graph node or another segment.
-    pub base_kind: StackSegmentBaseKind,
-    /// Once sealed, frames are immutable and can be shared.
-    pub sealed: bool,
-}
-
-pub type StackSegmentArray = Array<StackSegment>;
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct StackFrame {
-    /// Payload shifted between this frame and the previous frame.
-    pub payload: StackLinkPayload,
-    /// Source position after applying `payload`.
-    pub position: Length,
-    /// Aggregates copied from graph nodes for pruning/comparison.
-    pub error_cost: u32,
-    pub node_count: u32,
-    pub dynamic_precedence: i32,
-    /// Parse state at this frame.
-    pub state: TSStateId,
-    /// Segment-local flags.
-    pub flags: u8,
-}
-
-pub type StackFrameArray = Array<StackFrame>;
-
 #[repr(C)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum StackStatus {
@@ -297,10 +248,6 @@ pub struct StackHead {
 pub struct Stack {
     /// One head per active/paused/halted GLR version.
     pub heads: Array<StackHead>,
-    /// Experimental linearized stack storage for shared frame segments.
-    pub segments: StackSegmentArray,
-    /// Backing storage for segment frames.
-    pub frames: StackFrameArray,
     /// Scratch pop results returned to the parser.
     pub slices: StackSliceArray,
     /// Reusable DFS iterators for pop operations.
@@ -324,10 +271,6 @@ const _: () = assert!(core::mem::size_of::<StackLinkPayload>() == 16);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(core::mem::size_of::<StackNode>() == 232);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(core::mem::size_of::<StackSegment>() == 32);
-#[cfg(target_pointer_width = "64")]
-const _: () = assert!(core::mem::size_of::<StackFrame>() == 48);
-#[cfg(target_pointer_width = "64")]
 const _: () = assert!(core::mem::size_of::<StackIterator>() == 32);
 const _: () = assert!(core::mem::size_of::<StackStatus>() == 4);
 #[cfg(target_pointer_width = "64")]
@@ -337,7 +280,7 @@ const _: () = assert!(core::mem::size_of::<StackSummaryEntry>() == 20);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(core::mem::size_of::<StackHead>() == 48);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(core::mem::size_of::<Stack>() == 112);
+const _: () = assert!(core::mem::size_of::<Stack>() == 80);
 
 pub type StackAction = u32;
 pub const StackActionNone: StackAction = 0;
@@ -1062,25 +1005,6 @@ unsafe fn stack_payload_array_delete(
     }
 }
 
-unsafe fn stack_segment_storage_clear(self_: &mut Stack) {
-    let subtree_pool = ptr_mut(self_.subtree_pool);
-    for i in 0..self_.frames.size {
-        let payload = array_get_ref(&self_.frames, i).payload;
-        if !stack_link_payload_is_null(payload) {
-            stack_link_payload_release(payload, subtree_pool);
-        }
-    }
-    let node_pool = &mut self_.node_pool;
-    for i in 0..self_.segments.size {
-        let segment = *array_get_ref(&self_.segments, i);
-        if segment.base_kind == STACK_SEGMENT_BASE_GRAPH && !segment.base_node.is_null() {
-            stack_node_release(ptr_mut(segment.base_node), node_pool, subtree_pool);
-        }
-    }
-    array_clear(&mut self_.frames);
-    array_clear(&mut self_.segments);
-}
-
 unsafe fn stack_payload_array_copy(
     source: &StackLinkPayloadArray,
     destination: &mut StackLinkPayloadArray,
@@ -1619,8 +1543,6 @@ pub unsafe fn stack_new(subtree_pool: &mut SubtreePool) -> *mut Stack {
         self_,
         Stack {
             heads: array_new(),
-            segments: array_new(),
-            frames: array_new(),
             slices: array_new(),
             iterators: array_new(),
             node_pool: array_new(),
@@ -1631,8 +1553,6 @@ pub unsafe fn stack_new(subtree_pool: &mut SubtreePool) -> *mut Stack {
     let stack = ptr_mut(self_);
 
     array_reserve(&mut stack.heads, 4);
-    array_reserve(&mut stack.segments, 4);
-    array_reserve(&mut stack.frames, 32);
     array_reserve(&mut stack.slices, 4);
     array_reserve(&mut stack.iterators, 4);
     array_reserve(&mut stack.node_pool, MAX_NODE_POOL_SIZE);
@@ -1652,13 +1572,6 @@ pub unsafe fn stack_new(subtree_pool: &mut SubtreePool) -> *mut Stack {
 
 /// Free the parse stack.
 pub unsafe fn stack_delete(self_: &mut Stack) {
-    stack_segment_storage_clear(self_);
-    if !self_.segments.contents.is_null() {
-        array_delete(&mut self_.segments);
-    }
-    if !self_.frames.contents.is_null() {
-        array_delete(&mut self_.frames);
-    }
     if !self_.slices.contents.is_null() {
         array_delete(&mut self_.slices);
     }
@@ -2084,7 +1997,6 @@ pub unsafe fn stack_resume(stack: &mut Stack, version: StackVersion) -> Subtree 
 
 /// Clear all versions, resetting to initial state.
 pub unsafe fn stack_clear(self_: &mut Stack) {
-    stack_segment_storage_clear(self_);
     stack_node_retain(ptr_mut(self_.base_node));
     let heads = &mut self_.heads;
     let node_pool = &mut self_.node_pool;
