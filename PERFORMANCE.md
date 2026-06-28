@@ -163,6 +163,74 @@ broader baseline replaces it.
 
 ## Checkpoints
 
+### 2026-06-28 EDT - rejected summarizer parent-error hoist
+
+- Repo head: `d064b198`
+- Trial status: not kept. Source experiment was reverted after measurement.
+- Hypothesis: most reduction parents are not `ERROR` or `ERROR_REPEAT`, but
+  `subtree_summarize_children` checks the parent error kind inside the child
+  loop and again at the end. Hoisting that parent-kind check into a local
+  `is_error_parent` bool could remove repeated symbol comparisons without
+  adding new metadata or revisiting the closed single-child/no-alias/zero-child
+  summarizer fast paths.
+- Patch shape:
+
+```rust
+let is_error_parent =
+    data.symbol == TS_BUILTIN_SYM_ERROR || data.symbol == TS_BUILTIN_SYM_ERROR_REPEAT;
+
+if is_error_parent && !subtree_extra(child) && ... {
+    ...
+}
+
+if is_error_parent {
+    ...
+}
+```
+
+- Validation before benchmarking:
+
+```sh
+cargo fmt --check --all
+cargo check -p tree-sitter --lib --offline
+cargo test -p tree-sitter --lib --offline
+```
+
+- Focused weak-language command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-summarizer-parent-error-hoist-pgcj cargo xtask perf-gate --language python --language go --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Hoist Rust | Hoist C | Hoist delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 12656.8 | 11104.6 | +13.98% |
+| Go normal | 17371.2 | 13883.5 | +25.12% |
+| C++ normal | 8101.3 | 9855.0 | -17.80% |
+| Java normal | 9876.2 | 10663.3 | -7.38% |
+| Python + Go + C++ + Java normal | 14360.6 | 12317.0 | +16.59% |
+
+- Same-window baseline after reverting:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-summarizer-parent-error-hoist-baseline-pgcj cargo xtask perf-gate --language python --language go --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Baseline Rust | Baseline C | Baseline delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 13036.1 | 10649.0 | +22.42% |
+| Go normal | 15576.7 | 13444.6 | +15.86% |
+| C++ normal | 7876.1 | 10322.7 | -23.70% |
+| Java normal | 10295.4 | 11473.8 | -10.27% |
+| Python + Go + C++ + Java normal | 13867.7 | 11918.5 | +16.35% |
+
+- Interpretation: hoisting the parent error-kind check helps Go and C++ but
+  regresses Python and Java absolute Rust throughput. The focused aggregate
+  movement is not enough to justify hurting two target languages. Do not keep
+  this as a generic summarizer code-shape tweak; future summarizer work still
+  needs to remove a field or defer materialization rather than rearrange
+  branches in the existing loop.
+
 ### 2026-06-28 EDT - rejected deterministic reduction runner
 
 - Repo head: `cb452fb9`
