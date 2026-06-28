@@ -2499,6 +2499,43 @@ Interpretation:
   parser-local instrumentation or grammar/state knowledge to avoid the phase,
   not a new per-subtree aggregate flag in the hot summarizer.
 
+Large-state direct parse-table entry trial:
+
+- Trial: in `language_table_entry`, handle large parse states directly by
+  reading `parse_table[state * symbol_count + symbol]`, falling back to
+  `language_lookup` only for small states. This tested whether avoiding the
+  generic lookup wrapper in the terminal action hot path helps without adding
+  parser-local caches or changing table data.
+- Validation before benchmarking:
+
+```sh
+cargo fmt --check --all
+cargo check -p tree-sitter --lib --offline
+cargo test -p tree-sitter --lib --offline
+```
+
+- Focused weak-language command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-large-state-table-direct-pgcj cargo xtask perf-gate --language python --language go --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Direct table Rust | Direct table C | Trial delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 12571.6 | 11193.9 | +12.31% |
+| Go normal | 15834.0 | 13170.9 | +20.22% |
+| C++ normal | 7626.4 | 9905.7 | -23.01% |
+| Java normal | 9998.2 | 10404.0 | -3.90% |
+| Python + Go + C++ + Java normal | 13699.9 | 12066.1 | +13.54% |
+
+Interpretation:
+
+- This is not keepable. The branch in `language_table_entry` and changed code
+  shape regress Python and the focused aggregate badly.
+- Keep the single `language_lookup` path. Parse-table work still needs a larger
+  layout or generated-action change; small access-shape rewrites are closed
+  along with the earlier table-entry and goto caches.
+
 Single-slice reduction fast path trial:
 
 - Trial: preserve the existing "pop into a new reduction version, then
