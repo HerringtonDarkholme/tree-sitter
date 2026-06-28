@@ -163,6 +163,75 @@ broader baseline replaces it.
 
 ## Checkpoints
 
+### 2026-06-28 EDT - rejected reduction merge split scan
+
+- Repo head: `b21228eb`
+- Trial status: not kept. Temporary instrumentation and source experiment were
+  reverted after measurement.
+- Instrumentation: `TREE_SITTER_GLR_STATS=1`, counting reduction merge scans,
+  reduction merge attempts, potential-reduction merge attempts, and condense
+  merge attempts. The probe was parser-local and env-gated; it did not edit
+  benchmark source code.
+- Command template:
+
+```sh
+TREE_SITTER_GLR_STATS=1 TREE_SITTER_CORE_IMPL=rust TREE_SITTER_BENCHMARK_LANGUAGE_FILTER=<language> TREE_SITTER_BENCHMARK_KIND_FILTER=normal TREE_SITTER_BENCHMARK_REPETITION_COUNT=5 target/release/deps/benchmark-cbf7a217e4c2dbe8
+```
+
+| Workload | Reduce merge attempts | Reduce merge successes | Condense calls | Condense merge attempts | Condense merge successes |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| TypeScript normal | 18810 | 750 | 217120 | 5790 | 690 |
+| JavaScript normal | 21580 | 3355 | 353875 | 6655 | 1670 |
+| Python normal | 4505 | 50 | 185395 | 1115 | 90 |
+| Go normal | 182525 | 12585 | 184455 | 68380 | 19525 |
+| Rust normal | 0 | 0 | 69645 | 0 | 0 |
+| C++ normal | 7205 | 15 | 14660 | 2315 | 445 |
+| Java normal | 1060 | 70 | 3875 | 865 | 35 |
+
+- Interpretation: merge-key/index work could matter for Go, but normal
+  TypeScript, Python, Rust, C++, and Java do not spend enough reduction or
+  condense attempts there for this to be a universal 20% lever. In particular,
+  Rust normal had many reductions that entered the old loop shape, but zero
+  real merge attempts.
+- Trial: split the post-reduction merge scan into the range before the source
+  version and the range after it. This avoids the `j == version` branch and
+  avoids entering a no-op scan when the only candidate would be the source
+  version.
+- Focused trial command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-split-reduce-merge-pgcj cargo xtask perf-gate --language python --language go --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Split-scan Rust | Split-scan C | Split-scan delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 12853.1 | 10568.6 | +21.62% |
+| Go normal | 15944.7 | 13094.6 | +21.77% |
+| C++ normal | 8125.0 | 10653.3 | -23.73% |
+| Java normal | 11217.0 | 11759.5 | -4.61% |
+| Python + Go + C++ + Java normal | 13959.0 | 11747.3 | +18.83% |
+
+- Same-window baseline command after reverting the split scan:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-split-reduce-merge-baseline-pgcj cargo xtask perf-gate --language python --language go --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Baseline Rust | Baseline C | Baseline delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 13340.6 | 10666.7 | +25.07% |
+| Go normal | 15908.7 | 13448.0 | +18.30% |
+| C++ normal | 8081.9 | 10672.9 | -24.28% |
+| Java normal | 10747.6 | 11346.1 | -5.28% |
+| Python + Go + C++ + Java normal | 14184.0 | 11943.7 | +18.76% |
+
+- Interpretation: the split scan slightly helped Go, C++, and Java absolute
+  Rust throughput, but Python regressed enough that the focused aggregate fell
+  below the same-window baseline. Do not keep or retry this as a local loop
+  rewrite. Future merge work needs a Go-targeted version-key/index design and
+  must prove it does not add overhead to the deterministic languages where
+  merge attempts are rare.
+
 ### 2026-06-28 EDT - rejected last-external-token identity trial
 
 - Repo head: `7f5e1067`
