@@ -2318,6 +2318,131 @@ Interpretation:
   work needs to remove persistent-node allocation/traversal for straight
   segments, while keeping branch and merge behavior cheap.
 
+Lexer callback-count instrumentation and range-state layout trials:
+
+- Temporary instrumentation: `TREE_SITTER_LEXER_STATS=1`, using lexer-local
+  atomic counters for callback/helper volume and reporting when the parser is
+  deleted. The instrumentation was removed after measurement.
+- Seven-language count command:
+
+```sh
+for lang in typescript javascript python go rust cpp java; do TREE_SITTER_LEXER_STATS=1 TREE_SITTER_CORE_IMPL=rust cargo xtask benchmark --language "$lang" --repetition-count 5 --kind normal; done
+```
+
+| Workload | advance | skip | mark_end | eof | get_column | included_range_start | get_chunk | get_lookahead | seek_range | seek steps |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| TypeScript normal | 3060960 | 1439065 | 1639655 | 2550040 | 0 | 0 | 290 | 3330450 | 3060905 | 3060905 |
+| JavaScript normal | 2937130 | 1039340 | 1991330 | 2803920 | 0 | 112345 | 50 | 3382575 | 2937120 | 2937120 |
+| Python normal | 2064940 | 1364145 | 751550 | 1330110 | 0 | 0 | 420 | 2257075 | 2064880 | 2064880 |
+| Go normal | 1178030 | 113475 | 969590 | 1453675 | 0 | 0 | 40 | 1312205 | 1178010 | 1178010 |
+| Rust normal | 440020 | 125425 | 224930 | 488560 | 0 | 0 | 40 | 495255 | 440010 | 440010 |
+| C++ normal | 85845 | 11645 | 61425 | 108710 | 0 | 0 | 20 | 98770 | 85835 | 85835 |
+| Java normal | 22445 | 5230 | 14175 | 28625 | 0 | 0 | 20 | 25655 | 22435 | 22435 |
+
+Interpretation:
+
+- Generated lexers call `advance`, `mark_end`, and `eof` at very high volume;
+  `get_column` is unused in these normal-parser fixtures.
+- `seek_range` is called once per advance and usually performs exactly one
+  range step. This confirms the included-range branch is hot, but the previous
+  single-range advance specialization remains closed because it regressed
+  Python and Java.
+- `eof` is frequent enough to justify a data-layout probe: move the lexer
+  included-range state nearer the `TSLexer` callback header so `ts_lexer__eof`
+  reads closer fields without changing generated parser call targets.
+
+- Trial A: move `included_range_count` and
+  `current_included_range_index` immediately after `data`.
+- Targeted lexer-heavy command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-lexer-range-state-layout-cpp-java-js cargo xtask perf-gate --language cpp --language java --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Trial A Rust | Trial A C | Trial delta |
+| --- | ---: | ---: | ---: |
+| C++ normal | 7309.6 | 9258.6 | -21.05% |
+| Java normal | 10754.7 | 11505.4 | -6.52% |
+| JavaScript normal | 21022.0 | 16505.2 | +27.37% |
+| C++ + Java + JavaScript normal | 19693.9 | 16049.1 | +22.71% |
+
+- Seven-language command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-lexer-range-state-layout-7lang cargo xtask perf-gate --language typescript --language javascript --language python --language go --language rust --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Trial A Rust | Trial A C | Trial delta |
+| --- | ---: | ---: | ---: |
+| TypeScript normal | 29371.4 | 22547.0 | +30.27% |
+| JavaScript normal | 19992.7 | 15909.9 | +25.66% |
+| Python normal | 13731.8 | 10842.4 | +26.65% |
+| Go normal | 17174.9 | 13865.6 | +23.87% |
+| Rust normal | 20873.2 | 16917.7 | +23.38% |
+| C++ normal | 7925.3 | 10280.9 | -22.91% |
+| Java normal | 9739.3 | 10719.8 | -9.15% |
+| Overall normal | 19900.2 | 15927.7 | +24.94% |
+
+- Same-window seven-language baseline after reverting Trial A:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-lexer-range-state-layout-baseline-7lang cargo xtask perf-gate --language typescript --language javascript --language python --language go --language rust --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Baseline Rust | Baseline C | Baseline delta |
+| --- | ---: | ---: | ---: |
+| TypeScript normal | 28880.8 | 23833.1 | +21.18% |
+| JavaScript normal | 19847.2 | 15535.0 | +27.76% |
+| Python normal | 13026.4 | 10580.8 | +23.11% |
+| Go normal | 16048.5 | 13523.2 | +18.67% |
+| Rust normal | 21189.3 | 17012.0 | +24.56% |
+| C++ normal | 7840.6 | 10780.9 | -27.27% |
+| Java normal | 11105.6 | 10949.6 | +1.42% |
+| Overall normal | 19343.6 | 15863.1 | +21.94% |
+
+- Trial B: keep `current_position` at its original offset after `data`, then
+  move `included_range_count` and `current_included_range_index` after
+  `current_position`.
+- Targeted lexer-heavy command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-lexer-range-after-position-cpp-java-js cargo xtask perf-gate --language cpp --language java --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Trial B Rust | Trial B C | Trial delta |
+| --- | ---: | ---: | ---: |
+| C++ normal | 8050.6 | 10457.0 | -23.01% |
+| Java normal | 11078.6 | 11519.8 | -3.83% |
+| JavaScript normal | 19865.5 | 15433.4 | +28.72% |
+| C++ + Java + JavaScript normal | 18863.5 | 15162.4 | +24.41% |
+
+- Seven-language command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-lexer-range-after-position-7lang cargo xtask perf-gate --language typescript --language javascript --language python --language go --language rust --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Trial B Rust | Trial B C | Trial delta |
+| --- | ---: | ---: | ---: |
+| TypeScript normal | 29726.8 | 22777.9 | +30.51% |
+| JavaScript normal | 20074.0 | 15926.1 | +26.04% |
+| Python normal | 13071.8 | 10914.1 | +19.77% |
+| Go normal | 16658.6 | 13615.3 | +22.35% |
+| Rust normal | 20647.6 | 16583.3 | +24.51% |
+| C++ normal | 6883.9 | 10264.0 | -32.93% |
+| Java normal | 10834.1 | 11088.8 | -2.30% |
+| Overall normal | 19583.9 | 15920.5 | +23.01% |
+
+Interpretation:
+
+- Neither layout is keepable. Trial A improves overall throughput versus the
+  same-window baseline, but materially regresses Java; Trial B avoids most of
+  the Java loss but badly regresses C++ in the broad run.
+- Lexer field ordering is too sensitive to trade one callback's locality
+  against `advance` and generated-lexer access patterns. Future lexer work
+  should reduce callback frequency or change generated lexer contracts, not
+  shuffle internal `Lexer` fields.
+
 Single-slice reduction fast path trial:
 
 - Trial: preserve the existing "pop into a new reduction version, then
