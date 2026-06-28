@@ -44,7 +44,7 @@ use super::node::{
 };
 use super::point::{point_eq, point_gt, point_gte, point_lt, point_lte, POINT_MAX};
 use super::subtree::{
-    subtree_is_repetition, subtree_symbol, ts_builtin_sym_error, Subtree, TSFieldMapEntry,
+    subtree_is_repetition, subtree_symbol, Subtree, TSFieldMapEntry, TS_BUILTIN_SYM_ERROR,
 };
 use super::tree_cursor::{
     tree_cursor_entry_slice, tree_cursor_goto_first_child_internal,
@@ -2171,7 +2171,7 @@ unsafe fn ts_query_perform_analysis(
                     // Determine if this child would match the current step.
                     let mut does_match = false;
 
-                    if step.symbol == ts_builtin_sym_error {
+                    if step.symbol == TS_BUILTIN_SYM_ERROR {
                         // ERROR nodes can appear anywhere.
                         does_match = true;
                     } else if visible_symbol != 0 {
@@ -2559,7 +2559,7 @@ unsafe fn ts_query_analyze_patterns(self_: &mut TSQuery, error_offset: &mut u32)
         let parent_step_index = *array_get_ref(&parent_step_indices, i) as u16;
         let parent_depth = array_get_ref(&self_.steps, u32::from(parent_step_index)).depth;
         let parent_symbol = array_get_ref(&self_.steps, u32::from(parent_step_index)).symbol;
-        if parent_symbol == ts_builtin_sym_error {
+        if parent_symbol == TS_BUILTIN_SYM_ERROR {
             continue;
         }
 
@@ -3875,9 +3875,9 @@ unsafe fn ts_query_cursor_advance(self_: *mut TSQueryCursor, stop_on_definite_st
                     &mut supertype_count,
                 );
 
-                let node_is_error = symbol == ts_builtin_sym_error;
+                let node_is_error = symbol == TS_BUILTIN_SYM_ERROR;
                 let parent_is_error = !ts_node_is_null(parent_node)
-                    && ts_node_symbol(parent_node) == ts_builtin_sym_error;
+                    && ts_node_symbol(parent_node) == TS_BUILTIN_SYM_ERROR;
 
                 // Add states for patterns whose root node is a wildcard.
                 if !node_is_error {

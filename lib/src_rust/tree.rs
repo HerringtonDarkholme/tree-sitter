@@ -403,7 +403,7 @@ mod tests {
     use crate::core_impl::length::length_zero;
     use crate::core_impl::subtree::{
         subtree_child_count, subtree_from_mut, subtree_new_error, subtree_new_node_in_arena,
-        tree_arena_new, ts_builtin_sym_error_repeat,
+        tree_arena_new, TS_BUILTIN_SYM_ERROR_REPEAT,
     };
 
     #[test]
@@ -433,7 +433,7 @@ mod tests {
             let arena = tree_arena_new();
             let root = subtree_from_mut(subtree_new_node_in_arena(
                 arena,
-                ts_builtin_sym_error_repeat,
+                TS_BUILTIN_SYM_ERROR_REPEAT,
                 children.as_ptr(),
                 children.len() as u32,
                 0,

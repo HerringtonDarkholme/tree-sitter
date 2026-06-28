@@ -27,8 +27,8 @@ use super::utils::ptr_mut;
 pub const LANGUAGE_VERSION_WITH_RESERVED_WORDS: u32 = 15;
 pub const LANGUAGE_VERSION_WITH_PRIMARY_STATES: u32 = 14;
 
-const ts_builtin_sym_error: TSSymbol = u16::MAX;
-const ts_builtin_sym_error_repeat: TSSymbol = ts_builtin_sym_error - 1;
+const TS_BUILTIN_SYM_ERROR: TSSymbol = u16::MAX;
+const TS_BUILTIN_SYM_ERROR_REPEAT: TSSymbol = TS_BUILTIN_SYM_ERROR - 1;
 
 pub type TSSymbolType = u32;
 pub const TSSymbolTypeRegular: TSSymbolType = 0;
@@ -808,7 +808,7 @@ pub unsafe fn language_table_entry(
     result: &mut TableEntry,
 ) {
     let l = lang(self_);
-    if symbol == ts_builtin_sym_error || symbol == ts_builtin_sym_error_repeat {
+    if symbol == TS_BUILTIN_SYM_ERROR || symbol == TS_BUILTIN_SYM_ERROR_REPEAT {
         result.action_count = 0;
         result.is_reusable = false;
         result.actions = ptr::null();
@@ -869,13 +869,13 @@ pub const unsafe extern "C" fn ts_language_symbol_metadata(
     self_: *const TSLanguage,
     symbol: TSSymbol,
 ) -> TSSymbolMetadata {
-    if symbol == ts_builtin_sym_error {
+    if symbol == TS_BUILTIN_SYM_ERROR {
         TSSymbolMetadata {
             visible: true,
             named: true,
             supertype: false,
         }
-    } else if symbol == ts_builtin_sym_error_repeat {
+    } else if symbol == TS_BUILTIN_SYM_ERROR_REPEAT {
         TSSymbolMetadata {
             visible: false,
             named: false,
@@ -887,7 +887,7 @@ pub const unsafe extern "C" fn ts_language_symbol_metadata(
 }
 
 pub const unsafe fn language_public_symbol(self_: *const TSLanguage, symbol: TSSymbol) -> TSSymbol {
-    if symbol == ts_builtin_sym_error {
+    if symbol == TS_BUILTIN_SYM_ERROR {
         symbol
     } else {
         *lang(self_).public_symbol_map.add(symbol as usize)
@@ -901,7 +901,7 @@ pub unsafe extern "C" fn ts_language_next_state(
     symbol: TSSymbol,
 ) -> TSStateId {
     let l = lang(self_);
-    if symbol == ts_builtin_sym_error || symbol == ts_builtin_sym_error_repeat {
+    if symbol == TS_BUILTIN_SYM_ERROR || symbol == TS_BUILTIN_SYM_ERROR_REPEAT {
         0
     } else if u32::from(symbol) < l.token_count {
         let mut count: u32 = 0;
@@ -927,9 +927,9 @@ pub unsafe extern "C" fn ts_language_symbol_name(
     self_: *const TSLanguage,
     symbol: TSSymbol,
 ) -> *const i8 {
-    if symbol == ts_builtin_sym_error {
+    if symbol == TS_BUILTIN_SYM_ERROR {
         c"ERROR".as_ptr().cast::<i8>()
-    } else if symbol == ts_builtin_sym_error_repeat {
+    } else if symbol == TS_BUILTIN_SYM_ERROR_REPEAT {
         c"_ERROR".as_ptr().cast::<i8>()
     } else if u32::from(symbol) < ts_language_symbol_count(self_) {
         *lang(self_).symbol_names.add(symbol as usize)
@@ -948,7 +948,7 @@ pub unsafe extern "C" fn ts_language_symbol_for_name(
     if is_named
         && c_string_prefix_cmp(string, c"ERROR".as_ptr().cast::<i8>(), length as usize).is_eq()
     {
-        return ts_builtin_sym_error;
+        return TS_BUILTIN_SYM_ERROR;
     }
     let count = ts_language_symbol_count(self_) as u16;
     let l = lang(self_);

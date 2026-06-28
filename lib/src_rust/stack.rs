@@ -22,7 +22,7 @@ use super::subtree::{
     subtree_external_scanner_state_eq, subtree_extra, subtree_is_error, subtree_named,
     subtree_padding, subtree_release, subtree_retain, subtree_size, subtree_symbol,
     subtree_total_bytes, subtree_total_size, subtree_visible, subtree_visible_descendant_count,
-    ts_builtin_sym_error_repeat, Subtree, SubtreeArray, SubtreePool, NULL_SUBTREE,
+    Subtree, SubtreeArray, SubtreePool, NULL_SUBTREE, TS_BUILTIN_SYM_ERROR_REPEAT,
 };
 use super::subtree::{subtree_array_copy, subtree_array_delete, subtree_array_reverse};
 use super::utils::{
@@ -379,7 +379,7 @@ unsafe fn stack__subtree_node_count(subtree: Subtree) -> u32 {
     if subtree_visible(subtree) {
         count += 1;
     }
-    if subtree_symbol(subtree) == ts_builtin_sym_error_repeat {
+    if subtree_symbol(subtree) == TS_BUILTIN_SYM_ERROR_REPEAT {
         count += 1;
     }
     count

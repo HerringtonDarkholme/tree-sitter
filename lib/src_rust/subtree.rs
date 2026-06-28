@@ -1,5 +1,3 @@
-#![allow(non_upper_case_globals, non_snake_case)]
-
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 use core::ffi::c_void;
@@ -31,9 +29,9 @@ pub const TS_TREE_STATE_NONE: TSStateId = u16::MAX;
 const TS_MAX_INLINE_TREE_LENGTH: u8 = u8::MAX;
 const TS_MAX_TREE_POOL_SIZE: u32 = 32;
 
-pub const ts_builtin_sym_error: TSSymbol = u16::MAX;
-pub const ts_builtin_sym_end: TSSymbol = 0;
-pub const ts_builtin_sym_error_repeat: TSSymbol = ts_builtin_sym_error - 1;
+pub const TS_BUILTIN_SYM_ERROR: TSSymbol = u16::MAX;
+pub const TS_BUILTIN_SYM_END: TSSymbol = 0;
+pub const TS_BUILTIN_SYM_ERROR_REPEAT: TSSymbol = TS_BUILTIN_SYM_ERROR - 1;
 
 // ---------------------------------------------------------------------------
 // C types from parser.h that are not in the Rust bindings
@@ -100,8 +98,12 @@ pub union ExternalScannerStateData {
 // ---------------------------------------------------------------------------
 
 /// Compact inline representation of a subtree (fits in a pointer-sized word).
-/// The `is_inline` bit overlaps with the LSB of a pointer, distinguishing
-/// inline nodes from heap-allocated ones.
+///
+/// The C runtime stores this as bitfields inside one arm of the `Subtree`
+/// union. Rust has no C-compatible bitfields, so this mirrors the byte layout
+/// explicitly and exposes accessors for the individual flags. The `is_inline`
+/// bit overlaps with the LSB of a pointer, distinguishing inline nodes from
+/// heap-allocated ones.
 ///
 /// Little-endian layout (matches the C struct bitfields):
 ///   byte 0: `is_inline:1`, `visible:1`, `named:1`, `extra:1`,
@@ -243,7 +245,11 @@ pub struct SubtreeHeapData {
     /// Parse state recorded on this subtree.
     pub parse_state: TSStateId,
 
-    /// Packed bitfield flags (11 bits used, matches C bitfield layout)
+    /// Packed bitfield flags.
+    ///
+    /// The C runtime stores these as bitfields immediately before the anonymous
+    /// union. Rust has no C-compatible bitfields, so this field mirrors their
+    /// little-endian storage as one `u16`.
     /// bit 0: `visible`, bit 1: `named`, bit 2: `extra`, bit 3: `fragile_left`,
     /// bit 4: `fragile_right`, bit 5: `has_changes`, bit 6: `has_external_tokens`,
     /// bit 7: `has_external_scanner_state_change`, bit 8: `depends_on_column`,
@@ -500,12 +506,46 @@ pub union MutableSubtree {
 
 pub const NULL_SUBTREE: Subtree = Subtree { ptr: ptr::null() };
 
-// Compile-time layout assertions — catch ABI mismatches immediately
+// Compile-time layout assertions. `Subtree` and `MutableSubtree` are real Rust
+// unions because the C ABI depends on their pointer/inline-data overlap. The
+// inline and heap data structs manually mirror C bitfields, so assert both size
+// and field offsets instead of trusting comments.
 const _: () = assert!(core::mem::size_of::<SubtreeInlineData>() == 8);
+const _: () = assert!(core::mem::offset_of!(SubtreeInlineData, flags) == 0);
+const _: () = assert!(core::mem::offset_of!(SubtreeInlineData, symbol) == 1);
+const _: () = assert!(core::mem::offset_of!(SubtreeInlineData, parse_state) == 2);
+const _: () = assert!(core::mem::offset_of!(SubtreeInlineData, padding_columns) == 4);
+const _: () = assert!(core::mem::offset_of!(SubtreeInlineData, rows_and_lookahead) == 5);
+const _: () = assert!(core::mem::offset_of!(SubtreeInlineData, padding_bytes) == 6);
+const _: () = assert!(core::mem::offset_of!(SubtreeInlineData, size_bytes) == 7);
 const _: () = assert!(core::mem::size_of::<Subtree>() == 8);
 const _: () = assert!(core::mem::size_of::<MutableSubtree>() == 8);
+const _: () = assert!(core::mem::offset_of!(SubtreeHeapData, ref_count) == 0);
+const _: () = assert!(core::mem::offset_of!(SubtreeHeapData, padding) == 4);
+const _: () = assert!(core::mem::offset_of!(SubtreeHeapData, size) == 16);
+const _: () = assert!(core::mem::offset_of!(SubtreeHeapData, lookahead_bytes) == 28);
+const _: () = assert!(core::mem::offset_of!(SubtreeHeapData, error_cost) == 32);
+const _: () = assert!(core::mem::offset_of!(SubtreeHeapData, child_count) == 36);
+const _: () = assert!(core::mem::offset_of!(SubtreeHeapData, symbol) == 40);
+const _: () = assert!(core::mem::offset_of!(SubtreeHeapData, parse_state) == 42);
+const _: () = assert!(core::mem::offset_of!(SubtreeHeapData, flags) == 44);
+const _: () = assert!(core::mem::offset_of!(SubtreeHeapData, data) == 48);
+#[cfg(target_pointer_width = "64")]
+const _: () = assert!(core::mem::size_of::<SubtreeHeapData>() == 80);
+#[cfg(target_pointer_width = "64")]
+const _: () = assert!(core::mem::align_of::<SubtreeHeapData>() == 8);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(core::mem::size_of::<ExternalScannerState>() == 32);
+#[cfg(target_pointer_width = "64")]
+const _: () = assert!(core::mem::offset_of!(ExternalScannerState, length) == 24);
+const _: () = assert!(core::mem::offset_of!(SubtreeChildrenData, visible_child_count) == 0);
+const _: () = assert!(core::mem::offset_of!(SubtreeChildrenData, named_child_count) == 4);
+const _: () = assert!(core::mem::offset_of!(SubtreeChildrenData, visible_descendant_count) == 8);
+const _: () = assert!(core::mem::offset_of!(SubtreeChildrenData, dynamic_precedence) == 12);
+const _: () = assert!(core::mem::offset_of!(SubtreeChildrenData, repeat_depth) == 16);
+const _: () = assert!(core::mem::offset_of!(SubtreeChildrenData, production_id) == 18);
+const _: () = assert!(core::mem::offset_of!(SubtreeChildrenData, first_leaf) == 20);
+const _: () = assert!(core::mem::size_of::<SubtreeChildrenData>() == 24);
 const _: () = assert!(core::mem::size_of::<FirstLeaf>() == 4);
 
 pub type SubtreeArray = Array<Subtree>;
@@ -1214,12 +1254,12 @@ pub const unsafe fn subtree_is_fragile(self_: Subtree) -> bool {
 
 #[inline]
 pub unsafe fn subtree_is_error(self_: Subtree) -> bool {
-    subtree_symbol(self_) == ts_builtin_sym_error
+    subtree_symbol(self_) == TS_BUILTIN_SYM_ERROR
 }
 
 #[inline]
 pub unsafe fn subtree_is_eof(self_: Subtree) -> bool {
-    subtree_symbol(self_) == ts_builtin_sym_end
+    subtree_symbol(self_) == TS_BUILTIN_SYM_END
 }
 
 // --- #32: from_mut, to_mut_unsafe ---
@@ -1289,7 +1329,7 @@ pub unsafe fn subtree_new_leaf(
     language: *const TSLanguage,
 ) -> Subtree {
     let metadata = ts_language_symbol_metadata(language, symbol);
-    let extra = symbol == ts_builtin_sym_end;
+    let extra = symbol == TS_BUILTIN_SYM_END;
 
     let is_inline = symbol <= TSSymbol::from(u8::MAX)
         && !has_external_tokens
@@ -1380,7 +1420,7 @@ pub unsafe fn subtree_new_error(
 ) -> Subtree {
     let result = subtree_new_leaf(
         pool,
-        ts_builtin_sym_error,
+        TS_BUILTIN_SYM_ERROR,
         padding,
         size,
         bytes_scanned,
@@ -1437,7 +1477,7 @@ unsafe fn subtree_init_node_data(
     extra_flags: u16,
 ) -> MutableSubtree {
     let metadata = ts_language_symbol_metadata(language, symbol);
-    let fragile = symbol == ts_builtin_sym_error || symbol == ts_builtin_sym_error_repeat;
+    let fragile = symbol == TS_BUILTIN_SYM_ERROR || symbol == TS_BUILTIN_SYM_ERROR_REPEAT;
     *data = SubtreeHeapData {
         ref_count: 1,
         padding: length_zero(),
@@ -1548,7 +1588,7 @@ pub unsafe fn subtree_new_error_node(
     extra: bool,
     language: *const TSLanguage,
 ) -> Subtree {
-    let result = subtree_new_node(ts_builtin_sym_error, children, 0, language);
+    let result = subtree_new_node(TS_BUILTIN_SYM_ERROR, children, 0, language);
     (*result.ptr).set_extra(extra);
     subtree_from_mut(result)
 }
@@ -1782,12 +1822,12 @@ pub unsafe fn subtree_summarize_children(self_: MutableSubtree, language: *const
             lookahead_end_byte = child_lookahead_end_byte;
         }
 
-        if subtree_symbol(child) != ts_builtin_sym_error_repeat {
+        if subtree_symbol(child) != TS_BUILTIN_SYM_ERROR_REPEAT {
             data.error_cost += subtree_error_cost(child);
         }
 
         let grandchild_count = subtree_child_count(child);
-        if (data.symbol == ts_builtin_sym_error || data.symbol == ts_builtin_sym_error_repeat)
+        if (data.symbol == TS_BUILTIN_SYM_ERROR || data.symbol == TS_BUILTIN_SYM_ERROR_REPEAT)
             && !subtree_extra(child)
             && !(subtree_is_error(child) && grandchild_count == 0)
         {
@@ -1843,7 +1883,7 @@ pub unsafe fn subtree_summarize_children(self_: MutableSubtree, language: *const
 
     data.lookahead_bytes = lookahead_end_byte - data.size.bytes - data.padding.bytes;
 
-    if data.symbol == ts_builtin_sym_error || data.symbol == ts_builtin_sym_error_repeat {
+    if data.symbol == TS_BUILTIN_SYM_ERROR || data.symbol == TS_BUILTIN_SYM_ERROR_REPEAT {
         data.error_cost += ERROR_COST_PER_RECOVERY
             + ERROR_COST_PER_SKIPPED_CHAR * data.size.bytes
             + ERROR_COST_PER_SKIPPED_LINE * data.size.extent.row;
@@ -2139,7 +2179,7 @@ extern "C" {
 
 static ROOT_FIELD: &[u8; 9] = b"__ROOT__\0";
 
-unsafe fn subtree__write_char_to_string(s: *mut i8, n: usize, chr: i32) -> usize {
+unsafe fn subtree_write_char_to_string(s: *mut i8, n: usize, chr: i32) -> usize {
     if chr == -1 {
         snprintf(s, n, c"INVALID".as_ptr().cast::<i8>()) as usize
     } else if chr == 0 {
@@ -2158,7 +2198,7 @@ unsafe fn subtree__write_char_to_string(s: *mut i8, n: usize, chr: i32) -> usize
 }
 
 #[allow(clippy::too_many_arguments)]
-unsafe fn subtree__write_to_string(
+unsafe fn subtree_write_to_string(
     self_: Subtree,
     string: *mut i8,
     limit: usize,
@@ -2204,7 +2244,7 @@ unsafe fn subtree__write_to_string(
         {
             cursor = cursor
                 .add(snprintf(*writer, limit, c"(UNEXPECTED ".as_ptr().cast::<i8>()) as usize);
-            cursor = cursor.add(subtree__write_char_to_string(
+            cursor = cursor.add(subtree_write_char_to_string(
                 *writer,
                 limit,
                 (*self_.ptr).data.lookahead_char,
@@ -2283,7 +2323,7 @@ unsafe fn subtree__write_to_string(
         for child in subtree_children_slice(self_) {
             let child = *child;
             if subtree_extra(child) {
-                cursor = cursor.add(subtree__write_to_string(
+                cursor = cursor.add(subtree_write_to_string(
                     child,
                     *writer,
                     limit,
@@ -2317,7 +2357,7 @@ unsafe fn subtree__write_to_string(
                     map = map.add(1);
                 }
 
-                cursor = cursor.add(subtree__write_to_string(
+                cursor = cursor.add(subtree_write_to_string(
                     child,
                     *writer,
                     limit,
@@ -2347,7 +2387,7 @@ pub unsafe fn subtree_string(
     include_all: bool,
 ) -> *mut i8 {
     let mut scratch_string: [i8; 1] = [0];
-    let size = subtree__write_to_string(
+    let size = subtree_write_to_string(
         self_,
         scratch_string.as_mut_ptr(),
         1,
@@ -2358,7 +2398,7 @@ pub unsafe fn subtree_string(
         ROOT_FIELD.as_ptr().cast::<i8>(),
     ) + 1;
     let result = malloc(size).cast::<i8>();
-    subtree__write_to_string(
+    subtree_write_to_string(
         self_,
         result,
         size,
@@ -2371,7 +2411,7 @@ pub unsafe fn subtree_string(
     result
 }
 
-unsafe fn subtree__print_dot_graph(
+unsafe fn subtree_print_dot_graph_recursive(
     self_: *const Subtree,
     start_offset: u32,
     language: *const TSLanguage,
@@ -2442,7 +2482,7 @@ unsafe fn subtree__print_dot_graph(
             subtree_alias_symbol = *lang.alias_sequences.add(child_info_offset as usize);
             child_info_offset += 1;
         }
-        subtree__print_dot_graph(
+        subtree_print_dot_graph_recursive(
             child_ptr,
             child_start_offset,
             language,
@@ -2463,7 +2503,7 @@ unsafe fn subtree__print_dot_graph(
 pub unsafe fn subtree_print_dot_graph(self_: Subtree, language: *const TSLanguage, f: *mut c_void) {
     fprintf(f, c"digraph tree {\n".as_ptr().cast::<i8>());
     fprintf(f, c"edge [arrowhead=none]\n".as_ptr().cast::<i8>());
-    subtree__print_dot_graph(core::ptr::addr_of!(self_), 0, language, 0, f);
+    subtree_print_dot_graph_recursive(core::ptr::addr_of!(self_), 0, language, 0, f);
     fprintf(f, c"}\n".as_ptr().cast::<i8>());
 }
 
@@ -2499,18 +2539,18 @@ mod tests {
             array_push(&mut children, child2);
 
             let parent =
-                subtree_new_node(ts_builtin_sym_error_repeat, &mut children, 0, ptr::null());
+                subtree_new_node(TS_BUILTIN_SYM_ERROR_REPEAT, &mut children, 0, ptr::null());
             let parent_tree = subtree_from_mut(parent);
 
             assert_eq!(subtree_child_count(parent_tree), 2);
             assert_eq!(subtree_children_slice(parent_tree).len(), 2);
             assert_eq!(
                 subtree_symbol(subtree_children_slice(parent_tree)[0]),
-                ts_builtin_sym_error
+                TS_BUILTIN_SYM_ERROR
             );
             assert_eq!(
                 subtree_symbol(subtree_children_slice(parent_tree)[1]),
-                ts_builtin_sym_error
+                TS_BUILTIN_SYM_ERROR
             );
 
             subtree_release(&mut pool, parent_tree);

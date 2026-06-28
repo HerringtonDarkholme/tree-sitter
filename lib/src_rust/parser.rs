@@ -130,9 +130,6 @@ use super::subtree::{
     subtree_total_bytes,
     subtree_total_size,
     tree_arena_release,
-    ts_builtin_sym_end,
-    ts_builtin_sym_error,
-    ts_builtin_sym_error_repeat,
     ExternalScannerState,
     MutableSubtree,
     Subtree,
@@ -140,6 +137,9 @@ use super::subtree::{
     SubtreePool,
     TreeArena,
     NULL_SUBTREE,
+    TS_BUILTIN_SYM_END,
+    TS_BUILTIN_SYM_ERROR,
+    TS_BUILTIN_SYM_ERROR_REPEAT,
     TS_TREE_STATE_NONE,
 };
 use super::tree::{tree_new_with_arena, TSTree};
@@ -857,7 +857,7 @@ unsafe fn parser__can_reuse_first_leaf(
     }
 
     // Empty tokens are not reusable in states with different lookaheads.
-    if subtree_size(tree).bytes == 0 && leaf_symbol != ts_builtin_sym_end {
+    if subtree_size(tree).bytes == 0 && leaf_symbol != TS_BUILTIN_SYM_END {
         return false;
     }
 
@@ -1129,7 +1129,7 @@ unsafe fn parser__lex(
 
         if self_.lexer.current_position.bytes == error_end_position.bytes {
             if (self_.lexer.data.eof.unwrap())(core::ptr::addr_of!(self_.lexer.data)) {
-                self_.lexer.data.result_symbol = ts_builtin_sym_error;
+                self_.lexer.data.result_symbol = TS_BUILTIN_SYM_ERROR;
                 break;
             }
             (self_.lexer.data.advance.unwrap())(&mut self_.lexer.data, false);
@@ -1295,7 +1295,7 @@ unsafe fn parser__lex_lookahead(
             table_entry,
         );
     } else {
-        language_table_entry(self_.language, state, ts_builtin_sym_end, table_entry);
+        language_table_entry(self_.language, state, TS_BUILTIN_SYM_END, table_entry);
     }
 
     true
@@ -1789,8 +1789,8 @@ unsafe fn parser__reduce(
         }
 
         let state = stack_state(stack, slice_version);
-        let next_state = if symbol != ts_builtin_sym_error
-            && symbol != ts_builtin_sym_error_repeat
+        let next_state = if symbol != TS_BUILTIN_SYM_ERROR
+            && symbol != TS_BUILTIN_SYM_ERROR_REPEAT
             && u32::from(symbol) >= language_full(self_.language).token_count
         {
             language_lookup(self_.language, state, symbol)
@@ -1938,8 +1938,8 @@ unsafe fn parser__reduce_with_slices(
         }
 
         let state = stack_state(stack, slice_version);
-        let next_state = if symbol != ts_builtin_sym_error
-            && symbol != ts_builtin_sym_error_repeat
+        let next_state = if symbol != TS_BUILTIN_SYM_ERROR
+            && symbol != TS_BUILTIN_SYM_ERROR_REPEAT
             && u32::from(symbol) >= language_full(self_.language).token_count
         {
             language_lookup(self_.language, state, symbol)
@@ -2363,7 +2363,7 @@ unsafe fn parser__recover(self_: &mut TSParser, version: StackVersion, mut looka
     let mut children: SubtreeArray = array_new();
     array_reserve(&mut children, 1);
     array_push(&mut children, lookahead);
-    let mut error_repeat = parser__new_node(self_, ts_builtin_sym_error_repeat, &mut children, 0);
+    let mut error_repeat = parser__new_node(self_, TS_BUILTIN_SYM_ERROR_REPEAT, &mut children, 0);
 
     // Merge with existing error on top of stack
     if node_count_since_error > 0 {
@@ -2384,7 +2384,7 @@ unsafe fn parser__recover(self_: &mut TSParser, version: StackVersion, mut looka
         stack_renumber_version(stack, array_get_ref(&pop, 0).version, version);
         let slot = &mut array_get_mut(&mut pop, 0).subtrees;
         array_push(slot, subtree_from_mut(error_repeat));
-        error_repeat = parser__new_node(self_, ts_builtin_sym_error_repeat, slot, 0);
+        error_repeat = parser__new_node(self_, TS_BUILTIN_SYM_ERROR_REPEAT, slot, 0);
     }
 
     // Push the ERROR

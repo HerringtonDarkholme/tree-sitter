@@ -11,7 +11,7 @@ use super::subtree::{
     subtree_child, subtree_child_count, subtree_error_cost, subtree_external_scanner_state_eq,
     subtree_extra, subtree_has_changes, subtree_has_external_tokens, subtree_last_external_token,
     subtree_padding, subtree_parse_state, subtree_size, subtree_symbol, subtree_total_size,
-    subtree_visible, ts_builtin_sym_error, Subtree, NULL_SUBTREE, TS_TREE_STATE_NONE,
+    subtree_visible, Subtree, NULL_SUBTREE, TS_BUILTIN_SYM_ERROR, TS_TREE_STATE_NONE,
 };
 use super::tree_cursor::{tree_cursor_entry_slice, TreeCursor, TreeCursorEntry};
 use super::utils::{array_clear, array_new, array_pop, array_push, Array};
@@ -464,7 +464,7 @@ impl DiffIterator {
         let new_error_cost = subtree_error_cost(new_tree);
 
         if old_visible.start_byte != new_visible.start_byte
-            || old_symbol == ts_builtin_sym_error
+            || old_symbol == TS_BUILTIN_SYM_ERROR
             || old_size != new_size
             || old_state == TS_TREE_STATE_NONE
             || new_state == TS_TREE_STATE_NONE

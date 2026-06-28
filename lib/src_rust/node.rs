@@ -15,8 +15,8 @@ use super::subtree::subtree_parse_state;
 use super::subtree::{
     subtree_child, subtree_child_count, subtree_error_cost, subtree_extra, subtree_has_changes,
     subtree_missing, subtree_named, subtree_padding, subtree_size, subtree_string, subtree_symbol,
-    subtree_total_bytes, subtree_visible, subtree_visible_descendant_count, ts_builtin_sym_error,
-    Subtree, TSFieldMapEntry, NULL_SUBTREE, TS_TREE_STATE_NONE,
+    subtree_total_bytes, subtree_visible, subtree_visible_descendant_count, Subtree,
+    TSFieldMapEntry, NULL_SUBTREE, TS_BUILTIN_SYM_ERROR, TS_TREE_STATE_NONE,
 };
 use super::tree::{tree_root_node_ref, TSTree};
 use super::utils::{ptr_mut, ptr_ref};
@@ -748,7 +748,7 @@ pub const unsafe extern "C" fn ts_node_has_error(self_: TSNode) -> bool {
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_node_is_error(self_: TSNode) -> bool {
-    node_symbol(self_) == ts_builtin_sym_error
+    node_symbol(self_) == TS_BUILTIN_SYM_ERROR
 }
 
 #[no_mangle]
