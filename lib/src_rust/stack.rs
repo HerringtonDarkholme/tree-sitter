@@ -925,21 +925,6 @@ unsafe fn stack_pop_builder_append_subtrees(
     builder: &mut StackPopBuilder,
     subtrees: &SubtreeArray,
 ) -> StackSliceSpan {
-    stack_pop_builder_append_subtrees_with_order(builder, subtrees, true)
-}
-
-unsafe fn stack_pop_builder_append_subtrees_in_order(
-    builder: &mut StackPopBuilder,
-    subtrees: &SubtreeArray,
-) -> StackSliceSpan {
-    stack_pop_builder_append_subtrees_with_order(builder, subtrees, false)
-}
-
-unsafe fn stack_pop_builder_append_subtrees_with_order(
-    builder: &mut StackPopBuilder,
-    subtrees: &SubtreeArray,
-    reverse: bool,
-) -> StackSliceSpan {
     let start = builder.subtrees.size;
     let dest = &mut builder.subtrees;
     array_reserve(dest, start + subtrees.size);
@@ -951,9 +936,6 @@ unsafe fn stack_pop_builder_append_subtrees_with_order(
         );
     }
     dest.size = start + subtrees.size;
-    if reverse {
-        stack_pop_builder_reverse_subtrees(builder, start, subtrees.size);
-    }
     StackSliceSpan {
         start,
         size: subtrees.size,
@@ -1249,8 +1231,8 @@ unsafe fn stack_pop_payloads_into(
     let mut popped = false;
     while iterators.size > 0 {
         let mut i: u32 = 0;
-        let mut size = iterators.size;
-        while i < size {
+        let mut active_iterator_count = iterators.size;
+        while i < active_iterator_count {
             let iterator = array_get_ref(&iterators, i);
             let node = iterator.node;
             let should_pop = iterator.subtree_count == goal_subtree_count;
@@ -1289,25 +1271,24 @@ unsafe fn stack_pop_payloads_into(
                     stack_payload_array_delete(&mut iter.payloads, ptr_mut(stack.subtree_pool));
                 }
                 array_erase(&mut iterators, i);
-                i = i.wrapping_sub(1);
-                size -= 1;
-                i = i.wrapping_add(1);
+                active_iterator_count -= 1;
                 continue;
             }
 
-            let mut j: u32 = 1;
-            while j <= u32::from((*node).link_count) {
+            // Copy all alternate branches, then reuse the current iterator for
+            // link 0 so the common path avoids an extra payload-array clone.
+            let link_count = u32::from((*node).link_count);
+            for branch_index in 1..=link_count {
                 let next_iterator: &mut StackPayloadIterator;
                 let link: StackLink;
-                if j == u32::from((*node).link_count) {
+                if branch_index == link_count {
                     link = (*node).links[0];
                     next_iterator = array_get_mut(&mut iterators, i);
                 } else {
                     if iterators.size >= MAX_ITERATOR_COUNT {
-                        j += 1;
                         continue;
                     }
-                    link = (*node).links[j as usize];
+                    link = (*node).links[branch_index as usize];
                     let current_iterator = ptr::read(array_get_ref(&iterators, i));
                     let mut copied_iterator = StackPayloadIterator {
                         node: current_iterator.node,
@@ -1333,7 +1314,6 @@ unsafe fn stack_pop_payloads_into(
                         next_iterator.subtree_count += 1;
                     }
                 }
-                j += 1;
             }
             i = i.wrapping_add(1);
         }
@@ -1376,8 +1356,8 @@ unsafe fn stack__iter(
 
     while stack.iterators.size > 0 {
         let mut i: u32 = 0;
-        let mut size = stack.iterators.size;
-        while i < size {
+        let mut active_iterator_count = stack.iterators.size;
+        while i < active_iterator_count {
             let iterator = array_get_ref(&stack.iterators, i);
             let node = iterator.node;
 
@@ -1401,25 +1381,24 @@ unsafe fn stack__iter(
                     subtree_array_delete(ptr_mut(stack.subtree_pool), &mut iter.subtrees);
                 }
                 array_erase(&mut stack.iterators, i);
-                i = i.wrapping_sub(1);
-                size -= 1;
-                i = i.wrapping_add(1);
+                active_iterator_count -= 1;
                 continue;
             }
 
-            let mut j: u32 = 1;
-            while j <= u32::from((*node).link_count) {
+            // Copy all alternate branches, then reuse the current iterator for
+            // link 0 so the common path avoids an extra subtree-array clone.
+            let link_count = u32::from((*node).link_count);
+            for branch_index in 1..=link_count {
                 let next_iterator: &mut StackIterator;
                 let link: StackLink;
-                if j == u32::from((*node).link_count) {
+                if branch_index == link_count {
                     link = (*node).links[0];
                     next_iterator = array_get_mut(&mut stack.iterators, i);
                 } else {
                     if stack.iterators.size >= MAX_ITERATOR_COUNT {
-                        j += 1;
                         continue;
                     }
-                    link = (*node).links[j as usize];
+                    link = (*node).links[branch_index as usize];
                     let current_iterator = ptr::read(array_get_ref(&stack.iterators, i));
                     array_push(&mut stack.iterators, current_iterator);
                     next_iterator = array_back_mut(&mut stack.iterators);
@@ -1446,7 +1425,6 @@ unsafe fn stack__iter(
                         }
                     }
                 }
-                j += 1;
             }
             i = i.wrapping_add(1);
         }
@@ -1745,7 +1723,7 @@ pub unsafe fn stack_pop_count_into(
     );
     for i in 0..pop.size {
         let mut slice = ptr::read(array_get_ref(&pop, i));
-        let mut span = stack_pop_builder_append_subtrees_in_order(builder, &slice.subtrees);
+        let mut span = stack_pop_builder_append_subtrees(builder, &slice.subtrees);
         span.version = slice.version;
         array_push(&mut builder.slices, span);
         array_delete(&mut slice.subtrees);

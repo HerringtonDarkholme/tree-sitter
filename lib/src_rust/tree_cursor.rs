@@ -291,12 +291,12 @@ unsafe fn tree_cursor_child_iterator_previous(
     Some(CursorChild { entry, visible })
 }
 
-#[inline]
 /// Descend to the first visible child covering a byte/point target.
 ///
 /// Hidden nodes are traversed when they contain visible descendants. If no
 /// matching visible child exists, the cursor stack is restored to its original
 /// depth.
+#[inline]
 unsafe fn tree_cursor_goto_first_child_for_byte_and_point(
     cursor: &mut TreeCursor,
     goal_byte: u32,

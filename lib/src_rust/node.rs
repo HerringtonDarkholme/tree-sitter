@@ -454,22 +454,21 @@ unsafe fn node__next_sibling(self_: TSNode, include_anonymous: bool) -> TSNode {
 unsafe fn node__first_child_for_byte(self_: TSNode, goal: u32, include_anonymous: bool) -> TSNode {
     let mut node = self_;
 
-    let mut last_iterator: Option<NodeChildIterator> = None;
+    let mut resume_iterator: Option<NodeChildIterator> = None;
 
     loop {
         let mut did_descend = false;
 
         let mut child = node__null();
         let mut iterator = node_iterate_children(&node);
-        // labeled loop replaces C's "goto loop"
-        'outer: loop {
+        'resume_sibling_scan: loop {
             while node_child_iterator_next(&mut iterator, &mut child) {
                 if node_end_byte(child) > goal {
                     if node__is_relevant(child, include_anonymous) {
                         return child;
                     } else if node_child_count(child) > 0 {
                         if iterator.child_index < subtree_child_count(node__subtree(child)) {
-                            last_iterator = Some(iterator);
+                            resume_iterator = Some(iterator);
                         }
                         did_descend = true;
                         node = child;
@@ -479,9 +478,9 @@ unsafe fn node__first_child_for_byte(self_: TSNode, goal: u32, include_anonymous
             }
 
             if !did_descend {
-                if let Some(saved) = last_iterator.take() {
+                if let Some(saved) = resume_iterator.take() {
                     iterator = saved;
-                    continue 'outer;
+                    continue 'resume_sibling_scan;
                 }
             }
             break;
