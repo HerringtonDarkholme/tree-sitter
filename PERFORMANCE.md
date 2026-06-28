@@ -2443,6 +2443,62 @@ Interpretation:
   should reduce callback frequency or change generated lexer contracts, not
   shuffle internal `Lexer` fields.
 
+Subtree balance-work aggregate flag trial:
+
+- Trial: use an unused `SubtreeHeapData.flags` bit as `has_balance_work`.
+  `subtree_summarize_children` propagated this flag from children and set it
+  when a node's `repeat_depth > 0`; `parser_balance_subtree` then skipped the
+  entire balancing phase for roots without the flag and skipped child subtrees
+  without it. This tested whether removing the post-parse balancing traversal
+  could beat the extra summarization metadata work.
+- Validation before benchmarking:
+
+```sh
+cargo fmt --check --all
+cargo check -p tree-sitter --lib --offline
+cargo test -p tree-sitter --lib --offline
+```
+
+- Focused weak-language command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-balance-work-flag-pgcj cargo xtask perf-gate --language python --language go --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Balance-flag Rust | Balance-flag C | Trial delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 12831.6 | 10643.1 | +20.56% |
+| Go normal | 17240.2 | 13718.3 | +25.67% |
+| C++ normal | 7914.8 | 10147.5 | -22.00% |
+| Java normal | 10159.8 | 10499.6 | -3.24% |
+| Python + Go + C++ + Java normal | 14397.7 | 12007.2 | +19.91% |
+
+- Seven-language command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-balance-work-flag-7lang cargo xtask perf-gate --language typescript --language javascript --language python --language go --language rust --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Balance-flag Rust | Balance-flag C | Trial delta |
+| --- | ---: | ---: | ---: |
+| TypeScript normal | 30919.2 | 23760.2 | +30.13% |
+| JavaScript normal | 21280.9 | 16429.4 | +29.53% |
+| Python normal | 13100.2 | 10651.9 | +22.98% |
+| Go normal | 16467.7 | 12976.7 | +26.90% |
+| Rust normal | 20475.4 | 16003.7 | +27.94% |
+| C++ normal | 7669.6 | 10012.7 | -23.40% |
+| Java normal | 8397.4 | 11158.4 | -24.74% |
+| Overall normal | 20083.2 | 15954.2 | +25.88% |
+
+Interpretation:
+
+- This is not keepable. The broad aggregate is strong, but Java collapses and
+  the focused weak-language set misses the target.
+- Propagating balance-work metadata through every summarized parent is too
+  expensive or too disruptive for Java. Future balancing work should use
+  parser-local instrumentation or grammar/state knowledge to avoid the phase,
+  not a new per-subtree aggregate flag in the hot summarizer.
+
 Single-slice reduction fast path trial:
 
 - Trial: preserve the existing "pop into a new reduction version, then
