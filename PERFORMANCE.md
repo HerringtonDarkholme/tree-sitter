@@ -2229,6 +2229,95 @@ Interpretation:
   design would need to preserve high-link behavior with a different spill path
   instead of just lowering the inline capacity.
 
+Stack pop-builder slice-reverse trial:
+
+- Trial: replace the manual pointer-swap loop in
+  `stack_pop_builder_reverse_subtrees` with a guarded temporary mutable slice
+  and `reverse()`. This mirrored the kept `SubtreeArray` readability cleanup
+  but tested the parser hot-path scratch builder separately.
+- Validation before benchmarking:
+
+```sh
+cargo fmt --all
+cargo check -p tree-sitter --lib --offline
+cargo test -p tree-sitter --lib --offline
+```
+
+- Focused command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-builder-reverse-slice-pgcj cargo xtask perf-gate --language python --language go --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Slice-reverse Rust | Slice-reverse C | Trial delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 12450.4 | 10320.9 | +20.63% |
+| Go normal | 16908.0 | 13931.0 | +21.37% |
+| C++ normal | 7889.2 | 10607.1 | -25.62% |
+| Java normal | 10247.4 | 11471.0 | -10.67% |
+| Python + Go + C++ + Java normal | 14063.1 | 11932.3 | +17.86% |
+
+- Same-window focused baseline after reverting the slice-reverse trial:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-builder-reverse-baseline-pgcj cargo xtask perf-gate --language python --language go --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Baseline Rust | Baseline C | Baseline delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 12813.3 | 9934.9 | +28.97% |
+| Go normal | 15569.0 | 13369.7 | +16.45% |
+| C++ normal | 7724.0 | 10247.3 | -24.62% |
+| Java normal | 10152.7 | 11338.8 | -10.46% |
+| Python + Go + C++ + Java normal | 13733.9 | 11474.8 | +19.69% |
+
+Interpretation:
+
+- This is not keepable. The slice version improved Go/C++/Java absolute Rust
+  throughput in this noisy focused run, but it regressed Python and reduced the
+  aggregate Rust-vs-C delta.
+- Keep the manual pointer-swap loop in the stack pop builder. Unlike
+  `SubtreeArray` cleanup paths, this helper is part of the reduction hot path
+  and needs benchmark proof before readability rewrites are kept.
+
+Stack node scalar-first layout trial:
+
+- Trial: keep `MAX_LINK_COUNT` at 8 but move `StackNode` scalar metadata
+  (`link_count`, `ref_count`, error cost, node count, dynamic precedence)
+  before the inline link array. The 64-bit node size remained 232 bytes. This
+  tested whether stack scans benefit from denser hot metadata without reducing
+  branching capacity.
+- Validation before benchmarking:
+
+```sh
+cargo fmt --check --all
+cargo check -p tree-sitter --lib --offline
+cargo test -p tree-sitter --lib --offline
+```
+
+- Focused command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-stack-node-scalars-first-pgcj cargo xtask perf-gate --language python --language go --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Scalar-first Rust | Scalar-first C | Trial delta |
+| --- | ---: | ---: | ---: |
+| Python normal | 12559.8 | 10127.8 | +24.01% |
+| Go normal | 16264.3 | 13731.0 | +18.45% |
+| C++ normal | 7946.1 | 10365.1 | -23.34% |
+| Java normal | 10382.7 | 11618.4 | -10.64% |
+| Python + Go + C++ + Java normal | 13896.3 | 11733.1 | +18.44% |
+
+Interpretation:
+
+- This is not keepable. Preserving all eight inline links avoids the Go collapse
+  from the link-capacity trial, but the focused aggregate still misses the
+  target and Java remains weak.
+- The remaining stack opportunity is not a simple field reorder. Future stack
+  work needs to remove persistent-node allocation/traversal for straight
+  segments, while keeping branch and merge behavior cheap.
+
 Single-slice reduction fast path trial:
 
 - Trial: preserve the existing "pop into a new reduction version, then
