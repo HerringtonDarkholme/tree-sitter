@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use super::subtree::{
     subtree_child, subtree_child_count, subtree_has_external_tokens, subtree_last_external_token,
     subtree_total_bytes, Subtree, NULL_SUBTREE,

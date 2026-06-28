@@ -1,6 +1,4 @@
-#![allow(dead_code)]
-#![allow(non_upper_case_globals)]
-#![allow(non_snake_case)]
+#![allow(non_upper_case_globals, non_snake_case)]
 
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
@@ -177,14 +175,6 @@ impl SubtreeInlineData {
     }
 
     #[inline(always)]
-    pub fn set_is_inline(&mut self, v: bool) {
-        if v {
-            self.flags |= INLINE_IS_INLINE;
-        } else {
-            self.flags &= !INLINE_IS_INLINE;
-        }
-    }
-    #[inline(always)]
     pub fn set_visible(&mut self, v: bool) {
         if v {
             self.flags |= INLINE_VISIBLE;
@@ -225,20 +215,8 @@ impl SubtreeInlineData {
         }
     }
     #[inline(always)]
-    pub fn set_is_keyword(&mut self, v: bool) {
-        if v {
-            self.flags |= INLINE_IS_KEYWORD;
-        } else {
-            self.flags &= !INLINE_IS_KEYWORD;
-        }
-    }
-    #[inline(always)]
     pub fn set_padding_rows(&mut self, v: u8) {
         self.rows_and_lookahead = (self.rows_and_lookahead & 0xF0) | (v & 0x0F);
-    }
-    #[inline(always)]
-    pub fn set_lookahead_bytes(&mut self, v: u8) {
-        self.rows_and_lookahead = (self.rows_and_lookahead & 0x0F) | ((v & 0x0F) << 4);
     }
 }
 
@@ -419,14 +397,6 @@ impl SubtreeHeapData {
             self.flags |= HEAP_IS_MISSING;
         } else {
             self.flags &= !HEAP_IS_MISSING;
-        }
-    }
-    #[inline(always)]
-    pub fn set_is_keyword(&mut self, v: bool) {
-        if v {
-            self.flags |= HEAP_IS_KEYWORD;
-        } else {
-            self.flags &= !HEAP_IS_KEYWORD;
         }
     }
     #[inline(always)]
@@ -743,6 +713,7 @@ const fn align_up(value: usize, alignment: usize) -> usize {
     (value + alignment - 1) & !(alignment - 1)
 }
 
+#[cfg(test)]
 pub unsafe fn tree_arena_new() -> *mut TreeArena {
     let arena = malloc(core::mem::size_of::<TreeArena>()).cast::<TreeArena>();
     ptr::write(
@@ -1147,15 +1118,6 @@ pub const unsafe fn subtree_visible_descendant_count(self_: Subtree) -> u32 {
 pub const unsafe fn subtree_visible_child_count(self_: Subtree) -> u32 {
     if subtree_child_count(self_) > 0 {
         (*self_.ptr).data.children.visible_child_count
-    } else {
-        0
-    }
-}
-
-#[inline]
-pub const unsafe fn subtree_named_child_count(self_: Subtree) -> u32 {
-    if subtree_child_count(self_) > 0 {
-        (*self_.ptr).data.children.named_child_count
     } else {
         0
     }

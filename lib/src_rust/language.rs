@@ -1,4 +1,4 @@
-#![allow(dead_code, non_upper_case_globals, non_snake_case)]
+#![allow(non_upper_case_globals, non_snake_case)]
 
 //! Rust replacement for language.c/h — Language metadata and parse table access.
 //!

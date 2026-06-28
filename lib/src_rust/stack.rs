@@ -1,4 +1,4 @@
-#![allow(dead_code, non_upper_case_globals, non_snake_case)]
+#![allow(non_snake_case)]
 
 //! Rust replacement for stack.c/h — GLR parse stack with version management.
 //!
@@ -10,7 +10,7 @@
 use core::ffi::c_void;
 use core::ptr;
 
-use crate::ffi::{TSLanguage, TSStateId, TSSymbol};
+use crate::ffi::{TSLanguage, TSStateId};
 
 use super::alloc::{free, malloc};
 use super::error_costs::{ERROR_COST_PER_RECOVERY, ERROR_STATE};
@@ -39,15 +39,6 @@ const MAX_LINK_COUNT: usize = 8;
 const MAX_NODE_POOL_SIZE: u32 = 50;
 const MAX_ITERATOR_COUNT: u32 = 64;
 const STACK_LINK_PAYLOAD_IS_PENDING_LINK: u8 = 1 << 0;
-const STACK_LINK_PAYLOAD_IS_PENDING_REDUCTION: u8 = 1 << 1;
-pub const PENDING_REDUCTION_EXTRA: u16 = 1 << 0;
-pub const PENDING_REDUCTION_VISIBLE: u16 = 1 << 1;
-pub const PENDING_REDUCTION_NAMED: u16 = 1 << 2;
-pub const PENDING_REDUCTION_FRAGILE_LEFT: u16 = 1 << 3;
-pub const PENDING_REDUCTION_FRAGILE_RIGHT: u16 = 1 << 4;
-pub const PENDING_REDUCTION_HAS_EXTERNAL_TOKENS: u16 = 1 << 5;
-pub const PENDING_REDUCTION_HAS_EXTERNAL_SCANNER_STATE_CHANGE: u16 = 1 << 6;
-pub const PENDING_REDUCTION_DEPENDS_ON_COLUMN: u16 = 1 << 7;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -57,23 +48,16 @@ pub type StackVersion = u32;
 pub const STACK_VERSION_NONE: StackVersion = u32::MAX;
 
 /// Payload carried by an edge in the parse stack graph.
-///
-/// A stack link usually owns a concrete `Subtree`, but reduction work can also
-/// be represented by a `PendingReduction` descriptor. The active variant is
-/// selected by `StackLinkPayload::flags`; this mirrors the compact C union
-/// representation and keeps every stack edge one pointer-sized payload.
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub union StackLinkPayloadValue {
     pub subtree: Subtree,
-    pub pending_reduction: *mut PendingReduction,
 }
 
 /// Tagged edge payload for a `StackLink`.
 ///
 /// `STACK_LINK_PAYLOAD_IS_PENDING_LINK` means the payload is part of a pending
-/// path during stack popping. `STACK_LINK_PAYLOAD_IS_PENDING_REDUCTION` changes
-/// the union arm from `subtree` to `pending_reduction`.
+/// path during stack popping.
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct StackLinkPayload {
@@ -119,48 +103,6 @@ pub struct StackNode {
     pub dynamic_precedence: i32,
 }
 
-/// Deferred representation of a reduce action.
-///
-/// Pending reductions let the stack carry a reduction descriptor as an edge
-/// payload before it is materialized into a concrete `Subtree`. The descriptor
-/// stores enough aggregate metadata for stack comparison, pruning, and further
-/// reductions without forcing immediate node allocation.
-#[repr(C)]
-pub struct PendingReduction {
-    /// Intrusive count from stack payloads referencing this descriptor.
-    pub ref_count: u32,
-    /// Parent grammar symbol produced by the reduction.
-    pub symbol: TSSymbol,
-    pub production_id: u16,
-    /// Parse state recorded on the produced subtree when materialized.
-    pub parse_state: TSStateId,
-    /// Number of children consumed by the reduce action.
-    pub child_count: u32,
-    /// Concrete children when the reduction has already collected subtrees.
-    pub children: SubtreeArray,
-    /// Payload children when the reduction stays lazy across stack edges.
-    pub payload_children: StackLinkPayloadArray,
-    /// Leading padding and content size of the would-be subtree.
-    pub padding: Length,
-    pub size: Length,
-    /// Lexer lookahead distance attached to the produced subtree.
-    pub lookahead_bytes: u32,
-    /// Cached subtree metadata used before materialization.
-    pub error_cost: u32,
-    pub node_count: u32,
-    pub visible_child_count: u32,
-    pub named_child_count: u32,
-    pub visible_descendant_count: u32,
-    pub dynamic_precedence: i32,
-    pub repeat_depth: u16,
-    pub first_leaf_symbol: TSSymbol,
-    pub first_leaf_parse_state: TSStateId,
-    /// Bitset of `PENDING_REDUCTION_*` flags matching subtree properties.
-    pub flags: u16,
-    /// Concrete subtree once this descriptor has been forced.
-    pub materialized: Subtree,
-}
-
 /// DFS cursor used by stack pop operations.
 #[repr(C)]
 pub struct StackIterator {
@@ -174,15 +116,7 @@ pub struct StackIterator {
     pub is_pending: bool,
 }
 
-#[repr(C)]
-struct StackPayloadIterator {
-    node: *mut StackNode,
-    payloads: StackLinkPayloadArray,
-    subtree_count: u32,
-}
-
 pub type StackNodeArray = Array<*mut StackNode>;
-pub type StackLinkPayloadArray = Array<StackLinkPayload>;
 
 #[repr(C)]
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -214,7 +148,6 @@ pub type StackSliceSpanArray = Array<StackSliceSpan>;
 pub struct StackPopBuilder {
     pub slices: StackSliceSpanArray,
     pub subtrees: SubtreeArray,
-    pub payloads: StackLinkPayloadArray,
 }
 
 #[repr(C)]
@@ -283,9 +216,9 @@ const _: () = assert!(core::mem::size_of::<StackHead>() == 48);
 const _: () = assert!(core::mem::size_of::<Stack>() == 80);
 
 pub type StackAction = u32;
-pub const StackActionNone: StackAction = 0;
-pub const StackActionStop: StackAction = 1;
-pub const StackActionPop: StackAction = 2;
+pub const STACK_ACTION_NONE: StackAction = 0;
+pub const STACK_ACTION_STOP: StackAction = 1;
+pub const STACK_ACTION_POP: StackAction = 2;
 
 pub type StackCallback = unsafe fn(payload: *mut c_void, iterator: &StackIterator) -> StackAction;
 
@@ -330,7 +263,6 @@ pub const fn stack_pop_builder_new() -> StackPopBuilder {
     StackPopBuilder {
         slices: array_new(),
         subtrees: array_new(),
-        payloads: array_new(),
     }
 }
 
@@ -341,15 +273,11 @@ pub unsafe fn stack_pop_builder_delete(self_: &mut StackPopBuilder) {
     if !self_.subtrees.contents.is_null() {
         array_delete(&mut self_.subtrees);
     }
-    if !self_.payloads.contents.is_null() {
-        array_delete(&mut self_.payloads);
-    }
 }
 
 fn stack_pop_builder_clear(self_: &mut StackPopBuilder) {
     self_.slices.size = 0;
     self_.subtrees.size = 0;
-    self_.payloads.size = 0;
 }
 
 #[inline]
@@ -470,22 +398,6 @@ const fn stack_link_payload_new(subtree: Subtree, is_pending: bool) -> StackLink
 }
 
 #[inline]
-const fn stack_link_payload_new_pending_reduction(
-    pending_reduction: *mut PendingReduction,
-    is_pending: bool,
-) -> StackLinkPayload {
-    StackLinkPayload {
-        value: StackLinkPayloadValue { pending_reduction },
-        flags: STACK_LINK_PAYLOAD_IS_PENDING_REDUCTION
-            | if is_pending {
-                STACK_LINK_PAYLOAD_IS_PENDING_LINK
-            } else {
-                0
-            },
-    }
-}
-
-#[inline]
 const unsafe fn stack_link_payload_subtree_raw(payload: StackLinkPayload) -> Subtree {
     payload.value.subtree
 }
@@ -496,99 +408,43 @@ const fn stack_link_payload_is_pending(payload: StackLinkPayload) -> bool {
 }
 
 #[inline]
-const fn stack_link_payload_is_pending_reduction_raw(payload: StackLinkPayload) -> bool {
-    payload.flags & STACK_LINK_PAYLOAD_IS_PENDING_REDUCTION != 0
-}
-
-#[inline]
-const unsafe fn stack_link_payload_pending_reduction_raw(
-    payload: StackLinkPayload,
-) -> *mut PendingReduction {
-    payload.value.pending_reduction
-}
-
-#[inline]
-pub const fn stack_link_payload_is_pending_reduction(payload: StackLinkPayload) -> bool {
-    stack_link_payload_is_pending_reduction_raw(payload)
-}
-
-#[inline]
-pub const unsafe fn stack_link_payload_pending_reduction(
-    payload: StackLinkPayload,
-) -> *mut PendingReduction {
-    stack_link_payload_pending_reduction_raw(payload)
-}
-
-#[inline]
 pub const unsafe fn stack_link_payload_subtree(payload: StackLinkPayload) -> Subtree {
     stack_link_payload_subtree_raw(payload)
 }
 
 #[inline]
 unsafe fn stack_link_payload_is_null(payload: StackLinkPayload) -> bool {
-    if stack_link_payload_is_pending_reduction(payload) {
-        false
-    } else {
-        stack_link_payload_subtree(payload).ptr.is_null()
-    }
+    stack_link_payload_subtree(payload).ptr.is_null()
 }
 
 #[inline]
-unsafe fn stack_link_payload_error_cost(payload: StackLinkPayload) -> u32 {
-    if stack_link_payload_is_pending_reduction(payload) {
-        (*stack_link_payload_pending_reduction(payload)).error_cost
-    } else {
-        subtree_error_cost(stack_link_payload_subtree(payload))
-    }
+const unsafe fn stack_link_payload_error_cost(payload: StackLinkPayload) -> u32 {
+    subtree_error_cost(stack_link_payload_subtree(payload))
 }
 
 #[inline]
 unsafe fn stack_link_payload_total_size(payload: StackLinkPayload) -> Length {
-    if stack_link_payload_is_pending_reduction(payload) {
-        let pending = stack_link_payload_pending_reduction(payload)
-            .as_ref()
-            .unwrap_unchecked();
-        length_add(pending.padding, pending.size)
-    } else {
-        subtree_total_size(stack_link_payload_subtree(payload))
-    }
+    subtree_total_size(stack_link_payload_subtree(payload))
 }
 
 #[inline]
 unsafe fn stack_link_payload_total_bytes(payload: StackLinkPayload) -> u32 {
-    if stack_link_payload_is_pending_reduction(payload) {
-        stack_link_payload_total_size(payload).bytes
-    } else {
-        subtree_total_bytes(stack_link_payload_subtree(payload))
-    }
+    subtree_total_bytes(stack_link_payload_subtree(payload))
 }
 
 #[inline]
-unsafe fn stack_link_payload_dynamic_precedence(payload: StackLinkPayload) -> i32 {
-    if stack_link_payload_is_pending_reduction(payload) {
-        (*stack_link_payload_pending_reduction(payload)).dynamic_precedence
-    } else {
-        subtree_dynamic_precedence(stack_link_payload_subtree(payload))
-    }
+const unsafe fn stack_link_payload_dynamic_precedence(payload: StackLinkPayload) -> i32 {
+    subtree_dynamic_precedence(stack_link_payload_subtree(payload))
 }
 
 #[inline]
 unsafe fn stack_link_payload_node_count(payload: StackLinkPayload) -> u32 {
-    if stack_link_payload_is_pending_reduction(payload) {
-        (*stack_link_payload_pending_reduction(payload)).node_count
-    } else {
-        stack__subtree_node_count(stack_link_payload_subtree(payload))
-    }
+    stack__subtree_node_count(stack_link_payload_subtree(payload))
 }
 
 #[inline]
 unsafe fn stack_link_payload_retain_impl(payload: StackLinkPayload) {
-    if stack_link_payload_is_pending_reduction(payload) {
-        let pending = stack_link_payload_pending_reduction(payload);
-        (*pending).ref_count += 1;
-    } else {
-        subtree_retain(stack_link_payload_subtree(payload));
-    }
+    subtree_retain(stack_link_payload_subtree(payload));
 }
 
 #[inline]
@@ -596,16 +452,7 @@ unsafe fn stack_link_payload_release_impl(
     payload: StackLinkPayload,
     subtree_pool: &mut SubtreePool,
 ) {
-    if stack_link_payload_is_pending_reduction(payload) {
-        let pending = stack_link_payload_pending_reduction(payload);
-        (*pending).ref_count -= 1;
-        if (*pending).ref_count == 0 && !(*pending).materialized.ptr.is_null() {
-            subtree_release(subtree_pool, (*pending).materialized);
-            (*pending).materialized = NULL_SUBTREE;
-        }
-    } else {
-        subtree_release(subtree_pool, stack_link_payload_subtree(payload));
-    }
+    subtree_release(subtree_pool, stack_link_payload_subtree(payload));
 }
 
 #[inline]
@@ -622,12 +469,8 @@ pub unsafe fn stack_link_payload_release(
 }
 
 #[inline]
-unsafe fn stack_link_payload_extra(payload: StackLinkPayload) -> bool {
-    if stack_link_payload_is_pending_reduction(payload) {
-        (*stack_link_payload_pending_reduction(payload)).flags & PENDING_REDUCTION_EXTRA != 0
-    } else {
-        subtree_extra(stack_link_payload_subtree(payload))
-    }
+const unsafe fn stack_link_payload_extra(payload: StackLinkPayload) -> bool {
+    subtree_extra(stack_link_payload_subtree(payload))
 }
 
 /// Allocate a new stack node, reusing from pool if available.
@@ -727,16 +570,6 @@ unsafe fn stack_link_payload_is_equivalent(
     left: StackLinkPayload,
     right: StackLinkPayload,
 ) -> bool {
-    if stack_link_payload_is_pending_reduction(left)
-        || stack_link_payload_is_pending_reduction(right)
-    {
-        return stack_link_payload_is_pending_reduction(left)
-            && stack_link_payload_is_pending_reduction(right)
-            && stack_link_payload_pending_reduction(left)
-                == stack_link_payload_pending_reduction(right)
-            && stack_link_payload_is_pending(left) == stack_link_payload_is_pending(right);
-    }
-
     stack__subtree_is_equivalent(
         stack_link_payload_subtree(left),
         stack_link_payload_subtree(right),
@@ -911,16 +744,6 @@ unsafe fn stack_pop_builder_reverse_subtrees(builder: &mut StackPopBuilder, star
     }
 }
 
-unsafe fn stack_pop_builder_reverse_payloads(builder: &mut StackPopBuilder, start: u32, size: u32) {
-    let limit = size / 2;
-    for i in 0..limit {
-        let reverse_index = start as usize + size as usize - 1 - i as usize;
-        let a = builder.payloads.contents.add(start as usize + i as usize);
-        let b = builder.payloads.contents.add(reverse_index);
-        ptr::swap(a, b);
-    }
-}
-
 unsafe fn stack_pop_builder_append_subtrees(
     builder: &mut StackPopBuilder,
     subtrees: &SubtreeArray,
@@ -962,82 +785,6 @@ unsafe fn stack_pop_builder_add_slice(
 
     slice.version = stack__add_version(self_, original_version, node);
     array_push(&mut builder.slices, slice);
-}
-
-unsafe fn stack_pop_builder_release_payloads(
-    builder: &mut StackPopBuilder,
-    subtree_pool: &mut SubtreePool,
-    start: u32,
-) {
-    for i in start..builder.payloads.size {
-        stack_link_payload_release(*array_get_ref(&builder.payloads, i), subtree_pool);
-    }
-    builder.payloads.size = start;
-}
-
-unsafe fn stack_payload_array_delete(
-    payloads: &mut StackLinkPayloadArray,
-    subtree_pool: &mut SubtreePool,
-) {
-    for i in 0..payloads.size {
-        stack_link_payload_release(*array_get_ref(payloads, i), subtree_pool);
-    }
-    if !payloads.contents.is_null() {
-        array_delete(payloads);
-    }
-}
-
-unsafe fn stack_payload_array_copy(
-    source: &StackLinkPayloadArray,
-    destination: &mut StackLinkPayloadArray,
-) {
-    array_reserve(destination, source.size);
-    if source.size > 0 {
-        ptr::copy_nonoverlapping(source.contents, destination.contents, source.size as usize);
-        for i in 0..source.size {
-            stack_link_payload_retain(*array_get_ref(destination, i));
-        }
-    }
-    destination.size = source.size;
-}
-
-unsafe fn stack_payload_array_reverse(payloads: &mut StackLinkPayloadArray) {
-    let limit = payloads.size / 2;
-    for i in 0..limit {
-        let reverse_index = payloads.size as usize - 1 - i as usize;
-        let a = payloads.contents.add(i as usize);
-        let b = payloads.contents.add(reverse_index);
-        ptr::swap(a, b);
-    }
-}
-
-pub const unsafe fn stack_pop_builder_payloads(
-    builder: &StackPopBuilder,
-    span: StackSliceSpan,
-) -> StackLinkPayloadArray {
-    StackLinkPayloadArray {
-        contents: if span.size > 0 {
-            builder.payloads.contents.add(span.start as usize)
-        } else {
-            ptr::null_mut()
-        },
-        size: span.size,
-        capacity: span.size,
-    }
-}
-
-pub unsafe fn stack_pop_builder_release_payload_span(
-    stack: &mut Stack,
-    builder: &mut StackPopBuilder,
-    span: StackSliceSpan,
-) {
-    let end = span.start + span.size;
-    for i in span.start..end {
-        stack_link_payload_release(
-            *array_get_ref(&builder.payloads, i),
-            ptr_mut(stack.subtree_pool),
-        );
-    }
 }
 
 /// Fast pop path for an unbranched stack chain.
@@ -1143,188 +890,6 @@ unsafe fn stack_pop_count_linear_into(
     true
 }
 
-pub unsafe fn stack_pop_count_payloads_into(
-    self_: &mut Stack,
-    version: StackVersion,
-    count: u32,
-    builder: &mut StackPopBuilder,
-) -> bool {
-    stack_pop_builder_clear(builder);
-    if stack_pop_count_payloads_linear_into(self_, version, count, builder) {
-        return true;
-    }
-
-    stack_pop_payloads_into(self_, version, builder, count)
-}
-
-unsafe fn stack_pop_count_payloads_linear_into(
-    self_: &mut Stack,
-    version: StackVersion,
-    count: u32,
-    builder: &mut StackPopBuilder,
-) -> bool {
-    let mut node = stack_head(self_, version).node;
-    let mut subtree_count = 0;
-    let start = builder.payloads.size;
-    let reserve_count = subtree_alloc_size(count) / core::mem::size_of::<StackLinkPayload>();
-    array_reserve(
-        &mut builder.payloads,
-        start + u32::try_from(reserve_count).unwrap(),
-    );
-
-    while subtree_count < count {
-        let current_node = ptr_ref(node);
-        if current_node.link_count != 1 {
-            stack_pop_builder_release_payloads(builder, ptr_mut(self_.subtree_pool), start);
-            return false;
-        }
-
-        let link = current_node.links[0];
-        node = link.node;
-        if stack_link_payload_is_null(link.payload) {
-            subtree_count += 1;
-        } else {
-            array_push(&mut builder.payloads, link.payload);
-            stack_link_payload_retain(link.payload);
-
-            if !stack_link_payload_extra(link.payload) {
-                subtree_count += 1;
-            }
-        }
-    }
-
-    let size = builder.payloads.size - start;
-    stack_pop_builder_reverse_payloads(builder, start, size);
-    let slice = StackSliceSpan {
-        start,
-        size,
-        version: STACK_VERSION_NONE,
-    };
-    stack_pop_builder_add_slice(self_, version, ptr_mut(node), builder, slice);
-    true
-}
-
-unsafe fn stack_pop_payloads_into(
-    stack: &mut Stack,
-    version: StackVersion,
-    builder: &mut StackPopBuilder,
-    goal_subtree_count: u32,
-) -> bool {
-    let mut iterators: Array<StackPayloadIterator> = array_new();
-    array_reserve(&mut iterators, 4);
-
-    let mut new_iterator = StackPayloadIterator {
-        node: stack_head(stack, version).node,
-        payloads: array_new(),
-        subtree_count: 0,
-    };
-
-    let reserve_count =
-        subtree_alloc_size(goal_subtree_count) / core::mem::size_of::<StackLinkPayload>();
-    array_reserve(
-        &mut new_iterator.payloads,
-        u32::try_from(reserve_count).unwrap(),
-    );
-
-    array_push(&mut iterators, new_iterator);
-
-    let mut popped = false;
-    while iterators.size > 0 {
-        let mut i: u32 = 0;
-        let mut active_iterator_count = iterators.size;
-        while i < active_iterator_count {
-            let iterator = array_get_ref(&iterators, i);
-            let node = iterator.node;
-            let should_pop = iterator.subtree_count == goal_subtree_count;
-            let should_stop = should_pop || (*node).link_count == 0;
-
-            if should_pop {
-                let mut payloads = ptr::read(&array_get_ref(&iterators, i).payloads);
-                stack_payload_array_reverse(&mut payloads);
-
-                let start = builder.payloads.size;
-                array_reserve(&mut builder.payloads, start + payloads.size);
-                if payloads.size > 0 {
-                    ptr::copy_nonoverlapping(
-                        payloads.contents,
-                        builder.payloads.contents.add(start as usize),
-                        payloads.size as usize,
-                    );
-                }
-                builder.payloads.size = start + payloads.size;
-                if !payloads.contents.is_null() {
-                    array_delete(&mut payloads);
-                }
-
-                let span = StackSliceSpan {
-                    start,
-                    size: builder.payloads.size - start,
-                    version: STACK_VERSION_NONE,
-                };
-                stack_pop_builder_add_slice(stack, version, ptr_mut(node), builder, span);
-                popped = true;
-            }
-
-            if should_stop {
-                if !should_pop {
-                    let iter = array_get_mut(&mut iterators, i);
-                    stack_payload_array_delete(&mut iter.payloads, ptr_mut(stack.subtree_pool));
-                }
-                array_erase(&mut iterators, i);
-                active_iterator_count -= 1;
-                continue;
-            }
-
-            // Copy all alternate branches, then reuse the current iterator for
-            // link 0 so the common path avoids an extra payload-array clone.
-            let link_count = u32::from((*node).link_count);
-            for branch_index in 1..=link_count {
-                let next_iterator: &mut StackPayloadIterator;
-                let link: StackLink;
-                if branch_index == link_count {
-                    link = (*node).links[0];
-                    next_iterator = array_get_mut(&mut iterators, i);
-                } else {
-                    if iterators.size >= MAX_ITERATOR_COUNT {
-                        continue;
-                    }
-                    link = (*node).links[branch_index as usize];
-                    let current_iterator = ptr::read(array_get_ref(&iterators, i));
-                    let mut copied_iterator = StackPayloadIterator {
-                        node: current_iterator.node,
-                        payloads: array_new(),
-                        subtree_count: current_iterator.subtree_count,
-                    };
-                    stack_payload_array_copy(
-                        &current_iterator.payloads,
-                        &mut copied_iterator.payloads,
-                    );
-                    array_push(&mut iterators, copied_iterator);
-                    next_iterator = array_back_mut(&mut iterators);
-                }
-
-                next_iterator.node = link.node;
-                if stack_link_payload_is_null(link.payload) {
-                    next_iterator.subtree_count += 1;
-                } else {
-                    array_push(&mut next_iterator.payloads, link.payload);
-                    stack_link_payload_retain(link.payload);
-
-                    if !stack_link_payload_extra(link.payload) {
-                        next_iterator.subtree_count += 1;
-                    }
-                }
-            }
-            i = i.wrapping_add(1);
-        }
-    }
-
-    if !iterators.contents.is_null() {
-        array_delete(&mut iterators);
-    }
-    popped
-}
-
 /// Core iteration function for walking the stack graph.
 unsafe fn stack__iter(
     stack: &mut Stack,
@@ -1362,8 +927,8 @@ unsafe fn stack__iter(
             let node = iterator.node;
 
             let action = callback(payload, iterator);
-            let should_pop = (action & StackActionPop) != 0;
-            let should_stop = (action & StackActionStop) != 0 || (*node).link_count == 0;
+            let should_pop = (action & STACK_ACTION_POP) != 0;
+            let should_stop = (action & STACK_ACTION_STOP) != 0 || (*node).link_count == 0;
 
             if should_pop {
                 let mut subtrees = ptr::read(&array_get_ref(&stack.iterators, i).subtrees);
@@ -1437,9 +1002,9 @@ unsafe fn stack__iter(
 unsafe fn pop_count_callback(payload: *mut c_void, iterator: &StackIterator) -> StackAction {
     let goal_subtree_count = *ptr_ref(payload.cast::<u32>());
     if iterator.subtree_count == goal_subtree_count {
-        StackActionPop | StackActionStop
+        STACK_ACTION_POP | STACK_ACTION_STOP
     } else {
-        StackActionNone
+        STACK_ACTION_NONE
     }
 }
 
@@ -1449,12 +1014,12 @@ const unsafe fn pop_pending_callback(
 ) -> StackAction {
     if iterator.subtree_count >= 1 {
         if iterator.is_pending {
-            StackActionPop | StackActionStop
+            STACK_ACTION_POP | STACK_ACTION_STOP
         } else {
-            StackActionStop
+            STACK_ACTION_STOP
         }
     } else {
-        StackActionNone
+        STACK_ACTION_NONE
     }
 }
 
@@ -1463,21 +1028,21 @@ unsafe fn pop_error_callback(payload: *mut c_void, iterator: &StackIterator) -> 
         let found_error = ptr_mut(payload.cast::<bool>());
         if !*found_error && subtree_is_error(*array_get_ref(&iterator.subtrees, 0)) {
             *found_error = true;
-            StackActionPop | StackActionStop
+            STACK_ACTION_POP | STACK_ACTION_STOP
         } else {
-            StackActionStop
+            STACK_ACTION_STOP
         }
     } else {
-        StackActionNone
+        STACK_ACTION_NONE
     }
 }
 
 unsafe fn pop_all_callback(_payload: *mut c_void, iterator: &StackIterator) -> StackAction {
     let node = ptr_ref(iterator.node);
     if node.link_count == 0 {
-        StackActionPop
+        STACK_ACTION_POP
     } else {
-        StackActionNone
+        STACK_ACTION_NONE
     }
 }
 
@@ -1487,7 +1052,7 @@ unsafe fn summarize_stack_callback(payload: *mut c_void, iterator: &StackIterato
     let state = node.state;
     let depth = iterator.subtree_count;
     if depth > session.max_depth {
-        return StackActionStop;
+        return STACK_ACTION_STOP;
     }
     let summary = ptr_ref(session.summary);
     for i in (0..summary.size).rev() {
@@ -1496,7 +1061,7 @@ unsafe fn summarize_stack_callback(payload: *mut c_void, iterator: &StackIterato
             break;
         }
         if entry.depth == depth && entry.state == state {
-            return StackActionNone;
+            return STACK_ACTION_NONE;
         }
     }
     array_push(
@@ -1507,7 +1072,7 @@ unsafe fn summarize_stack_callback(payload: *mut c_void, iterator: &StackIterato
             state,
         },
     );
-    StackActionNone
+    STACK_ACTION_NONE
 }
 
 // ===========================================================================
@@ -1660,26 +1225,6 @@ pub unsafe fn stack_push(
     if subtree.ptr.is_null() {
         head.node_count_at_last_error = (*new_node).node_count;
     }
-    head.node = new_node;
-}
-
-/// Push a pending reduction descriptor onto a version.
-pub unsafe fn stack_push_pending_reduction(
-    stack: &mut Stack,
-    version: StackVersion,
-    pending_reduction: *mut PendingReduction,
-    pending: bool,
-    state: TSStateId,
-) {
-    let heads = &mut stack.heads;
-    let node_pool = &mut stack.node_pool;
-    let head = array_get_mut(heads, version);
-    let new_node = stack_node_new_with_payload(
-        head.node,
-        stack_link_payload_new_pending_reduction(pending_reduction, pending),
-        state,
-        node_pool,
-    );
     head.node = new_node;
 }
 

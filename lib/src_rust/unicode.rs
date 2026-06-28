@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 // UTF-8 and UTF-16 decoding support.
 // Replaces the ICU unicode/*.h headers used by the C library.
 //

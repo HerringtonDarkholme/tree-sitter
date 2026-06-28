@@ -1,5 +1,3 @@
-#![allow(non_snake_case)]
-
 use core::ptr;
 
 use crate::ffi::{TSFieldId, TSNode, TSPoint, TSSymbol, TSTreeCursor};
@@ -103,8 +101,6 @@ pub enum TreeCursorStep {
 struct CursorChildIterator {
     /// Parent whose children are being scanned.
     parent: Subtree,
-    /// Owning tree, needed for language metadata.
-    tree: *const TSTree,
     /// Start position of the next child.
     position: Length,
     /// Raw child index of the next child.
@@ -162,7 +158,6 @@ unsafe fn tree_cursor_iterate_children(self_: &TreeCursor) -> CursorChildIterato
     if subtree_child_count(*last_entry.subtree) == 0 {
         return CursorChildIterator {
             parent: NULL_SUBTREE,
-            tree: self_.tree,
             position: length_zero(),
             child_index: 0,
             structural_child_index: 0,
@@ -181,7 +176,6 @@ unsafe fn tree_cursor_iterate_children(self_: &TreeCursor) -> CursorChildIterato
     }
 
     CursorChildIterator {
-        tree: self_.tree,
         parent: *last_entry.subtree,
         position: last_entry.position,
         child_index: 0,

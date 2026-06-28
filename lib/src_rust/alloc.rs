@@ -1,6 +1,3 @@
-#![allow(dead_code)]
-#![allow(non_upper_case_globals)]
-
 use core::ffi::c_void;
 
 // Default allocator functions that abort on failure.

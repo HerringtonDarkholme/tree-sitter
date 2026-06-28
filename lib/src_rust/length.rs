@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use crate::ffi::TSPoint;
 
 use super::point::{point_add, point_sub};

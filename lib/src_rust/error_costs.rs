@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 //! Parser recovery cost constants.
 //!
 //! Error recovery compares stack versions by an accumulated cost. Smaller costs

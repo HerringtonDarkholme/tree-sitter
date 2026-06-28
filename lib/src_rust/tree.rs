@@ -1,9 +1,6 @@
-#![allow(dead_code)]
-#![allow(non_snake_case)]
-
 use core::ffi::c_void;
 
-use crate::ffi::{TSLanguage, TSNode, TSPoint, TSRange, TSSymbol};
+use crate::ffi::{TSLanguage, TSNode, TSPoint, TSRange};
 
 use super::alloc::{calloc, free, malloc};
 use super::get_changed_ranges::{
@@ -46,23 +43,6 @@ use crate::ffi::TSInputEdit;
 // ---------------------------------------------------------------------------
 // Types from tree.h
 // ---------------------------------------------------------------------------
-
-/// Cached parent lookup entry used by node APIs.
-///
-/// Trees do not store parent pointers in every subtree. Parent lookups walk the
-/// tree and can populate this small cache with the child pointer, its parent,
-/// the child's start position, and the alias visible at that child.
-#[repr(C)]
-pub struct ParentCacheEntry {
-    /// Child subtree pointer that was searched.
-    pub child: *const Subtree,
-    /// Parent subtree containing `child`.
-    pub parent: *const Subtree,
-    /// Start position of `child`.
-    pub position: Length,
-    /// Alias symbol applied to `child`, or zero when none.
-    pub alias_symbol: TSSymbol,
-}
 
 /// Owned parse tree returned by the parser.
 ///
@@ -213,21 +193,6 @@ unsafe fn tree_print_dot_graph_ref(tree: &TSTree, file_descriptor: i32) {
 // ---------------------------------------------------------------------------
 // Lifecycle: tree_new, ts_tree_copy, ts_tree_delete
 // ---------------------------------------------------------------------------
-
-pub unsafe fn tree_new(
-    root: Subtree,
-    language: *const TSLanguage,
-    included_ranges: *const TSRange,
-    included_range_count: u32,
-) -> *mut TSTree {
-    tree_new_with_arena(
-        root,
-        language,
-        included_ranges,
-        included_range_count,
-        core::ptr::null_mut(),
-    )
-}
 
 pub unsafe fn tree_new_with_arena(
     root: Subtree,

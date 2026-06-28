@@ -1,10 +1,7 @@
-#![allow(dead_code)]
-
 use crate::ffi::{TSInputEdit, TSPoint};
 
 use super::utils::{ptr_mut, ptr_ref};
 
-pub const POINT_ZERO: TSPoint = TSPoint { row: 0, column: 0 };
 pub const POINT_MAX: TSPoint = TSPoint {
     row: u32::MAX,
     column: u32::MAX,

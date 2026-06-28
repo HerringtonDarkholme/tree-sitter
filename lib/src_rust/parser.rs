@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 #![allow(non_snake_case)]
 
 use core::ffi::{c_char, c_void};
@@ -11,24 +10,23 @@ use crate::ffi::{
 
 use super::alloc::{free, malloc};
 use super::error_costs::{
-    ERROR_COST_PER_RECOVERY, ERROR_COST_PER_SKIPPED_CHAR, ERROR_COST_PER_SKIPPED_LINE,
-    ERROR_COST_PER_SKIPPED_TREE, ERROR_STATE,
+    ERROR_COST_PER_SKIPPED_CHAR, ERROR_COST_PER_SKIPPED_LINE, ERROR_COST_PER_SKIPPED_TREE,
+    ERROR_STATE,
 };
 use super::get_changed_ranges::{
     range_array_get_changed_ranges_ref, range_array_intersects_ref, range_slice, TSRangeArray,
 };
 use super::language::{
-    language_actions, language_alias_sequence, language_enabled_external_tokens, language_full,
-    language_has_actions, language_has_reduce_action, language_is_reserved_word,
-    language_lex_mode_for_state, language_lookup, language_table_entry, ts_language_copy,
-    ts_language_delete, ts_language_next_state, ts_language_symbol_metadata,
-    ts_language_symbol_name, TSLexer, TSLexerMode, TSParseAction,
+    language_actions, language_enabled_external_tokens, language_full, language_has_actions,
+    language_has_reduce_action, language_is_reserved_word, language_lex_mode_for_state,
+    language_lookup, language_table_entry, ts_language_copy, ts_language_delete,
+    ts_language_next_state, ts_language_symbol_name, TSLexer, TSLexerMode, TSParseAction,
     TSParseActionTypeAccept as TSPARSE_ACTION_TYPE_ACCEPT,
     TSParseActionTypeRecover as TSPARSE_ACTION_TYPE_RECOVER,
     TSParseActionTypeReduce as TSPARSE_ACTION_TYPE_REDUCE,
     TSParseActionTypeShift as TSPARSE_ACTION_TYPE_SHIFT, TableEntry,
 };
-use super::length::{length_add, length_sub, length_zero, Length};
+use super::length::{length_sub, length_zero, Length};
 use super::lexer::{
     lexer_delete, lexer_finish, lexer_included_ranges, lexer_mark_end, lexer_new, lexer_reset,
     lexer_set_included_ranges, lexer_set_input, lexer_start, Lexer,
@@ -51,11 +49,6 @@ use super::stack::{
     stack_is_halted,
     stack_is_paused,
     stack_last_external_token,
-    stack_link_payload_is_pending_reduction,
-    stack_link_payload_pending_reduction,
-    stack_link_payload_release,
-    stack_link_payload_retain,
-    stack_link_payload_subtree,
     stack_merge,
     stack_new,
     stack_node_count_since_error,
@@ -78,20 +71,10 @@ use super::stack::{
     stack_state,
     stack_swap_versions,
     stack_version_count,
-    PendingReduction,
     Stack,
-    StackLinkPayload,
     StackPopBuilder,
     StackSliceSpan,
     StackVersion,
-    PENDING_REDUCTION_DEPENDS_ON_COLUMN,
-    PENDING_REDUCTION_EXTRA,
-    PENDING_REDUCTION_FRAGILE_LEFT,
-    PENDING_REDUCTION_FRAGILE_RIGHT,
-    PENDING_REDUCTION_HAS_EXTERNAL_SCANNER_STATE_CHANGE,
-    PENDING_REDUCTION_HAS_EXTERNAL_TOKENS,
-    PENDING_REDUCTION_NAMED,
-    PENDING_REDUCTION_VISIBLE,
     STACK_VERSION_NONE,
 };
 use super::subtree::{
@@ -107,14 +90,11 @@ use super::subtree::{
     subtree_children_slice,
     subtree_compare,
     subtree_compress,
-    subtree_depends_on_column,
     subtree_dynamic_precedence,
     subtree_error_cost,
     subtree_external_scanner_state,
     subtree_external_scanner_state_eq,
     subtree_extra,
-    subtree_fragile_left,
-    subtree_fragile_right,
     subtree_from_mut,
     subtree_has_changes,
     subtree_has_external_scanner_state_change,
@@ -129,15 +109,12 @@ use super::subtree::{
     subtree_lookahead_bytes,
     subtree_make_mut,
     subtree_missing,
-    subtree_named,
-    subtree_named_child_count,
     subtree_new_error,
     subtree_new_error_node,
     subtree_new_leaf,
     subtree_new_missing_leaf,
     subtree_new_node,
     subtree_new_node_in_arena,
-    subtree_padding,
     subtree_parse_state,
     subtree_pool_delete,
     subtree_pool_new,
@@ -152,9 +129,6 @@ use super::subtree::{
     subtree_to_mut_unsafe,
     subtree_total_bytes,
     subtree_total_size,
-    subtree_visible,
-    subtree_visible_child_count,
-    subtree_visible_descendant_count,
     tree_arena_release,
     ts_builtin_sym_end,
     ts_builtin_sym_error,
@@ -172,7 +146,6 @@ use super::tree::{tree_new_with_arena, TSTree};
 use super::utils::{
     array_assign, array_back_ref, array_clear, array_delete, array_erase, array_get_mut,
     array_get_ref, array_new, array_pop, array_push, array_reserve, array_splice, array_swap,
-    Array,
 };
 use super::utils::{ptr_mut, ptr_ref};
 
@@ -194,7 +167,6 @@ extern "C" {
     fn ts_wasm_store_call_lex_main(self_: *mut TSWasmStore, state: u16) -> bool;
     fn ts_wasm_store_call_lex_keyword(self_: *mut TSWasmStore, state: u16) -> bool;
     fn ts_wasm_store_call_scanner_create(self_: *mut TSWasmStore) -> u32;
-    fn ts_wasm_store_call_scanner_destroy(self_: *mut TSWasmStore, scanner_address: u32);
     fn ts_wasm_store_call_scanner_serialize(
         self_: *mut TSWasmStore,
         scanner_address: u32,
@@ -360,60 +332,6 @@ macro_rules! TREE_NAME {
 // Types
 // ---------------------------------------------------------------------------
 
-type PendingReductionArray = Array<*mut PendingReduction>;
-
-const fn pending_reduction_new_empty(
-    symbol: TSSymbol,
-    production_id: u16,
-    parse_state: TSStateId,
-    visible: bool,
-    named: bool,
-    extra: bool,
-    fragile: bool,
-) -> PendingReduction {
-    let mut flags = 0;
-    if visible {
-        flags |= PENDING_REDUCTION_VISIBLE;
-    }
-    if named {
-        flags |= PENDING_REDUCTION_NAMED;
-    }
-    if extra {
-        flags |= PENDING_REDUCTION_EXTRA;
-    }
-    if fragile {
-        flags |= PENDING_REDUCTION_FRAGILE_LEFT | PENDING_REDUCTION_FRAGILE_RIGHT;
-    }
-
-    PendingReduction {
-        ref_count: 1,
-        symbol,
-        production_id,
-        parse_state: if fragile {
-            TS_TREE_STATE_NONE
-        } else {
-            parse_state
-        },
-        child_count: 0,
-        children: array_new(),
-        payload_children: array_new(),
-        padding: length_zero(),
-        size: length_zero(),
-        lookahead_bytes: 0,
-        error_cost: 0,
-        node_count: 0,
-        visible_child_count: 0,
-        named_child_count: 0,
-        visible_descendant_count: 0,
-        dynamic_precedence: 0,
-        repeat_depth: 0,
-        first_leaf_symbol: 0,
-        first_leaf_parse_state: 0,
-        flags,
-        materialized: NULL_SUBTREE,
-    }
-}
-
 /// One-token cache shared by stack versions at the same byte offset.
 ///
 /// GLR versions often ask the lexer for the same position and external scanner
@@ -485,8 +403,6 @@ pub struct TSParser {
     finished_tree: Subtree,
     /// Reusable pop-result builder for normal reductions without an old tree.
     reduce_builder: StackPopBuilder,
-    /// Parser-owned pending reduction descriptors awaiting cleanup.
-    pending_reductions: PendingReductionArray,
     /// Scratch arrays for stripping and comparing trailing extras.
     trailing_extras: SubtreeArray,
     trailing_extras2: SubtreeArray,
@@ -539,714 +455,6 @@ const fn parse_state_empty() -> TSParseState {
         current_byte_offset: 0,
         has_error: false,
     }
-}
-
-unsafe fn parser__pending_reduction_delete(self_: &mut TSParser, pending: *mut PendingReduction) {
-    let pending = ptr_mut(pending);
-    if !pending.materialized.ptr.is_null() {
-        subtree_release(&mut self_.tree_pool, pending.materialized);
-        pending.materialized = NULL_SUBTREE;
-    } else {
-        if !pending.children.contents.is_null() {
-            subtree_array_delete(&mut self_.tree_pool, &mut pending.children);
-        }
-        if !pending.payload_children.contents.is_null() {
-            for i in 0..pending.payload_children.size {
-                stack_link_payload_release(
-                    *array_get_ref(&pending.payload_children, i),
-                    &mut self_.tree_pool,
-                );
-            }
-            array_delete(&mut pending.payload_children);
-        }
-    }
-    free(ptr::from_mut(pending).cast::<c_void>());
-}
-
-unsafe fn parser__clear_pending_reductions(self_: &mut TSParser) {
-    for i in 0..self_.pending_reductions.size {
-        parser__pending_reduction_delete(self_, *array_get_ref(&self_.pending_reductions, i));
-    }
-    array_clear(&mut self_.pending_reductions);
-}
-
-trait PendingReductionChild: Copy {
-    unsafe fn symbol(self) -> TSSymbol;
-    unsafe fn extra(self) -> bool;
-    unsafe fn child_count(self) -> u32;
-    unsafe fn visible(self) -> bool;
-    unsafe fn named(self) -> bool;
-    unsafe fn visible_child_count(self) -> u32;
-    unsafe fn named_child_count(self) -> u32;
-    unsafe fn visible_descendant_count(self) -> u32;
-    unsafe fn has_external_tokens(self) -> bool;
-    unsafe fn has_external_scanner_state_change(self) -> bool;
-    unsafe fn depends_on_column(self) -> bool;
-    unsafe fn padding(self) -> Length;
-    unsafe fn size(self) -> Length;
-    unsafe fn total_size(self) -> Length;
-    unsafe fn lookahead_bytes(self) -> u32;
-    unsafe fn error_cost(self) -> u32;
-    unsafe fn dynamic_precedence(self) -> i32;
-    unsafe fn is_error(self) -> bool;
-    unsafe fn fragile_left(self) -> bool;
-    unsafe fn fragile_right(self) -> bool;
-    unsafe fn leaf_symbol(self) -> TSSymbol;
-    unsafe fn leaf_parse_state(self) -> TSStateId;
-    unsafe fn repeat_depth(self) -> u32;
-}
-
-impl PendingReductionChild for Subtree {
-    #[inline]
-    unsafe fn symbol(self) -> TSSymbol {
-        subtree_symbol(self)
-    }
-
-    #[inline]
-    unsafe fn extra(self) -> bool {
-        subtree_extra(self)
-    }
-
-    #[inline]
-    unsafe fn child_count(self) -> u32 {
-        subtree_child_count(self)
-    }
-
-    #[inline]
-    unsafe fn visible(self) -> bool {
-        subtree_visible(self)
-    }
-
-    #[inline]
-    unsafe fn named(self) -> bool {
-        subtree_named(self)
-    }
-
-    #[inline]
-    unsafe fn visible_child_count(self) -> u32 {
-        subtree_visible_child_count(self)
-    }
-
-    #[inline]
-    unsafe fn named_child_count(self) -> u32 {
-        subtree_named_child_count(self)
-    }
-
-    #[inline]
-    unsafe fn visible_descendant_count(self) -> u32 {
-        subtree_visible_descendant_count(self)
-    }
-
-    #[inline]
-    unsafe fn has_external_tokens(self) -> bool {
-        subtree_has_external_tokens(self)
-    }
-
-    #[inline]
-    unsafe fn has_external_scanner_state_change(self) -> bool {
-        subtree_has_external_scanner_state_change(self)
-    }
-
-    #[inline]
-    unsafe fn depends_on_column(self) -> bool {
-        subtree_depends_on_column(self)
-    }
-
-    #[inline]
-    unsafe fn padding(self) -> Length {
-        subtree_padding(self)
-    }
-
-    #[inline]
-    unsafe fn size(self) -> Length {
-        subtree_size(self)
-    }
-
-    #[inline]
-    unsafe fn total_size(self) -> Length {
-        subtree_total_size(self)
-    }
-
-    #[inline]
-    unsafe fn lookahead_bytes(self) -> u32 {
-        subtree_lookahead_bytes(self)
-    }
-
-    #[inline]
-    unsafe fn error_cost(self) -> u32 {
-        subtree_error_cost(self)
-    }
-
-    #[inline]
-    unsafe fn dynamic_precedence(self) -> i32 {
-        subtree_dynamic_precedence(self)
-    }
-
-    #[inline]
-    unsafe fn is_error(self) -> bool {
-        subtree_is_error(self)
-    }
-
-    #[inline]
-    unsafe fn fragile_left(self) -> bool {
-        subtree_fragile_left(self)
-    }
-
-    #[inline]
-    unsafe fn fragile_right(self) -> bool {
-        subtree_fragile_right(self)
-    }
-
-    #[inline]
-    unsafe fn leaf_symbol(self) -> TSSymbol {
-        subtree_leaf_symbol(self)
-    }
-
-    #[inline]
-    unsafe fn leaf_parse_state(self) -> TSStateId {
-        subtree_leaf_parse_state(self)
-    }
-
-    #[inline]
-    unsafe fn repeat_depth(self) -> u32 {
-        subtree_repeat_depth(self)
-    }
-}
-
-unsafe fn parser__pending_reduction_summarize_child_array<T: PendingReductionChild>(
-    pending: &mut PendingReduction,
-    language: *const TSLanguage,
-    child_count: u32,
-    children: *const T,
-) {
-    pending.child_count = child_count;
-    pending.named_child_count = 0;
-    pending.visible_child_count = 0;
-    pending.error_cost = 0;
-    pending.repeat_depth = 0;
-    pending.visible_descendant_count = 0;
-    pending.dynamic_precedence = 0;
-    pending.node_count = 0;
-    pending.padding = length_zero();
-    pending.size = length_zero();
-    pending.lookahead_bytes = 0;
-    pending.flags &= PENDING_REDUCTION_VISIBLE | PENDING_REDUCTION_NAMED | PENDING_REDUCTION_EXTRA;
-
-    let mut structural_index: u32 = 0;
-    let alias_sequence = language_alias_sequence(language, u32::from(pending.production_id));
-    let mut lookahead_end_byte: u32 = 0;
-
-    for i in 0..child_count {
-        let child = *children.add(i as usize);
-
-        if pending.size.extent.row == 0 && child.depends_on_column() {
-            pending.flags |= PENDING_REDUCTION_DEPENDS_ON_COLUMN;
-        }
-
-        if child.has_external_scanner_state_change() {
-            pending.flags |= PENDING_REDUCTION_HAS_EXTERNAL_SCANNER_STATE_CHANGE;
-        }
-
-        if i == 0 {
-            pending.padding = child.padding();
-            pending.size = child.size();
-        } else {
-            pending.size = length_add(pending.size, child.total_size());
-        }
-
-        let child_lookahead_end_byte =
-            pending.padding.bytes + pending.size.bytes + child.lookahead_bytes();
-        if child_lookahead_end_byte > lookahead_end_byte {
-            lookahead_end_byte = child_lookahead_end_byte;
-        }
-
-        if child.symbol() != ts_builtin_sym_error_repeat {
-            pending.error_cost += child.error_cost();
-        }
-
-        let grandchild_count = child.child_count();
-        if (pending.symbol == ts_builtin_sym_error || pending.symbol == ts_builtin_sym_error_repeat)
-            && !child.extra()
-            && !(child.is_error() && grandchild_count == 0)
-        {
-            if child.visible() {
-                pending.error_cost += ERROR_COST_PER_SKIPPED_TREE;
-            } else if grandchild_count > 0 {
-                pending.error_cost += ERROR_COST_PER_SKIPPED_TREE * child.visible_child_count();
-            }
-        }
-
-        pending.dynamic_precedence += child.dynamic_precedence();
-        pending.visible_descendant_count += child.visible_descendant_count();
-
-        if !child.extra()
-            && child.symbol() != 0
-            && !alias_sequence.is_null()
-            && *alias_sequence.add(structural_index as usize) != 0
-        {
-            pending.visible_descendant_count += 1;
-            pending.visible_child_count += 1;
-            if ts_language_symbol_metadata(language, *alias_sequence.add(structural_index as usize))
-                .named
-            {
-                pending.named_child_count += 1;
-            }
-        } else if child.visible() {
-            pending.visible_descendant_count += 1;
-            pending.visible_child_count += 1;
-            if child.named() {
-                pending.named_child_count += 1;
-            }
-        } else if grandchild_count > 0 {
-            pending.visible_child_count += child.visible_child_count();
-            pending.named_child_count += child.named_child_count();
-        }
-
-        if child.has_external_tokens() {
-            pending.flags |= PENDING_REDUCTION_HAS_EXTERNAL_TOKENS;
-        }
-
-        if child.is_error() {
-            pending.flags |= PENDING_REDUCTION_FRAGILE_LEFT | PENDING_REDUCTION_FRAGILE_RIGHT;
-            pending.parse_state = TS_TREE_STATE_NONE;
-        }
-
-        if !child.extra() {
-            structural_index += 1;
-        }
-    }
-
-    pending.lookahead_bytes = lookahead_end_byte - pending.size.bytes - pending.padding.bytes;
-
-    if pending.symbol == ts_builtin_sym_error || pending.symbol == ts_builtin_sym_error_repeat {
-        pending.error_cost += ERROR_COST_PER_RECOVERY
-            + ERROR_COST_PER_SKIPPED_CHAR * pending.size.bytes
-            + ERROR_COST_PER_SKIPPED_LINE * pending.size.extent.row;
-        pending.flags |= PENDING_REDUCTION_FRAGILE_LEFT | PENDING_REDUCTION_FRAGILE_RIGHT;
-    }
-
-    if pending.child_count > 0 {
-        let first_child = *children;
-        let last_child = *children.add(pending.child_count as usize - 1);
-
-        pending.first_leaf_symbol = first_child.leaf_symbol();
-        pending.first_leaf_parse_state = first_child.leaf_parse_state();
-
-        if first_child.fragile_left() {
-            pending.flags |= PENDING_REDUCTION_FRAGILE_LEFT;
-        }
-        if last_child.fragile_right() {
-            pending.flags |= PENDING_REDUCTION_FRAGILE_RIGHT;
-        }
-
-        if pending.child_count >= 2
-            && pending.flags & (PENDING_REDUCTION_VISIBLE | PENDING_REDUCTION_NAMED) == 0
-            && first_child.symbol() == pending.symbol
-        {
-            let first_depth = first_child.repeat_depth();
-            let last_depth = last_child.repeat_depth();
-            pending.repeat_depth = (first_depth.max(last_depth) + 1) as u16;
-        }
-    }
-
-    pending.node_count = pending.visible_descendant_count;
-    if pending.flags & PENDING_REDUCTION_VISIBLE != 0 {
-        pending.node_count += 1;
-    }
-    if pending.symbol == ts_builtin_sym_error_repeat {
-        pending.node_count += 1;
-    }
-}
-
-unsafe fn parser__pending_reduction_summarize_children(
-    pending: &mut PendingReduction,
-    language: *const TSLanguage,
-) {
-    let child_count = pending.children.size;
-    let children = pending.children.contents;
-    parser__pending_reduction_summarize_child_array(pending, language, child_count, children);
-}
-
-impl PendingReductionChild for StackLinkPayload {
-    #[inline]
-    unsafe fn symbol(self) -> TSSymbol {
-        if stack_link_payload_is_pending_reduction(self) {
-            (*stack_link_payload_pending_reduction(self)).symbol
-        } else {
-            subtree_symbol(stack_link_payload_subtree(self))
-        }
-    }
-
-    #[inline]
-    unsafe fn extra(self) -> bool {
-        if stack_link_payload_is_pending_reduction(self) {
-            (*stack_link_payload_pending_reduction(self)).flags & PENDING_REDUCTION_EXTRA != 0
-        } else {
-            subtree_extra(stack_link_payload_subtree(self))
-        }
-    }
-
-    #[inline]
-    unsafe fn child_count(self) -> u32 {
-        if stack_link_payload_is_pending_reduction(self) {
-            (*stack_link_payload_pending_reduction(self)).child_count
-        } else {
-            subtree_child_count(stack_link_payload_subtree(self))
-        }
-    }
-
-    #[inline]
-    unsafe fn visible(self) -> bool {
-        if stack_link_payload_is_pending_reduction(self) {
-            (*stack_link_payload_pending_reduction(self)).flags & PENDING_REDUCTION_VISIBLE != 0
-        } else {
-            subtree_visible(stack_link_payload_subtree(self))
-        }
-    }
-
-    #[inline]
-    unsafe fn named(self) -> bool {
-        if stack_link_payload_is_pending_reduction(self) {
-            (*stack_link_payload_pending_reduction(self)).flags & PENDING_REDUCTION_NAMED != 0
-        } else {
-            subtree_named(stack_link_payload_subtree(self))
-        }
-    }
-
-    #[inline]
-    unsafe fn visible_child_count(self) -> u32 {
-        if stack_link_payload_is_pending_reduction(self) {
-            (*stack_link_payload_pending_reduction(self)).visible_child_count
-        } else {
-            subtree_visible_child_count(stack_link_payload_subtree(self))
-        }
-    }
-
-    #[inline]
-    unsafe fn named_child_count(self) -> u32 {
-        if stack_link_payload_is_pending_reduction(self) {
-            (*stack_link_payload_pending_reduction(self)).named_child_count
-        } else {
-            subtree_named_child_count(stack_link_payload_subtree(self))
-        }
-    }
-
-    #[inline]
-    unsafe fn visible_descendant_count(self) -> u32 {
-        if stack_link_payload_is_pending_reduction(self) {
-            (*stack_link_payload_pending_reduction(self)).visible_descendant_count
-        } else {
-            subtree_visible_descendant_count(stack_link_payload_subtree(self))
-        }
-    }
-
-    #[inline]
-    unsafe fn has_external_tokens(self) -> bool {
-        if stack_link_payload_is_pending_reduction(self) {
-            (*stack_link_payload_pending_reduction(self)).flags
-                & PENDING_REDUCTION_HAS_EXTERNAL_TOKENS
-                != 0
-        } else {
-            subtree_has_external_tokens(stack_link_payload_subtree(self))
-        }
-    }
-
-    #[inline]
-    unsafe fn has_external_scanner_state_change(self) -> bool {
-        if stack_link_payload_is_pending_reduction(self) {
-            (*stack_link_payload_pending_reduction(self)).flags
-                & PENDING_REDUCTION_HAS_EXTERNAL_SCANNER_STATE_CHANGE
-                != 0
-        } else {
-            subtree_has_external_scanner_state_change(stack_link_payload_subtree(self))
-        }
-    }
-
-    #[inline]
-    unsafe fn depends_on_column(self) -> bool {
-        if stack_link_payload_is_pending_reduction(self) {
-            (*stack_link_payload_pending_reduction(self)).flags
-                & PENDING_REDUCTION_DEPENDS_ON_COLUMN
-                != 0
-        } else {
-            subtree_depends_on_column(stack_link_payload_subtree(self))
-        }
-    }
-
-    #[inline]
-    unsafe fn padding(self) -> Length {
-        if stack_link_payload_is_pending_reduction(self) {
-            (*stack_link_payload_pending_reduction(self)).padding
-        } else {
-            subtree_padding(stack_link_payload_subtree(self))
-        }
-    }
-
-    #[inline]
-    unsafe fn size(self) -> Length {
-        if stack_link_payload_is_pending_reduction(self) {
-            (*stack_link_payload_pending_reduction(self)).size
-        } else {
-            subtree_size(stack_link_payload_subtree(self))
-        }
-    }
-
-    #[inline]
-    unsafe fn total_size(self) -> Length {
-        if stack_link_payload_is_pending_reduction(self) {
-            let pending = ptr_ref(stack_link_payload_pending_reduction(self));
-            length_add(pending.padding, pending.size)
-        } else {
-            subtree_total_size(stack_link_payload_subtree(self))
-        }
-    }
-
-    #[inline]
-    unsafe fn lookahead_bytes(self) -> u32 {
-        if stack_link_payload_is_pending_reduction(self) {
-            (*stack_link_payload_pending_reduction(self)).lookahead_bytes
-        } else {
-            subtree_lookahead_bytes(stack_link_payload_subtree(self))
-        }
-    }
-
-    #[inline]
-    unsafe fn error_cost(self) -> u32 {
-        if stack_link_payload_is_pending_reduction(self) {
-            (*stack_link_payload_pending_reduction(self)).error_cost
-        } else {
-            subtree_error_cost(stack_link_payload_subtree(self))
-        }
-    }
-
-    #[inline]
-    unsafe fn dynamic_precedence(self) -> i32 {
-        if stack_link_payload_is_pending_reduction(self) {
-            (*stack_link_payload_pending_reduction(self)).dynamic_precedence
-        } else {
-            subtree_dynamic_precedence(stack_link_payload_subtree(self))
-        }
-    }
-
-    #[inline]
-    unsafe fn is_error(self) -> bool {
-        if stack_link_payload_is_pending_reduction(self) {
-            let symbol = (*stack_link_payload_pending_reduction(self)).symbol;
-            symbol == ts_builtin_sym_error || symbol == ts_builtin_sym_error_repeat
-        } else {
-            subtree_is_error(stack_link_payload_subtree(self))
-        }
-    }
-
-    #[inline]
-    unsafe fn fragile_left(self) -> bool {
-        if stack_link_payload_is_pending_reduction(self) {
-            (*stack_link_payload_pending_reduction(self)).flags & PENDING_REDUCTION_FRAGILE_LEFT
-                != 0
-        } else {
-            subtree_fragile_left(stack_link_payload_subtree(self))
-        }
-    }
-
-    #[inline]
-    unsafe fn fragile_right(self) -> bool {
-        if stack_link_payload_is_pending_reduction(self) {
-            (*stack_link_payload_pending_reduction(self)).flags & PENDING_REDUCTION_FRAGILE_RIGHT
-                != 0
-        } else {
-            subtree_fragile_right(stack_link_payload_subtree(self))
-        }
-    }
-
-    #[inline]
-    unsafe fn leaf_symbol(self) -> TSSymbol {
-        if stack_link_payload_is_pending_reduction(self) {
-            (*stack_link_payload_pending_reduction(self)).first_leaf_symbol
-        } else {
-            subtree_leaf_symbol(stack_link_payload_subtree(self))
-        }
-    }
-
-    #[inline]
-    unsafe fn leaf_parse_state(self) -> TSStateId {
-        if stack_link_payload_is_pending_reduction(self) {
-            (*stack_link_payload_pending_reduction(self)).first_leaf_parse_state
-        } else {
-            subtree_leaf_parse_state(stack_link_payload_subtree(self))
-        }
-    }
-
-    #[inline]
-    unsafe fn repeat_depth(self) -> u32 {
-        if stack_link_payload_is_pending_reduction(self) {
-            u32::from((*stack_link_payload_pending_reduction(self)).repeat_depth)
-        } else {
-            subtree_repeat_depth(stack_link_payload_subtree(self))
-        }
-    }
-}
-
-unsafe fn parser__pending_reduction_summarize_payload_children(
-    pending: &mut PendingReduction,
-    language: *const TSLanguage,
-) {
-    let child_count = pending.payload_children.size;
-    let children = pending.payload_children.contents;
-    parser__pending_reduction_summarize_child_array(pending, language, child_count, children);
-}
-
-unsafe fn parser__pending_reduction_new_from_children(
-    self_: &mut TSParser,
-    symbol: TSSymbol,
-    children: &SubtreeArray,
-    production_id: u16,
-    parse_state: TSStateId,
-    extra: bool,
-    dynamic_precedence: i32,
-) -> *mut PendingReduction {
-    let metadata = ts_language_symbol_metadata(self_.language, symbol);
-    let fragile = symbol == ts_builtin_sym_error || symbol == ts_builtin_sym_error_repeat;
-    let pending = malloc(core::mem::size_of::<PendingReduction>()).cast::<PendingReduction>();
-    ptr::write(
-        pending,
-        pending_reduction_new_empty(
-            symbol,
-            production_id,
-            parse_state,
-            metadata.visible,
-            metadata.named,
-            extra,
-            fragile,
-        ),
-    );
-    let pending_ref = ptr_mut(pending);
-
-    array_reserve(&mut pending_ref.children, children.size);
-    for i in 0..children.size {
-        let child = *children.contents.add(i as usize);
-        subtree_retain(child);
-        array_push(&mut pending_ref.children, child);
-    }
-
-    parser__pending_reduction_summarize_children(pending_ref, self_.language);
-    pending_ref.dynamic_precedence += dynamic_precedence;
-    array_push(&mut self_.pending_reductions, pending);
-    pending
-}
-
-unsafe fn parser__pending_reduction_new_from_payloads(
-    self_: &mut TSParser,
-    symbol: TSSymbol,
-    children: &Array<StackLinkPayload>,
-    production_id: u16,
-    parse_state: TSStateId,
-    extra: bool,
-    dynamic_precedence: i32,
-) -> *mut PendingReduction {
-    let metadata = ts_language_symbol_metadata(self_.language, symbol);
-    let fragile = symbol == ts_builtin_sym_error || symbol == ts_builtin_sym_error_repeat;
-    let pending = malloc(core::mem::size_of::<PendingReduction>()).cast::<PendingReduction>();
-    ptr::write(
-        pending,
-        pending_reduction_new_empty(
-            symbol,
-            production_id,
-            parse_state,
-            metadata.visible,
-            metadata.named,
-            extra,
-            fragile,
-        ),
-    );
-    let pending_ref = ptr_mut(pending);
-
-    array_reserve(&mut pending_ref.payload_children, children.size);
-    for i in 0..children.size {
-        let child = *children.contents.add(i as usize);
-        stack_link_payload_retain(child);
-        array_push(&mut pending_ref.payload_children, child);
-    }
-
-    parser__pending_reduction_summarize_payload_children(pending_ref, self_.language);
-    pending_ref.dynamic_precedence += dynamic_precedence;
-    array_push(&mut self_.pending_reductions, pending);
-    pending
-}
-
-unsafe fn parser__materialize_pending_reduction(
-    self_: &mut TSParser,
-    pending: *mut PendingReduction,
-) -> Subtree {
-    let pending_ref = ptr_mut(pending);
-    if !pending_ref.materialized.ptr.is_null() {
-        subtree_retain(pending_ref.materialized);
-        return pending_ref.materialized;
-    }
-
-    let mut children = array_new();
-
-    if !pending_ref.payload_children.contents.is_null() {
-        array_reserve(&mut children, pending_ref.payload_children.size);
-        for i in 0..pending_ref.payload_children.size {
-            let payload = *array_get_ref(&pending_ref.payload_children, i);
-            let child = if stack_link_payload_is_pending_reduction(payload) {
-                parser__materialize_pending_reduction(
-                    self_,
-                    stack_link_payload_pending_reduction(payload),
-                )
-            } else {
-                let child = stack_link_payload_subtree(payload);
-                subtree_retain(child);
-                child
-            };
-            array_push(&mut children, child);
-        }
-
-        for i in 0..pending_ref.payload_children.size {
-            stack_link_payload_release(
-                *array_get_ref(&pending_ref.payload_children, i),
-                &mut self_.tree_pool,
-            );
-        }
-        array_delete(&mut pending_ref.payload_children);
-    } else {
-        children = ptr::read(&pending_ref.children);
-        pending_ref.children = array_new();
-    }
-
-    let result = parser__new_node(
-        self_,
-        pending_ref.symbol,
-        &mut children,
-        u32::from(pending_ref.production_id),
-    );
-
-    (*result.ptr).padding = pending_ref.padding;
-    (*result.ptr).size = pending_ref.size;
-    (*result.ptr).lookahead_bytes = pending_ref.lookahead_bytes;
-    (*result.ptr).error_cost = pending_ref.error_cost;
-    (*result.ptr).parse_state = pending_ref.parse_state;
-    (*result.ptr).set_extra(pending_ref.flags & PENDING_REDUCTION_EXTRA != 0);
-    (*result.ptr).set_fragile_left(pending_ref.flags & PENDING_REDUCTION_FRAGILE_LEFT != 0);
-    (*result.ptr).set_fragile_right(pending_ref.flags & PENDING_REDUCTION_FRAGILE_RIGHT != 0);
-    (*result.ptr)
-        .set_has_external_tokens(pending_ref.flags & PENDING_REDUCTION_HAS_EXTERNAL_TOKENS != 0);
-    (*result.ptr).set_has_external_scanner_state_change(
-        pending_ref.flags & PENDING_REDUCTION_HAS_EXTERNAL_SCANNER_STATE_CHANGE != 0,
-    );
-    (*result.ptr)
-        .set_depends_on_column(pending_ref.flags & PENDING_REDUCTION_DEPENDS_ON_COLUMN != 0);
-    (*result.ptr).data.children.visible_child_count = pending_ref.visible_child_count;
-    (*result.ptr).data.children.named_child_count = pending_ref.named_child_count;
-    (*result.ptr).data.children.visible_descendant_count = pending_ref.visible_descendant_count;
-    (*result.ptr).data.children.dynamic_precedence = pending_ref.dynamic_precedence;
-    (*result.ptr).data.children.repeat_depth = pending_ref.repeat_depth;
-    (*result.ptr).data.children.first_leaf.symbol = pending_ref.first_leaf_symbol;
-    (*result.ptr).data.children.first_leaf.parse_state = pending_ref.first_leaf_parse_state;
-
-    pending_ref.materialized = subtree_from_mut(result);
-    subtree_retain(pending_ref.materialized);
-    pending_ref.materialized
 }
 
 // ---------------------------------------------------------------------------
@@ -3906,7 +3114,6 @@ pub unsafe extern "C" fn ts_parser_new() -> *mut TSParser {
             reduce_actions: array_new(),
             finished_tree: NULL_SUBTREE,
             reduce_builder: stack_pop_builder_new(),
-            pending_reductions: array_new(),
             trailing_extras: array_new(),
             trailing_extras2: array_new(),
             scratch_trees: array_new(),
@@ -3947,12 +3154,8 @@ pub unsafe extern "C" fn ts_parser_delete(self_: *mut TSParser) {
     ts_parser_set_language(self_, ptr::null());
     let parser = ptr_mut(self_);
     stack_delete(ptr_mut(parser.stack));
-    parser__clear_pending_reductions(parser);
     if !parser.reduce_actions.contents.is_null() {
         array_delete(&mut parser.reduce_actions);
-    }
-    if !parser.pending_reductions.contents.is_null() {
-        array_delete(&mut parser.pending_reductions);
     }
     if !parser.included_range_differences.contents.is_null() {
         array_delete(&mut parser.included_range_differences);
@@ -4088,7 +3291,6 @@ pub unsafe extern "C" fn ts_parser_reset(self_: *mut TSParser) {
     parser.reusable_node.clear();
     lexer_reset(&mut parser.lexer, length_zero());
     stack_clear(ptr_mut(parser.stack));
-    parser__clear_pending_reductions(parser);
     parser__set_cached_token(parser, 0, NULL_SUBTREE, NULL_SUBTREE);
     if !parser.finished_tree.ptr.is_null() {
         subtree_release(&mut parser.tree_pool, parser.finished_tree);

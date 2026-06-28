@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 // Core Rust implementation of the tree-sitter library.
 //
 // This module is the Rust rewrite of lib/src/*.c.
