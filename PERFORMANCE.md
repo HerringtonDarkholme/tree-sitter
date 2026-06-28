@@ -3280,6 +3280,44 @@ Source-code analysis:
 - Full `cargo test --all` passed before every committed code change in this
   checkpoint.
 
+## 2026-06-28 internal lexer error-skip cleanup
+
+- Change: factored the logged lexer advance path into a normal Rust helper and
+  routed parser error recovery through internal lexer helpers instead of the
+  public `TSLexer` vtable. This preserves callback logging behavior while
+  avoiding indirect `advance` / `eof` calls on the malformed-input skip path.
+- Scope: error recovery only. This is not expected to move normal parsing.
+- Validation:
+  - `cargo fmt --check --all`
+  - `cargo check -p tree-sitter --lib --offline`
+  - `cargo clippy -p tree-sitter --lib --offline --all-targets -- -D warnings`
+  - `git diff --check`
+  - `cargo test --all` reached the established local baseline: 265 CLI tests
+    passed and the same four `detect_language` tests failed.
+- Targeted error-path benchmark command:
+
+```sh
+env TMPDIR=/private/tmp/tree-sitter-lexer-internal-error-skip cargo xtask perf-gate --kind error --language cpp --language java --language javascript --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| C++ error parses | 39 | 2189.2 | 2056.8 | +6.43% |
+| Java error parses | 39 | 3648.2 | 3246.5 | +12.38% |
+| JavaScript error parses | 39 | 2122.2 | 1950.6 | +8.80% |
+| Overall parser throughput | 117 | 2539.0 | 2335.6 | +8.71% |
+
+Per-case regressions over 5%:
+
+| Case | Rust bytes/ms | C bytes/ms | Slowdown |
+| --- | ---: | ---: | ---: |
+| `javascript error compound-statement-without-trailing-newline.py` | 3017.1 | 3272.5 | 7.80% |
+
+The targeted aggregate remained positive in report-only mode. Because this
+change only replaces internal Rust-owned calls with direct helpers and leaves
+the generated-parser ABI callback table intact, no ABI or parser-table risk was
+identified.
+
 ### 2026-06-25 18:45 EDT
 
 - Repo head: `9a0904a5`

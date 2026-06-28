@@ -24,8 +24,8 @@ use super::language::{
 };
 use super::length::{length_sub, length_zero, Length};
 use super::lexer::{
-    lexer_delete, lexer_finish, lexer_included_ranges, lexer_mark_end, lexer_new, lexer_reset,
-    lexer_set_included_ranges, lexer_set_input, lexer_start, Lexer,
+    lexer_advance, lexer_delete, lexer_finish, lexer_included_ranges, lexer_is_eof, lexer_mark_end,
+    lexer_new, lexer_reset, lexer_set_included_ranges, lexer_set_input, lexer_start, Lexer,
 };
 use super::reduce_action::{reduce_action_set_add, ReduceAction, ReduceActionSet};
 use super::reusable_node::ReusableNode;
@@ -1127,11 +1127,11 @@ unsafe fn parser_lex(
         }
 
         if self_.lexer.current_position.bytes == error_end_position.bytes {
-            if (self_.lexer.data.eof.unwrap())(core::ptr::addr_of!(self_.lexer.data)) {
+            if lexer_is_eof(&self_.lexer) {
                 self_.lexer.data.result_symbol = TS_BUILTIN_SYM_ERROR;
                 break;
             }
-            (self_.lexer.data.advance.unwrap())(&mut self_.lexer.data, false);
+            lexer_advance(&mut self_.lexer, false);
         }
 
         error_end_position = self_.lexer.current_position;

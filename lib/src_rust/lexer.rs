@@ -199,7 +199,7 @@ unsafe extern "C" fn ts_lexer__eof(lexer: *const TSLexer) -> bool {
 }
 
 #[inline]
-const fn lexer_is_eof(self_: &Lexer) -> bool {
+pub const fn lexer_is_eof(self_: &Lexer) -> bool {
     self_.current_included_range_index == self_.included_range_count
 }
 
@@ -442,15 +442,14 @@ unsafe fn lexer_do_advance(self_: &mut Lexer, skip: bool) {
     lexer_load_next_lookahead(self_, has_current_range);
 }
 
-/// Advance to the next character (with logging). `TSLexer` vtable callback.
-#[allow(non_snake_case)]
-unsafe extern "C-unwind" fn ts_lexer__advance(lexer: *mut TSLexer, skip: bool) {
-    let self_ = lexer_mut(lexer);
+/// Advance to the next character, preserving public lexer logging behavior.
+pub unsafe fn lexer_advance(self_: &mut Lexer, skip: bool) {
     if self_.chunk.is_null() {
         return;
     }
 
     if self_.logger.log.is_some() {
+        let lexer = ptr::addr_of_mut!(self_.data);
         let character = self_.data.lookahead;
         if skip {
             if (32..127).contains(&character) {
@@ -478,6 +477,12 @@ unsafe extern "C-unwind" fn ts_lexer__advance(lexer: *mut TSLexer, skip: bool) {
     }
 
     lexer_do_advance(self_, skip);
+}
+
+/// Advance to the next character (with logging). `TSLexer` vtable callback.
+#[allow(non_snake_case)]
+unsafe extern "C-unwind" fn ts_lexer__advance(lexer: *mut TSLexer, skip: bool) {
+    lexer_advance(lexer_mut(lexer), skip);
 }
 
 /// Mark that a token match has completed. `TSLexer` vtable callback.
