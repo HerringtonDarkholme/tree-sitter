@@ -96,10 +96,15 @@ fn check_wasm_exports() -> Result<()> {
     );
 
     let nm_cmd = env::var("NM").unwrap_or_else(|_| "nm".to_owned());
+    let library_path = PathBuf::from("target/release").join(format!(
+        "{}tree_sitter{}",
+        env::consts::DLL_PREFIX,
+        env::consts::DLL_SUFFIX
+    ));
     let nm_child = Command::new(nm_cmd)
         .arg("-W")
         .arg("-U")
-        .arg("libtree-sitter.so")
+        .arg(library_path)
         .stdout(Stdio::piped())
         .output()
         .expect("Failed to run nm");

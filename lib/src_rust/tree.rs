@@ -6,7 +6,6 @@ use super::alloc::{calloc, free, malloc};
 use super::get_changed_ranges::{
     range_array_get_changed_ranges_ref, range_edit_ref, range_slice, subtree_get_changed_ranges_ref,
 };
-use super::language::{ts_language_copy, ts_language_delete};
 use super::length::{length_add, Length};
 use super::node::node_new;
 use super::subtree::{
@@ -71,7 +70,7 @@ unsafe fn tree_init_ref(
     arena: *mut TreeArena,
 ) {
     tree.root = root;
-    tree.language = ts_language_copy(language);
+    tree.language = language;
     tree.included_range_count = included_ranges.len() as u32;
     tree.arena = arena;
     tree.included_ranges =
@@ -107,7 +106,6 @@ unsafe fn tree_delete_ref(tree: &mut TSTree) {
     subtree_release(&mut pool, tree.root);
     subtree_pool_delete(&mut pool);
     tree_arena_release(tree.arena);
-    ts_language_delete(tree.language);
     free(tree.included_ranges.cast::<c_void>());
 }
 

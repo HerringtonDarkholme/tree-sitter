@@ -14,10 +14,9 @@ use super::error_costs::{
 use super::language::{
     language_actions, language_enabled_external_tokens, language_full, language_has_actions,
     language_has_reduce_action, language_is_reserved_word, language_lex_mode_for_state,
-    language_lookup, language_table_entry, ts_language_copy, ts_language_delete,
-    ts_language_next_state, ts_language_symbol_name, TSLexerMode, TSParseAction, TableEntry,
-    TSPARSE_ACTION_TYPE_ACCEPT, TSPARSE_ACTION_TYPE_RECOVER, TSPARSE_ACTION_TYPE_REDUCE,
-    TSPARSE_ACTION_TYPE_SHIFT,
+    language_lookup, language_table_entry, ts_language_next_state, ts_language_symbol_name,
+    TSLexerMode, TSParseAction, TableEntry, TSPARSE_ACTION_TYPE_ACCEPT,
+    TSPARSE_ACTION_TYPE_RECOVER, TSPARSE_ACTION_TYPE_REDUCE, TSPARSE_ACTION_TYPE_SHIFT,
 };
 use super::length::{length_sub, length_zero, Length};
 use super::lexer::{
@@ -1728,7 +1727,7 @@ unsafe fn parser_recover_to_state(
 
         let mut error_trees = stack_pop_error(stack, slice.version);
         if error_trees.size > 0 {
-            debug_assert!(error_trees.size == 1);
+            debug_assert_eq!(error_trees.size, 1);
             let error_tree = *error_trees.contents;
             let error_child_count = subtree_child_count(error_tree);
             if error_child_count > 0 {
@@ -2634,7 +2633,7 @@ pub unsafe extern "C" fn ts_parser_delete(self_: *mut TSParser) {
         return;
     }
 
-    ts_parser_set_language(self_, ptr::null());
+    ts_parser_reset(self_);
     let parser = ptr_mut(self_);
     stack_delete(ptr_mut(parser.stack));
     if !parser.reduce_actions.contents.is_null() {
@@ -2671,9 +2670,7 @@ pub unsafe extern "C" fn ts_parser_set_language(
 ) -> bool {
     ts_parser_reset(self_);
     let parser = ptr_mut(self_);
-    ts_language_delete(parser.language);
     parser.language = ptr::null();
-
     if !language.is_null() {
         let language_data = language_full(language);
         if language_data.abi_version > TREE_SITTER_LANGUAGE_VERSION
@@ -2683,7 +2680,7 @@ pub unsafe extern "C" fn ts_parser_set_language(
         }
     }
 
-    parser.language = ts_language_copy(language);
+    parser.language = language;
     true
 }
 

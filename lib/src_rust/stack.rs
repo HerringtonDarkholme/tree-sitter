@@ -1181,7 +1181,7 @@ pub unsafe fn stack_pop_error(self_: &mut Stack, version: StackVersion) -> Subtr
                 Some(1),
             );
             if pop.size > 0 {
-                debug_assert!(pop.size == 1);
+                debug_assert_eq!(pop.size, 1);
                 let first_pop = array_get_ref(&pop, 0);
                 stack_renumber_version(self_, first_pop.version, version);
                 return ptr::read(&first_pop.subtrees);

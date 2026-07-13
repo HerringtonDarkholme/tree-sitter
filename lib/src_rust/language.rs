@@ -692,16 +692,6 @@ pub unsafe fn language_write_symbol_as_dot_string(
 // ===========================================================================
 
 #[no_mangle]
-pub unsafe extern "C" fn ts_language_copy(self_: *const TSLanguage) -> *const TSLanguage {
-    self_
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn ts_language_delete(self_: *const TSLanguage) {
-    let _ = self_;
-}
-
-#[no_mangle]
 pub const unsafe extern "C" fn ts_language_symbol_count(self_: *const TSLanguage) -> u32 {
     let l = lang(self_);
     l.symbol_count + l.alias_count

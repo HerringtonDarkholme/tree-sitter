@@ -360,7 +360,6 @@ fn emit_c_api_probe(
         tree_sitter::ffi::ts_tree_delete(tree_copy);
         tree_sitter::ffi::ts_tree_delete(tree);
         tree_sitter::ffi::ts_parser_delete(parser);
-        tree_sitter::ffi::ts_language_delete(language);
     }
 
     Ok(())

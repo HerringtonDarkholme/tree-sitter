@@ -33,10 +33,10 @@ use super::alloc::{calloc, free, malloc};
 use super::language::{
     language_alias_at, language_aliases_for_symbol, language_field_map, language_lookaheads,
     language_public_symbol, language_state_is_primary, language_symbol_count, language_token_count,
-    lookahead_iterator_next, ts_language_abi_version, ts_language_copy, ts_language_delete,
-    ts_language_field_id_for_name, ts_language_state_count, ts_language_subtypes,
-    ts_language_symbol_for_name, ts_language_symbol_metadata, LANGUAGE_VERSION_WITH_RESERVED_WORDS,
-    TSPARSE_ACTION_TYPE_REDUCE, TSPARSE_ACTION_TYPE_SHIFT,
+    lookahead_iterator_next, ts_language_abi_version, ts_language_field_id_for_name,
+    ts_language_state_count, ts_language_subtypes, ts_language_symbol_for_name,
+    ts_language_symbol_metadata, LANGUAGE_VERSION_WITH_RESERVED_WORDS, TSPARSE_ACTION_TYPE_REDUCE,
+    TSPARSE_ACTION_TYPE_SHIFT,
 };
 use super::node::{
     ts_node_child_by_field_id, ts_node_end_byte, ts_node_end_point, ts_node_is_missing,
@@ -2853,7 +2853,7 @@ pub unsafe extern "C" fn ts_query_new(
             negated_fields: array_new(),
             string_buffer: array_new(),
             repeat_symbols_with_rootless_patterns: array_new(),
-            language: ts_language_copy(language),
+            language,
             wildcard_root_pattern_count: 0,
         },
     );
@@ -3001,7 +3001,6 @@ pub unsafe extern "C" fn ts_query_delete(self_: *mut TSQuery) {
     array_delete(&mut query.string_buffer);
     array_delete(&mut query.negated_fields);
     array_delete(&mut query.repeat_symbols_with_rootless_patterns);
-    ts_language_delete(query.language);
     symbol_table_delete(&mut query.captures);
     symbol_table_delete(&mut query.predicate_values);
     for index in 0..query.capture_quantifiers.size {

@@ -35,5 +35,8 @@ jobs:
         working-directory: lib/binding_web
         run: npm ci && npm run build:debug
 
+      - name: Build native library
+        run: cargo rustc -p tree-sitter --release --crate-type cdylib
+
       - name: Check Wasm exports
         run: cargo xtask check-wasm-exports

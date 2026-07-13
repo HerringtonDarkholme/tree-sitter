@@ -1,8 +1,6 @@
 _ts_dup	pub unsafe extern "C" fn _ts_dup(file_descriptor: i32) -> i32
 _ts_dup	pub unsafe extern "C" fn _ts_dup(handle: win_dot_graph::Handle) -> i32
 ts_language_abi_version	pub const unsafe extern "C" fn ts_language_abi_version(self_: *const TSLanguage) -> u32
-ts_language_copy	pub unsafe extern "C" fn ts_language_copy(self_: *const TSLanguage) -> *const TSLanguage
-ts_language_delete	pub unsafe extern "C" fn ts_language_delete(self_: *const TSLanguage)
 ts_language_field_count	pub const unsafe extern "C" fn ts_language_field_count(self_: *const TSLanguage) -> u32
 ts_language_field_id_for_name	pub unsafe extern "C" fn ts_language_field_id_for_name( self_: *const TSLanguage, name: *const i8, name_length: u32, ) -> TSFieldId
 ts_language_field_name_for_id	pub unsafe extern "C" fn ts_language_field_name_for_id( self_: *const TSLanguage, id: TSFieldId, ) -> *const i8
