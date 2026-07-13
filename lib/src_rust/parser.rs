@@ -1,4 +1,5 @@
-use core::ffi::{c_char, c_void};
+use core::ffi::{c_char, c_void, CStr};
+use core::fmt::{self, Write};
 use core::ptr;
 
 use crate::ffi::{
@@ -144,7 +145,6 @@ use super::utils::{ptr_mut, ptr_ref};
 
 extern "C" {
     // libc
-    fn snprintf(buf: *mut i8, size: usize, fmt: *const i8, ...) -> i32;
     fn fprintf(f: *mut c_void, fmt: *const i8, ...) -> i32;
     fn fputs(s: *const i8, f: *mut c_void) -> i32;
     fn fputc(c: i32, f: *mut c_void) -> i32;
@@ -167,125 +167,6 @@ const OP_COUNT_PER_PARSER_CALLBACK_CHECK: u32 = 100;
 const TREE_SITTER_SERIALIZATION_BUFFER_SIZE: usize = 1024;
 const TREE_SITTER_LANGUAGE_VERSION: u32 = 15;
 const TREE_SITTER_MIN_COMPATIBLE_LANGUAGE_VERSION: u32 = 13;
-
-// ---------------------------------------------------------------------------
-// Logging macros (equivalent to C LOG, LOG_STACK, LOG_TREE macros)
-// ---------------------------------------------------------------------------
-
-macro_rules! LOG {
-    ($self_:expr, $($arg:expr),+) => {
-        let parser = &mut *$self_;
-        if parser.lexer.logger.log.is_some() || !parser.dot_graph_file.is_null() {
-            snprintf(
-                parser.lexer.debug_buffer.as_mut_ptr().cast::<i8>(),
-                TREE_SITTER_SERIALIZATION_BUFFER_SIZE,
-                $($arg),+
-            );
-            parser_log(parser);
-        }
-    };
-}
-
-macro_rules! LOG_STACK {
-    ($self_:expr) => {
-        if !(*$self_).dot_graph_file.is_null() {
-            stack_print_dot_graph(
-                ptr_mut((*$self_).stack),
-                (*$self_).language,
-                (*$self_).dot_graph_file,
-            );
-            fputs(c"\n\n".as_ptr().cast::<i8>(), (*$self_).dot_graph_file);
-        }
-    };
-}
-
-macro_rules! LOG_TREE {
-    ($self_:expr, $tree:expr) => {
-        if !(*$self_).dot_graph_file.is_null() {
-            subtree_print_dot_graph($tree, (*$self_).language, (*$self_).dot_graph_file);
-            fputs(c"\n".as_ptr().cast::<i8>(), (*$self_).dot_graph_file);
-        }
-    };
-}
-
-macro_rules! LOG_LOOKAHEAD {
-    ($self_:expr, $symbol_name:expr, $size:expr) => {
-        if (*$self_).lexer.logger.log.is_some() || !(*$self_).dot_graph_file.is_null() {
-            let buf = (*$self_).lexer.debug_buffer.as_mut_ptr().cast::<i8>();
-            let symbol = $symbol_name;
-            let mut off = snprintf(
-                buf,
-                TREE_SITTER_SERIALIZATION_BUFFER_SIZE,
-                c"lexed_lookahead sym:".as_ptr().cast::<i8>(),
-            ) as usize;
-            let mut i = 0usize;
-            while *symbol.add(i) != 0 && off < TREE_SITTER_SERIALIZATION_BUFFER_SIZE {
-                match *symbol.add(i) as u8 {
-                    b'\t' => {
-                        *buf.add(off) = b'\\' as i8;
-                        off += 1;
-                        *buf.add(off) = b't' as i8;
-                        off += 1;
-                    }
-                    b'\n' => {
-                        *buf.add(off) = b'\\' as i8;
-                        off += 1;
-                        *buf.add(off) = b'n' as i8;
-                        off += 1;
-                    }
-                    0x0b => {
-                        *buf.add(off) = b'\\' as i8;
-                        off += 1;
-                        *buf.add(off) = b'v' as i8;
-                        off += 1;
-                    }
-                    0x0c => {
-                        *buf.add(off) = b'\\' as i8;
-                        off += 1;
-                        *buf.add(off) = b'f' as i8;
-                        off += 1;
-                    }
-                    b'\r' => {
-                        *buf.add(off) = b'\\' as i8;
-                        off += 1;
-                        *buf.add(off) = b'r' as i8;
-                        off += 1;
-                    }
-                    b'\\' => {
-                        *buf.add(off) = b'\\' as i8;
-                        off += 1;
-                        *buf.add(off) = b'\\' as i8;
-                        off += 1;
-                    }
-                    _ => {
-                        *buf.add(off) = *symbol.add(i);
-                        off += 1;
-                    }
-                }
-                i += 1;
-            }
-            snprintf(
-                buf.add(off),
-                TREE_SITTER_SERIALIZATION_BUFFER_SIZE - off,
-                c", size:%u".as_ptr().cast::<i8>(),
-                $size,
-            );
-            parser_log(&mut *$self_);
-        }
-    };
-}
-
-macro_rules! SYM_NAME {
-    ($self_:expr, $symbol:expr) => {
-        ts_language_symbol_name((*$self_).language, $symbol)
-    };
-}
-
-macro_rules! TREE_NAME {
-    ($self_:expr, $tree:expr) => {
-        SYM_NAME!($self_, subtree_symbol($tree))
-    };
-}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -428,7 +309,119 @@ unsafe extern "C" fn ts_string_input_read(
 // Internal helpers — logging & breakdown
 // ---------------------------------------------------------------------------
 
-unsafe fn parser_log(self_: &mut TSParser) {
+struct ParserLogBuffer<'a> {
+    bytes: &'a mut [u8],
+    len: usize,
+}
+
+impl ParserLogBuffer<'_> {
+    fn write_bytes(&mut self, bytes: &[u8]) {
+        let available = self.bytes.len().saturating_sub(self.len + 1);
+        let count = available.min(bytes.len());
+        self.bytes[self.len..self.len + count].copy_from_slice(&bytes[..count]);
+        self.len += count;
+    }
+}
+
+impl Write for ParserLogBuffer<'_> {
+    fn write_str(&mut self, value: &str) -> fmt::Result {
+        self.write_bytes(value.as_bytes());
+        Ok(())
+    }
+}
+
+struct DisplayCStr(*const c_char);
+
+impl fmt::Display for DisplayCStr {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut bytes = unsafe { CStr::from_ptr(self.0) }.to_bytes();
+        while !bytes.is_empty() {
+            match core::str::from_utf8(bytes) {
+                Ok(value) => return formatter.write_str(value),
+                Err(error) => {
+                    let valid = error.valid_up_to();
+                    formatter
+                        .write_str(unsafe { core::str::from_utf8_unchecked(&bytes[..valid]) })?;
+                    formatter.write_char(char::REPLACEMENT_CHARACTER)?;
+                    bytes = &bytes[valid + error.error_len().unwrap_or(1)..];
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy)]
+struct ParserLogContext {
+    language: *const TSLanguage,
+    stack: *mut Stack,
+}
+
+unsafe fn parser_log(
+    self_: &mut TSParser,
+    write_message: impl FnOnce(ParserLogContext, &mut ParserLogBuffer<'_>) -> fmt::Result,
+) {
+    if self_.lexer.logger.log.is_none() && self_.dot_graph_file.is_null() {
+        return;
+    }
+
+    {
+        let context = ParserLogContext {
+            language: self_.language,
+            stack: self_.stack,
+        };
+        let mut buffer = ParserLogBuffer {
+            bytes: &mut self_.lexer.debug_buffer,
+            len: 0,
+        };
+        let _ = write_message(context, &mut buffer);
+        buffer.bytes[buffer.len] = 0;
+    }
+
+    parser_emit_log(self_);
+}
+
+unsafe fn parser_log_stack(self_: &TSParser) {
+    if !self_.dot_graph_file.is_null() {
+        stack_print_dot_graph(ptr_mut(self_.stack), self_.language, self_.dot_graph_file);
+        fputs(c"\n\n".as_ptr().cast::<i8>(), self_.dot_graph_file);
+    }
+}
+
+unsafe fn parser_log_tree(self_: &TSParser, tree: Subtree) {
+    if !self_.dot_graph_file.is_null() {
+        subtree_print_dot_graph(tree, self_.language, self_.dot_graph_file);
+        fputs(c"\n".as_ptr().cast::<i8>(), self_.dot_graph_file);
+    }
+}
+
+unsafe fn parser_symbol_name(language: *const TSLanguage, symbol: TSSymbol) -> *const c_char {
+    ts_language_symbol_name(language, symbol)
+}
+
+unsafe fn parser_tree_name(language: *const TSLanguage, tree: Subtree) -> *const c_char {
+    parser_symbol_name(language, subtree_symbol(tree))
+}
+
+unsafe fn parser_log_lookahead(self_: &mut TSParser, symbol: *const c_char, size: u32) {
+    parser_log(self_, |_, buffer| {
+        buffer.write_str("lexed_lookahead sym:")?;
+        for byte in CStr::from_ptr(symbol).to_bytes() {
+            match *byte {
+                b'\t' => buffer.write_str("\\t")?,
+                b'\n' => buffer.write_str("\\n")?,
+                0x0b => buffer.write_str("\\v")?,
+                0x0c => buffer.write_str("\\f")?,
+                b'\r' => buffer.write_str("\\r")?,
+                b'\\' => buffer.write_str("\\\\")?,
+                _ => buffer.write_bytes(core::slice::from_ref(byte)),
+            }
+        }
+        write!(buffer, ", size:{size}")
+    });
+}
+
+unsafe fn parser_emit_log(self_: &mut TSParser) {
     if let Some(log_fn) = self_.lexer.logger.log {
         log_fn(
             self_.lexer.logger.payload,
@@ -804,16 +797,12 @@ unsafe fn parser_lex(
     version: StackVersion,
     parse_state: TSStateId,
 ) -> Subtree {
-    let parser = ptr::from_mut(self_);
     let lang = language_full(self_.language);
     let mut lex_mode = language_lex_mode_for_state(self_.language, parse_state);
     if lex_mode.lex_state == u16::MAX {
-        LOG!(
-            parser,
-            c"no_lookahead_after_non_terminal_extra"
-                .as_ptr()
-                .cast::<i8>()
-        );
+        parser_log(self_, |_, log| {
+            log.write_str("no_lookahead_after_non_terminal_extra")
+        });
         return NULL_SUBTREE;
     }
 
@@ -839,15 +828,15 @@ unsafe fn parser_lex(
         let column_data = self_.lexer.column_data;
 
         if lex_mode.external_lex_state != 0 {
-            LOG!(
-                parser,
-                c"lex_external state:%d, row:%u, column:%u"
-                    .as_ptr()
-                    .cast::<i8>(),
-                i32::from(lex_mode.external_lex_state),
-                current_position.extent.row,
-                current_position.extent.column
-            );
+            parser_log(self_, |_, log| {
+                write!(
+                    log,
+                    "lex_external state:{}, row:{}, column:{}",
+                    i32::from(lex_mode.external_lex_state),
+                    current_position.extent.row,
+                    current_position.extent.column
+                )
+            });
             lexer_start(&mut self_.lexer);
             parser_external_scanner_deserialize(self_, external_token);
             found_token = parser_external_scanner_scan(self_, lex_mode.external_lex_state);
@@ -876,19 +865,13 @@ unsafe fn parser_lex(
                         || !stack_has_advanced_since_error(ptr_ref(self_.stack), version)
                         || token_is_extra
                     {
-                        LOG!(
-                            parser,
-                            c"ignore_empty_external_token symbol:%s"
-                                .as_ptr()
-                                .cast::<i8>(),
-                            SYM_NAME!(
-                                parser,
-                                *lang
-                                    .external_scanner
-                                    .symbol_map
-                                    .add(self_.lexer.data.result_symbol as usize)
+                        parser_log(self_, |context, log| {
+                            write!(
+                                log,
+                                "ignore_empty_external_token symbol:{}",
+                                DisplayCStr(parser_symbol_name(context.language, symbol))
                             )
-                        );
+                        });
                         found_token = false;
                     }
                 }
@@ -904,15 +887,15 @@ unsafe fn parser_lex(
             self_.lexer.column_data = column_data;
         }
 
-        LOG!(
-            parser,
-            c"lex_internal state:%d, row:%u, column:%u"
-                .as_ptr()
-                .cast::<i8>(),
-            i32::from(lex_mode.lex_state),
-            current_position.extent.row,
-            current_position.extent.column
-        );
+        parser_log(self_, |_, log| {
+            write!(
+                log,
+                "lex_internal state:{}, row:{}, column:{}",
+                i32::from(lex_mode.lex_state),
+                current_position.extent.row,
+                current_position.extent.column
+            )
+        });
         lexer_start(&mut self_.lexer);
         found_token = parser_call_main_lex_fn(self_, lex_mode);
         lexer_finish(&mut self_.lexer, &mut lookahead_end_byte);
@@ -928,7 +911,7 @@ unsafe fn parser_lex(
         }
 
         if !skipped_error {
-            LOG!(parser, c"skip_unrecognized_character".as_ptr().cast::<i8>());
+            parser_log(self_, |_, log| log.write_str("skip_unrecognized_character"));
             skipped_error = true;
             error_start_position = self_.lexer.token_start_position;
             error_end_position = self_.lexer.token_start_position;
@@ -969,10 +952,10 @@ unsafe fn parser_lex(
         )
     };
 
-    LOG_LOOKAHEAD!(
-        parser,
-        SYM_NAME!(parser, subtree_symbol(result)),
-        subtree_total_size(result).bytes
+    parser_log_lookahead(
+        self_,
+        parser_symbol_name(self_.language, subtree_symbol(result)),
+        subtree_total_size(result).bytes,
     );
     result
 }
@@ -1084,7 +1067,6 @@ unsafe fn parser_lex_lookahead(
 // ---------------------------------------------------------------------------
 
 unsafe fn parser_select_tree(self_: &mut TSParser, left: Subtree, right: Subtree) -> bool {
-    let parser = ptr::from_mut(self_);
     if left.ptr.is_null() {
         return true;
     }
@@ -1095,56 +1077,52 @@ unsafe fn parser_select_tree(self_: &mut TSParser, left: Subtree, right: Subtree
     let left_error_cost = subtree_error_cost(left);
     let right_error_cost = subtree_error_cost(right);
     if right_error_cost < left_error_cost {
-        LOG!(
-            parser,
-            c"select_smaller_error symbol:%s, over_symbol:%s"
-                .as_ptr()
-                .cast::<i8>(),
-            SYM_NAME!(parser, subtree_symbol(right)),
-            SYM_NAME!(parser, subtree_symbol(left))
-        );
+        parser_log(self_, |context, log| {
+            write!(
+                log,
+                "select_smaller_error symbol:{}, over_symbol:{}",
+                DisplayCStr(parser_symbol_name(context.language, subtree_symbol(right))),
+                DisplayCStr(parser_symbol_name(context.language, subtree_symbol(left)))
+            )
+        });
         return true;
     }
 
     if left_error_cost < right_error_cost {
-        LOG!(
-            parser,
-            c"select_smaller_error symbol:%s, over_symbol:%s"
-                .as_ptr()
-                .cast::<i8>(),
-            SYM_NAME!(parser, subtree_symbol(left)),
-            SYM_NAME!(parser, subtree_symbol(right))
-        );
+        parser_log(self_, |context, log| {
+            write!(
+                log,
+                "select_smaller_error symbol:{}, over_symbol:{}",
+                DisplayCStr(parser_symbol_name(context.language, subtree_symbol(left))),
+                DisplayCStr(parser_symbol_name(context.language, subtree_symbol(right)))
+            )
+        });
         return false;
     }
 
     let left_dynamic_precedence = subtree_dynamic_precedence(left);
     let right_dynamic_precedence = subtree_dynamic_precedence(right);
     if right_dynamic_precedence > left_dynamic_precedence {
-        LOG!(
-            parser,
-            c"select_higher_precedence symbol:%s, prec:%d, over_symbol:%s, other_prec:%d"
-                .as_ptr()
-                .cast::<i8>(),
-            SYM_NAME!(parser, subtree_symbol(right)),
-            right_dynamic_precedence,
-            SYM_NAME!(parser, subtree_symbol(left)),
-            left_dynamic_precedence
-        );
+        parser_log(self_, |context, log| {
+            write!(
+                log,
+                "select_higher_precedence symbol:{}, prec:{right_dynamic_precedence}, over_symbol:{}, other_prec:{left_dynamic_precedence}",
+                DisplayCStr(parser_symbol_name(context.language, subtree_symbol(right))),
+                DisplayCStr(parser_symbol_name(context.language, subtree_symbol(left)))
+            )
+        });
         return true;
     }
 
     if left_dynamic_precedence > right_dynamic_precedence {
-        LOG!(
-            parser,
-            c"select_higher_precedence symbol:%s, prec:%d, over_symbol:%s, other_prec:%d"
-                .as_ptr()
-                .cast::<i8>(),
-            SYM_NAME!(parser, subtree_symbol(left)),
-            left_dynamic_precedence,
-            SYM_NAME!(parser, subtree_symbol(right)),
-            right_dynamic_precedence
-        );
+        parser_log(self_, |context, log| {
+            write!(
+                log,
+                "select_higher_precedence symbol:{}, prec:{left_dynamic_precedence}, over_symbol:{}, other_prec:{right_dynamic_precedence}",
+                DisplayCStr(parser_symbol_name(context.language, subtree_symbol(left))),
+                DisplayCStr(parser_symbol_name(context.language, subtree_symbol(right)))
+            )
+        });
         return false;
     }
 
@@ -1155,36 +1133,36 @@ unsafe fn parser_select_tree(self_: &mut TSParser, left: Subtree, right: Subtree
     let comparison = subtree_compare(left, right, &mut self_.tree_pool);
     match comparison {
         -1 => {
-            LOG!(
-                parser,
-                c"select_earlier symbol:%s, over_symbol:%s"
-                    .as_ptr()
-                    .cast::<i8>(),
-                SYM_NAME!(parser, subtree_symbol(left)),
-                SYM_NAME!(parser, subtree_symbol(right))
-            );
+            parser_log(self_, |context, log| {
+                write!(
+                    log,
+                    "select_earlier symbol:{}, over_symbol:{}",
+                    DisplayCStr(parser_symbol_name(context.language, subtree_symbol(left))),
+                    DisplayCStr(parser_symbol_name(context.language, subtree_symbol(right)))
+                )
+            });
             false
         }
         1 => {
-            LOG!(
-                parser,
-                c"select_earlier symbol:%s, over_symbol:%s"
-                    .as_ptr()
-                    .cast::<i8>(),
-                SYM_NAME!(parser, subtree_symbol(right)),
-                SYM_NAME!(parser, subtree_symbol(left))
-            );
+            parser_log(self_, |context, log| {
+                write!(
+                    log,
+                    "select_earlier symbol:{}, over_symbol:{}",
+                    DisplayCStr(parser_symbol_name(context.language, subtree_symbol(right))),
+                    DisplayCStr(parser_symbol_name(context.language, subtree_symbol(left)))
+                )
+            });
             true
         }
         _ => {
-            LOG!(
-                parser,
-                c"select_existing symbol:%s, over_symbol:%s"
-                    .as_ptr()
-                    .cast::<i8>(),
-                SYM_NAME!(parser, subtree_symbol(left)),
-                SYM_NAME!(parser, subtree_symbol(right))
-            );
+            parser_log(self_, |context, log| {
+                write!(
+                    log,
+                    "select_existing symbol:{}, over_symbol:{}",
+                    DisplayCStr(parser_symbol_name(context.language, subtree_symbol(left))),
+                    DisplayCStr(parser_symbol_name(context.language, subtree_symbol(right)))
+                )
+            });
             false
         }
     }
@@ -1404,7 +1382,6 @@ unsafe fn parser_reduce(
     is_fragile: bool,
     end_of_non_terminal_extra: bool,
 ) -> StackVersion {
-    let parser = ptr::from_mut(self_);
     let initial_version_count = stack_version_count(ptr_ref(self_.stack));
 
     stack_pop_count_into(
@@ -1428,12 +1405,9 @@ unsafe fn parser_reduce(
             parser_release_builder_span(self_, span);
             removed_version_count += 1;
             while i + 1 < pop_size {
-                LOG!(
-                    parser,
-                    c"aborting reduce with too many versions"
-                        .as_ptr()
-                        .cast::<i8>()
-                );
+                parser_log(self_, |_, log| {
+                    log.write_str("aborting reduce with too many versions")
+                });
                 let next_span = *array_get_ref(&self_.reduce_builder.slices, i + 1);
                 if next_span.version != span.version {
                     break;
@@ -1768,7 +1742,6 @@ unsafe fn parser_recover_to_state(
 }
 
 unsafe fn parser_recover(self_: &mut TSParser, version: StackVersion, mut lookahead: Subtree) {
-    let parser = ptr::from_mut(self_);
     let mut did_recover = false;
     let stack = ptr_mut(self_.stack);
     let previous_version_count = stack_version_count(stack);
@@ -1821,15 +1794,14 @@ unsafe fn parser_recover(self_: &mut TSParser, version: StackVersion, mut lookah
                 && parser_recover_to_state(self_, version, depth, entry.state)
             {
                 did_recover = true;
-                LOG!(
-                    parser,
-                    c"recover_to_previous state:%u, depth:%u"
-                        .as_ptr()
-                        .cast::<i8>(),
-                    u32::from(entry.state),
-                    depth
-                );
-                LOG_STACK!(parser);
+                parser_log(self_, |_, log| {
+                    write!(
+                        log,
+                        "recover_to_previous state:{}, depth:{depth}",
+                        u32::from(entry.state)
+                    )
+                });
+                parser_log_stack(self_);
                 break;
             }
         }
@@ -1839,13 +1811,9 @@ unsafe fn parser_recover(self_: &mut TSParser, version: StackVersion, mut lookah
     let mut i = previous_version_count;
     while i < stack_version_count(stack) {
         if !stack_is_active(stack, i) {
-            LOG!(
-                parser,
-                c"removed paused version:%u".as_ptr().cast::<i8>(),
-                i
-            );
+            parser_log(self_, |_, log| write!(log, "removed paused version:{i}"));
             stack_remove_version(stack, i);
-            LOG_STACK!(parser);
+            parser_log_stack(self_);
         } else {
             i += 1;
         }
@@ -1853,7 +1821,7 @@ unsafe fn parser_recover(self_: &mut TSParser, version: StackVersion, mut lookah
 
     // EOF: wrap everything and terminate
     if subtree_is_eof(lookahead) {
-        LOG!(parser, c"recover_eof".as_ptr().cast::<i8>());
+        parser_log(self_, |_, log| log.write_str("recover_eof"));
         let mut children: SubtreeArray = array_new();
         let parent = subtree_new_error_node(&mut children, false, self_.language);
         stack_push(stack, version, parent, 1);
@@ -1897,11 +1865,16 @@ unsafe fn parser_recover(self_: &mut TSParser, version: StackVersion, mut lookah
     }
 
     // Wrap the lookahead in an ERROR
-    LOG!(
-        parser,
-        c"skip_token symbol:%s".as_ptr().cast::<i8>(),
-        SYM_NAME!(parser, subtree_symbol(lookahead))
-    );
+    parser_log(self_, |context, log| {
+        write!(
+            log,
+            "skip_token symbol:{}",
+            DisplayCStr(parser_symbol_name(
+                context.language,
+                subtree_symbol(lookahead)
+            ))
+        )
+    });
     let mut children: SubtreeArray = array_new();
     array_reserve(&mut children, 1);
     array_push(&mut children, lookahead);
@@ -1947,7 +1920,6 @@ unsafe fn parser_recover(self_: &mut TSParser, version: StackVersion, mut lookah
 }
 
 unsafe fn parser_handle_error(self_: &mut TSParser, version: StackVersion, lookahead: Subtree) {
-    let parser = ptr::from_mut(self_);
     let previous_version_count = stack_version_count(ptr_ref(self_.stack));
 
     // Perform any reductions that can happen in this state, regardless of the lookahead. After
@@ -2008,16 +1980,17 @@ unsafe fn parser_handle_error(self_: &mut TSParser, version: StackVersion, looka
                         version_with_missing_tree,
                         subtree_leaf_symbol(lookahead),
                     ) {
-                        LOG!(
-                            parser,
-                            c"recover_with_missing symbol:%s, state:%u"
-                                .as_ptr()
-                                .cast::<i8>(),
-                            SYM_NAME!(parser, missing_symbol),
-                            u32::from(
-                                stack_state(ptr_ref(self_.stack), version_with_missing_tree,)
+                        parser_log(self_, |context, log| {
+                            write!(
+                                log,
+                                "recover_with_missing symbol:{}, state:{}",
+                                DisplayCStr(parser_symbol_name(context.language, missing_symbol)),
+                                u32::from(stack_state(
+                                    ptr_ref(context.stack),
+                                    version_with_missing_tree,
+                                ))
                             )
-                        );
+                        });
                         did_insert_missing_token = true;
                         break;
                     }
@@ -2048,7 +2021,7 @@ unsafe fn parser_handle_error(self_: &mut TSParser, version: StackVersion, looka
     // recognize it.
     parser_recover(self_, version, lookahead);
 
-    LOG_STACK!(parser);
+    parser_log_stack(self_);
 }
 
 // ---------------------------------------------------------------------------
@@ -2095,7 +2068,6 @@ unsafe fn parser_check_progress(
 
 unsafe fn parser_shift_for_action(
     self_: &mut TSParser,
-    parser: *mut TSParser,
     version: StackVersion,
     state: TSStateId,
     lookahead: &mut Subtree,
@@ -2103,14 +2075,12 @@ unsafe fn parser_shift_for_action(
 ) {
     let shift = action.shift;
     let next_state = if shift.extra {
-        LOG!(parser, c"shift_extra".as_ptr().cast::<i8>());
+        parser_log(self_, |_, log| log.write_str("shift_extra"));
         state
     } else {
-        LOG!(
-            parser,
-            c"shift state:%u".as_ptr().cast::<i8>(),
-            u32::from(shift.state)
-        );
+        parser_log(self_, |_, log| {
+            write!(log, "shift state:{}", u32::from(shift.state))
+        });
         shift.state
     };
 
@@ -2127,7 +2097,6 @@ unsafe fn parser_recover_for_action(
 
 unsafe fn parser_apply_parse_actions(
     self_: &mut TSParser,
-    parser: *mut TSParser,
     version: StackVersion,
     state: TSStateId,
     lookahead: &mut Subtree,
@@ -2144,7 +2113,7 @@ unsafe fn parser_apply_parse_actions(
                 if action.shift.repetition {
                     break;
                 }
-                parser_shift_for_action(self_, parser, version, state, lookahead, action);
+                parser_shift_for_action(self_, version, state, lookahead, action);
                 return ParseActionsResult::Done;
             }
 
@@ -2156,12 +2125,14 @@ unsafe fn parser_apply_parse_actions(
                     self_.deterministic_reduction_count =
                         self_.deterministic_reduction_count.saturating_add(1);
                 }
-                LOG!(
-                    parser,
-                    c"reduce sym:%s, child_count:%u".as_ptr().cast::<i8>(),
-                    SYM_NAME!(parser, reduce.symbol),
-                    u32::from(reduce.child_count)
-                );
+                parser_log(self_, |context, log| {
+                    write!(
+                        log,
+                        "reduce sym:{}, child_count:{}",
+                        DisplayCStr(parser_symbol_name(context.language, reduce.symbol)),
+                        u32::from(reduce.child_count)
+                    )
+                });
                 let reduction_version = if table_entry.action_count == 1
                     && parser_reduce_in_place_after_warmup(
                         self_,
@@ -2192,7 +2163,7 @@ unsafe fn parser_apply_parse_actions(
             }
 
             TSPARSE_ACTION_TYPE_ACCEPT => {
-                LOG!(parser, c"accept".as_ptr().cast::<i8>());
+                parser_log(self_, |_, log| log.write_str("accept"));
                 parser_accept(self_, version, *lookahead);
                 return ParseActionsResult::Done;
             }
@@ -2214,7 +2185,6 @@ unsafe fn parser_apply_parse_actions(
 
 unsafe fn parser_continue_after_reduction(
     self_: &mut TSParser,
-    parser: *mut TSParser,
     version: StackVersion,
     last_reduction_version: StackVersion,
     state: &mut TSStateId,
@@ -2222,7 +2192,7 @@ unsafe fn parser_continue_after_reduction(
     table_entry: &mut TableEntry,
 ) -> bool {
     stack_renumber_version(ptr_mut(self_.stack), last_reduction_version, version);
-    LOG_STACK!(parser);
+    parser_log_stack(self_);
     *state = stack_state(ptr_ref(self_.stack), version);
 
     // At the end of a non-terminal extra rule, the lexer will return a null
@@ -2255,7 +2225,6 @@ unsafe fn parser_halt_after_merged_reduction(
 
 unsafe fn parser_try_keyword_fallback(
     self_: &mut TSParser,
-    parser: *mut TSParser,
     state: TSStateId,
     lookahead: &mut Subtree,
     table_entry: &mut TableEntry,
@@ -2273,14 +2242,14 @@ unsafe fn parser_try_keyword_fallback(
         return false;
     }
 
-    LOG!(
-        parser,
-        c"switch from_keyword:%s, to_word_token:%s"
-            .as_ptr()
-            .cast::<i8>(),
-        TREE_NAME!(parser, *lookahead),
-        SYM_NAME!(parser, keyword_capture_token)
-    );
+    parser_log(self_, |context, log| {
+        write!(
+            log,
+            "switch from_keyword:{}, to_word_token:{}",
+            DisplayCStr(parser_tree_name(context.language, *lookahead)),
+            DisplayCStr(parser_symbol_name(context.language, keyword_capture_token))
+        )
+    });
 
     let mut mutable_lookahead = subtree_make_mut(&mut self_.tree_pool, *lookahead);
     subtree_set_symbol(
@@ -2292,17 +2261,14 @@ unsafe fn parser_try_keyword_fallback(
     true
 }
 
-unsafe fn parser_pause_with_error(
-    self_: &mut TSParser,
-    parser: *mut TSParser,
-    version: StackVersion,
-    lookahead: Subtree,
-) {
-    LOG!(
-        parser,
-        c"detect_error lookahead:%s".as_ptr().cast::<i8>(),
-        TREE_NAME!(parser, lookahead)
-    );
+unsafe fn parser_pause_with_error(self_: &mut TSParser, version: StackVersion, lookahead: Subtree) {
+    parser_log(self_, |context, log| {
+        write!(
+            log,
+            "detect_error lookahead:{}",
+            DisplayCStr(parser_tree_name(context.language, lookahead))
+        )
+    });
     stack_pause(ptr_mut(self_.stack), version, lookahead);
 }
 
@@ -2314,7 +2280,6 @@ unsafe fn parser_pause_with_error(
 /// same lookahead and continue in the new goto state; shifts consume the
 /// lookahead and return to the outer parse loop.
 unsafe fn parser_advance(self_: &mut TSParser, version: StackVersion) -> bool {
-    let parser = ptr::from_mut(self_);
     let stack = ptr_ref(self_.stack);
     let mut state = stack_state(stack, version);
     let position = stack_position(stack, version).bytes;
@@ -2346,7 +2311,7 @@ unsafe fn parser_advance(self_: &mut TSParser, version: StackVersion) -> bool {
         let ParseActionsResult::Reductions {
             did_reduce,
             last_reduction_version,
-        } = parser_apply_parse_actions(self_, parser, version, state, &mut lookahead, &table_entry)
+        } = parser_apply_parse_actions(self_, version, state, &mut lookahead, &table_entry)
         else {
             return true;
         };
@@ -2357,7 +2322,6 @@ unsafe fn parser_advance(self_: &mut TSParser, version: StackVersion) -> bool {
         if last_reduction_version != STACK_VERSION_NONE {
             needs_lex = parser_continue_after_reduction(
                 self_,
-                parser,
                 version,
                 last_reduction_version,
                 &mut state,
@@ -2377,7 +2341,7 @@ unsafe fn parser_advance(self_: &mut TSParser, version: StackVersion) -> bool {
         // If the current lookahead token is a keyword that is not valid, but the
         // default word token *is* valid, then treat the lookahead token as the word
         // token instead.
-        if parser_try_keyword_fallback(self_, parser, state, &mut lookahead, &mut table_entry) {
+        if parser_try_keyword_fallback(self_, state, &mut lookahead, &mut table_entry) {
             continue;
         }
 
@@ -2386,7 +2350,7 @@ unsafe fn parser_advance(self_: &mut TSParser, version: StackVersion) -> bool {
         // versions that exist. If some other version advances successfully, then
         // this version can simply be removed. But if all versions end up paused,
         // then error recovery is needed.
-        parser_pause_with_error(self_, parser, version, lookahead);
+        parser_pause_with_error(self_, version, lookahead);
         return true;
     }
 }
@@ -2470,7 +2434,7 @@ unsafe fn parser_condense_stack(self_: &mut TSParser) -> u32 {
         while i < n {
             if stack_is_paused(ptr_ref(self_.stack), i) {
                 if !has_unpaused_version && self_.accept_count < MAX_VERSION_COUNT {
-                    LOG!(self_, c"resume version:%u".as_ptr().cast::<i8>(), i);
+                    parser_log(self_, |_, log| write!(log, "resume version:{i}"));
                     min_error_cost = stack_error_cost(ptr_ref(self_.stack), i);
                     let lookahead = stack_resume(ptr_mut(self_.stack), i);
                     parser_handle_error(self_, i, lookahead);
@@ -2489,8 +2453,8 @@ unsafe fn parser_condense_stack(self_: &mut TSParser) -> u32 {
     }
 
     if made_changes {
-        LOG!(self_, c"condense".as_ptr().cast::<i8>());
-        LOG_STACK!(self_);
+        parser_log(self_, |_, log| log.write_str("condense"));
+        parser_log_stack(self_);
     }
 
     min_error_cost
@@ -2794,7 +2758,7 @@ pub unsafe extern "C-unwind" fn ts_parser_parse(
     parser.operation_count = 0;
 
     if parser_has_outstanding_parse(parser) {
-        LOG!(self_, c"resume_parsing".as_ptr().cast::<i8>());
+        parser_log(parser, |_, log| log.write_str("resume_parsing"));
         if parser.canceled_balancing {
             // goto balance
             debug_assert!(!parser.finished_tree.ptr.is_null());
@@ -2803,8 +2767,8 @@ pub unsafe extern "C-unwind" fn ts_parser_parse(
                 return ptr::null_mut();
             }
             parser.canceled_balancing = false;
-            LOG!(self_, c"done".as_ptr().cast::<i8>());
-            LOG_TREE!(self_, parser.finished_tree);
+            parser_log(parser, |_, log| log.write_str("done"));
+            parser_log_tree(parser, parser.finished_tree);
 
             let result = parser_take_finished_tree(parser);
 
@@ -2815,7 +2779,7 @@ pub unsafe extern "C-unwind" fn ts_parser_parse(
     } else {
         parser_external_scanner_create(parser);
         parser.tree_arena = tree_arena_new();
-        LOG!(self_, c"new_parse".as_ptr().cast::<i8>());
+        parser_log(parser, |_, log| log.write_str("new_parse"));
     }
 
     let mut last_position: u32 = 0;
@@ -2829,23 +2793,24 @@ pub unsafe extern "C-unwind" fn ts_parser_parse(
             }
 
             while stack_is_active(ptr_ref(parser.stack), version) {
-                LOG!(
-                    self_,
-                    c"process version:%u, version_count:%u, state:%d, row:%u, col:%u"
-                        .as_ptr()
-                        .cast::<i8>(),
-                    version,
-                    stack_version_count(ptr_ref(parser.stack)),
-                    i32::from(stack_state(ptr_ref(parser.stack), version)),
-                    stack_position(ptr_ref(parser.stack), version).extent.row,
-                    stack_position(ptr_ref(parser.stack), version).extent.column
-                );
+                parser_log(parser, |context, log| {
+                    write!(
+                        log,
+                        "process version:{version}, version_count:{}, state:{}, row:{}, col:{}",
+                        stack_version_count(ptr_ref(context.stack)),
+                        i32::from(stack_state(ptr_ref(context.stack), version)),
+                        stack_position(ptr_ref(context.stack), version).extent.row,
+                        stack_position(ptr_ref(context.stack), version)
+                            .extent
+                            .column
+                    )
+                });
 
                 if !parser_advance(parser, version) {
                     return ptr::null_mut();
                 }
 
-                LOG_STACK!(self_);
+                parser_log_stack(parser);
 
                 let position = stack_position(ptr_ref(parser.stack), version).bytes;
                 if position > last_position || (version > 0 && position == last_position) {
@@ -2883,8 +2848,8 @@ pub unsafe extern "C-unwind" fn ts_parser_parse(
         return ptr::null_mut();
     }
     parser.canceled_balancing = false;
-    LOG!(self_, c"done".as_ptr().cast::<i8>());
-    LOG_TREE!(self_, parser.finished_tree);
+    parser_log(parser, |_, log| log.write_str("done"));
+    parser_log_tree(parser, parser.finished_tree);
 
     let result = parser_take_finished_tree(parser);
 
