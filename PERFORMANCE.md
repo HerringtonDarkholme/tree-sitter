@@ -163,6 +163,42 @@ broader baseline replaces it.
 
 ## Checkpoints
 
+### 2026-07-13 EDT - remove one-pass dead subtree bookkeeping
+
+- Repo base: `2f2077c6`.
+- Removed the heap-subtree fragility flags and their propagation. No Rust-core
+  code used the flags after old-tree reuse was removed.
+- Removed the cached first-leaf symbol/state pair from internal nodes. The
+  parser's token cache is populated only by `parser_lex`, so token reuse now
+  reads the cached leaf's own symbol and parse state directly.
+- Preserved internal-node parse-state invalidation for ambiguous reductions and
+  error-containing parents because `ts_node_parse_state` and changed-range
+  comparison still consume it.
+- `SubtreeChildrenData` shrank from 24 to 20 bytes. `SubtreeHeapData` remains 80
+  bytes because the 32-byte external-scanner-state union arm still determines
+  its size, so this is primarily a dead-write cleanup rather than a layout win.
+- Command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-rust-core-dead-bookkeeping XDG_CACHE_HOME=/private/tmp/tree-sitter-cache cargo +1.97.0 xtask perf-gate --language python --language go --language cpp --language java --repetitions 10 --error-limit 8 --kind normal --report-only --offline
+```
+
+Two modified-tree runs:
+
+| Run | Python | Go | C++ | Java | Overall Rust |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 1 | 13475.6 | 17851.8 | 7531.9 | 12029.9 | 14954.8 |
+| 2 | 14134.9 | 17937.6 | 7240.2 | 10678.6 | 15277.3 |
+
+- A detached baseline rerun measured 14936.3 Rust bytes/ms overall. Earlier
+  same-window baseline and trial runs measured 14774.7 and 14625.6 bytes/ms,
+  respectively, but individual C++ and Java results varied too widely for
+  attribution. The aggregate result is neutral to slightly positive; no speedup
+  is claimed for this cleanup.
+- A broader initial trial also removed live parse-state invalidation. That
+  variant was rejected: parse-state values remain observable even though the
+  old fragility bits do not.
+
 ### 2026-07-13 EDT - post one-pass weak-language profile refresh
 
 - Repo head: `f1d51f12` plus the perf-gate historical-header fix.

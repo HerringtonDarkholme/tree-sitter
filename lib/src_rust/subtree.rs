@@ -250,8 +250,8 @@ pub struct SubtreeHeapData {
     /// The C runtime stores these as bitfields immediately before the anonymous
     /// union. Rust has no C-compatible bitfields, so this field mirrors their
     /// little-endian storage as one `u16`.
-    /// bit 0: `visible`, bit 1: `named`, bit 2: `extra`, bit 3: `fragile_left`,
-    /// bit 4: `fragile_right`, bit 5: `has_changes`, bit 6: `has_external_tokens`,
+    /// bit 0: `visible`, bit 1: `named`, bit 2: `extra`, bits 3-4: unused,
+    /// bit 5: `has_changes`, bit 6: `has_external_tokens`,
     /// bit 7: `has_external_scanner_state_change`, bit 8: `depends_on_column`,
     /// bit 9: `is_missing`, bit 10: `is_keyword`, bit 11: `arena_owned`
     pub flags: u16,
@@ -265,8 +265,6 @@ pub struct SubtreeHeapData {
 const HEAP_VISIBLE: u16 = 1 << 0;
 const HEAP_NAMED: u16 = 1 << 1;
 const HEAP_EXTRA: u16 = 1 << 2;
-const HEAP_FRAGILE_LEFT: u16 = 1 << 3;
-const HEAP_FRAGILE_RIGHT: u16 = 1 << 4;
 const HEAP_HAS_CHANGES: u16 = 1 << 5;
 const HEAP_HAS_EXTERNAL_TOKENS: u16 = 1 << 6;
 const HEAP_HAS_EXTERNAL_SCANNER_STATE_CHANGE: u16 = 1 << 7;
@@ -287,14 +285,6 @@ impl SubtreeHeapData {
     #[inline(always)]
     pub const fn extra(&self) -> bool {
         self.flags & HEAP_EXTRA != 0
-    }
-    #[inline(always)]
-    pub const fn fragile_left(&self) -> bool {
-        self.flags & HEAP_FRAGILE_LEFT != 0
-    }
-    #[inline(always)]
-    pub const fn fragile_right(&self) -> bool {
-        self.flags & HEAP_FRAGILE_RIGHT != 0
     }
     #[inline(always)]
     pub const fn has_changes(&self) -> bool {
@@ -347,22 +337,6 @@ impl SubtreeHeapData {
             self.flags |= HEAP_EXTRA;
         } else {
             self.flags &= !HEAP_EXTRA;
-        }
-    }
-    #[inline(always)]
-    pub fn set_fragile_left(&mut self, v: bool) {
-        if v {
-            self.flags |= HEAP_FRAGILE_LEFT;
-        } else {
-            self.flags &= !HEAP_FRAGILE_LEFT;
-        }
-    }
-    #[inline(always)]
-    pub fn set_fragile_right(&mut self, v: bool) {
-        if v {
-            self.flags |= HEAP_FRAGILE_RIGHT;
-        } else {
-            self.flags &= !HEAP_FRAGILE_RIGHT;
         }
     }
     #[inline(always)]
@@ -421,8 +395,6 @@ impl SubtreeHeapData {
         visible: bool,
         named: bool,
         extra: bool,
-        fragile_left: bool,
-        fragile_right: bool,
         has_changes: bool,
         has_external_tokens: bool,
         has_external_scanner_state_change: bool,
@@ -433,8 +405,6 @@ impl SubtreeHeapData {
         u16::from(visible)
             | u16::from(named) << 1
             | u16::from(extra) << 2
-            | u16::from(fragile_left) << 3
-            | u16::from(fragile_right) << 4
             | u16::from(has_changes) << 5
             | u16::from(has_external_tokens) << 6
             | u16::from(has_external_scanner_state_change) << 7
@@ -469,17 +439,6 @@ pub struct SubtreeChildrenData {
     pub repeat_depth: u16,
     /// Production id used for fields and aliases.
     pub production_id: u16,
-    /// First leaf summary for reuse and node state APIs.
-    pub first_leaf: FirstLeaf,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct FirstLeaf {
-    /// Symbol of the first leaf under this subtree.
-    pub symbol: TSSymbol,
-    /// Parse state of the first leaf under this subtree.
-    pub parse_state: TSStateId,
 }
 
 // ---------------------------------------------------------------------------
@@ -544,9 +503,7 @@ const _: () = assert!(core::mem::offset_of!(SubtreeChildrenData, visible_descend
 const _: () = assert!(core::mem::offset_of!(SubtreeChildrenData, dynamic_precedence) == 12);
 const _: () = assert!(core::mem::offset_of!(SubtreeChildrenData, repeat_depth) == 16);
 const _: () = assert!(core::mem::offset_of!(SubtreeChildrenData, production_id) == 18);
-const _: () = assert!(core::mem::offset_of!(SubtreeChildrenData, first_leaf) == 20);
-const _: () = assert!(core::mem::size_of::<SubtreeChildrenData>() == 24);
-const _: () = assert!(core::mem::size_of::<FirstLeaf>() == 4);
+const _: () = assert!(core::mem::size_of::<SubtreeChildrenData>() == 20);
 
 pub type SubtreeArray = Array<Subtree>;
 pub type MutableSubtreeArray = Array<MutableSubtree>;
@@ -1051,31 +1008,7 @@ pub unsafe fn subtree_set_extra(self_: &mut MutableSubtree, is_extra: bool) {
     }
 }
 
-// --- #25: leaf_symbol, leaf_parse_state ---
-
-#[inline]
-pub unsafe fn subtree_leaf_symbol(self_: Subtree) -> TSSymbol {
-    if self_.data.is_inline() {
-        return TSSymbol::from(self_.data.symbol);
-    }
-    if (*self_.ptr).child_count == 0 {
-        return (*self_.ptr).symbol;
-    }
-    (*self_.ptr).data.children.first_leaf.symbol
-}
-
-#[inline]
-pub const unsafe fn subtree_leaf_parse_state(self_: Subtree) -> TSStateId {
-    if self_.data.is_inline() {
-        return self_.data.parse_state;
-    }
-    if (*self_.ptr).child_count == 0 {
-        return (*self_.ptr).parse_state;
-    }
-    (*self_.ptr).data.children.first_leaf.parse_state
-}
-
-// --- #26: padding, size, total_size, total_bytes ---
+// --- #25: padding, size, total_size, total_bytes ---
 
 #[inline]
 pub unsafe fn subtree_padding(self_: Subtree) -> Length {
@@ -1196,26 +1129,6 @@ pub const unsafe fn subtree_production_id(self_: Subtree) -> u16 {
         (*self_.ptr).data.children.production_id
     } else {
         0
-    }
-}
-
-// --- #31: fragile/external/depends_on_column accessors ---
-
-#[inline]
-pub const unsafe fn subtree_fragile_left(self_: Subtree) -> bool {
-    if self_.data.is_inline() {
-        false
-    } else {
-        (*self_.ptr).fragile_left()
-    }
-}
-
-#[inline]
-pub const unsafe fn subtree_fragile_right(self_: Subtree) -> bool {
-    if self_.data.is_inline() {
-        false
-    } else {
-        (*self_.ptr).fragile_right()
     }
 }
 
@@ -1370,8 +1283,6 @@ pub unsafe fn subtree_new_leaf(
                 metadata.named,
                 extra,
                 false,
-                false,
-                false,
                 has_external_tokens,
                 false,
                 depends_on_column,
@@ -1386,10 +1297,6 @@ pub unsafe fn subtree_new_leaf(
                     dynamic_precedence: 0,
                     repeat_depth: 0,
                     production_id: 0,
-                    first_leaf: FirstLeaf {
-                        symbol: 0,
-                        parse_state: 0,
-                    },
                 },
             },
         };
@@ -1401,8 +1308,6 @@ pub unsafe fn subtree_new_leaf(
 
 /// Create an error leaf for skipped input.
 ///
-/// Error leaves are marked fragile on both sides so tree comparison does not
-/// over-trust their boundaries.
 pub unsafe fn subtree_new_error(
     pool: &mut SubtreePool,
     lookahead_char: i32,
@@ -1425,8 +1330,6 @@ pub unsafe fn subtree_new_error(
         language,
     );
     let data = result.ptr.cast_mut();
-    (*data).set_fragile_left(true);
-    (*data).set_fragile_right(true);
     (*data).data.lookahead_char = lookahead_char;
     result
 }
@@ -1471,7 +1374,6 @@ unsafe fn subtree_init_node_data(
     extra_flags: u16,
 ) -> MutableSubtree {
     let metadata = ts_language_symbol_metadata(language, symbol);
-    let fragile = symbol == TS_BUILTIN_SYM_ERROR || symbol == TS_BUILTIN_SYM_ERROR_REPEAT;
     *data = SubtreeHeapData {
         ref_count: 1,
         padding: length_zero(),
@@ -1485,8 +1387,6 @@ unsafe fn subtree_init_node_data(
             metadata.visible,
             metadata.named,
             false,
-            fragile,
-            fragile,
             false,
             false,
             false,
@@ -1502,10 +1402,6 @@ unsafe fn subtree_init_node_data(
                 dynamic_precedence: 0,
                 repeat_depth: 0,
                 production_id: production_id as u16,
-                first_leaf: FirstLeaf {
-                    symbol: 0,
-                    parse_state: 0,
-                },
             },
         },
     };
@@ -1865,8 +1761,6 @@ pub unsafe fn subtree_summarize_children(self_: MutableSubtree, language: *const
         }
 
         if subtree_is_error(child) {
-            data.set_fragile_left(true);
-            data.set_fragile_right(true);
             data.parse_state = TS_TREE_STATE_NONE;
         }
 
@@ -1886,16 +1780,6 @@ pub unsafe fn subtree_summarize_children(self_: MutableSubtree, language: *const
     if data.child_count > 0 {
         let first_child = *children.get_unchecked(0);
         let last_child = *children.get_unchecked(data.child_count as usize - 1);
-
-        data.data.children.first_leaf.symbol = subtree_leaf_symbol(first_child);
-        data.data.children.first_leaf.parse_state = subtree_leaf_parse_state(first_child);
-
-        if subtree_fragile_left(first_child) {
-            data.set_fragile_left(true);
-        }
-        if subtree_fragile_right(last_child) {
-            data.set_fragile_right(true);
-        }
 
         if data.child_count >= 2
             && !data.visible()
@@ -2047,8 +1931,6 @@ pub unsafe fn subtree_edit(
                         result.data.visible(),
                         result.data.named(),
                         result.data.extra(),
-                        false,
-                        false,
                         false,
                         false,
                         false,

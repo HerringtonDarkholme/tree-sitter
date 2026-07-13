@@ -94,8 +94,6 @@ use super::subtree::{
     subtree_is_error,
     subtree_is_keyword,
     subtree_last_external_token,
-    subtree_leaf_parse_state,
-    subtree_leaf_symbol,
     subtree_lookahead_bytes,
     subtree_make_mut,
     subtree_new_error,
@@ -627,13 +625,14 @@ unsafe fn parser_external_scanner_scan(
 // Internal helpers — token reuse & lexing
 // ---------------------------------------------------------------------------
 
-unsafe fn parser_can_reuse_first_leaf(
+unsafe fn parser_can_reuse_token(
     self_: &TSParser,
     state: TSStateId,
-    tree: Subtree,
+    token: Subtree,
     table_entry: &TableEntry,
 ) -> bool {
-    let leaf_symbol = subtree_leaf_symbol(tree);
+    debug_assert_eq!(subtree_child_count(token), 0);
+    let token_symbol = subtree_symbol(token);
     let current_lex_mode = language_lex_mode_for_state(self_.language, state);
 
     // At the end of a non-terminal extra node, the lexer normally returns
@@ -645,15 +644,15 @@ unsafe fn parser_can_reuse_first_leaf(
 
     // If the token was created in a state with the same set of lookaheads, it is reusable.
     if table_entry.action_count > 0 {
-        let leaf_state = subtree_leaf_parse_state(tree);
-        let leaf_lex_mode = language_lex_mode_for_state(self_.language, leaf_state);
-        if leaf_lex_mode.lex_state == current_lex_mode.lex_state
-            && leaf_lex_mode.external_lex_state == current_lex_mode.external_lex_state
-            && leaf_lex_mode.reserved_word_set_id == current_lex_mode.reserved_word_set_id
+        let token_state = subtree_parse_state(token);
+        let token_lex_mode = language_lex_mode_for_state(self_.language, token_state);
+        if token_lex_mode.lex_state == current_lex_mode.lex_state
+            && token_lex_mode.external_lex_state == current_lex_mode.external_lex_state
+            && token_lex_mode.reserved_word_set_id == current_lex_mode.reserved_word_set_id
         {
             let lang = language_full(self_.language);
-            if leaf_symbol != lang.keyword_capture_token
-                || (!subtree_is_keyword(tree) && subtree_parse_state(tree) == state)
+            if token_symbol != lang.keyword_capture_token
+                || (!subtree_is_keyword(token) && subtree_parse_state(token) == state)
             {
                 return true;
             }
@@ -661,7 +660,7 @@ unsafe fn parser_can_reuse_first_leaf(
     }
 
     // Empty tokens are not reusable in states with different lookaheads.
-    if subtree_size(tree).bytes == 0 && leaf_symbol != TS_BUILTIN_SYM_END {
+    if subtree_size(token).bytes == 0 && token_symbol != TS_BUILTIN_SYM_END {
         return false;
     }
 
@@ -978,7 +977,7 @@ unsafe fn parser_get_cached_token(
             subtree_symbol(cache.token),
             &mut table_entry,
         );
-        if parser_can_reuse_first_leaf(self_, state, cache.token, &table_entry) {
+        if parser_can_reuse_token(self_, state, cache.token, &table_entry) {
             subtree_retain(cache.token);
             return Some((cache.token, table_entry));
         }
@@ -1379,7 +1378,7 @@ unsafe fn parser_reduce(
     count: u32,
     dynamic_precedence: i32,
     production_id: u16,
-    is_fragile: bool,
+    invalidate_parse_state: bool,
     end_of_non_terminal_extra: bool,
 ) -> StackVersion {
     let initial_version_count = stack_version_count(ptr_ref(self_.stack));
@@ -1469,13 +1468,12 @@ unsafe fn parser_reduce(
         if end_of_non_terminal_extra && next_state == state {
             (*parent.ptr).set_extra(true);
         }
-        if is_fragile || pop_size > 1 || initial_version_count > 1 {
-            (*parent.ptr).set_fragile_left(true);
-            (*parent.ptr).set_fragile_right(true);
-            (*parent.ptr).parse_state = TS_TREE_STATE_NONE;
-        } else {
-            (*parent.ptr).parse_state = state;
-        }
+        (*parent.ptr).parse_state =
+            if invalidate_parse_state || pop_size > 1 || initial_version_count > 1 {
+                TS_TREE_STATE_NONE
+            } else {
+                state
+            };
         (*parent.ptr).data.children.dynamic_precedence += dynamic_precedence;
 
         // Push the parent node and trailing extras
@@ -1949,7 +1947,7 @@ unsafe fn parser_handle_error(self_: &mut TSParser, version: StackVersion, looka
                 if language_has_reduce_action(
                     self_.language,
                     state_after_missing_symbol,
-                    subtree_leaf_symbol(lookahead),
+                    subtree_symbol(lookahead),
                 ) {
                     // In case the parser is currently outside of any included range, the lexer will
                     // snap to the beginning of the next included range. The missing token's padding
@@ -1978,7 +1976,7 @@ unsafe fn parser_handle_error(self_: &mut TSParser, version: StackVersion, looka
                     if parser_do_all_potential_reductions(
                         self_,
                         version_with_missing_tree,
-                        subtree_leaf_symbol(lookahead),
+                        subtree_symbol(lookahead),
                     ) {
                         parser_log(self_, |context, log| {
                             write!(
@@ -2119,7 +2117,7 @@ unsafe fn parser_apply_parse_actions(
 
             TSPARSE_ACTION_TYPE_REDUCE => {
                 let reduce = action.reduce;
-                let is_fragile = table_entry.action_count > 1;
+                let invalidate_parse_state = table_entry.action_count > 1;
                 let end_of_non_terminal_extra = lookahead.ptr.is_null();
                 if table_entry.action_count == 1 && stack_version_count(ptr_ref(self_.stack)) == 1 {
                     self_.deterministic_reduction_count =
@@ -2152,7 +2150,7 @@ unsafe fn parser_apply_parse_actions(
                         u32::from(reduce.child_count),
                         i32::from(reduce.dynamic_precedence),
                         reduce.production_id,
-                        is_fragile,
+                        invalidate_parse_state,
                         end_of_non_terminal_extra,
                     )
                 };
@@ -2205,7 +2203,7 @@ unsafe fn parser_continue_after_reduction(
         language_table_entry(
             self_.language,
             *state,
-            subtree_leaf_symbol(lookahead),
+            subtree_symbol(lookahead),
             table_entry,
         );
         false
