@@ -55,7 +55,7 @@ pub struct TSTree {
     pub root: Subtree,
     /// Language used to parse this tree.
     pub language: *const TSLanguage,
-    /// Copied included ranges for incremental diffing and public APIs.
+    /// Copied included ranges for tree comparison and public APIs.
     pub included_ranges: *mut TSRange,
     /// Number of entries in `included_ranges`.
     pub included_range_count: u32,
@@ -161,8 +161,7 @@ const fn tree_cursor_empty() -> TreeCursor {
 /// Apply an edit to the tree's ranges and root subtree.
 ///
 /// The edit rewrites byte/point positions in-place where possible and marks
-/// affected subtrees as changed so an incremental parse can decide what to
-/// reuse.
+/// affected subtrees as changed for later tree comparison.
 unsafe fn tree_edit_ref(tree: &mut TSTree, edit: &TSInputEdit) {
     let included_ranges = if tree.included_range_count == 0 {
         &mut []

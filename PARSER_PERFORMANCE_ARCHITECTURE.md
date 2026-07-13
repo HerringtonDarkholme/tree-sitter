@@ -5,9 +5,8 @@ benchmark and trial history lives in `PERFORMANCE.md`.
 
 ## Goal
 
-Improve raw normal parsing throughput across TypeScript, JavaScript, Python,
-Go, Rust, C++, and Java without changing benchmark semantics or public runtime
-behavior.
+Improve raw one-pass parsing throughput across TypeScript, JavaScript, Python,
+Go, Rust, C++, and Java while preserving public API and parse-tree behavior.
 
 ## Current Evidence
 
@@ -53,9 +52,9 @@ the existing `Subtree` pointer shape:
 freeing the node block itself, because page memory is released with the
 `TreeArena`.
 
-The arena path is disabled when parsing with an old tree, because reused nodes
-may point into the old tree's arena and a returned tree currently owns only one
-arena pointer.
+The parser always builds a fresh arena-backed tree. The public `old_tree`
+parameter remains for ABI compatibility but is ignored; incremental subtree
+reuse and its pending-stack representation have been removed.
 
 ## Remaining Bottleneck
 
@@ -75,8 +74,8 @@ Any next performance attempt should target one of these boundaries:
 ## Rules For Future Trials
 
 - Start with counters or flamegraphs that identify a hot phase.
-- Keep correctness boundaries explicit: reduce, merge/recovery, accept, old-tree
-  reuse, external scanner state, and tree publication are separate.
+- Keep correctness boundaries explicit: reduce, merge/recovery, accept,
+  external scanner state, and tree publication are separate.
 - Do not add dormant storage foundations without a benchmarked activation plan.
 - Remove failed trial scaffolding instead of keeping it under `dead_code`.
 - Validate with `cargo test --all`.

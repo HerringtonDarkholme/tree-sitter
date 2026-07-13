@@ -850,9 +850,7 @@ impl Parser {
     ///
     /// # Arguments:
     /// * `text` The UTF8-encoded text to parse.
-    /// * `old_tree` A previous syntax tree parsed from the same document. If the text of the
-    ///   document has changed since `old_tree` was created, then you must edit `old_tree` to match
-    ///   the new text using [`Tree::edit`].
+    /// * `old_tree` Retained for API compatibility but ignored. Every call performs a fresh parse.
     ///
     /// Returns a [`Tree`] if parsing succeeded, or `None` if:
     ///  * The parser has not yet had a language assigned with [`Parser::set_language`]
@@ -874,9 +872,7 @@ impl Parser {
     ///   UTF8-encoded text starting at that byte offset and position. The slices can be of any
     ///   length. If the given position is at the end of the text, the callback should return an
     ///   empty slice.
-    /// * `old_tree` A previous syntax tree parsed from the same document. If the text of the
-    ///   document has changed since `old_tree` was created, then you must edit `old_tree` to match
-    ///   the new text using [`Tree::edit`].
+    /// * `old_tree` Retained for API compatibility but ignored. Every call performs a fresh parse.
     /// * `options` Options for parsing the text. This can be used to set a progress callback.
     pub fn parse_with_options<T: AsRef<[u8]>, F: FnMut(usize, Point) -> T>(
         &mut self,
@@ -964,9 +960,7 @@ impl Parser {
     ///
     /// # Arguments:
     /// * `text` The UTF16-encoded text to parse.
-    /// * `old_tree` A previous syntax tree parsed from the same document. If the text of the
-    ///   document has changed since `old_tree` was created, then you must edit `old_tree` to match
-    ///   the new text using [`Tree::edit`].
+    /// * `old_tree` Retained for API compatibility but ignored. Every call performs a fresh parse.
     pub fn parse_utf16_le(
         &mut self,
         input: impl AsRef<[u16]>,
@@ -988,9 +982,7 @@ impl Parser {
     ///   UTF16-encoded text starting at that byte offset and position. The slices can be of any
     ///   length. If the given position is at the end of the text, the callback should return an
     ///   empty slice.
-    /// * `old_tree` A previous syntax tree parsed from the same document. If the text of the
-    ///   document has changed since `old_tree` was created, then you must edit `old_tree` to match
-    ///   the new text using [`Tree::edit`].
+    /// * `old_tree` Retained for API compatibility but ignored. Every call performs a fresh parse.
     /// * `options` Options for parsing the text. This can be used to set a progress callback.
     pub fn parse_utf16_le_with_options<T: AsRef<[u16]>, F: FnMut(usize, Point) -> T>(
         &mut self,
@@ -1083,9 +1075,7 @@ impl Parser {
     ///
     /// # Arguments:
     /// * `text` The UTF16-encoded text to parse.
-    /// * `old_tree` A previous syntax tree parsed from the same document. If the text of the
-    ///   document has changed since `old_tree` was created, then you must edit `old_tree` to match
-    ///   the new text using [`Tree::edit`].
+    /// * `old_tree` Retained for API compatibility but ignored. Every call performs a fresh parse.
     pub fn parse_utf16_be(
         &mut self,
         input: impl AsRef<[u16]>,
@@ -1107,9 +1097,7 @@ impl Parser {
     ///   UTF16-encoded text starting at that byte offset and position. The slices can be of any
     ///   length. If the given position is at the end of the text, the callback should return an
     ///   empty slice.
-    /// * `old_tree` A previous syntax tree parsed from the same document. If the text of the
-    ///   document has changed since `old_tree` was created, then you must edit `old_tree` to match
-    ///   the new text using [`Tree::edit`].
+    /// * `old_tree` Retained for API compatibility but ignored. Every call performs a fresh parse.
     /// * `options` Options for parsing the text. This can be used to set a progress callback.
     pub fn parse_utf16_be_with_options<T: AsRef<[u16]>, F: FnMut(usize, Point) -> T>(
         &mut self,
@@ -1206,9 +1194,7 @@ impl Parser {
     /// * `callback` A function that takes a byte offset and position and returns a slice of text
     ///   starting at that byte offset and position. The slices can be of any length. If the given
     ///   position is at the end of the text, the callback should return an empty slice.
-    /// * `old_tree` A previous syntax tree parsed from the same document. If the text of the
-    ///   document has changed since `old_tree` was created, then you must edit `old_tree` to match
-    ///   the new text using [`Tree::edit`].
+    /// * `old_tree` Retained for API compatibility but ignored. Every call performs a fresh parse.
     /// * `options` Options for parsing the text. This can be used to set a progress callback.
     ///
     /// Additionally, you must set the generic parameter [`D`] to a type that implements the
@@ -1450,10 +1436,8 @@ impl Tree {
     /// structure has changed.
     ///
     /// For this to work correctly, this syntax tree must have been edited such
-    /// that its ranges match up to the new tree. Generally, you'll want to
-    /// call this method right after calling one of the [`Parser::parse`]
-    /// functions. Call it on the old tree that was passed to parse, and
-    /// pass the new tree that was returned from `parse`.
+    /// that its ranges match up to the new tree. Parse the replacement source
+    /// into a fresh tree, then compare the edited old tree with that replacement.
     #[doc(alias = "ts_tree_get_changed_ranges")]
     #[must_use]
     pub fn changed_ranges(&self, other: &Self) -> impl ExactSizeIterator<Item = Range> {
@@ -1535,14 +1519,8 @@ impl<'tree> Node<'tree> {
 
     /// Get a numeric id for this node that is unique.
     ///
-    /// Within a given syntax tree, no two nodes have the same id. However:
-    ///
-    /// - If a new tree is created based on an older tree, and a node from the old tree is reused in
-    ///   the process, then that node will have the same id in both trees.
-    ///
-    /// - A node not marked as having changes does not guarantee it was reused.
-    ///
-    /// - If a node is marked as having changed in the old tree, it will not be reused.
+    /// Within a given syntax tree, no two nodes have the same id. Node ids are
+    /// not preserved across separate parse calls.
     #[must_use]
     pub fn id(&self) -> usize {
         self.0.id as usize

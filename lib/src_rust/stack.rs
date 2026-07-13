@@ -36,7 +36,6 @@ use super::utils::{ptr_mut, ptr_ref};
 const MAX_LINK_COUNT: usize = 8;
 const MAX_NODE_POOL_SIZE: u32 = 50;
 const MAX_ITERATOR_COUNT: u32 = 64;
-const STACK_LINK_PAYLOAD_IS_PENDING_LINK: u8 = 1 << 0;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -52,15 +51,11 @@ pub union StackLinkPayloadValue {
     pub subtree: Subtree,
 }
 
-/// Tagged edge payload for a `StackLink`.
-///
-/// `STACK_LINK_PAYLOAD_IS_PENDING_LINK` means the payload is part of a pending
-/// path during stack popping.
+/// Edge payload for a `StackLink`.
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct StackLinkPayload {
     pub value: StackLinkPayloadValue,
-    pub flags: u8,
 }
 
 /// Directed edge from a stack node to one predecessor.
@@ -110,8 +105,6 @@ pub struct StackIterator {
     pub subtrees: SubtreeArray,
     /// Number of non-null subtree payloads traversed.
     pub subtree_count: u32,
-    /// Whether this iterator is walking pending links.
-    pub is_pending: bool,
 }
 
 pub type StackNodeArray = Array<*mut StackNode>;
@@ -194,15 +187,15 @@ pub struct Stack {
 }
 
 // ---------------------------------------------------------------------------
-// Compile-time layout assertions (sizes from C on 64-bit)
+// Compile-time layout assertions for hot internal structures
 // ---------------------------------------------------------------------------
 
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(core::mem::size_of::<StackLink>() == 24);
+const _: () = assert!(core::mem::size_of::<StackLink>() == 16);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(core::mem::size_of::<StackLinkPayload>() == 16);
+const _: () = assert!(core::mem::size_of::<StackLinkPayload>() == 8);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(core::mem::size_of::<StackNode>() == 232);
+const _: () = assert!(core::mem::size_of::<StackNode>() == 168);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(core::mem::size_of::<StackIterator>() == 32);
 const _: () = assert!(core::mem::size_of::<StackStatus>() == 4);
@@ -387,25 +380,15 @@ unsafe fn stack_subtree_node_count(subtree: Subtree) -> u32 {
 }
 
 #[inline]
-const fn stack_link_payload_new(subtree: Subtree, is_pending: bool) -> StackLinkPayload {
+const fn stack_link_payload_new(subtree: Subtree) -> StackLinkPayload {
     StackLinkPayload {
         value: StackLinkPayloadValue { subtree },
-        flags: if is_pending {
-            STACK_LINK_PAYLOAD_IS_PENDING_LINK
-        } else {
-            0
-        },
     }
 }
 
 #[inline]
 const unsafe fn stack_link_payload_subtree_raw(payload: StackLinkPayload) -> Subtree {
     payload.value.subtree
-}
-
-#[inline]
-const fn stack_link_payload_is_pending(payload: StackLinkPayload) -> bool {
-    payload.flags & STACK_LINK_PAYLOAD_IS_PENDING_LINK != 0
 }
 
 #[inline]
@@ -494,7 +477,7 @@ unsafe fn stack_node_new_with_payload(
             position: length_zero(),
             links: [StackLink {
                 node: ptr::null_mut(),
-                payload: stack_link_payload_new(NULL_SUBTREE, false),
+                payload: stack_link_payload_new(NULL_SUBTREE),
             }; MAX_LINK_COUNT],
             link_count: 0,
             ref_count: 1,
@@ -530,16 +513,10 @@ unsafe fn stack_node_new_with_payload(
 unsafe fn stack_node_new(
     previous_node: *mut StackNode,
     subtree: Subtree,
-    is_pending: bool,
     state: TSStateId,
     pool: &mut StackNodeArray,
 ) -> *mut StackNode {
-    stack_node_new_with_payload(
-        previous_node,
-        stack_link_payload_new(subtree, is_pending),
-        state,
-        pool,
-    )
+    stack_node_new_with_payload(previous_node, stack_link_payload_new(subtree), state, pool)
 }
 
 /// Check if two subtrees are equivalent for merging purposes.
@@ -580,7 +557,7 @@ unsafe fn stack_link_payload_is_equivalent(
     stack_subtree_is_equivalent(
         stack_link_payload_subtree(left),
         stack_link_payload_subtree(right),
-    ) && stack_link_payload_is_pending(left) == stack_link_payload_is_pending(right)
+    )
 }
 
 /// Add one predecessor edge to a stack node, merging equivalent paths.
@@ -966,7 +943,6 @@ unsafe fn stack_iter(
         node: head.node,
         subtrees: array_new(),
         subtree_count: 0,
-        is_pending: true,
     };
 
     if let Some(goal_subtree_count) = goal_subtree_count {
@@ -1035,7 +1011,6 @@ unsafe fn stack_iter(
                 let subtree = stack_link_payload_subtree(link.payload);
                 if stack_link_payload_is_null(link.payload) {
                     next_iterator.subtree_count += 1;
-                    next_iterator.is_pending = false;
                 } else {
                     if include_subtrees {
                         let subtrees = &mut next_iterator.subtrees;
@@ -1045,9 +1020,6 @@ unsafe fn stack_iter(
 
                     if !stack_link_payload_extra(link.payload) {
                         next_iterator.subtree_count += 1;
-                        if !stack_link_payload_is_pending(link.payload) {
-                            next_iterator.is_pending = false;
-                        }
                     }
                 }
             }
@@ -1063,21 +1035,6 @@ unsafe fn pop_count_callback(payload: *mut c_void, iterator: &StackIterator) -> 
     let goal_subtree_count = *ptr_ref(payload.cast::<u32>());
     if iterator.subtree_count == goal_subtree_count {
         STACK_ACTION_POP | STACK_ACTION_STOP
-    } else {
-        STACK_ACTION_NONE
-    }
-}
-
-const unsafe fn pop_pending_callback(
-    _payload: *mut c_void,
-    iterator: &StackIterator,
-) -> StackAction {
-    if iterator.subtree_count >= 1 {
-        if iterator.is_pending {
-            STACK_ACTION_POP | STACK_ACTION_STOP
-        } else {
-            STACK_ACTION_STOP
-        }
     } else {
         STACK_ACTION_NONE
     }
@@ -1162,13 +1119,7 @@ pub unsafe fn stack_new(subtree_pool: &mut SubtreePool) -> *mut Stack {
     array_reserve(&mut stack.node_pool, MAX_NODE_POOL_SIZE);
 
     stack.subtree_pool = subtree_pool;
-    stack.base_node = stack_node_new(
-        ptr::null_mut(),
-        NULL_SUBTREE,
-        false,
-        1,
-        &mut stack.node_pool,
-    );
+    stack.base_node = stack_node_new(ptr::null_mut(), NULL_SUBTREE, 1, &mut stack.node_pool);
     stack_clear(stack);
 
     self_
@@ -1270,13 +1221,12 @@ pub unsafe fn stack_push(
     stack: &mut Stack,
     version: StackVersion,
     subtree: Subtree,
-    pending: bool,
     state: TSStateId,
 ) {
     let heads = &mut stack.heads;
     let node_pool = &mut stack.node_pool;
     let head = array_get_mut(heads, version);
-    let new_node = stack_node_new(head.node, subtree, pending, state, node_pool);
+    let new_node = stack_node_new(head.node, subtree, state, node_pool);
     if subtree.ptr.is_null() {
         head.node_count_at_last_error = (*new_node).node_count;
     }
@@ -1355,23 +1305,6 @@ pub unsafe fn stack_pop_error(self_: &mut Stack, version: StackVersion) -> Subtr
         }
     }
     array_new()
-}
-
-/// Pop pending entries from a version.
-pub unsafe fn stack_pop_pending(self_: &mut Stack, version: StackVersion) -> StackSliceArray {
-    let mut pop = stack_iter(
-        self_,
-        version,
-        pop_pending_callback,
-        ptr::null_mut(),
-        Some(0),
-    );
-    if pop.size > 0 {
-        let first_pop = array_get_mut(&mut pop, 0);
-        stack_renumber_version(self_, first_pop.version, version);
-        first_pop.version = version;
-    }
-    pop
 }
 
 /// Pop all entries from a version.
@@ -1691,7 +1624,6 @@ pub unsafe fn stack_print_dot_graph(
             node: head.node,
             subtrees: array_new(),
             subtree_count: 0,
-            is_pending: false,
         };
         array_push(&mut stack.iterators, iter);
     }
@@ -1750,9 +1682,6 @@ pub unsafe fn stack_print_dot_graph(
                     node as *const c_void,
                     link.node as *const c_void,
                 );
-                if stack_link_payload_is_pending(link.payload) {
-                    fprintf(f, c"style=dashed ".as_ptr().cast::<i8>());
-                }
                 let subtree = stack_link_payload_subtree(link.payload);
                 if !stack_link_payload_is_null(link.payload)
                     && stack_link_payload_extra(link.payload)

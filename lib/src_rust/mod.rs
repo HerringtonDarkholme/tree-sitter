@@ -41,4 +41,3 @@ pub mod query;
 
 // Internal helpers for the active Rust runtime (no corresponding .c file).
 mod reduce_action;
-mod reusable_node;

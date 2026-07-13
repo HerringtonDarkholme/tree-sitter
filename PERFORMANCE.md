@@ -113,7 +113,7 @@ Future architecture candidates should be ranked by removed phase:
 
 1. A linear/common-path stack representation that avoids persistent graph-node
    allocation for straight segments while preserving first-class branching,
-   merge, recovery, old-tree reuse, and GLR semantics.
+   merge, recovery, and GLR semantics.
 2. A stack-native parse forest that materializes concrete `SubtreeHeapData` only
    at accept or forced boundaries.
 3. Action-trace execution for deterministic state/lookahead runs that contain
@@ -162,6 +162,37 @@ for optimization decisions and record the gain against this table until a
 broader baseline replaces it.
 
 ## Checkpoints
+
+### 2026-07-13 EDT - one-pass parser and compact stack links
+
+- Repo base: `676cc411`.
+- Removed old-tree subtree reuse, reusable-node traversal, incremental
+  reduction slices, pending stack links, and reused-subtree breakdown paths.
+- The public `old_tree` parameters remain ABI-compatible but are ignored.
+- `StackLink` shrank from 24 to 16 bytes and `StackNode` from 232 to 168 bytes
+  on 64-bit targets after removing the pending-link tag.
+- Command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-one-pass-perf XDG_CACHE_HOME=/private/tmp/tree-sitter-cache cargo xtask perf-gate --language typescript --language javascript --language python --language go --language rust --language cpp --language java --repetitions 10 --error-limit 8 --kind normal --report-only --offline
+```
+
+| Workload | Rust bytes/ms | C bytes/ms | Delta |
+| --- | ---: | ---: | ---: |
+| TypeScript normal | 28435.9 | 22892.4 | +24.22% |
+| JavaScript normal | 19943.2 | 15805.0 | +26.18% |
+| Python normal | 13657.4 | 10988.0 | +24.29% |
+| Go normal | 17502.8 | 13910.5 | +25.82% |
+| Rust normal | 21167.3 | 16406.6 | +29.02% |
+| C++ normal | 7172.6 | 10447.4 | -31.35% |
+| Java normal | 9806.9 | 9610.0 | +2.05% |
+| Overall normal | 19754.1 | 15971.7 | +23.68% |
+
+- This is a report-only cross-core comparison, not an A/B attribution of the
+  one-pass change. C++ and several small Python fixtures remain above the 5%
+  per-case regression threshold.
+- Validation: `cargo fmt --check --all`, strict tree-sitter clippy, ABI surface,
+  focused parser tests, and `cargo test --all` passed.
 
 ### 2026-06-28 EDT - rejected summarizer parent-error hoist
 

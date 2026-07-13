@@ -378,7 +378,7 @@ fn test_parsing_ends_when_input_callback_returns_empty() {
     assert_eq!(tree.root_node().end_byte(), 6);
 }
 
-// Incremental parsing
+// The old-tree parameter remains accepted, but parsing always reads fresh input.
 
 #[test]
 fn test_parsing_after_editing_beginning_of_code() {
@@ -425,7 +425,7 @@ fn test_parsing_after_editing_beginning_of_code() {
         )
     );
 
-    assert_eq!(recorder.strings_read(), vec!["123 || 5 "]);
+    assert_eq!(recorder.strings_read(), vec!["123 || 5 + 456 * (10 + x);"]);
 }
 
 #[test]
@@ -473,11 +473,11 @@ fn test_parsing_after_editing_end_of_code() {
         )
     );
 
-    assert_eq!(recorder.strings_read(), vec![" * ", "abc.d)",]);
+    assert_eq!(recorder.strings_read(), vec!["x * (100 + abc.d);"]);
 }
 
 #[test]
-fn test_parsing_empty_file_with_reused_tree() {
+fn test_parsing_empty_file_with_ignored_old_tree() {
     let mut parser = Parser::new();
     parser.set_language(&get_language("rust")).unwrap();
 
@@ -555,7 +555,7 @@ h + i
 
     assert_eq!(
         recorder.strings_read(),
-        vec!["\nc1234 = do d\n       e + f\n       g\n"]
+        vec!["\na = b\nc1234 = do d\n       e + f\n       g\nh + i\n    "]
     );
 }
 
@@ -686,7 +686,7 @@ fn test_parsing_on_multiple_threads() {
             });
             prepended_source += this_file_source;
 
-            // Reparse using the old tree as a starting point.
+            // Passing the old tree is source-compatible but still performs a fresh parse.
             let mut parser = Parser::new();
             parser.set_language(&get_language("rust")).unwrap();
             parser.parse(&prepended_source, Some(&tree_clone)).unwrap()

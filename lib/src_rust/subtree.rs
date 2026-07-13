@@ -1247,15 +1247,6 @@ pub const unsafe fn subtree_depends_on_column(self_: Subtree) -> bool {
 }
 
 #[inline]
-pub const unsafe fn subtree_is_fragile(self_: Subtree) -> bool {
-    if self_.data.is_inline() {
-        false
-    } else {
-        (*self_.ptr).fragile_left() || (*self_.ptr).fragile_right()
-    }
-}
-
-#[inline]
 pub unsafe fn subtree_is_error(self_: Subtree) -> bool {
     subtree_symbol(self_) == TS_BUILTIN_SYM_ERROR
 }
@@ -1410,8 +1401,8 @@ pub unsafe fn subtree_new_leaf(
 
 /// Create an error leaf for skipped input.
 ///
-/// Error leaves are marked fragile on both sides so later incremental parsing
-/// does not over-trust their boundaries.
+/// Error leaves are marked fragile on both sides so tree comparison does not
+/// over-trust their boundaries.
 pub unsafe fn subtree_new_error(
     pool: &mut SubtreePool,
     lookahead_char: i32,

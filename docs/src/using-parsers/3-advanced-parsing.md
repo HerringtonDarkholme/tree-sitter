@@ -2,9 +2,9 @@
 
 ## Editing
 
-In applications like text editors, you often need to re-parse a file after its source code has changed. Tree-sitter is designed
-to support this use case efficiently. There are two steps required. First, you must _edit_ the syntax tree, which adjusts
-the ranges of its nodes so that they stay in sync with the code.
+Editing a syntax tree adjusts the ranges of its nodes so that they stay in sync with changed source code. This is useful
+when comparing an edited tree with a separately parsed replacement tree. Parsing itself is always a fresh, one-pass
+operation in this fork; passing an old tree to a parse function has no effect.
 
 ```c
 typedef struct {
@@ -18,9 +18,6 @@ typedef struct {
 
 void ts_tree_edit(TSTree *, const TSInputEdit *);
 ```
-
-Then, you can call `ts_parser_parse` again, passing in the old tree. This will create a new tree that internally shares
-structure with the old tree.
 
 When you edit a syntax tree, the positions of its nodes will change. If you have stored any `TSNode` instances outside of
 the `TSTree`, you must update their positions separately, using the same `TSInputEdit` value, in order to update their
@@ -153,7 +150,7 @@ TSTree *ts_tree_copy(const TSTree *);
 ```
 
 Internally, copying a syntax tree just entails incrementing an atomic reference count. Conceptually, it provides you a new
-tree which you can freely query, edit, reparse, or delete on a new thread while continuing to use the original tree on a
+tree which you can freely query, edit, compare, or delete on a new thread while continuing to use the original tree on a
 different thread.
 
 ```admonish danger

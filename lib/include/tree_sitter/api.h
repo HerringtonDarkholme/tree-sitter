@@ -274,13 +274,8 @@ const TSRange *ts_parser_included_ranges(
 /**
  * Use the parser to parse some source code and create a syntax tree.
  *
- * If you are parsing this document for the first time, pass `NULL` for the
- * `old_tree` parameter. Otherwise, if you have already parsed an earlier
- * version of this document and the document has since been edited, pass the
- * previous syntax tree so that the unchanged parts of it can be reused.
- * This will save time and memory. For this to work correctly, you must have
- * already edited the old syntax tree using the [`ts_tree_edit`] function in a
- * way that exactly matches the source code changes.
+ * The `old_tree` parameter is retained for API compatibility but is ignored.
+ * Every call performs a fresh, one-pass parse of the supplied input.
  *
  * The [`TSInput`] parameter lets you specify how to read the text. It has the
  * following three fields:
@@ -445,10 +440,8 @@ void ts_tree_edit(TSTree *self, const TSInputEdit *edit);
  * document, returning an array of ranges whose syntactic structure has changed.
  *
  * For this to work correctly, the old syntax tree must have been edited such
- * that its ranges match up to the new tree. Generally, you'll want to call
- * this function right after calling one of the [`ts_parser_parse`] functions.
- * You need to pass the old tree that was passed to parse, as well as the new
- * tree that was returned from that function.
+ * that its ranges match up to the new tree. Parse the replacement source into
+ * a fresh tree, then compare the edited old tree with that replacement.
  *
  * The returned ranges indicate areas where the hierarchical structure of syntax
  * nodes (from root to leaf) has changed between the old and new trees. Characters

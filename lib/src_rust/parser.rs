@@ -11,9 +11,6 @@ use super::error_costs::{
     ERROR_COST_PER_SKIPPED_CHAR, ERROR_COST_PER_SKIPPED_LINE, ERROR_COST_PER_SKIPPED_TREE,
     ERROR_STATE,
 };
-use super::get_changed_ranges::{
-    range_array_get_changed_ranges_ref, range_array_intersects_ref, range_slice, TSRangeArray,
-};
 use super::language::{
     language_actions, language_enabled_external_tokens, language_full, language_has_actions,
     language_has_reduce_action, language_is_reserved_word, language_lex_mode_for_state,
@@ -28,7 +25,6 @@ use super::lexer::{
     lexer_new, lexer_reset, lexer_set_included_ranges, lexer_set_input, lexer_start, Lexer,
 };
 use super::reduce_action::{reduce_action_set_add, ReduceAction, ReduceActionSet};
-use super::reusable_node::ReusableNode;
 use super::stack::{
     // Stack functions (now Rust-only)
     stack_can_merge,
@@ -56,7 +52,6 @@ use super::stack::{
     stack_pop_count_into,
     stack_pop_count_linear_in_place,
     stack_pop_error,
-    stack_pop_pending,
     stack_position,
     stack_print_dot_graph,
     stack_push,
@@ -93,19 +88,16 @@ use super::subtree::{
     subtree_external_scanner_state_eq,
     subtree_extra,
     subtree_from_mut,
-    subtree_has_changes,
     subtree_has_external_scanner_state_change,
     subtree_has_external_tokens,
     subtree_is_eof,
     subtree_is_error,
-    subtree_is_fragile,
     subtree_is_keyword,
     subtree_last_external_token,
     subtree_leaf_parse_state,
     subtree_leaf_symbol,
     subtree_lookahead_bytes,
     subtree_make_mut,
-    subtree_missing,
     subtree_new_error,
     subtree_new_error_node,
     subtree_new_leaf,
@@ -380,9 +372,8 @@ struct TSStringInput {
 /// Main parser runtime state.
 ///
 /// One `TSParser` owns all mutable state for a parse: lexer callbacks, GLR
-/// stack versions, old-tree reuse cursor, parser scratch arrays, external
-/// scanner state, and the final accepted tree. The public C API treats this as
-/// opaque; the `repr(C)` layout is preserved for parity with the C core.
+/// stack versions, parser scratch arrays, external scanner state, and the final
+/// accepted tree. The public C API treats this as opaque.
 #[repr(C)]
 pub struct TSParser {
     /// Input adapter and `TSLexer` callback surface.
@@ -399,7 +390,7 @@ pub struct TSParser {
     reduce_actions: ReduceActionSet,
     /// Best accepted root found so far.
     finished_tree: Subtree,
-    /// Reusable pop-result builder for normal reductions without an old tree.
+    /// Reusable pop-result builder for reductions.
     reduce_builder: StackPopBuilder,
     /// Scratch arrays for stripping and comparing trailing extras.
     trailing_extras: SubtreeArray,
@@ -411,8 +402,6 @@ pub struct TSParser {
     deterministic_reduction_count: u32,
     /// Arena that owns internal nodes in the returned tree.
     tree_arena: *mut TreeArena,
-    /// Cursor over the old tree for incremental node reuse.
-    reusable_node: ReusableNode,
     /// Language-owned external scanner payload.
     external_scanner_payload: *mut c_void,
     /// Optional parse debug graph output.
@@ -421,16 +410,10 @@ pub struct TSParser {
     accept_count: u32,
     /// Progress-callback operation counter.
     operation_count: u32,
-    /// Retained old root while reparsing.
-    old_tree: Subtree,
-    /// Included-range diffs between old and new parse inputs.
-    included_range_differences: TSRangeArray,
     /// Public parse cancellation/progress options.
     parse_options: TSParseOptions,
     /// Mutable status passed to the progress callback.
     parse_state: TSParseState,
-    /// Cursor into `included_range_differences`.
-    included_range_difference_index: u32,
     /// Set when an external scanner reports an error.
     has_scanner_error: bool,
     /// Set when balancing was canceled by the progress callback.
@@ -503,89 +486,6 @@ unsafe fn parser_log(self_: &mut TSParser) {
             chr = chr.add(1);
         }
         fprintf(self_.dot_graph_file, c"\"\n}\n\n".as_ptr().cast::<i8>());
-    }
-}
-
-unsafe fn parser_breakdown_top_of_stack(self_: &mut TSParser, version: StackVersion) -> bool {
-    let mut did_break_down = false;
-
-    loop {
-        let pop = stack_pop_pending(ptr_mut(self_.stack), version);
-        if pop.size == 0 {
-            break;
-        }
-
-        did_break_down = true;
-        let mut pending = false;
-        for i in 0..pop.size {
-            let mut slice = ptr::read(array_get_ref(&pop, i));
-            let mut state = stack_state(ptr_ref(self_.stack), slice.version);
-            let parent = *array_get_ref(&slice.subtrees, 0);
-
-            let n = subtree_child_count(parent);
-            for j in 0..n {
-                let child = *subtree_child(parent, j);
-                pending = subtree_child_count(child) > 0;
-
-                if subtree_is_error(child) {
-                    state = ERROR_STATE;
-                } else if !subtree_extra(child) {
-                    state = ts_language_next_state(self_.language, state, subtree_symbol(child));
-                }
-
-                subtree_retain(child);
-                stack_push(ptr_mut(self_.stack), slice.version, child, pending, state);
-            }
-
-            for j in 1..slice.subtrees.size {
-                let tree = *array_get_ref(&slice.subtrees, j);
-                stack_push(ptr_mut(self_.stack), slice.version, tree, false, state);
-            }
-
-            subtree_release(&mut self_.tree_pool, parent);
-            array_delete(&mut slice.subtrees);
-
-            let parser = ptr::from_mut(self_);
-            LOG!(
-                parser,
-                c"breakdown_top_of_stack tree:%s".as_ptr().cast::<i8>(),
-                SYM_NAME!(parser, subtree_symbol(parent))
-            );
-            LOG_STACK!(parser);
-        }
-
-        if !pending {
-            break;
-        }
-    }
-
-    did_break_down
-}
-
-unsafe fn parser_breakdown_lookahead(
-    self_: &mut TSParser,
-    lookahead: &mut Subtree,
-    state: TSStateId,
-) {
-    let parser = ptr::from_mut(self_);
-    let reusable_node = &mut self_.reusable_node;
-    let mut did_descend = false;
-    let mut tree = reusable_node.tree();
-    while subtree_child_count(tree) > 0 && subtree_parse_state(tree) != state {
-        LOG!(
-            parser,
-            c"state_mismatch sym:%s".as_ptr().cast::<i8>(),
-            SYM_NAME!(parser, subtree_symbol(tree))
-        );
-        reusable_node.descend();
-        tree = reusable_node.tree();
-        did_descend = true;
-    }
-
-    if did_descend {
-        subtree_release(&mut self_.tree_pool, *lookahead);
-        *lookahead = tree;
-        subtree_retain(*lookahead);
     }
 }
 
@@ -1222,48 +1122,23 @@ unsafe fn parser_set_cached_token(
 ///
 /// The parser tries sources in cheapest-to-most-expensive order:
 ///
-/// 1. Reuse a compatible subtree from the old tree during incremental parsing.
-/// 2. Reuse the parser's one-token cache for another version at this position.
-/// 3. Ask the lexer to scan a fresh token.
+/// 1. Reuse the parser's one-token cache for another version at this position.
+/// 2. Ask the lexer to scan a fresh token.
 ///
-/// The returned `needs_lex` flag tells `parser_advance` whether step 3 is
-/// still required. `did_reuse` records only old-tree reuse, because successful
-/// shifts must advance the reusable-node cursor.
+/// The returned `needs_lex` flag tells `parser_advance` whether step 2 is
+/// still required.
 unsafe fn parser_get_initial_lookahead(
     self_: &mut TSParser,
-    version: StackVersion,
-    state: &mut TSStateId,
+    state: TSStateId,
     position: u32,
     last_external_token: Subtree,
-    allow_node_reuse: bool,
-) -> (bool, Subtree, TableEntry, bool) {
-    let mut did_reuse = true;
-    let mut lookahead = NULL_SUBTREE;
-    let mut table_entry = TableEntry::empty();
-
-    if allow_node_reuse {
-        lookahead = parser_reuse_node(
-            self_,
-            version,
-            state,
-            position,
-            last_external_token,
-            &mut table_entry,
-        );
-    }
-
-    if lookahead.ptr.is_null() {
-        did_reuse = false;
-        if let Some((token, cached_table_entry)) =
-            parser_get_cached_token(self_, *state, position as usize, last_external_token)
-        {
-            lookahead = token;
-            table_entry = cached_table_entry;
-        }
-    }
+) -> (Subtree, TableEntry, bool) {
+    let (lookahead, table_entry) =
+        parser_get_cached_token(self_, state, position as usize, last_external_token)
+            .unwrap_or((NULL_SUBTREE, TableEntry::empty()));
 
     let needs_lex = lookahead.ptr.is_null();
-    (did_reuse, lookahead, table_entry, needs_lex)
+    (lookahead, table_entry, needs_lex)
 }
 
 /// Lex a token for the current stack version and prepare its parse-table entry.
@@ -1298,135 +1173,6 @@ unsafe fn parser_lex_lookahead(
     }
 
     true
-}
-
-unsafe fn parser_has_included_range_difference(
-    self_: &TSParser,
-    start_position: u32,
-    end_position: u32,
-) -> bool {
-    range_array_intersects_ref(
-        &self_.included_range_differences,
-        self_.included_range_difference_index,
-        start_position,
-        end_position,
-    )
-}
-
-unsafe fn parser_reuse_node(
-    self_: &mut TSParser,
-    version: StackVersion,
-    state: &mut TSStateId,
-    position: u32,
-    last_external_token: Subtree,
-    table_entry: &mut TableEntry,
-) -> Subtree {
-    let parser = ptr::from_mut(self_);
-    let mut result;
-    loop {
-        result = self_.reusable_node.tree();
-        if result.ptr.is_null() {
-            break;
-        }
-        let byte_offset = self_.reusable_node.byte_offset();
-
-        // Do not reuse an EOF node if the included ranges array has changes
-        // later on in the file.
-        let end_byte_offset = if subtree_is_eof(result) {
-            u32::MAX
-        } else {
-            byte_offset + subtree_total_bytes(result)
-        };
-
-        if byte_offset > position {
-            LOG!(
-                parser,
-                c"before_reusable_node symbol:%s".as_ptr().cast::<i8>(),
-                SYM_NAME!(parser, subtree_symbol(result))
-            );
-            break;
-        }
-
-        if byte_offset < position {
-            LOG!(
-                parser,
-                c"past_reusable_node symbol:%s".as_ptr().cast::<i8>(),
-                SYM_NAME!(parser, subtree_symbol(result))
-            );
-            if end_byte_offset <= position || !self_.reusable_node.descend() {
-                self_.reusable_node.advance();
-            }
-            continue;
-        }
-
-        if !subtree_external_scanner_state_eq(
-            &self_.reusable_node.last_external_token,
-            &last_external_token,
-        ) {
-            LOG!(
-                parser,
-                c"reusable_node_has_different_external_scanner_state symbol:%s"
-                    .as_ptr()
-                    .cast::<i8>(),
-                SYM_NAME!(parser, subtree_symbol(result))
-            );
-            self_.reusable_node.advance();
-            continue;
-        }
-
-        let mut reason: *const i8 = ptr::null();
-        if subtree_has_changes(result) {
-            reason = c"has_changes".as_ptr().cast::<i8>();
-        } else if subtree_is_error(result) {
-            reason = c"is_error".as_ptr().cast::<i8>();
-        } else if subtree_missing(result) {
-            reason = c"is_missing".as_ptr().cast::<i8>();
-        } else if subtree_is_fragile(result) {
-            reason = c"is_fragile".as_ptr().cast::<i8>();
-        } else if parser_has_included_range_difference(self_, byte_offset, end_byte_offset) {
-            reason = c"contains_different_included_range".as_ptr().cast::<i8>();
-        }
-
-        if !reason.is_null() {
-            LOG!(
-                parser,
-                c"cant_reuse_node_%s tree:%s".as_ptr().cast::<i8>(),
-                reason,
-                SYM_NAME!(parser, subtree_symbol(result))
-            );
-            if !self_.reusable_node.descend() {
-                self_.reusable_node.advance();
-                parser_breakdown_top_of_stack(self_, version);
-                *state = stack_state(ptr_ref(self_.stack), version);
-            }
-            continue;
-        }
-
-        let leaf_symbol = subtree_leaf_symbol(result);
-        language_table_entry(self_.language, *state, leaf_symbol, table_entry);
-        if !parser_can_reuse_first_leaf(self_, *state, result, table_entry) {
-            LOG!(
-                parser,
-                c"cant_reuse_node symbol:%s, first_leaf_symbol:%s"
-                    .as_ptr()
-                    .cast::<i8>(),
-                SYM_NAME!(parser, subtree_symbol(result)),
-                SYM_NAME!(parser, leaf_symbol)
-            );
-            self_.reusable_node.advance_past_leaf();
-            break;
-        }
-
-        LOG!(
-            parser,
-            c"reuse_node symbol:%s".as_ptr().cast::<i8>(),
-            SYM_NAME!(parser, subtree_symbol(result))
-        );
-        subtree_retain(result);
-        return result;
-    }
-
-    NULL_SUBTREE
 }
 
 // ---------------------------------------------------------------------------
@@ -1659,13 +1405,7 @@ unsafe fn parser_shift(
         lookahead
     };
 
-    stack_push(
-        ptr_mut(self_.stack),
-        version,
-        subtree_to_push,
-        !is_leaf,
-        state,
-    );
+    stack_push(ptr_mut(self_.stack), version, subtree_to_push, state);
     if subtree_has_external_tokens(subtree_to_push) {
         stack_set_last_external_token(
             ptr_mut(self_.stack),
@@ -1686,8 +1426,7 @@ unsafe fn parser_reduce_in_place_after_warmup(
     production_id: u16,
     end_of_non_terminal_extra: bool,
 ) -> bool {
-    if !self_.old_tree.ptr.is_null()
-        || stack_version_count(ptr_ref(self_.stack)) != 1
+    if stack_version_count(ptr_ref(self_.stack)) != 1
         || self_.deterministic_reduction_count < IN_PLACE_REDUCTION_WARMUP
         || count == 0
     {
@@ -1723,13 +1462,12 @@ unsafe fn parser_reduce_in_place_after_warmup(
     (*parent.ptr).parse_state = state;
     (*parent.ptr).data.children.dynamic_precedence += dynamic_precedence;
 
-    stack_push(stack, version, subtree_from_mut(parent), false, next_state);
+    stack_push(stack, version, subtree_from_mut(parent), next_state);
     for j in 0..self_.trailing_extras.size {
         stack_push(
             stack,
             version,
             *array_get_ref(&self_.trailing_extras, j),
-            false,
             next_state,
         );
     }
@@ -1750,8 +1488,8 @@ unsafe fn parser_reduce_in_place_after_warmup(
 ///   stripped trailing extras.
 /// - Try to merge the resulting stack version back into earlier versions.
 ///
-/// The no-old-tree path writes pop results into `reduce_builder`, avoiding the
-/// allocation-heavy `StackSliceArray` used by the incremental path.
+/// Pop results are written into `reduce_builder`, avoiding a temporary
+/// `StackSliceArray` allocation on each reduction.
 unsafe fn parser_reduce(
     self_: &mut TSParser,
     version: StackVersion,
@@ -1762,19 +1500,6 @@ unsafe fn parser_reduce(
     is_fragile: bool,
     end_of_non_terminal_extra: bool,
 ) -> StackVersion {
-    if !self_.old_tree.ptr.is_null() {
-        return parser_reduce_with_slices(
-            self_,
-            version,
-            symbol,
-            count,
-            dynamic_precedence,
-            production_id,
-            is_fragile,
-            end_of_non_terminal_extra,
-        );
-    }
-
     let parser = ptr::from_mut(self_);
     let initial_version_count = stack_version_count(ptr_ref(self_.stack));
 
@@ -1876,19 +1601,12 @@ unsafe fn parser_reduce(
         (*parent.ptr).data.children.dynamic_precedence += dynamic_precedence;
 
         // Push the parent node and trailing extras
-        stack_push(
-            stack,
-            slice_version,
-            subtree_from_mut(parent),
-            false,
-            next_state,
-        );
+        stack_push(stack, slice_version, subtree_from_mut(parent), next_state);
         for j in 0..self_.trailing_extras.size {
             stack_push(
                 stack,
                 slice_version,
                 *array_get_ref(&self_.trailing_extras, j),
-                false,
                 next_state,
             );
         }
@@ -1915,156 +1633,10 @@ unsafe fn parser_reduce(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-/// Incremental parsing variant of `parser_reduce`.
-///
-/// This path keeps concrete `StackSlice` arrays because old-tree reuse and
-/// breakdown can make the child ownership rules differ from the fresh parse
-/// path. It intentionally mirrors `parser_reduce` so parity bugs are easier
-/// to audit.
-unsafe fn parser_reduce_with_slices(
-    self_: &mut TSParser,
-    version: StackVersion,
-    symbol: TSSymbol,
-    count: u32,
-    dynamic_precedence: i32,
-    production_id: u16,
-    is_fragile: bool,
-    end_of_non_terminal_extra: bool,
-) -> StackVersion {
-    let parser = ptr::from_mut(self_);
-    let initial_version_count = stack_version_count(ptr_ref(self_.stack));
-
-    let pop = stack_pop_count(ptr_mut(self_.stack), version, count);
-    let mut removed_version_count: u32 = 0;
-    let stack = ptr_mut(self_.stack);
-    let halted_version_count = stack_halted_version_count(stack);
-    let mut i: u32 = 0;
-    while i < pop.size {
-        let mut slice = ptr::read(array_get_ref(&pop, i));
-        let slice_version = slice.version - removed_version_count;
-
-        if slice_version > MAX_VERSION_COUNT + MAX_VERSION_COUNT_OVERFLOW + halted_version_count {
-            stack_remove_version(stack, slice_version);
-            subtree_array_delete(&mut self_.tree_pool, &mut slice.subtrees);
-            removed_version_count += 1;
-            while i + 1 < pop.size {
-                LOG!(
-                    parser,
-                    c"aborting reduce with too many versions"
-                        .as_ptr()
-                        .cast::<i8>()
-                );
-                let mut next_slice = ptr::read(array_get_ref(&pop, i + 1));
-                if next_slice.version != slice.version {
-                    break;
-                }
-                subtree_array_delete(&mut self_.tree_pool, &mut next_slice.subtrees);
-                i += 1;
-            }
-            i += 1;
-            continue;
-        }
-
-        let mut children = slice.subtrees;
-        subtree_array_remove_trailing_extras(&mut children, &mut self_.trailing_extras);
-        let mut parent = parser_new_node(self_, symbol, &mut children, u32::from(production_id));
-
-        while i + 1 < pop.size {
-            let mut next_slice = ptr::read(array_get_ref(&pop, i + 1));
-            if next_slice.version != slice.version {
-                break;
-            }
-            i += 1;
-
-            let mut next_slice_children = SubtreeArray {
-                contents: next_slice.subtrees.contents,
-                size: next_slice.subtrees.size,
-                capacity: next_slice.subtrees.capacity,
-            };
-            subtree_array_remove_trailing_extras(
-                &mut next_slice_children,
-                &mut self_.trailing_extras2,
-            );
-
-            if parser_select_children(self_, subtree_from_mut(parent), &next_slice_children) {
-                subtree_array_clear(&mut self_.tree_pool, &mut self_.trailing_extras);
-                subtree_release(&mut self_.tree_pool, subtree_from_mut(parent));
-                array_swap(&mut self_.trailing_extras, &mut self_.trailing_extras2);
-                parent = parser_new_node(
-                    self_,
-                    symbol,
-                    &mut next_slice_children,
-                    u32::from(production_id),
-                );
-            } else {
-                array_clear(&mut self_.trailing_extras2);
-                subtree_array_delete(&mut self_.tree_pool, &mut next_slice.subtrees);
-            }
-        }
-
-        let state = stack_state(stack, slice_version);
-        let next_state = if symbol != TS_BUILTIN_SYM_ERROR
-            && symbol != TS_BUILTIN_SYM_ERROR_REPEAT
-            && u32::from(symbol) >= language_full(self_.language).token_count
-        {
-            language_lookup(self_.language, state, symbol)
-        } else {
-            ts_language_next_state(self_.language, state, symbol)
-        };
-        if end_of_non_terminal_extra && next_state == state {
-            (*parent.ptr).set_extra(true);
-        }
-        if is_fragile || pop.size > 1 || initial_version_count > 1 {
-            (*parent.ptr).set_fragile_left(true);
-            (*parent.ptr).set_fragile_right(true);
-            (*parent.ptr).parse_state = TS_TREE_STATE_NONE;
-        } else {
-            (*parent.ptr).parse_state = state;
-        }
-        (*parent.ptr).data.children.dynamic_precedence += dynamic_precedence;
-
-        stack_push(
-            stack,
-            slice_version,
-            subtree_from_mut(parent),
-            false,
-            next_state,
-        );
-        for j in 0..self_.trailing_extras.size {
-            stack_push(
-                stack,
-                slice_version,
-                *array_get_ref(&self_.trailing_extras, j),
-                false,
-                next_state,
-            );
-        }
-
-        for j in 0..slice_version {
-            if j == version {
-                continue;
-            }
-            if stack_merge(stack, j, slice_version) {
-                removed_version_count += 1;
-                break;
-            }
-        }
-
-        i += 1;
-    }
-
-    if stack_version_count(stack) > initial_version_count {
-        initial_version_count
-    } else {
-        STACK_VERSION_NONE
-    }
-}
-
 unsafe fn parser_accept(self_: &mut TSParser, version: StackVersion, lookahead: Subtree) {
     debug_assert!(subtree_is_eof(lookahead));
     let stack = ptr_mut(self_.stack);
-    stack_push(stack, version, lookahead, false, 1);
+    stack_push(stack, version, lookahead, 1);
 
     let pop = stack_pop_all(stack, version);
     for i in 0..pop.size {
@@ -2274,14 +1846,14 @@ unsafe fn parser_recover_to_state(
 
         if slice.subtrees.size > 0 {
             let error = subtree_new_error_node(&mut slice.subtrees, true, self_.language);
-            stack_push(stack, slice.version, error, false, goal_state);
+            stack_push(stack, slice.version, error, goal_state);
         } else {
             array_delete(&mut slice.subtrees);
         }
 
         for j in 0..self_.trailing_extras.size {
             let tree = *array_get_ref(&self_.trailing_extras, j);
-            stack_push(stack, slice.version, tree, false, goal_state);
+            stack_push(stack, slice.version, tree, goal_state);
         }
 
         previous_version = slice.version;
@@ -2380,7 +1952,7 @@ unsafe fn parser_recover(self_: &mut TSParser, version: StackVersion, mut lookah
         LOG!(parser, c"recover_eof".as_ptr().cast::<i8>());
         let mut children: SubtreeArray = array_new();
         let parent = subtree_new_error_node(&mut children, false, self_.language);
-        stack_push(stack, version, parent, false, 1);
+        stack_push(stack, version, parent, 1);
         parser_accept(self_, version, lookahead);
         return;
     }
@@ -2454,13 +2026,7 @@ unsafe fn parser_recover(self_: &mut TSParser, version: StackVersion, mut lookah
     }
 
     // Push the ERROR
-    stack_push(
-        stack,
-        version,
-        subtree_from_mut(error_repeat),
-        false,
-        ERROR_STATE,
-    );
+    stack_push(stack, version, subtree_from_mut(error_repeat), ERROR_STATE);
     if subtree_has_external_tokens(lookahead) {
         stack_set_last_external_token(stack, version, subtree_last_external_token(lookahead));
     }
@@ -2530,7 +2096,6 @@ unsafe fn parser_handle_error(self_: &mut TSParser, version: StackVersion, looka
                         ptr_mut(self_.stack),
                         version_with_missing_tree,
                         missing_tree,
-                        false,
                         state_after_missing_symbol,
                     );
 
@@ -2557,7 +2122,7 @@ unsafe fn parser_handle_error(self_: &mut TSParser, version: StackVersion, looka
             }
         }
 
-        stack_push(ptr_mut(self_.stack), v, NULL_SUBTREE, false, ERROR_STATE);
+        stack_push(ptr_mut(self_.stack), v, NULL_SUBTREE, ERROR_STATE);
         v = if v == version {
             previous_version_count
         } else {
@@ -2577,10 +2142,6 @@ unsafe fn parser_handle_error(self_: &mut TSParser, version: StackVersion, looka
     // current lookahead token's "lookahead bytes" value, which describes how far
     // the lexer needed to look ahead beyond the content of the token in order to
     // recognize it.
-    let mut lookahead = lookahead;
-    if subtree_child_count(lookahead) > 0 {
-        parser_breakdown_lookahead(self_, &mut lookahead, ERROR_STATE);
-    }
     parser_recover(self_, version, lookahead);
 
     LOG_STACK!(parser);
@@ -2637,23 +2198,18 @@ unsafe fn parser_shift_for_action(
     action: TSParseAction,
 ) {
     let shift = action.shift;
-    let mut next_state;
-    if shift.extra {
-        next_state = state;
+    let next_state = if shift.extra {
         LOG!(parser, c"shift_extra".as_ptr().cast::<i8>());
+        state
     } else {
-        next_state = shift.state;
         LOG!(
             parser,
             c"shift state:%u".as_ptr().cast::<i8>(),
-            u32::from(next_state)
+            u32::from(shift.state)
         );
-    }
+        shift.state
+    };
 
-    if subtree_child_count(*lookahead) > 0 {
-        parser_breakdown_lookahead(self_, lookahead, state);
-        next_state = ts_language_next_state(self_.language, state, subtree_symbol(*lookahead));
-    }
     parser_shift(self_, version, next_state, *lookahead, shift.extra);
 }
 
@@ -2662,9 +2218,6 @@ unsafe fn parser_recover_for_action(
     version: StackVersion,
     lookahead: &mut Subtree,
 ) {
-    if subtree_child_count(*lookahead) > 0 {
-        parser_breakdown_lookahead(self_, lookahead, ERROR_STATE);
-    }
     parser_recover(self_, version, *lookahead);
 }
 
@@ -2673,7 +2226,6 @@ unsafe fn parser_apply_parse_actions(
     parser: *mut TSParser,
     version: StackVersion,
     state: TSStateId,
-    did_reuse: bool,
     lookahead: &mut Subtree,
     table_entry: &TableEntry,
 ) -> ParseActionsResult {
@@ -2689,9 +2241,6 @@ unsafe fn parser_apply_parse_actions(
                     break;
                 }
                 parser_shift_for_action(self_, parser, version, state, lookahead, action);
-                if did_reuse {
-                    self_.reusable_node.advance();
-                }
                 return ParseActionsResult::Done;
             }
 
@@ -2699,10 +2248,7 @@ unsafe fn parser_apply_parse_actions(
                 let reduce = action.reduce;
                 let is_fragile = table_entry.action_count > 1;
                 let end_of_non_terminal_extra = lookahead.ptr.is_null();
-                if table_entry.action_count == 1
-                    && self_.old_tree.ptr.is_null()
-                    && stack_version_count(ptr_ref(self_.stack)) == 1
-                {
+                if table_entry.action_count == 1 && stack_version_count(ptr_ref(self_.stack)) == 1 {
                     self_.deterministic_reduction_count =
                         self_.deterministic_reduction_count.saturating_add(1);
                 }
@@ -2749,9 +2295,6 @@ unsafe fn parser_apply_parse_actions(
 
             TSPARSE_ACTION_TYPE_RECOVER => {
                 parser_recover_for_action(self_, version, lookahead);
-                if did_reuse {
-                    self_.reusable_node.advance();
-                }
                 return ParseActionsResult::Done;
             }
 
@@ -2845,21 +2388,6 @@ unsafe fn parser_try_keyword_fallback(
     true
 }
 
-unsafe fn parser_try_breakdown_reused_top(
-    self_: &mut TSParser,
-    version: StackVersion,
-    state: &mut TSStateId,
-    lookahead: Subtree,
-) -> bool {
-    if !parser_breakdown_top_of_stack(self_, version) {
-        return false;
-    }
-
-    *state = stack_state(ptr_ref(self_.stack), version);
-    subtree_release(&mut self_.tree_pool, lookahead);
-    true
-}
-
 unsafe fn parser_pause_with_error(
     self_: &mut TSParser,
     parser: *mut TSParser,
@@ -2876,30 +2404,20 @@ unsafe fn parser_pause_with_error(
 
 /// Advance one stack version until it shifts, accepts, recovers, pauses, or halts.
 ///
-/// This is the parser action interpreter. It first obtains a lookahead from old
-/// tree reuse, token cache, or lexing. Then it repeatedly reads the parse-table
+/// This is the parser action interpreter. It first obtains a lookahead from the
+/// token cache or lexer. Then it repeatedly reads the parse-table
 /// entry for `(state, lookahead)` and executes its actions. Reductions keep the
 /// same lookahead and continue in the new goto state; shifts consume the
 /// lookahead and return to the outer parse loop.
-unsafe fn parser_advance(
-    self_: &mut TSParser,
-    version: StackVersion,
-    allow_node_reuse: bool,
-) -> bool {
+unsafe fn parser_advance(self_: &mut TSParser, version: StackVersion) -> bool {
     let parser = ptr::from_mut(self_);
     let stack = ptr_ref(self_.stack);
     let mut state = stack_state(stack, version);
     let position = stack_position(stack, version).bytes;
     let last_external_token = stack_last_external_token(stack, version);
 
-    let (did_reuse, mut lookahead, mut table_entry, mut needs_lex) = parser_get_initial_lookahead(
-        self_,
-        version,
-        &mut state,
-        position,
-        last_external_token,
-        allow_node_reuse,
-    );
+    let (mut lookahead, mut table_entry, mut needs_lex) =
+        parser_get_initial_lookahead(self_, state, position, last_external_token);
 
     loop {
         if needs_lex {
@@ -2926,15 +2444,7 @@ unsafe fn parser_advance(
         let ParseActionsResult::Reductions {
             did_reduce,
             last_reduction_version,
-        } = parser_apply_parse_actions(
-            self_,
-            parser,
-            version,
-            state,
-            did_reuse,
-            &mut lookahead,
-            &table_entry,
-        )
+        } = parser_apply_parse_actions(self_, parser, version, state, &mut lookahead, &table_entry)
         else {
             return true;
         };
@@ -2966,15 +2476,6 @@ unsafe fn parser_advance(
         // default word token *is* valid, then treat the lookahead token as the word
         // token instead.
         if parser_try_keyword_fallback(self_, parser, state, &mut lookahead, &mut table_entry) {
-            continue;
-        }
-
-        // If the current lookahead token is not valid and the previous subtree on
-        // the stack was reused from an old tree, then it wasn't actually valid to
-        // reuse that previous subtree. Remove it from the stack, and in its place,
-        // push each of its children. Then try again to process the current lookahead.
-        if parser_try_breakdown_reused_top(self_, version, &mut state, lookahead) {
-            needs_lex = true;
             continue;
         }
 
@@ -3208,16 +2709,12 @@ pub unsafe extern "C" fn ts_parser_new() -> *mut TSParser {
             },
             deterministic_reduction_count: 0,
             tree_arena: ptr::null_mut(),
-            reusable_node: ReusableNode::new(),
             external_scanner_payload: ptr::null_mut(),
             dot_graph_file: ptr::null_mut(),
             accept_count: 0,
             operation_count: 0,
-            old_tree: NULL_SUBTREE,
-            included_range_differences: array_new(),
             parse_options: parse_options_none(),
             parse_state: parse_state_empty(),
-            included_range_difference_index: 0,
             has_scanner_error: false,
             canceled_balancing: false,
             has_error: false,
@@ -3242,13 +2739,6 @@ pub unsafe extern "C" fn ts_parser_delete(self_: *mut TSParser) {
     if !parser.reduce_actions.contents.is_null() {
         array_delete(&mut parser.reduce_actions);
     }
-    if !parser.included_range_differences.contents.is_null() {
-        array_delete(&mut parser.included_range_differences);
-    }
-    if !parser.old_tree.ptr.is_null() {
-        subtree_release(&mut parser.tree_pool, parser.old_tree);
-        parser.old_tree = NULL_SUBTREE;
-    }
     if !parser.tree_arena.is_null() {
         tree_arena_release(parser.tree_arena);
         parser.tree_arena = ptr::null_mut();
@@ -3257,7 +2747,6 @@ pub unsafe extern "C" fn ts_parser_delete(self_: *mut TSParser) {
     lexer_delete(&mut parser.lexer);
     parser_set_cached_token(parser, 0, NULL_SUBTREE, NULL_SUBTREE);
     subtree_pool_delete(&mut parser.tree_pool);
-    parser.reusable_node.delete();
     stack_pop_builder_delete(&mut parser.reduce_builder);
     array_delete(&mut parser.trailing_extras);
     array_delete(&mut parser.trailing_extras2);
@@ -3368,12 +2857,6 @@ pub unsafe extern "C" fn ts_parser_reset(self_: *mut TSParser) {
         ts_wasm_store_reset(parser.wasm_store);
     }
 
-    if !parser.old_tree.ptr.is_null() {
-        subtree_release(&mut parser.tree_pool, parser.old_tree);
-        parser.old_tree = NULL_SUBTREE;
-    }
-
-    parser.reusable_node.clear();
     parser.deterministic_reduction_count = 0;
     lexer_reset(&mut parser.lexer, length_zero());
     stack_clear(ptr_mut(parser.stack));
@@ -3402,7 +2885,7 @@ pub unsafe extern "C" fn ts_parser_reset(self_: *mut TSParser) {
 /// Parse one input document and return a new tree.
 ///
 /// The driver owns the outer GLR loop:
-/// - initialize lexer, external scanner, arena, and optional old-tree reuse;
+/// - initialize lexer, external scanner, and tree arena;
 /// - process every active stack version until none can advance normally;
 /// - condense/merge/prune stack versions;
 /// - recover when all versions are paused at errors;
@@ -3416,6 +2899,7 @@ pub unsafe extern "C-unwind" fn ts_parser_parse(
     old_tree: *const TSTree,
     input: TSInput,
 ) -> *mut TSTree {
+    let _ = old_tree;
     let parser = ptr_mut(self_);
     let mut result: *mut TSTree = ptr::null_mut();
     if parser.language.is_null() || input.read.is_none() {
@@ -3430,9 +2914,6 @@ pub unsafe extern "C-unwind" fn ts_parser_parse(
     }
 
     lexer_set_input(&mut parser.lexer, input);
-    array_clear(&mut parser.included_range_differences);
-    parser.included_range_difference_index = 0;
-
     parser.operation_count = 0;
 
     if parser_has_outstanding_parse(parser) {
@@ -3461,48 +2942,10 @@ pub unsafe extern "C-unwind" fn ts_parser_parse(
             ts_parser_reset(self_);
             return result;
         }
-        // Fresh parses can return one arena-backed tree. Incremental parses can
-        // mix new nodes with reused nodes from the old tree's arena, but a
-        // returned tree currently retains only one arena pointer.
-        parser.tree_arena = if old_tree.is_null() {
-            tree_arena_new()
-        } else {
-            ptr::null_mut()
-        };
-
-        if let Some(old_tree) = old_tree.as_ref() {
-            subtree_retain(old_tree.root);
-            parser.old_tree = old_tree.root;
-            let old_included_ranges =
-                range_slice(old_tree.included_ranges, old_tree.included_range_count);
-            let new_included_ranges = range_slice(
-                parser.lexer.included_ranges,
-                parser.lexer.included_range_count,
-            );
-            range_array_get_changed_ranges_ref(
-                old_included_ranges,
-                new_included_ranges,
-                &mut parser.included_range_differences,
-            );
-            parser.reusable_node.reset(old_tree.root);
-            LOG!(self_, c"parse_after_edit".as_ptr().cast::<i8>());
-            LOG_TREE!(self_, parser.old_tree);
-            for i in 0..parser.included_range_differences.size {
-                let range = array_get_ref(&parser.included_range_differences, i);
-                LOG!(
-                    self_,
-                    c"different_included_range %u - %u".as_ptr().cast::<i8>(),
-                    range.start_byte,
-                    range.end_byte
-                );
-            }
-        } else {
-            parser.reusable_node.clear();
-            LOG!(self_, c"new_parse".as_ptr().cast::<i8>());
-        }
+        parser.tree_arena = tree_arena_new();
+        LOG!(self_, c"new_parse".as_ptr().cast::<i8>());
     }
 
-    let mut position: u32 = 0;
     let mut last_position: u32 = 0;
     let mut version_count: StackVersion;
     loop {
@@ -3513,7 +2956,6 @@ pub unsafe extern "C-unwind" fn ts_parser_parse(
                 break;
             }
 
-            let allow_node_reuse = version_count == 1;
             while stack_is_active(ptr_ref(parser.stack), version) {
                 LOG!(
                     self_,
@@ -3527,7 +2969,7 @@ pub unsafe extern "C-unwind" fn ts_parser_parse(
                     stack_position(ptr_ref(parser.stack), version).extent.column
                 );
 
-                if !parser_advance(parser, version, allow_node_reuse) {
+                if !parser_advance(parser, version) {
                     if parser.has_scanner_error {
                         // goto exit
                         ts_parser_reset(self_);
@@ -3538,7 +2980,7 @@ pub unsafe extern "C-unwind" fn ts_parser_parse(
 
                 LOG_STACK!(self_);
 
-                position = stack_position(ptr_ref(parser.stack), version).bytes;
+                let position = stack_position(ptr_ref(parser.stack), version).bytes;
                 if position > last_position || (version > 0 && position == last_position) {
                     last_position = position;
                     break;
@@ -3560,18 +3002,6 @@ pub unsafe extern "C-unwind" fn ts_parser_parse(
         {
             stack_clear(ptr_mut(parser.stack));
             break;
-        }
-
-        while parser.included_range_difference_index < parser.included_range_differences.size {
-            let range = array_get_ref(
-                &parser.included_range_differences,
-                parser.included_range_difference_index,
-            );
-            if range.end_byte <= position {
-                parser.included_range_difference_index += 1;
-            } else {
-                break;
-            }
         }
 
         if version_count == 0 {
