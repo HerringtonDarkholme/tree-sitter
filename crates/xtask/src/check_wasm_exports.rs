@@ -16,10 +16,11 @@ use notify_debouncer_full::new_debouncer;
 
 use crate::{bail_on_err, watch_wasm, CheckWasmExports};
 
-const EXCLUDES: [&str; 23] = [
+const EXCLUDES: [&str; 29] = [
     // Unneeded because the JS side has its own way of implementing it
     "ts_node_child_by_field_name",
     "ts_node_edit",
+    "ts_node_is_null",
     // Precomputed and stored in the JS side
     "ts_node_type",
     "ts_node_grammar_type",
@@ -38,6 +39,12 @@ const EXCLUDES: [&str; 23] = [
     "ts_parser_logger",
     "ts_parser_parse_string",
     "ts_parser_parse_string_encoding",
+    // Native-only or private runtime helpers
+    "_ts_dup",
+    "ts_language_symbol_metadata",
+    "ts_tree_cursor_goto_first_child_internal",
+    "ts_tree_cursor_goto_next_sibling_internal",
+    "ts_tree_cursor_parent_node",
     // Query cursor is not managed by user in web bindings
     "ts_query_cursor_delete",
     "ts_query_cursor_match_limit",

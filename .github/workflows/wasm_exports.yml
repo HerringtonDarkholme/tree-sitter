@@ -5,12 +5,15 @@ on:
     paths:
       - lib/include/tree_sitter/api.h
       - lib/binding_web/**
-      - xtask/src/**
+      - crates/xtask/src/**
+      - .github/workflows/wasm_exports.yml
   push:
     branches: [master]
     paths:
       - lib/include/tree_sitter/api.h
       - lib/binding_rust/bindings.rs
+      - crates/xtask/src/**
+      - .github/workflows/wasm_exports.yml
 
 jobs:
   check-wasm-exports:
