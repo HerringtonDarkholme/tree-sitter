@@ -44,30 +44,16 @@ const MAX_ITERATOR_COUNT: u32 = 64;
 pub type StackVersion = u32;
 pub const STACK_VERSION_NONE: StackVersion = u32::MAX;
 
-/// Payload carried by an edge in the parse stack graph.
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub union StackLinkPayloadValue {
-    pub subtree: Subtree,
-}
-
-/// Edge payload for a `StackLink`.
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct StackLinkPayload {
-    pub value: StackLinkPayloadValue,
-}
-
 /// Directed edge from a stack node to one predecessor.
 ///
-/// The edge payload is the syntax node that was shifted/reduced between the
+/// The subtree is the syntax node that was shifted/reduced between the
 /// predecessor and the current node. Multiple links model GLR ambiguity: the
 /// same parse state/position can be reached through different child lists.
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct StackLink {
     pub node: *mut StackNode,
-    pub payload: StackLinkPayload,
+    pub subtree: Subtree,
 }
 
 /// Node in the persistent GLR stack graph.
@@ -103,7 +89,7 @@ pub struct StackIterator {
     pub node: *mut StackNode,
     /// Child subtrees collected so far along this pop path.
     pub subtrees: SubtreeArray,
-    /// Number of non-null subtree payloads traversed.
+    /// Number of non-extra stack entries traversed.
     pub subtree_count: u32,
 }
 
@@ -182,7 +168,7 @@ pub struct Stack {
     pub halted_version_count: u32,
     /// Initial root node shared by all versions.
     pub base_node: *mut StackNode,
-    /// Parser-owned subtree pool used when releasing link payloads.
+    /// Parser-owned subtree pool used when releasing link subtrees.
     pub subtree_pool: *mut SubtreePool,
 }
 
@@ -192,8 +178,6 @@ pub struct Stack {
 
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(core::mem::size_of::<StackLink>() == 16);
-#[cfg(target_pointer_width = "64")]
-const _: () = assert!(core::mem::size_of::<StackLinkPayload>() == 8);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(core::mem::size_of::<StackNode>() == 168);
 #[cfg(target_pointer_width = "64")]
@@ -339,14 +323,14 @@ unsafe fn stack_node_release(
         let first_predecessor = if node.link_count > 0 {
             for i in (1..usize::from(node.link_count)).rev() {
                 let link = node.links[i];
-                if !stack_link_payload_is_null(link.payload) {
-                    stack_link_payload_release(link.payload, subtree_pool);
+                if !link.subtree.ptr.is_null() {
+                    subtree_release(subtree_pool, link.subtree);
                 }
                 stack_node_release(ptr_mut(link.node), pool, subtree_pool);
             }
             let link = node.links[0];
-            if !stack_link_payload_is_null(link.payload) {
-                stack_link_payload_release(link.payload, subtree_pool);
+            if !link.subtree.ptr.is_null() {
+                subtree_release(subtree_pool, link.subtree);
             }
             link.node
         } else {
@@ -379,88 +363,10 @@ unsafe fn stack_subtree_node_count(subtree: Subtree) -> u32 {
     count
 }
 
-#[inline]
-const fn stack_link_payload_new(subtree: Subtree) -> StackLinkPayload {
-    StackLinkPayload {
-        value: StackLinkPayloadValue { subtree },
-    }
-}
-
-#[inline]
-const unsafe fn stack_link_payload_subtree_raw(payload: StackLinkPayload) -> Subtree {
-    payload.value.subtree
-}
-
-#[inline]
-pub const unsafe fn stack_link_payload_subtree(payload: StackLinkPayload) -> Subtree {
-    stack_link_payload_subtree_raw(payload)
-}
-
-#[inline]
-unsafe fn stack_link_payload_is_null(payload: StackLinkPayload) -> bool {
-    stack_link_payload_subtree(payload).ptr.is_null()
-}
-
-#[inline]
-const unsafe fn stack_link_payload_error_cost(payload: StackLinkPayload) -> u32 {
-    subtree_error_cost(stack_link_payload_subtree(payload))
-}
-
-#[inline]
-unsafe fn stack_link_payload_total_size(payload: StackLinkPayload) -> Length {
-    subtree_total_size(stack_link_payload_subtree(payload))
-}
-
-#[inline]
-unsafe fn stack_link_payload_total_bytes(payload: StackLinkPayload) -> u32 {
-    subtree_total_bytes(stack_link_payload_subtree(payload))
-}
-
-#[inline]
-const unsafe fn stack_link_payload_dynamic_precedence(payload: StackLinkPayload) -> i32 {
-    subtree_dynamic_precedence(stack_link_payload_subtree(payload))
-}
-
-#[inline]
-unsafe fn stack_link_payload_node_count(payload: StackLinkPayload) -> u32 {
-    stack_subtree_node_count(stack_link_payload_subtree(payload))
-}
-
-#[inline]
-unsafe fn stack_link_payload_retain_impl(payload: StackLinkPayload) {
-    subtree_retain(stack_link_payload_subtree(payload));
-}
-
-#[inline]
-unsafe fn stack_link_payload_release_impl(
-    payload: StackLinkPayload,
-    subtree_pool: &mut SubtreePool,
-) {
-    subtree_release(subtree_pool, stack_link_payload_subtree(payload));
-}
-
-#[inline]
-pub unsafe fn stack_link_payload_retain(payload: StackLinkPayload) {
-    stack_link_payload_retain_impl(payload);
-}
-
-#[inline]
-pub unsafe fn stack_link_payload_release(
-    payload: StackLinkPayload,
-    subtree_pool: &mut SubtreePool,
-) {
-    stack_link_payload_release_impl(payload, subtree_pool);
-}
-
-#[inline]
-const unsafe fn stack_link_payload_extra(payload: StackLinkPayload) -> bool {
-    subtree_extra(stack_link_payload_subtree(payload))
-}
-
 /// Allocate a new stack node, reusing from pool if available.
-unsafe fn stack_node_new_with_payload(
+unsafe fn stack_node_new(
     previous_node: *mut StackNode,
-    payload: StackLinkPayload,
+    subtree: Subtree,
     state: TSStateId,
     pool: &mut StackNodeArray,
 ) -> *mut StackNode {
@@ -477,7 +383,7 @@ unsafe fn stack_node_new_with_payload(
             position: length_zero(),
             links: [StackLink {
                 node: ptr::null_mut(),
-                payload: stack_link_payload_new(NULL_SUBTREE),
+                subtree: NULL_SUBTREE,
             }; MAX_LINK_COUNT],
             link_count: 0,
             ref_count: 1,
@@ -491,7 +397,7 @@ unsafe fn stack_node_new_with_payload(
         (*node).link_count = 1;
         (*node).links[0] = StackLink {
             node: previous_node,
-            payload,
+            subtree,
         };
 
         (*node).position = (*previous_node).position;
@@ -499,24 +405,15 @@ unsafe fn stack_node_new_with_payload(
         (*node).dynamic_precedence = (*previous_node).dynamic_precedence;
         (*node).node_count = (*previous_node).node_count;
 
-        if !stack_link_payload_is_null(payload) {
-            (*node).error_cost += stack_link_payload_error_cost(payload);
-            (*node).position = length_add((*node).position, stack_link_payload_total_size(payload));
-            (*node).node_count += stack_link_payload_node_count(payload);
-            (*node).dynamic_precedence += stack_link_payload_dynamic_precedence(payload);
+        if !subtree.ptr.is_null() {
+            (*node).error_cost += subtree_error_cost(subtree);
+            (*node).position = length_add((*node).position, subtree_total_size(subtree));
+            (*node).node_count += stack_subtree_node_count(subtree);
+            (*node).dynamic_precedence += subtree_dynamic_precedence(subtree);
         }
     }
 
     node
-}
-
-unsafe fn stack_node_new(
-    previous_node: *mut StackNode,
-    subtree: Subtree,
-    state: TSStateId,
-    pool: &mut StackNodeArray,
-) -> *mut StackNode {
-    stack_node_new_with_payload(previous_node, stack_link_payload_new(subtree), state, pool)
 }
 
 /// Check if two subtrees are equivalent for merging purposes.
@@ -549,21 +446,10 @@ unsafe fn stack_subtree_is_equivalent(left: Subtree, right: Subtree) -> bool {
         && subtree_external_scanner_state_eq(&left, &right)
 }
 
-#[inline]
-unsafe fn stack_link_payload_is_equivalent(
-    left: StackLinkPayload,
-    right: StackLinkPayload,
-) -> bool {
-    stack_subtree_is_equivalent(
-        stack_link_payload_subtree(left),
-        stack_link_payload_subtree(right),
-    )
-}
-
 /// Add one predecessor edge to a stack node, merging equivalent paths.
 ///
 /// If an equivalent edge already exists, the function either keeps the existing
-/// payload or replaces it when the new path has higher dynamic precedence. If
+/// subtree or replaces it when the new path has higher dynamic precedence. If
 /// the predecessor node itself represents the same state/position/error cost,
 /// its links are folded into the existing predecessor to keep the graph shallow.
 /// This is the core local compaction step that prevents GLR branching from
@@ -580,16 +466,16 @@ unsafe fn stack_node_add_link(
 
     for i in 0..self_.link_count as usize {
         let existing_link = &mut self_.links[i];
-        if stack_link_payload_is_equivalent(existing_link.payload, link.payload) {
+        if stack_subtree_is_equivalent(existing_link.subtree, link.subtree) {
             if existing_link.node == link.node {
-                if stack_link_payload_dynamic_precedence(link.payload)
-                    > stack_link_payload_dynamic_precedence(existing_link.payload)
+                if subtree_dynamic_precedence(link.subtree)
+                    > subtree_dynamic_precedence(existing_link.subtree)
                 {
-                    stack_link_payload_retain(link.payload);
-                    stack_link_payload_release(existing_link.payload, subtree_pool);
-                    existing_link.payload = link.payload;
+                    subtree_retain(link.subtree);
+                    subtree_release(subtree_pool, existing_link.subtree);
+                    existing_link.subtree = link.subtree;
                     self_.dynamic_precedence = ptr_ref(link.node).dynamic_precedence
-                        + stack_link_payload_dynamic_precedence(link.payload);
+                        + subtree_dynamic_precedence(link.subtree);
                 }
                 return;
             }
@@ -608,8 +494,8 @@ unsafe fn stack_node_add_link(
                     );
                 }
                 let mut dynamic_precedence = link_node.dynamic_precedence;
-                if !stack_link_payload_is_null(link.payload) {
-                    dynamic_precedence += stack_link_payload_dynamic_precedence(link.payload);
+                if !link.subtree.ptr.is_null() {
+                    dynamic_precedence += subtree_dynamic_precedence(link.subtree);
                 }
                 if dynamic_precedence > self_.dynamic_precedence {
                     self_.dynamic_precedence = dynamic_precedence;
@@ -630,10 +516,10 @@ unsafe fn stack_node_add_link(
     self_.links[self_.link_count as usize] = link;
     self_.link_count += 1;
 
-    if !stack_link_payload_is_null(link.payload) {
-        stack_link_payload_retain(link.payload);
-        node_count += stack_link_payload_node_count(link.payload);
-        dynamic_precedence += stack_link_payload_dynamic_precedence(link.payload);
+    if !link.subtree.ptr.is_null() {
+        subtree_retain(link.subtree);
+        node_count += stack_subtree_node_count(link.subtree);
+        dynamic_precedence += subtree_dynamic_precedence(link.subtree);
     }
 
     if node_count > self_.node_count {
@@ -773,8 +659,8 @@ unsafe fn stack_pop_builder_add_slice(
 
 /// Fast pop path for an unbranched stack chain.
 ///
-/// The parser asks for `count` non-extra payloads. While every node has exactly
-/// one predecessor, this can walk a straight linked list, retain payloads, then
+/// The parser asks for `count` non-extra subtrees. While every node has exactly
+/// one predecessor, this can walk a straight linked list, retain subtrees, then
 /// reverse the collected child array into left-to-right order. Encountering a
 /// branched node returns `None` so the caller can use the full DFS pop path.
 unsafe fn stack_pop_count_linear(
@@ -799,14 +685,14 @@ unsafe fn stack_pop_count_linear(
 
         let link = current_node.links[0];
         node = link.node;
-        let subtree = stack_link_payload_subtree(link.payload);
-        if stack_link_payload_is_null(link.payload) {
+        let subtree = link.subtree;
+        if subtree.ptr.is_null() {
             subtree_count += 1;
         } else {
             array_push(&mut subtrees, subtree);
-            stack_link_payload_retain(link.payload);
+            subtree_retain(subtree);
 
-            if !stack_link_payload_extra(link.payload) {
+            if !subtree_extra(subtree) {
                 subtree_count += 1;
             }
         }
@@ -846,14 +732,14 @@ unsafe fn stack_pop_count_linear_into(
 
         let link = current_node.links[0];
         node = link.node;
-        let subtree = stack_link_payload_subtree(link.payload);
-        if stack_link_payload_is_null(link.payload) {
+        let subtree = link.subtree;
+        if subtree.ptr.is_null() {
             subtree_count += 1;
         } else {
             array_push(&mut builder.subtrees, subtree);
-            stack_link_payload_retain(link.payload);
+            subtree_retain(subtree);
 
-            if !stack_link_payload_extra(link.payload) {
+            if !subtree_extra(subtree) {
                 subtree_count += 1;
             }
         }
@@ -896,14 +782,14 @@ pub unsafe fn stack_pop_count_linear_in_place(
 
         let link = current_node.links[0];
         node = link.node;
-        let subtree = stack_link_payload_subtree(link.payload);
-        if stack_link_payload_is_null(link.payload) {
+        let subtree = link.subtree;
+        if subtree.ptr.is_null() {
             subtree_count += 1;
         } else {
             array_push(&mut builder.subtrees, subtree);
-            stack_link_payload_retain(link.payload);
+            subtree_retain(subtree);
 
-            if !stack_link_payload_extra(link.payload) {
+            if !subtree_extra(subtree) {
                 subtree_count += 1;
             }
         }
@@ -1008,17 +894,17 @@ unsafe fn stack_iter(
                 }
 
                 next_iterator.node = link.node;
-                let subtree = stack_link_payload_subtree(link.payload);
-                if stack_link_payload_is_null(link.payload) {
+                let subtree = link.subtree;
+                if subtree.ptr.is_null() {
                     next_iterator.subtree_count += 1;
                 } else {
                     if include_subtrees {
                         let subtrees = &mut next_iterator.subtrees;
                         array_push(subtrees, subtree);
-                        stack_link_payload_retain(link.payload);
+                        subtree_retain(subtree);
                     }
 
-                    if !stack_link_payload_extra(link.payload) {
+                    if !subtree_extra(subtree) {
                         next_iterator.subtree_count += 1;
                     }
                 }
@@ -1199,7 +1085,7 @@ pub unsafe fn stack_error_cost(self_: &Stack, version: StackVersion) -> u32 {
     let node = ptr_ref(head.node);
     let mut result = node.error_cost;
     if head.status == StackStatus::Paused
-        || (node.state == ERROR_STATE && stack_link_payload_is_null(node.links[0].payload))
+        || (node.state == ERROR_STATE && node.links[0].subtree.ptr.is_null())
     {
         result += ERROR_COST_PER_RECOVERY;
     }
@@ -1284,9 +1170,8 @@ pub unsafe fn stack_pop_count_into(
 pub unsafe fn stack_pop_error(self_: &mut Stack, version: StackVersion) -> SubtreeArray {
     let node = stack_head(self_, version).node;
     for i in 0..(*node).link_count as usize {
-        let payload = (*node).links[i].payload;
-        let subtree = stack_link_payload_subtree(payload);
-        if !stack_link_payload_is_null(payload) && subtree_is_error(subtree) {
+        let subtree = (*node).links[i].subtree;
+        if !subtree.ptr.is_null() && subtree_is_error(subtree) {
             let mut found_error = false;
             let pop = stack_iter(
                 self_,
@@ -1355,12 +1240,12 @@ pub unsafe fn stack_has_advanced_since_error(self_: &Stack, version: StackVersio
     }
     loop {
         if (*node).link_count > 0 {
-            let payload = (*node).links[0].payload;
-            if !stack_link_payload_is_null(payload) {
-                if stack_link_payload_total_bytes(payload) > 0 {
+            let subtree = (*node).links[0].subtree;
+            if !subtree.ptr.is_null() {
+                if subtree_total_bytes(subtree) > 0 {
                     return true;
                 } else if (*node).node_count > head.node_count_at_last_error
-                    && stack_link_payload_error_cost(payload) == 0
+                    && subtree_error_cost(subtree) == 0
                 {
                     node = (*node).links[0].node;
                     continue;
@@ -1652,8 +1537,8 @@ pub unsafe fn stack_print_dot_graph(
             if node_ref.state == ERROR_STATE {
                 fprintf(f, c"label=\"?\"".as_ptr().cast::<i8>());
             } else if node_ref.link_count == 1
-                && !stack_link_payload_is_null(node_ref.links[0].payload)
-                && stack_link_payload_extra(node_ref.links[0].payload)
+                && !node_ref.links[0].subtree.ptr.is_null()
+                && subtree_extra(node_ref.links[0].subtree)
             {
                 fprintf(f, c"shape=point margin=0 label=\"\"".as_ptr().cast::<i8>());
             } else {
@@ -1682,14 +1567,12 @@ pub unsafe fn stack_print_dot_graph(
                     node as *const c_void,
                     link.node as *const c_void,
                 );
-                let subtree = stack_link_payload_subtree(link.payload);
-                if !stack_link_payload_is_null(link.payload)
-                    && stack_link_payload_extra(link.payload)
-                {
+                let subtree = link.subtree;
+                if !subtree.ptr.is_null() && subtree_extra(subtree) {
                     fprintf(f, c"fontcolor=gray ".as_ptr().cast::<i8>());
                 }
 
-                if stack_link_payload_is_null(link.payload) {
+                if subtree.ptr.is_null() {
                     fprintf(f, c"color=red".as_ptr().cast::<i8>());
                 } else {
                     fprintf(f, c"label=\"".as_ptr().cast::<i8>());
@@ -1707,8 +1590,8 @@ pub unsafe fn stack_print_dot_graph(
                         c"labeltooltip=\"error_cost: %u\ndynamic_precedence: %d\""
                             .as_ptr()
                             .cast::<i8>(),
-                        stack_link_payload_error_cost(link.payload),
-                        stack_link_payload_dynamic_precedence(link.payload),
+                        subtree_error_cost(subtree),
+                        subtree_dynamic_precedence(subtree),
                     );
                 }
 
