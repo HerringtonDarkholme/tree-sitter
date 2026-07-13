@@ -1,8 +1,8 @@
 //! Freezes the C-ABI surface exported by the Rust core in `lib/src_rust`.
 //!
-//! Every `#[no_mangle]` function in `src_rust` is a symbol that the still-C code
-//! (`query.c`, `wasm_store.c`) and external consumers link against through
-//! `tree_sitter/api.h`. Because C has no name mangling, a silently-changed
+//! Every `#[no_mangle]` function in `src_rust` is a symbol that the remaining C
+//! shim and external consumers link against through `tree_sitter/api.h`.
+//! Because C has no name mangling, a silently-changed
 //! signature still links and then corrupts at runtime — the linker will not
 //! catch it. This test extracts every export's normalized signature and compares
 //! it to a committed golden snapshot, so any accidental rename, argument change,

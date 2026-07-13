@@ -776,49 +776,6 @@ Interpretation:
   substantially. Another small branch/cache around these sampled symbols is
   unlikely to satisfy the universal target.
 
-### 2026-06-28 EDT - rejected parser language-is-wasm cache trial
-
-- Repo head: `56d0d02e`
-- Trial status: not kept. Source experiment was reverted after measurement.
-- Hypothesis: cache `ts_language_is_wasm(language)` in `TSParser` at
-  `ts_parser_set_language` time, so native grammars avoid repeated C helper
-  calls in lexing and external-scanner dispatch.
-- Validation before benchmarking: `cargo fmt --check --all`,
-  `cargo check -p tree-sitter --lib --offline`, and
-  `cargo test -p tree-sitter --test abi_surface --offline` all passed.
-- Trial command:
-
-```sh
-TMPDIR=/private/tmp/tree-sitter-parser-wasm-flag-7lang cargo xtask perf-gate --language typescript --language javascript --language python --language go --language rust --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
-```
-
-- Same-window baseline command after reverting the cache:
-
-```sh
-TMPDIR=/private/tmp/tree-sitter-parser-wasm-flag-baseline-7lang cargo xtask perf-gate --language typescript --language javascript --language python --language go --language rust --language cpp --language java --repetitions 10 --error-limit 8 --report-only --offline
-```
-
-| Workload | Wasm-flag Rust bytes/ms | Baseline Rust bytes/ms | Movement |
-| --- | ---: | ---: | ---: |
-| TypeScript normal | 28863.9 | 29139.4 | -0.95% |
-| JavaScript normal | 20144.7 | 20533.6 | -1.89% |
-| Python normal | 13222.9 | 13219.9 | +0.02% |
-| Go normal | 17304.8 | 16743.5 | +3.35% |
-| Rust normal | 21215.1 | 18976.9 | +11.79% |
-| C++ normal | 7907.6 | 6584.9 | +20.09% |
-| Java normal | 10232.6 | 10659.6 | -4.01% |
-| Overall broad normal | 19767.4 | 19578.6 | +0.96% |
-
-Interpretation:
-
-- The result is mixed and too small to keep as a universal optimization.
-  TypeScript and JavaScript regress, Java regresses, and the aggregate movement
-  is within the noise seen in same-window runs.
-- The large C++ movement comes from an unusually low same-window baseline and
-  is not enough to justify adding parser state that weakens other languages.
-- Keep using the direct `ts_language_is_wasm` checks unless future profiling
-  shows wasm detection as a stable hot symbol across multiple broad runs.
-
 ### 2026-06-28 EDT - rejected balance progress guard trial
 
 - Repo head: `ba8c1a40`

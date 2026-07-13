@@ -9,14 +9,12 @@ use std::{
 };
 
 use anyhow::{anyhow, Result};
-use etcetera::BaseStrategy as _;
 use indoc::indoc;
 use notify::{
     event::{AccessKind, AccessMode},
     EventKind, RecursiveMode,
 };
 use notify_debouncer_full::new_debouncer;
-use tree_sitter_loader::{IoError, LoaderError, WasmToolError};
 
 use crate::{
     bail_on_err, embed_sources::embed_sources_in_map, watch_wasm, BuildWasm, EMSCRIPTEN_TAG,
@@ -51,42 +49,6 @@ const EXPORTED_RUNTIME_METHODS: [&str; 20] = [
     "HEAPU64",
     "LE_HEAP_STORE_I64",
 ];
-
-const WASI_SDK_VERSION: &str = include_str!("../../loader/wasi-sdk-version").trim_ascii();
-const BINARYEN_VERSION: &str = include_str!("../../loader/binaryen-version").trim_ascii();
-
-#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-const ARCH_OS: Result<&str, LoaderError> = Ok("arm64-macos");
-#[cfg(all(target_os = "macos", target_arch = "x86_64"))]
-const ARCH_OS: Result<&str, LoaderError> = Ok("x86_64-macos");
-#[cfg(all(
-    target_os = "macos",
-    not(any(target_arch = "aarch64", target_arch = "x86_64"))
-))]
-const ARCH_OS: Result<&str, LoaderError> = Err(LoaderError::WasiSDKPlatform);
-
-#[cfg(all(target_os = "windows", target_arch = "aarch64"))]
-const ARCH_OS: Result<&str, LoaderError> = Ok("arm64-windows");
-#[cfg(all(target_os = "windows", target_arch = "x86_64"))]
-const ARCH_OS: Result<&str, LoaderError> = Ok("x86_64-windows");
-#[cfg(all(
-    target_os = "windows",
-    not(any(target_arch = "aarch64", target_arch = "x86_64"))
-))]
-const ARCH_OS: Result<&str, LoaderError> = Err(LoaderError::WasiSDKPlatform);
-
-#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
-const ARCH_OS: Result<&str, LoaderError> = Ok("arm64-linux");
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-const ARCH_OS: Result<&str, LoaderError> = Ok("x86_64-linux");
-#[cfg(all(
-    target_os = "linux",
-    not(any(target_arch = "aarch64", target_arch = "x86_64"))
-))]
-const ARCH_OS: Result<&str, LoaderError> = Err(LoaderError::WasiSDKPlatform);
-
-#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
-const ARCH_OS: Result<&str, LoaderError> = Err(LoaderError::WasiSDKPlatform);
 
 pub fn run_wasm(args: &BuildWasm) -> Result<()> {
     // The parser engine now lives in Rust. Build it as an emscripten staticlib
@@ -249,9 +211,8 @@ pub fn run_wasm(args: &BuildWasm) -> Result<()> {
         core_staticlib,
         // lib.c (the remaining-C amalgamation) is linked here rather than compiled
         // into the staticlib, so the staticlib build needs no C toolchain (see
-        // build.rs). It supplies the symbols the Rust core references via FFI: the
-        // variadic lexer log shim and wasm_store.c's no-wasmtime stubs
-        // (ts_language_is_wasm, ts_wasm_store_*).
+        // build.rs). It supplies the variadic lexer log shim referenced by the
+        // Rust core.
         "lib/src/lib.c",
         "lib/binding_web/lib/tree-sitter.c",
     ]);
@@ -274,7 +235,7 @@ pub fn run_wasm(args: &BuildWasm) -> Result<()> {
 ///
 /// This replaces the former `lib/src/lib.c` amalgamation: the parser engine
 /// lives in Rust now, so emcc links this archive together with the binding glue
-/// and the C shims (see `run_wasm`). Requires the `wasm32-unknown-emscripten`
+/// and lexer logging shim (see `run_wasm`). Requires the `wasm32-unknown-emscripten`
 /// target and the `llvm-tools` component installed; no emscripten toolchain is
 /// needed to build the archive itself.
 ///
@@ -428,286 +389,6 @@ fn build_wasm(cmd: &mut Command, edit_tsd: bool) -> Result<()> {
             eprintln!("Warning: Failed to embed sources in source map: {e}");
         }
     }
-
-    Ok(())
-}
-
-/// This ensures that wasi-sdk is available, downloading and extracting it if necessary,
-/// and returns the path to the `clang` executable.
-///
-/// If `TREE_SITTER_WASI_SDK_PATH` is set, it will use that path to look for the clang executable.
-///
-/// Note that this is just a minimially modified version of
-/// `tree_sitter_loader::ensure_wasi_sdk_exists`. In the loader, this functionality is implemented
-/// as a private method of `Loader`. Rather than add this to the public API, we just
-/// re-implement it. Any fixes and/or modifications made to the loader's copy should be reflected
-/// here.
-pub fn ensure_wasi_sdk_exists() -> Result<PathBuf> {
-    let possible_executables = if cfg!(windows) {
-        vec![
-            "clang.exe",
-            "wasm32-unknown-wasi-clang.exe",
-            "wasm32-wasi-clang.exe",
-        ]
-    } else {
-        vec!["clang", "wasm32-unknown-wasi-clang", "wasm32-wasi-clang"]
-    };
-
-    if let Some(path) = get_existing_tool(
-        "clang",
-        "wasi-sdk",
-        &possible_executables,
-        "TREE_SITTER_WASI_SDK_PATH",
-    )? {
-        return Ok(path);
-    }
-
-    let arch_os = ARCH_OS?;
-    let sdk_filename = format!("wasi-sdk-{WASI_SDK_VERSION}-{arch_os}.tar.gz");
-    let wasi_sdk_major_version = WASI_SDK_VERSION
-        .trim_end_matches(char::is_numeric) // trim minor version...
-        .trim_end_matches('.'); // ...and '.' separator
-    let sdk_url = format!(
-        "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-{wasi_sdk_major_version}/{sdk_filename}",
-    );
-    download_tool(
-        "clang",
-        "wasi-sdk",
-        &sdk_filename,
-        &sdk_url,
-        &possible_executables,
-    )
-}
-
-/// This ensures that binaryen is available, downloading and extracting it if necessary,
-/// and returns the path to the `wasm-opt` executable.
-///
-/// If `TREE_SITTER_BINARYEN_PATH` is set, it will use that path to look for the wasm-opt executable.
-///
-/// Note that this is just a minimially modified version of
-/// `tree_sitter_loader::ensure_binaryen_exists`. In the loader, this functionality is implemented
-/// as a private method of `Loader`. Rather than add this to the public API, we just
-/// re-implement it. Any fixes and/or modifications made to the loader's copy should be reflected
-/// here.
-pub fn ensure_binaryen_exists() -> Result<PathBuf> {
-    let possible_executables = if cfg!(windows) {
-        vec![
-            "wasm-opt.exe",
-            "wasm32-unknown-wasm-opt.exe",
-            "wasm32-wasm-opt.exe",
-        ]
-    } else {
-        vec!["wasm-opt", "wasm32-unknown-wasm-opt", "wasm32-wasm-opt"]
-    };
-    if let Some(path) = get_existing_tool(
-        "wasm-opt",
-        "binaryen",
-        &possible_executables,
-        "TREE_SITTER_BINARYEN_PATH",
-    )? {
-        return Ok(path);
-    }
-
-    let arch_os = ARCH_OS?.replace("arm64-linux", "aarch64-linux");
-    let binaryen_filename = format!("binaryen-version_{BINARYEN_VERSION}-{arch_os}.tar.gz");
-    let binaryen_url = format!(
-       "https://github.com/WebAssembly/binaryen/releases/download/version_{BINARYEN_VERSION}/{binaryen_filename}"
-    );
-    download_tool(
-        "wasm-opt",
-        "binaryen",
-        &binaryen_filename,
-        &binaryen_url,
-        &possible_executables,
-    )
-}
-
-fn get_existing_tool(
-    tool_name: &'static str,
-    toolchain: &'static str,
-    possible_exes: &[&'static str],
-    env_var: &str,
-) -> Result<Option<PathBuf>> {
-    if let Ok(tool_path) = std::env::var(env_var) {
-        let tool_dir = PathBuf::from(tool_path);
-
-        for exe in possible_exes {
-            let tool_exe = tool_dir.join("bin").join(exe);
-            if tool_exe.exists() {
-                return Ok(Some(tool_exe));
-            }
-        }
-
-        Err(LoaderError::WasmTool(WasmToolError {
-            exe: tool_name,
-            toolchain,
-            tool_dir: tool_dir.to_string_lossy().to_string(),
-            possible_executables: possible_exes.to_vec(),
-            download: false,
-        }))?;
-    }
-
-    let cache_dir = etcetera::choose_base_strategy()?
-        .cache_dir()
-        .join("tree-sitter");
-    fs::create_dir_all(&cache_dir).map_err(|error| {
-        LoaderError::IO(IoError {
-            error,
-            path: Some(cache_dir.to_string_lossy().to_string()),
-        })
-    })?;
-
-    let tool_dir = cache_dir.join(toolchain).join("bin");
-
-    for exe in possible_exes {
-        let tool_exe = tool_dir.join(exe);
-        if tool_exe.exists() {
-            return Ok(Some(tool_exe));
-        }
-    }
-
-    Ok(None)
-}
-
-fn download_tool(
-    tool_name: &'static str,
-    toolchain: &'static str,
-    filename: &str,
-    url: &str,
-    possible_exes: &[&'static str],
-) -> Result<PathBuf> {
-    let cache_dir = etcetera::choose_base_strategy()?
-        .cache_dir()
-        .join("tree-sitter");
-    let tool_dir = cache_dir.join(toolchain);
-
-    fs::create_dir_all(&tool_dir).map_err(|error| {
-        LoaderError::IO(IoError {
-            error,
-            path: Some(tool_dir.to_string_lossy().to_string()),
-        })
-    })?;
-
-    eprintln!("Downloading {tool_name} from {url}...");
-    let temp_tar_path = cache_dir.join(filename);
-
-    let status = Command::new("curl")
-        .arg("-f")
-        .arg("-L")
-        .arg("-o")
-        .arg(&temp_tar_path)
-        .arg(url)
-        .status()
-        .map_err(|e| LoaderError::Curl(url.to_string(), e))?;
-
-    if !status.success() {
-        Err(LoaderError::WasmToolDownload {
-            tool: tool_name,
-            url: url.to_string(),
-        })?;
-    }
-
-    eprintln!("Extracting {tool_name} to {}...", tool_dir.display());
-    extract_tar_gz_with_strip(&temp_tar_path, &tool_dir)?;
-
-    fs::remove_file(temp_tar_path).ok();
-    for exe in possible_exes {
-        let tool_exe = tool_dir.join("bin").join(exe);
-        if tool_exe.exists() {
-            return Ok(tool_exe);
-        }
-    }
-
-    Err(LoaderError::WasmTool(WasmToolError {
-        exe: tool_name,
-        toolchain,
-        tool_dir: tool_dir.to_string_lossy().to_string(),
-        possible_executables: possible_exes.to_vec(),
-        download: true,
-    }))?
-}
-
-/// Extracts a tar.gz archive with `tar`, stripping the first path component.
-fn extract_tar_gz_with_strip(archive_path: &Path, destination: &Path) -> Result<()> {
-    let status = Command::new("tar")
-        .arg("-xzf")
-        .arg(archive_path)
-        .arg("--strip-components=1")
-        .arg("-C")
-        .arg(destination)
-        .status()
-        .map_err(|e| LoaderError::Tar(archive_path.to_string_lossy().to_string(), e))?;
-
-    if !status.success() {
-        Err(LoaderError::Extraction(
-            archive_path.to_string_lossy().to_string(),
-            destination.to_string_lossy().to_string(),
-        ))?;
-    }
-
-    Ok(())
-}
-
-pub fn run_wasm_stdlib() -> Result<()> {
-    let export_flags = include_str!("../../../lib/src/wasm/stdlib-symbols.txt")
-        .lines()
-        .map(|line| format!("-Wl,--export={}", &line[1..line.len() - 2]))
-        .collect::<Vec<String>>();
-
-    let clang_exe = ensure_wasi_sdk_exists()?;
-
-    let compile_output = Command::new(&clang_exe)
-        .args([
-            "-o",
-            "stdlib.wasm",
-            "-Os",
-            "-fPIC",
-            "-DTREE_SITTER_FEATURE_WASM",
-            "-Wl,--no-entry",
-            "-Wl,--stack-first",
-            "-Wl,-z",
-            "-Wl,stack-size=65536",
-            "-Wl,--import-undefined",
-            "-Wl,--import-memory",
-            "-Wl,--import-table",
-            "-Wl,--strip-debug",
-            "-Wl,--export=__wasm_call_ctors",
-            "-Wl,--export=__stack_pointer",
-            "-Wl,--export=reset_heap",
-        ])
-        .args(&export_flags)
-        .arg("crates/language/wasm/src/stdlib.c")
-        .arg("crates/language/wasm/src/wctype.c")
-        .output()?;
-
-    bail_on_err(
-        &compile_output,
-        "Failed to compile the Tree-sitter Wasm stdlib",
-    )?;
-
-    let wasm_opt_exe = ensure_binaryen_exists()?;
-
-    let opt_output = Command::new(&wasm_opt_exe)
-        .args(["stdlib.wasm", "-Os", "-o", "stdlib.wasm"])
-        .output()?;
-
-    bail_on_err(
-        &opt_output,
-        "Failed to optimize the Tree-sitter Wasm stdlib",
-    )?;
-
-    let xxd = Command::new("xxd")
-        .args(["-C", "-i", "stdlib.wasm"])
-        .output()?;
-
-    bail_on_err(
-        &xxd,
-        "Failed to run xxd on the compiled Tree-sitter Wasm stdlib",
-    )?;
-
-    fs::write("lib/src/wasm/wasm-stdlib.h", xxd.stdout)?;
-
-    fs::rename("stdlib.wasm", "target/stdlib.wasm")?;
 
     Ok(())
 }

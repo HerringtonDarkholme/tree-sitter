@@ -76,7 +76,7 @@ ts_parser_included_ranges	pub unsafe extern "C" fn ts_parser_included_ranges( se
 ts_parser_language	pub unsafe extern "C" fn ts_parser_language(self_: *const TSParser) -> *const TSLanguage
 ts_parser_logger	pub unsafe extern "C" fn ts_parser_logger(self_: *const TSParser) -> TSLogger
 ts_parser_new	pub unsafe extern "C" fn ts_parser_new() -> *mut TSParser
-ts_parser_parse	/// Parse one input document and return a new tree. /// /// The driver owns the outer GLR loop: /// - initialize lexer, external scanner, and tree arena; /// - process every active stack version until none can advance normally; /// - condense/merge/prune stack versions; /// - recover when all versions are paused at errors; /// - balance the accepted tree and transfer arena ownership into `TSTree`. /// /// Returning null means parsing was canceled, scanner setup failed, or wasm /// support was unavailable. In all cases parser-owned scratch state is reset /// before returning unless the parse is intentionally resumable. pub unsafe extern "C-unwind" fn ts_parser_parse( self_: *mut TSParser, old_tree: *const TSTree, input: TSInput, ) -> *mut TSTree
+ts_parser_parse	/// Parse one input document and return a new tree. /// /// The driver owns the outer GLR loop: /// - initialize lexer, external scanner, and tree arena; /// - process every active stack version until none can advance normally; /// - condense/merge/prune stack versions; /// - recover when all versions are paused at errors; /// - balance the accepted tree and transfer arena ownership into `TSTree`. /// /// Returning null means parsing was canceled. Parser-owned scratch state is /// reset before returning unless the parse is intentionally resumable. pub unsafe extern "C-unwind" fn ts_parser_parse( self_: *mut TSParser, old_tree: *const TSTree, input: TSInput, ) -> *mut TSTree
 ts_parser_parse_string	pub unsafe extern "C-unwind" fn ts_parser_parse_string( self_: *mut TSParser, old_tree: *const TSTree, string: *const i8, length: u32, ) -> *mut TSTree
 ts_parser_parse_string_encoding	pub unsafe extern "C-unwind" fn ts_parser_parse_string_encoding( self_: *mut TSParser, old_tree: *const TSTree, string: *const i8, length: u32, encoding: TSInputEncoding, ) -> *mut TSTree
 ts_parser_parse_with_options	pub unsafe extern "C-unwind" fn ts_parser_parse_with_options( self_: *mut TSParser, old_tree: *const TSTree, input: TSInput, parse_options: TSParseOptions, ) -> *mut TSTree
@@ -85,8 +85,6 @@ ts_parser_reset	pub unsafe extern "C" fn ts_parser_reset(self_: *mut TSParser)
 ts_parser_set_included_ranges	pub unsafe extern "C" fn ts_parser_set_included_ranges( self_: *mut TSParser, ranges: *const TSRange, count: u32, ) -> bool
 ts_parser_set_language	pub unsafe extern "C" fn ts_parser_set_language( self_: *mut TSParser, language: *const TSLanguage, ) -> bool
 ts_parser_set_logger	pub unsafe extern "C" fn ts_parser_set_logger(self_: *mut TSParser, logger: TSLogger)
-ts_parser_set_wasm_store	pub unsafe extern "C" fn ts_parser_set_wasm_store(self_: *mut TSParser, store: *mut TSWasmStore)
-ts_parser_take_wasm_store	pub unsafe extern "C" fn ts_parser_take_wasm_store(self_: *mut TSParser) -> *mut TSWasmStore
 ts_point_edit	pub unsafe extern "C" fn ts_point_edit( point: *mut TSPoint, byte: *mut u32, edit: *const TSInputEdit, )
 ts_query_capture_count	pub const unsafe extern "C" fn ts_query_capture_count(self_: *const TSQuery) -> u32
 ts_query_capture_name_for_id	pub unsafe extern "C" fn ts_query_capture_name_for_id( self_: *const TSQuery, index: u32, length: *mut u32, ) -> *const i8

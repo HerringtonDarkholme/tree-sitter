@@ -1,5 +1,5 @@
 # The tree-sitter library is built by cargo: the Rust core in lib/src_rust plus
-# the remaining C shims (lib/src/wasm_store.c). The former pure-C library build
+# the remaining variadic lexer logging shim. The former pure-C library build
 # (libtree-sitter.a/.so, install/uninstall, the amalgamation, and the CMake
 # build) has been retired because the core no longer lives in C. To build or
 # distribute the library, use cargo (see lib/Cargo.toml `crate-type`, which

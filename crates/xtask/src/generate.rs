@@ -66,7 +66,7 @@ pub fn run_fixtures(args: &GenerateFixtures) -> Result<()> {
 
 pub fn run_bindings() -> Result<()> {
     let output = Command::new("cargo")
-        .args(["metadata", "--format-version", "1"])
+        .args(["metadata", "--format-version", "1", "--no-deps"])
         .output()
         .unwrap();
 
@@ -111,7 +111,6 @@ pub fn run_bindings() -> Result<()> {
         .no_copy(no_copy.join("|"))
         .prepend_enum_name(false)
         .use_core()
-        .clang_arg("-D TREE_SITTER_FEATURE_WASM")
         .rust_target(RustTarget::from_str(rust_version).unwrap())
         .generate()
         .expect("Failed to generate bindings");

@@ -12,7 +12,6 @@ mod migration_gate;
 mod perf_gate;
 mod test;
 mod test_schema;
-mod upgrade_wasmtime;
 
 use std::{path::Path, process::Command};
 
@@ -31,8 +30,6 @@ enum Commands {
     /// Compile the Tree-sitter Wasm library. This will create two files in the
     /// `lib/binding_web` directory: `web-tree-sitter.js` and `web-tree-sitter.wasm`.
     BuildWasm(BuildWasm),
-    /// Compile the Tree-sitter Wasm standard library.
-    BuildWasmStdlib,
     /// Bumps the version of the workspace.
     BumpVersion(BumpVersion),
     /// Checks that Wasm exports are synced.
@@ -61,8 +58,6 @@ enum Commands {
     Test(Test),
     /// Run the Wasm test suite
     TestWasm,
-    /// Upgrade the wasmtime dependency.
-    UpgradeWasmtime(UpgradeWasmtime),
 }
 
 #[derive(Args)]
@@ -294,16 +289,6 @@ struct Test {
     /// Don't capture the output
     #[arg(long)]
     nocapture: bool,
-    /// Enable the Wasm tests.
-    #[arg(long, short)]
-    wasm: bool,
-}
-
-#[derive(Args)]
-struct UpgradeWasmtime {
-    /// The version to upgrade to.
-    #[arg(long, short)]
-    version: Version,
 }
 
 const BUILD_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -359,7 +344,6 @@ fn run() -> Result<()> {
         Commands::AstGrepGate(ast_grep_gate_options) => ast_grep_gate::run(&ast_grep_gate_options)?,
         Commands::Benchmark(benchmark_options) => benchmark::run(&benchmark_options)?,
         Commands::BuildWasm(build_wasm_options) => build_wasm::run_wasm(&build_wasm_options)?,
-        Commands::BuildWasmStdlib => build_wasm::run_wasm_stdlib()?,
         Commands::BumpVersion(bump_options) => bump::run(bump_options)?,
         Commands::CheckWasmExports(check_options) => check_wasm_exports::run(&check_options)?,
         Commands::Clippy(clippy_options) => clippy::run(&clippy_options)?,
@@ -380,9 +364,6 @@ fn run() -> Result<()> {
         Commands::PerfGate(perf_gate_options) => perf_gate::run(&perf_gate_options)?,
         Commands::Test(test_options) => test::run(&test_options)?,
         Commands::TestWasm => test::run_wasm()?,
-        Commands::UpgradeWasmtime(upgrade_wasmtime_options) => {
-            upgrade_wasmtime::run(&upgrade_wasmtime_options)?;
-        }
     }
 
     Ok(())

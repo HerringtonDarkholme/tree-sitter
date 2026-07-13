@@ -53,10 +53,6 @@ Compile the parser with debug flags enabled. This is useful when debugging issue
 Outputs logs of the graphs of the stack and parse trees during parsing, as well as the actual parsing and lexing message.
 The graphs are constructed with [graphviz dot][dot], and the output is written to `log.html`.
 
-### `--wasm`
-
-Compile and run the parser as a Wasm module (only if the tree-sitter CLI was built with `--features=wasm`).
-
 ### `--open-log`
 
 When using the `--debug-graph` option, open the log file in the default browser.

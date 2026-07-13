@@ -8,7 +8,7 @@
 # The tree-sitter core now lives in Rust (lib/src_rust). The `tree-sitter` crate
 # is rlib-only (like upstream); the standalone C library is produced by asking
 # cargo for the `cdylib` + `staticlib` crate-types explicitly, which emits
-# libtree_sitter.{a,so,dylib} (Rust core + the wasm_store.c shim). This
+# libtree_sitter.{a,so,dylib} (Rust core + the lexer logging shim). This
 # derivation builds that library and installs it with the public header and
 # pkg-config file.
 #

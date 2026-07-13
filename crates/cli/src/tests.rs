@@ -14,9 +14,6 @@ mod test_tags_test;
 mod text_provider_test;
 mod tree_test;
 
-#[cfg(feature = "wasm")]
-mod wasm_language_test;
-
 use tree_sitter_generate::GenerateResult;
 
 pub use crate::fuzz::{

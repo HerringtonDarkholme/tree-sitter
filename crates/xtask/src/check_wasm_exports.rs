@@ -16,7 +16,7 @@ use notify_debouncer_full::new_debouncer;
 
 use crate::{bail_on_err, watch_wasm, CheckWasmExports};
 
-const EXCLUDES: [&str; 25] = [
+const EXCLUDES: [&str; 23] = [
     // Unneeded because the JS side has its own way of implementing it
     "ts_node_child_by_field_name",
     "ts_node_edit",
@@ -31,8 +31,6 @@ const EXCLUDES: [&str; 25] = [
     "ts_set_allocator",
     "ts_parser_print_dot_graphs",
     "ts_tree_print_dot_graph",
-    "ts_parser_set_wasm_store",
-    "ts_parser_take_wasm_store",
     "ts_parser_language",
     "ts_node_language",
     "ts_tree_language",

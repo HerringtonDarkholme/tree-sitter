@@ -3,7 +3,7 @@ use core::ptr;
 
 use crate::ffi::{
     TSInput, TSInputEncoding, TSInputEncodingUTF8, TSLanguage, TSLogTypeParse, TSLogger,
-    TSParseOptions, TSParseState, TSPoint, TSRange, TSStateId, TSSymbol, TSWasmStore,
+    TSParseOptions, TSParseState, TSPoint, TSRange, TSStateId, TSSymbol,
 };
 
 use super::alloc::{free, malloc};
@@ -15,9 +15,9 @@ use super::language::{
     language_actions, language_enabled_external_tokens, language_full, language_has_actions,
     language_has_reduce_action, language_is_reserved_word, language_lex_mode_for_state,
     language_lookup, language_table_entry, ts_language_copy, ts_language_delete,
-    ts_language_next_state, ts_language_symbol_name, TSLexer, TSLexerMode, TSParseAction,
-    TableEntry, TSPARSE_ACTION_TYPE_ACCEPT, TSPARSE_ACTION_TYPE_RECOVER,
-    TSPARSE_ACTION_TYPE_REDUCE, TSPARSE_ACTION_TYPE_SHIFT,
+    ts_language_next_state, ts_language_symbol_name, TSLexerMode, TSParseAction, TableEntry,
+    TSPARSE_ACTION_TYPE_ACCEPT, TSPARSE_ACTION_TYPE_RECOVER, TSPARSE_ACTION_TYPE_REDUCE,
+    TSPARSE_ACTION_TYPE_SHIFT,
 };
 use super::length::{length_sub, length_zero, Length};
 use super::lexer::{
@@ -144,36 +144,6 @@ use super::utils::{ptr_mut, ptr_ref};
 // ---------------------------------------------------------------------------
 
 extern "C" {
-    // wasm_store.c (still in C)
-    fn ts_language_is_wasm(self_: *const TSLanguage) -> bool;
-    fn ts_wasm_store_start(
-        self_: *mut TSWasmStore,
-        lexer: *mut TSLexer,
-        language: *const TSLanguage,
-    ) -> bool;
-    fn ts_wasm_store_reset(self_: *mut TSWasmStore);
-    fn ts_wasm_store_delete(self_: *mut TSWasmStore);
-    fn ts_wasm_store_has_error(self_: *const TSWasmStore) -> bool;
-    fn ts_wasm_store_call_lex_main(self_: *mut TSWasmStore, state: u16) -> bool;
-    fn ts_wasm_store_call_lex_keyword(self_: *mut TSWasmStore, state: u16) -> bool;
-    fn ts_wasm_store_call_scanner_create(self_: *mut TSWasmStore) -> u32;
-    fn ts_wasm_store_call_scanner_serialize(
-        self_: *mut TSWasmStore,
-        scanner_address: u32,
-        buffer: *mut i8,
-    ) -> u32;
-    fn ts_wasm_store_call_scanner_deserialize(
-        self_: *mut TSWasmStore,
-        scanner_address: u32,
-        buffer: *const i8,
-        length: u32,
-    );
-    fn ts_wasm_store_call_scanner_scan(
-        self_: *mut TSWasmStore,
-        scanner_address: u32,
-        valid_tokens_ix: u32,
-    ) -> bool;
-
     // libc
     fn snprintf(buf: *mut i8, size: usize, fmt: *const i8, ...) -> i32;
     fn fprintf(f: *mut c_void, fmt: *const i8, ...) -> i32;
@@ -384,8 +354,6 @@ pub struct TSParser {
     tree_pool: SubtreePool,
     /// Active language tables and callbacks.
     language: *const TSLanguage,
-    /// Optional wasm runtime for wasm languages.
-    wasm_store: *mut TSWasmStore,
     /// Scratch set of reductions considered during recovery.
     reduce_actions: ReduceActionSet,
     /// Best accepted root found so far.
@@ -414,8 +382,6 @@ pub struct TSParser {
     parse_options: TSParseOptions,
     /// Mutable status passed to the progress callback.
     parse_state: TSParseState,
-    /// Set when an external scanner reports an error.
-    has_scanner_error: bool,
     /// Set when balancing was canceled by the progress callback.
     canceled_balancing: bool,
     /// Set once any accepted tree contains an error.
@@ -591,19 +557,11 @@ unsafe fn parser_better_version_exists(
 // ---------------------------------------------------------------------------
 
 unsafe fn parser_call_main_lex_fn(self_: &mut TSParser, lex_mode: TSLexerMode) -> bool {
-    if ts_language_is_wasm(self_.language) {
-        ts_wasm_store_call_lex_main(self_.wasm_store, lex_mode.lex_state)
-    } else {
-        (language_full(self_.language).lex_fn.unwrap())(&mut self_.lexer.data, lex_mode.lex_state)
-    }
+    (language_full(self_.language).lex_fn.unwrap())(&mut self_.lexer.data, lex_mode.lex_state)
 }
 
 unsafe fn parser_call_keyword_lex_fn(self_: &mut TSParser) -> bool {
-    if ts_language_is_wasm(self_.language) {
-        ts_wasm_store_call_lex_keyword(self_.wasm_store, 0)
-    } else {
-        (language_full(self_.language).keyword_lex_fn.unwrap())(&mut self_.lexer.data, 0)
-    }
+    (language_full(self_.language).keyword_lex_fn.unwrap())(&mut self_.lexer.data, 0)
 }
 
 // ---------------------------------------------------------------------------
@@ -617,23 +575,14 @@ unsafe fn parser_external_scanner_create(self_: &mut TSParser) {
             return;
         }
 
-        if ts_language_is_wasm(self_.language) {
-            self_.external_scanner_payload =
-                ts_wasm_store_call_scanner_create(self_.wasm_store) as usize as *mut c_void;
-            if ts_wasm_store_has_error(self_.wasm_store) {
-                self_.has_scanner_error = true;
-            }
-        } else if let Some(create_fn) = lang.external_scanner.create {
+        if let Some(create_fn) = lang.external_scanner.create {
             self_.external_scanner_payload = create_fn();
         }
     }
 }
 
 unsafe fn parser_external_scanner_destroy(self_: &mut TSParser) {
-    if !self_.language.is_null()
-        && !self_.external_scanner_payload.is_null()
-        && !ts_language_is_wasm(self_.language)
-    {
+    if !self_.language.is_null() && !self_.external_scanner_payload.is_null() {
         let lang = language_full(self_.language);
         if let Some(destroy_fn) = lang.external_scanner.destroy {
             destroy_fn(self_.external_scanner_payload);
@@ -643,25 +592,13 @@ unsafe fn parser_external_scanner_destroy(self_: &mut TSParser) {
 }
 
 unsafe fn parser_external_scanner_serialize(self_: &mut TSParser) -> u32 {
-    let length;
-    if ts_language_is_wasm(self_.language) {
-        length = ts_wasm_store_call_scanner_serialize(
-            self_.wasm_store,
-            self_.external_scanner_payload as usize as u32,
-            self_.lexer.debug_buffer.as_mut_ptr().cast::<i8>(),
-        );
-        if ts_wasm_store_has_error(self_.wasm_store) {
-            self_.has_scanner_error = true;
-        }
-    } else {
-        length = (language_full(self_.language)
-            .external_scanner
-            .serialize
-            .unwrap())(
-            self_.external_scanner_payload,
-            self_.lexer.debug_buffer.as_mut_ptr().cast::<i8>(),
-        );
-    }
+    let length = (language_full(self_.language)
+        .external_scanner
+        .serialize
+        .unwrap())(
+        self_.external_scanner_payload,
+        self_.lexer.debug_buffer.as_mut_ptr().cast::<i8>(),
+    );
     debug_assert!(length as usize <= TREE_SITTER_SERIALIZATION_BUFFER_SIZE);
     length
 }
@@ -674,22 +611,10 @@ unsafe fn parser_external_scanner_deserialize(self_: &mut TSParser, external_tok
         (ptr::null(), 0)
     };
 
-    if ts_language_is_wasm(self_.language) {
-        ts_wasm_store_call_scanner_deserialize(
-            self_.wasm_store,
-            self_.external_scanner_payload as usize as u32,
-            data.cast::<i8>(),
-            length,
-        );
-        if ts_wasm_store_has_error(self_.wasm_store) {
-            self_.has_scanner_error = true;
-        }
-    } else {
-        (language_full(self_.language)
-            .external_scanner
-            .deserialize
-            .unwrap())(self_.external_scanner_payload, data.cast::<i8>(), length);
-    }
+    (language_full(self_.language)
+        .external_scanner
+        .deserialize
+        .unwrap())(self_.external_scanner_payload, data.cast::<i8>(), length);
 }
 
 unsafe fn parser_external_scanner_scan(
@@ -697,25 +622,13 @@ unsafe fn parser_external_scanner_scan(
     external_lex_state: TSStateId,
 ) -> bool {
     let lang = language_full(self_.language);
-    if ts_language_is_wasm(self_.language) {
-        let result = ts_wasm_store_call_scanner_scan(
-            self_.wasm_store,
-            self_.external_scanner_payload as usize as u32,
-            u32::from(external_lex_state) * lang.external_token_count,
-        );
-        if ts_wasm_store_has_error(self_.wasm_store) {
-            self_.has_scanner_error = true;
-        }
-        result
-    } else {
-        let valid_external_tokens =
-            language_enabled_external_tokens(self_.language, u32::from(external_lex_state));
-        (lang.external_scanner.scan.unwrap())(
-            self_.external_scanner_payload,
-            &mut self_.lexer.data,
-            valid_external_tokens,
-        )
-    }
+    let valid_external_tokens =
+        language_enabled_external_tokens(self_.language, u32::from(external_lex_state));
+    (lang.external_scanner.scan.unwrap())(
+        self_.external_scanner_payload,
+        &mut self_.lexer.data,
+        valid_external_tokens,
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -939,9 +852,6 @@ unsafe fn parser_lex(
             lexer_start(&mut self_.lexer);
             parser_external_scanner_deserialize(self_, external_token);
             found_token = parser_external_scanner_scan(self_, lex_mode.external_lex_state);
-            if self_.has_scanner_error {
-                return NULL_SUBTREE;
-            }
             lexer_finish(&mut self_.lexer, &mut lookahead_end_byte);
 
             if found_token {
@@ -1154,11 +1064,8 @@ unsafe fn parser_lex_lookahead(
     last_external_token: Subtree,
     lookahead: &mut Subtree,
     table_entry: &mut TableEntry,
-) -> bool {
+) {
     *lookahead = parser_lex(self_, version, state);
-    if self_.has_scanner_error {
-        return false;
-    }
 
     if !lookahead.ptr.is_null() {
         parser_set_cached_token(self_, position, last_external_token, *lookahead);
@@ -1171,8 +1078,6 @@ unsafe fn parser_lex_lookahead(
     } else {
         language_table_entry(self_.language, state, TS_BUILTIN_SYM_END, table_entry);
     }
-
-    true
 }
 
 // ---------------------------------------------------------------------------
@@ -2422,7 +2327,7 @@ unsafe fn parser_advance(self_: &mut TSParser, version: StackVersion) -> bool {
     loop {
         if needs_lex {
             needs_lex = false;
-            if !parser_lex_lookahead(
+            parser_lex_lookahead(
                 self_,
                 version,
                 state,
@@ -2430,9 +2335,7 @@ unsafe fn parser_advance(self_: &mut TSParser, version: StackVersion) -> bool {
                 last_external_token,
                 &mut lookahead,
                 &mut table_entry,
-            ) {
-                return false;
-            }
+            );
         }
 
         // If a progress callback was provided, then check every
@@ -2695,7 +2598,6 @@ pub unsafe extern "C" fn ts_parser_new() -> *mut TSParser {
             stack: ptr::null_mut(),
             tree_pool: subtree_pool_new(32),
             language: ptr::null(),
-            wasm_store: ptr::null_mut(),
             reduce_actions: array_new(),
             finished_tree: NULL_SUBTREE,
             reduce_builder: stack_pop_builder_new(),
@@ -2715,7 +2617,6 @@ pub unsafe extern "C" fn ts_parser_new() -> *mut TSParser {
             operation_count: 0,
             parse_options: parse_options_none(),
             parse_state: parse_state_empty(),
-            has_scanner_error: false,
             canceled_balancing: false,
             has_error: false,
         },
@@ -2743,7 +2644,6 @@ pub unsafe extern "C" fn ts_parser_delete(self_: *mut TSParser) {
         tree_arena_release(parser.tree_arena);
         parser.tree_arena = ptr::null_mut();
     }
-    ts_wasm_store_delete(parser.wasm_store);
     lexer_delete(&mut parser.lexer);
     parser_set_cached_token(parser, 0, NULL_SUBTREE, NULL_SUBTREE);
     subtree_pool_delete(&mut parser.tree_pool);
@@ -2778,13 +2678,6 @@ pub unsafe extern "C" fn ts_parser_set_language(
         let language_data = language_full(language);
         if language_data.abi_version > TREE_SITTER_LANGUAGE_VERSION
             || language_data.abi_version < TREE_SITTER_MIN_COMPATIBLE_LANGUAGE_VERSION
-        {
-            return false;
-        }
-
-        if ts_language_is_wasm(language)
-            && (parser.wasm_store.is_null()
-                || !ts_wasm_store_start(parser.wasm_store, &mut parser.lexer.data, language))
         {
             return false;
         }
@@ -2853,9 +2746,6 @@ pub unsafe extern "C" fn ts_parser_included_ranges(
 pub unsafe extern "C" fn ts_parser_reset(self_: *mut TSParser) {
     let parser = ptr_mut(self_);
     parser_external_scanner_destroy(parser);
-    if !parser.wasm_store.is_null() {
-        ts_wasm_store_reset(parser.wasm_store);
-    }
 
     parser.deterministic_reduction_count = 0;
     lexer_reset(&mut parser.lexer, length_zero());
@@ -2870,7 +2760,6 @@ pub unsafe extern "C" fn ts_parser_reset(self_: *mut TSParser) {
         parser.tree_arena = ptr::null_mut();
     }
     parser.accept_count = 0;
-    parser.has_scanner_error = false;
     parser.has_error = false;
     parser.canceled_balancing = false;
     parser.parse_options = parse_options_none();
@@ -2891,9 +2780,8 @@ pub unsafe extern "C" fn ts_parser_reset(self_: *mut TSParser) {
 /// - recover when all versions are paused at errors;
 /// - balance the accepted tree and transfer arena ownership into `TSTree`.
 ///
-/// Returning null means parsing was canceled, scanner setup failed, or wasm
-/// support was unavailable. In all cases parser-owned scratch state is reset
-/// before returning unless the parse is intentionally resumable.
+/// Returning null means parsing was canceled. Parser-owned scratch state is
+/// reset before returning unless the parse is intentionally resumable.
 pub unsafe extern "C-unwind" fn ts_parser_parse(
     self_: *mut TSParser,
     old_tree: *const TSTree,
@@ -2901,16 +2789,8 @@ pub unsafe extern "C-unwind" fn ts_parser_parse(
 ) -> *mut TSTree {
     let _ = old_tree;
     let parser = ptr_mut(self_);
-    let mut result: *mut TSTree = ptr::null_mut();
     if parser.language.is_null() || input.read.is_none() {
         return ptr::null_mut();
-    }
-
-    if ts_language_is_wasm(parser.language) {
-        if parser.wasm_store.is_null() {
-            return ptr::null_mut();
-        }
-        ts_wasm_store_start(parser.wasm_store, &mut parser.lexer.data, parser.language);
     }
 
     lexer_set_input(&mut parser.lexer, input);
@@ -2929,7 +2809,7 @@ pub unsafe extern "C-unwind" fn ts_parser_parse(
             LOG!(self_, c"done".as_ptr().cast::<i8>());
             LOG_TREE!(self_, parser.finished_tree);
 
-            result = parser_take_finished_tree(parser);
+            let result = parser_take_finished_tree(parser);
 
             // goto exit
             ts_parser_reset(self_);
@@ -2937,11 +2817,6 @@ pub unsafe extern "C-unwind" fn ts_parser_parse(
         }
     } else {
         parser_external_scanner_create(parser);
-        if parser.has_scanner_error {
-            // goto exit
-            ts_parser_reset(self_);
-            return result;
-        }
         parser.tree_arena = tree_arena_new();
         LOG!(self_, c"new_parse".as_ptr().cast::<i8>());
     }
@@ -2970,11 +2845,6 @@ pub unsafe extern "C-unwind" fn ts_parser_parse(
                 );
 
                 if !parser_advance(parser, version) {
-                    if parser.has_scanner_error {
-                        // goto exit
-                        ts_parser_reset(self_);
-                        return result;
-                    }
                     return ptr::null_mut();
                 }
 
@@ -3019,7 +2889,7 @@ pub unsafe extern "C-unwind" fn ts_parser_parse(
     LOG!(self_, c"done".as_ptr().cast::<i8>());
     LOG_TREE!(self_, parser.finished_tree);
 
-    result = parser_take_finished_tree(parser);
+    let result = parser_take_finished_tree(parser);
 
     // exit:
     ts_parser_reset(self_);
@@ -3077,36 +2947,4 @@ pub unsafe extern "C-unwind" fn ts_parser_parse_string_encoding(
             decode: None,
         },
     )
-}
-
-// ---------------------------------------------------------------------------
-// Exported functions — WASM
-// ---------------------------------------------------------------------------
-
-#[no_mangle]
-pub unsafe extern "C" fn ts_parser_set_wasm_store(self_: *mut TSParser, store: *mut TSWasmStore) {
-    let parser = ptr_ref(self_);
-    if !parser.language.is_null() && ts_language_is_wasm(parser.language) {
-        // Copy the assigned language into the new store.
-        let copy = ts_language_copy(parser.language);
-        ts_parser_set_language(self_, copy);
-        ts_language_delete(copy);
-    }
-
-    let parser = ptr_mut(self_);
-    ts_wasm_store_delete(parser.wasm_store);
-    parser.wasm_store = store;
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn ts_parser_take_wasm_store(self_: *mut TSParser) -> *mut TSWasmStore {
-    let parser = ptr_ref(self_);
-    if !parser.language.is_null() && ts_language_is_wasm(parser.language) {
-        ts_parser_set_language(self_, ptr::null());
-    }
-
-    let parser = ptr_mut(self_);
-    let result = parser.wasm_store;
-    parser.wasm_store = ptr::null_mut();
-    result
 }

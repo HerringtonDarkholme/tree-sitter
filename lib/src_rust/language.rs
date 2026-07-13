@@ -368,11 +368,6 @@ const unsafe fn parse_action_at(language: &TSLanguageFull, index: usize) -> *con
 // ---------------------------------------------------------------------------
 
 extern "C" {
-    // wasm_store.c — only called when wasm feature is active
-    fn ts_language_is_wasm(self_: *const TSLanguage) -> bool;
-    fn ts_wasm_language_retain(self_: *const TSLanguage);
-    fn ts_wasm_language_release(self_: *const TSLanguage);
-
     fn fputc(c: i32, stream: *mut c_void) -> i32;
     fn fputs(s: *const i8, stream: *mut c_void) -> i32;
 }
@@ -698,17 +693,12 @@ pub unsafe fn language_write_symbol_as_dot_string(
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_language_copy(self_: *const TSLanguage) -> *const TSLanguage {
-    if !self_.is_null() && ts_language_is_wasm(self_) {
-        ts_wasm_language_retain(self_);
-    }
     self_
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_language_delete(self_: *const TSLanguage) {
-    if !self_.is_null() && ts_language_is_wasm(self_) {
-        ts_wasm_language_release(self_);
-    }
+    let _ = self_;
 }
 
 #[no_mangle]

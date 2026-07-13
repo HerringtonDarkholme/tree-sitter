@@ -31,19 +31,10 @@ fn main() {
         println!("cargo:rustc-cfg=tree_sitter_c_core");
     }
 
-    println!("cargo:rerun-if-env-changed=CARGO_FEATURE_WASM");
-    if env::var("CARGO_FEATURE_WASM").is_ok() {
-        config
-            .define("TREE_SITTER_FEATURE_WASM", "")
-            .define("static_assert(...)", "")
-            .include(env::var("DEP_WASMTIME_C_API_INCLUDE").unwrap());
-    }
-
     let manifest_path = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     let include_path = manifest_path.join("include");
     let src_path = manifest_path.join("src");
     let core_src_path = core_impl.source_path(&src_path);
-    let wasm_path = core_src_path.join("wasm");
 
     // Only bare wasm32-unknown-unknown lacks a libc and needs the bundled
     // stdlib shims. wasm32-unknown-emscripten ships a full libc, so adding them
@@ -71,7 +62,6 @@ fn main() {
             .flag_if_supported("-Wno-unused-parameter")
             .flag_if_supported("-Wno-incompatible-pointer-types")
             .include(&core_src_path)
-            .include(&wasm_path)
             .include(&include_path)
             .define("_POSIX_C_SOURCE", "200112L")
             .define("_DEFAULT_SOURCE", None)
@@ -115,7 +105,7 @@ impl CoreImpl {
     const fn library_source(self) -> &'static str {
         match self {
             // Both cores compile the `lib.c` amalgamation. For the Rust core
-            // `lib.c` wraps the remaining C (wasm_store.c + lexer_log_shim.c);
+            // `lib.c` wraps the remaining variadic lexer logging shim;
             // the C core's pre-rewrite tree has the full amalgamation.
             Self::Rust | Self::C => "lib.c",
         }
@@ -188,7 +178,6 @@ fn generate_bindings(out_dir: &std::path::Path) {
         .no_copy(no_copy.join("|"))
         .prepend_enum_name(false)
         .use_core()
-        .clang_arg("-D TREE_SITTER_FEATURE_WASM")
         .rust_target(RustTarget::from_str(rust_version).unwrap())
         .generate()
         .expect("Failed to generate bindings");

@@ -106,9 +106,6 @@ pub fn run(args: &Test) -> Result<()> {
     } else {
         let mut cargo_cmd = Command::new("cargo");
         cargo_cmd.arg("test").arg("--all");
-        if args.wasm {
-            cargo_cmd.arg("--features").arg("wasm");
-        }
         if !test_flags.is_empty() {
             cargo_cmd.arg(&test_flags);
         }

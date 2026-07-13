@@ -517,20 +517,12 @@ links = "tree-sitter"
 [features]
 default = ["std"]
 std = ["regex/std", "regex/perf", "regex-syntax/unicode"]
-wasm = ["std", "wasmtime-c-api"]
 
 [dependencies]
 regex = {{ version = "1.11.3", default-features = false, features = ["unicode"] }}
 regex-syntax = {{ version = "0.8.6", default-features = false }}
 tree-sitter-language = "0.1"
 streaming-iterator = "0.1.9"
-
-[dependencies.wasmtime-c-api]
-version = "33.0.2"
-optional = true
-package = "wasmtime-c-api-impl"
-default-features = false
-features = ["cranelift", "gc-drc"]
 
 [build-dependencies]
 bindgen = {{ version = "0.72.0", optional = true }}

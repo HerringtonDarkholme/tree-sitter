@@ -24,7 +24,6 @@ path = "src/loader.rs"
 workspace = true
 
 [features]
-wasm = ["tree-sitter/wasm"]
 default = ["tree-sitter-highlight", "tree-sitter-tags"]
 
 [dependencies]

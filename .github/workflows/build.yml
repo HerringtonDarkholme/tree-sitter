@@ -44,11 +44,11 @@ jobs:
           - { platform: macos-x64       , target: x86_64-apple-darwin           , os: macos-15-intel   }
           - { platform: wasm32          , target: wasm32-unknown-unknown        , os: ubuntu-24.04     }
 
-          # Extra features
-          - { platform: linux-arm64     , features: wasm }
-          - { platform: linux-x64       , features: wasm }
-          - { platform: macos-arm64     , features: wasm }
-          - { platform: macos-x64       , features: wasm }
+          # Web binding builds
+          - { platform: linux-arm64     , web: true }
+          - { platform: linux-x64       , web: true }
+          - { platform: macos-arm64     , web: true }
+          - { platform: macos-x64       , web: true }
 
           # Cross-compilation
           - { platform: linux-arm       , cross: true }
@@ -85,11 +85,11 @@ jobs:
         } >> $GITHUB_ENV
 
     - name: Get emscripten version
-      if: contains(matrix.features, 'wasm')
+      if: matrix.web
       run: printf 'EMSCRIPTEN_VERSION=%s\n' "$(<crates/loader/emscripten-version)" >> $GITHUB_ENV
 
     - name: Install Emscripten
-      if: contains(matrix.features, 'wasm')
+      if: matrix.web
       uses: mymindstorm/setup-emsdk@v14
       with:
         version: ${{ env.EMSCRIPTEN_VERSION }}
@@ -100,8 +100,8 @@ jobs:
         # The web bindings build the Rust core as a wasm32-unknown-emscripten
         # staticlib (replacing lib/src/lib.c), so that target is needed too, plus
         # llvm-tools for `rust-objcopy` (used to strip the staticlib's debug info).
-        target: ${{ matrix.target }}${{ contains(matrix.features, 'wasm') && ',wasm32-unknown-emscripten' || '' }}
-        components: ${{ contains(matrix.features, 'wasm') && 'llvm-tools' || '' }}
+        target: ${{ matrix.target }}${{ matrix.web && ',wasm32-unknown-emscripten' || '' }}
+        components: ${{ matrix.web && 'llvm-tools' || '' }}
 
     - name: Install cross-compilation toolchain
       if: matrix.cross
@@ -128,13 +128,8 @@ jobs:
           mingw-w64-x86_64-make
           mingw-w64-x86_64-cmake
 
-    # The wasm feature links wasmtime through the `wasmtime-c-api-impl` cargo
-    # dependency (build.rs reads DEP_WASMTIME_C_API_INCLUDE). The former
-    # CMake-built C library that needed a separate wasmtime build was retired, so
-    # no cmake wasmtime step is required here — cargo builds it as a dependency.
-
     - name: Build Wasm library
-      if: contains(matrix.features, 'wasm')
+      if: matrix.web
       shell: bash
       run: |
         cd lib/binding_web
@@ -151,7 +146,7 @@ jobs:
       run: cargo check --no-default-features --target='${{ matrix.target }}'
 
     - name: Build target
-      run: cargo build --release --target='${{ matrix.target }}' --features='${{ matrix.features }}' $PACKAGE
+      run: cargo build --release --target='${{ matrix.target }}' $PACKAGE
       env:
         PACKAGE: ${{ matrix.platform == 'wasm32' && '-p tree-sitter' || '' }}
 
@@ -161,7 +156,7 @@ jobs:
       # The crate is rlib-only (like upstream); the C core is now Rust, so request
       # the C-library crate-types explicitly here instead of compiling lib/src/*.c.
       # This replaces the retired per-platform make/CMake C-library builds.
-      run: cargo rustc -p tree-sitter --release --target='${{ matrix.target }}' --features='${{ matrix.features }}' --crate-type cdylib --crate-type staticlib
+      run: cargo rustc -p tree-sitter --release --target='${{ matrix.target }}' --crate-type cdylib --crate-type staticlib
 
     - name: Cache fixtures
       id: cache
@@ -177,7 +172,7 @@ jobs:
       run: cargo run -p xtask --target='${{ matrix.target }}' -- generate-fixtures
 
     - name: Generate Wasm fixtures
-      if: inputs.run-test && !matrix.no-run && contains(matrix.features, 'wasm') && steps.cache.outputs.cache-hit != 'true'
+      if: inputs.run-test && !matrix.no-run && matrix.web && steps.cache.outputs.cache-hit != 'true'
       run: cargo run -p xtask --target='${{ matrix.target }}' -- generate-fixtures --wasm
 
     - name: Run main tests
@@ -191,10 +186,10 @@ jobs:
         if [[ -n "${{ matrix.cross }}" ]]; then
           config=(--config 'profile.dev.package."tree-sitter".opt-level=3')
         fi
-        cargo test --target='${{ matrix.target }}' --features='${{ matrix.features }}' "${config[@]}"
+        cargo test --target='${{ matrix.target }}' "${config[@]}"
 
     - name: Run Wasm tests
-      if: inputs.run-test && !matrix.no-run && contains(matrix.features, 'wasm')
+      if: inputs.run-test && !matrix.no-run && matrix.web
       run: cargo run -p xtask --target='${{ matrix.target }}' -- test-wasm
 
     - name: Upload CLI artifact

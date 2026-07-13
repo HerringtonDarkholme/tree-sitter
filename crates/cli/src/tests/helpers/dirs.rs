@@ -21,9 +21,6 @@ pub static SCRATCH_BASE_DIR: LazyLock<PathBuf> = LazyLock::new(|| {
     result
 });
 
-#[cfg(feature = "wasm")]
-pub static WASM_DIR: LazyLock<PathBuf> = LazyLock::new(|| ROOT_DIR.join("target").join("release"));
-
 pub static SCRATCH_DIR: LazyLock<PathBuf> = LazyLock::new(|| {
     // https://doc.rust-lang.org/reference/conditional-compilation.html
     let vendor = if cfg!(target_vendor = "apple") {

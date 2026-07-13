@@ -34,8 +34,6 @@ use tree_sitter::Language;
 use tree_sitter::QueryError;
 #[cfg(feature = "tree-sitter-highlight")]
 use tree_sitter::QueryErrorKind;
-#[cfg(feature = "wasm")]
-use tree_sitter::WasmError;
 #[cfg(feature = "tree-sitter-highlight")]
 use tree_sitter_highlight::HighlightConfiguration;
 #[cfg(feature = "tree-sitter-tags")]
@@ -134,9 +132,6 @@ pub enum LoaderError {
     WasmTool(#[from] WasmToolError),
     #[error("Unsupported platform for wasi-sdk")]
     WasiSDKPlatform,
-    #[cfg(feature = "wasm")]
-    #[error(transparent)]
-    Wasm(#[from] WasmError),
     #[error("Failed to run wasi-sdk clang -- {0}")]
     WasmCompiler(std::io::Error),
     #[error("Failed to run wasm-opt -- {0}")]
@@ -673,9 +668,6 @@ pub struct Loader {
     sanitize_build: bool,
     force_rebuild: bool,
     verbose: bool,
-
-    #[cfg(feature = "wasm")]
-    wasm_store: Mutex<Option<tree_sitter::WasmStore>>,
 }
 
 pub struct CompileConfig<'a> {
@@ -754,9 +746,6 @@ impl Loader {
             sanitize_build: false,
             force_rebuild: false,
             verbose: false,
-
-            #[cfg(feature = "wasm")]
-            wasm_store: Mutex::default(),
         }
     }
 
@@ -1035,10 +1024,6 @@ impl Loader {
         let output_path = config.output_path.unwrap_or_else(|| {
             let mut path = self.parser_lib_path.join(lib_name);
             path.set_extension(env::consts::DLL_EXTENSION);
-            #[cfg(feature = "wasm")]
-            if self.wasm_store.lock().unwrap().is_some() {
-                path.set_extension("wasm");
-            }
             path
         });
         config.output_path = Some(output_path.clone());
@@ -1062,25 +1047,6 @@ impl Loader {
 
         if !recompile {
             recompile = needs_recompile(&output_path, &paths_to_check)?;
-        }
-
-        #[cfg(feature = "wasm")]
-        if let Some(wasm_store) = self.wasm_store.lock().unwrap().as_mut() {
-            if recompile {
-                self.compile_parser_to_wasm(
-                    &config.name,
-                    config.src_path,
-                    config
-                        .scanner_path
-                        .as_ref()
-                        .and_then(|p| p.strip_prefix(config.src_path).ok()),
-                    &output_path,
-                )?;
-            }
-
-            let wasm_bytes = fs::read(&output_path)
-                .map_err(|e| LoaderError::IO(IoError::new(e, Some(output_path.as_path()))))?;
-            return Ok(wasm_store.load_language(&config.name, &wasm_bytes)?);
         }
 
         // Create a unique lock path based on the output path hash to prevent
@@ -1963,12 +1929,6 @@ impl Loader {
 
     pub const fn verbose_build(&mut self, verbose: bool) {
         self.verbose = verbose;
-    }
-
-    #[cfg(feature = "wasm")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "wasm")))]
-    pub fn use_wasm(&mut self, engine: &tree_sitter::wasmtime::Engine) {
-        *self.wasm_store.lock().unwrap() = Some(tree_sitter::WasmStore::new(engine).unwrap());
     }
 
     #[must_use]
