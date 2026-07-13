@@ -736,8 +736,13 @@ pub fn materialize_c_core(root: &Path, rev: &str) -> Result<PathBuf> {
         .join("tree-sitter-core-parity-c-src")
         .join(sanitize_revision(rev));
     let src_dir = cache_dir.join("lib").join("src");
+    let api_header = cache_dir
+        .join("lib")
+        .join("include")
+        .join("tree_sitter")
+        .join("api.h");
     let complete_marker = cache_dir.join(".complete");
-    if complete_marker.is_file() && src_dir.join("lib.c").is_file() {
+    if complete_marker.is_file() && src_dir.join("lib.c").is_file() && api_header.is_file() {
         return Ok(src_dir);
     }
 
@@ -763,6 +768,17 @@ pub fn materialize_c_core(root: &Path, rev: &str) -> Result<PathBuf> {
         fs::write(&destination, contents)
             .with_context(|| format!("Failed to write {}", destination.display()))?;
     }
+
+    if let Some(parent) = api_header.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create {}", parent.display()))?;
+    }
+    let contents = git_output(
+        root,
+        ["show", &format!("{rev}:lib/include/tree_sitter/api.h")],
+    )?;
+    fs::write(&api_header, contents)
+        .with_context(|| format!("Failed to write {}", api_header.display()))?;
 
     if !src_dir.join("lib.c").is_file() {
         bail!("Revision {rev} did not provide lib/src/lib.c");

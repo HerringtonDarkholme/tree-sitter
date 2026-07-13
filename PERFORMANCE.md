@@ -163,6 +163,93 @@ broader baseline replaces it.
 
 ## Checkpoints
 
+### 2026-07-13 EDT - post one-pass weak-language profile refresh
+
+- Repo head: `f1d51f12` plus the perf-gate historical-header fix.
+- Purpose: refresh steady-state C++ and Java profiles after removing incremental
+  parsing, simplifying stack links, and replacing parser logging macros with
+  functions.
+- The perf gate initially failed because the historical C core was compiled
+  against the current public header, where the Wasm store declarations have
+  been removed. The harness now materializes and uses the selected C revision's
+  own `lib/include/tree_sitter/api.h`.
+- C++ profile command:
+
+```sh
+TREE_SITTER_CORE_IMPL=rust TREE_SITTER_BENCHMARK_LANGUAGE_FILTER=cpp TREE_SITTER_BENCHMARK_KIND_FILTER=normal TREE_SITTER_BENCHMARK_REPETITION_COUNT=30000 target/release/deps/benchmark-292366a87b1b3f92 &
+sample $! 5 -file /private/tmp/tree-sitter-cpp-f1d51f12.sample
+```
+
+- Java profile command used the same binary with language `java` and 60000
+  repetitions.
+
+Benchmark speeds during sampling:
+
+| Workload | Case | Speed |
+| --- | --- | ---: |
+| C++ normal | `marker-index.h` | 14711 bytes/ms |
+| C++ normal | `rule.cc` | 13640 bytes/ms |
+| Java normal | `LargeService.java` | 16100 bytes/ms |
+| Java normal | `Service.java` | 18168 bytes/ms |
+
+Top-of-stack samples from 4182 C++ and 4197 Java samples:
+
+| Area | C++ samples | Java samples |
+| --- | ---: | ---: |
+| generated `ts_lex` | 792 | 901 |
+| `lexer_do_advance` | 294 | 362 |
+| `subtree_summarize_children` | 338 | 356 |
+| `parser_reduce` | 313 | 208 |
+| `stack_node_new` | 162 | 173 |
+| `stack_pop_count_into` | 140 | 193 |
+| `subtree_release` | 113 | 126 |
+| generated `ts_lex_keywords` | 105 | 92 |
+| `parser_balance_subtree` | 81 | 76 |
+| `stack_node_release` | 76 | 100 |
+| `stack_renumber_version` | 56 | 55 |
+
+- No parser logging function appeared in either collapsed profile. The logging
+  function conversion is not a measurable steady-state hotspot when logging is
+  disabled.
+- The largest single named leaf remains generated `ts_lex`: 18.9% of C++
+  samples and 21.5% of Java samples. C++ also spent 529 samples in the generated
+  lexer's `set_contains`, so generated lexer work is the primary C++ bottleneck.
+- The largest reusable-core cluster remains reduction materialization.
+  `subtree_summarize_children` alone is about 8% in both profiles, and it is
+  paid after copying children into every new parent. Together with
+  `parser_reduce`, stack pop, stack-node creation/release, subtree release, and
+  balancing, reduction and stack lifecycle work accounts for roughly one third
+  of both profiles.
+- The actionable parser-side bottleneck is therefore not `StackLink` payload
+  access by itself. It is the full reduction pipeline: collect children from
+  the persistent stack, copy them into an arena parent, eagerly rescan them to
+  derive metadata, then allocate/push/release stack nodes. A data-oriented next
+  step must remove one of those passes or delay concrete parent materialization;
+  another local stack or summarizer branch is unlikely to move the aggregate.
+
+Seven-language comparison command:
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-f1d51f12-perf XDG_CACHE_HOME=/private/tmp/tree-sitter-cache cargo xtask perf-gate --language typescript --language javascript --language python --language go --language rust --language cpp --language java --repetitions 10 --error-limit 8 --kind normal --report-only --offline
+```
+
+| Workload | Rust bytes/ms | C bytes/ms | Delta |
+| --- | ---: | ---: | ---: |
+| TypeScript normal | 30526.4 | 22741.6 | +34.23% |
+| JavaScript normal | 21532.7 | 15957.6 | +34.94% |
+| Python normal | 13933.7 | 11009.2 | +26.56% |
+| Go normal | 17558.6 | 13336.6 | +31.66% |
+| Rust normal | 21828.1 | 16578.6 | +31.66% |
+| C++ normal | 7781.1 | 10057.9 | -22.64% |
+| Java normal | 10876.1 | 11603.5 | -6.27% |
+| Overall normal | 20725.6 | 15887.0 | +30.46% |
+
+- Short perf-gate runs showed substantial first-run variance, especially in
+  TypeScript. A 100-repetition direct TypeScript check measured 28150 Rust
+  bytes/ms versus 20248 C bytes/ms. Use the long-running sample workloads for
+  hotspot attribution and treat the 10-repetition gate as regression coverage,
+  not a microarchitectural profile.
+
 ### 2026-07-13 EDT - one-pass parser and compact stack links
 
 - Repo base: `676cc411`.

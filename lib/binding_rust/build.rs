@@ -35,6 +35,13 @@ fn main() {
     let include_path = manifest_path.join("include");
     let src_path = manifest_path.join("src");
     let core_src_path = core_impl.source_path(&src_path);
+    let core_include_path = if core_impl == CoreImpl::C {
+        core_src_path
+            .parent()
+            .map(|lib_path| lib_path.join("include"))
+    } else {
+        None
+    };
 
     // Only bare wasm32-unknown-unknown lacks a libc and needs the bundled
     // stdlib shims. wasm32-unknown-emscripten ships a full libc, so adding them
@@ -55,6 +62,9 @@ fn main() {
     // free of any C toolchain, so it can be produced by plain `cargo` even when
     // emcc is only reachable via Docker.
     if target != "wasm32-unknown-emscripten" {
+        if let Some(core_include_path) = core_include_path {
+            config.include(core_include_path);
+        }
         config
             .flag_if_supported("-std=c11")
             .flag_if_supported("-fvisibility=hidden")
