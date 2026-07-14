@@ -1,4 +1,5 @@
 use core::ffi::c_void;
+use core::ptr::NonNull;
 
 use crate::ffi::{TSLanguage, TSNode, TSPoint, TSRange};
 
@@ -57,7 +58,7 @@ pub struct TSTree {
     /// Copied included ranges for tree comparison and public APIs.
     pub(super) included_ranges: Array<TSRange>,
     /// Shared arena for arena-owned internal nodes.
-    pub(super) arena: *mut TreeArena,
+    pub(super) arena: Option<NonNull<TreeArena>>,
 }
 
 unsafe fn copy_ranges(included_ranges: &[TSRange]) -> Array<TSRange> {
@@ -103,7 +104,9 @@ unsafe fn tree_included_ranges_slice_mut(tree: &mut TSTree) -> &mut [TSRange] {
 /// does not clone the entire syntax graph.
 unsafe fn tree_copy_ref(tree: &TSTree) -> *mut TSTree {
     subtree_retain(tree.root);
-    tree_arena_retain(tree.arena);
+    if let Some(arena) = tree.arena {
+        tree_arena_retain(arena);
+    }
     tree_new_with_arena(
         tree.root,
         tree.language,
@@ -117,7 +120,9 @@ unsafe fn tree_delete_ref(tree: &mut TSTree) {
     let mut pool = subtree_pool_new(0);
     subtree_release(&mut pool, tree.root);
     subtree_pool_delete(&mut pool);
-    tree_arena_release(tree.arena);
+    if let Some(arena) = tree.arena {
+        tree_arena_release(arena);
+    }
     array_delete(&mut tree.included_ranges);
 }
 
@@ -195,7 +200,7 @@ pub unsafe fn tree_new_with_arena(
     root: Subtree,
     language: *const TSLanguage,
     included_ranges: &[TSRange],
-    arena: *mut TreeArena,
+    arena: Option<NonNull<TreeArena>>,
 ) -> *mut TSTree {
     let result = malloc(core::mem::size_of::<TSTree>()).cast::<TSTree>();
     core::ptr::write(
@@ -426,9 +431,9 @@ mod tests {
             );
             let children = [child1, child2];
 
-            let arena = tree_arena_new();
+            let mut arena = tree_arena_new();
             let root = subtree_from_mut(subtree_new_node_in_arena(
-                arena,
+                arena.as_mut(),
                 TS_BUILTIN_SYM_ERROR_REPEAT,
                 children.as_ptr(),
                 children.len() as u32,
@@ -437,11 +442,11 @@ mod tests {
             ));
 
             assert_eq!(subtree_child_count(root), 2);
-            let tree = tree_new_with_arena(root, ptr::null(), &[], arena);
+            let tree = tree_new_with_arena(root, ptr::null(), &[], Some(arena));
             let copy = ts_tree_copy(tree);
 
-            assert_eq!((*tree).arena, arena);
-            assert_eq!((*copy).arena, arena);
+            assert_eq!((*tree).arena, Some(arena));
+            assert_eq!((*copy).arena, Some(arena));
             ts_tree_delete(tree);
             ts_tree_delete(copy);
             subtree_pool_delete(&mut pool);

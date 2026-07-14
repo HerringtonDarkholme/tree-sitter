@@ -1,6 +1,7 @@
 use core::ffi::{c_char, c_void, CStr};
 use core::fmt::{self, Write};
 use core::ptr;
+use core::ptr::NonNull;
 
 use crate::ffi::{
     TSInput, TSInputEncoding, TSInputEncodingUTF8, TSLanguage, TSLogTypeParse, TSLogger,
@@ -164,7 +165,7 @@ pub struct TSParser {
     /// Cached lexer result for repeated same-position lookups.
     token_cache: TokenCache,
     /// Arena that owns internal nodes in the returned tree.
-    tree_arena: *mut TreeArena,
+    tree_arena: Option<NonNull<TreeArena>>,
     /// Language-owned external scanner payload.
     external_scanner_payload: *mut c_void,
     /// Optional parse debug graph output.
@@ -472,11 +473,9 @@ unsafe fn parser_new_node(
     children: &mut SubtreeArray,
     production_id: u32,
 ) -> MutableSubtree {
-    if self_.tree_arena.is_null() {
-        subtree_new_node(symbol, children, production_id, self_.language)
-    } else {
+    if let Some(mut arena) = self_.tree_arena {
         let result = subtree_new_node_in_arena(
-            self_.tree_arena,
+            arena.as_mut(),
             symbol,
             children.contents,
             children.size,
@@ -485,6 +484,8 @@ unsafe fn parser_new_node(
         );
         array_delete(children);
         result
+    } else {
+        subtree_new_node(symbol, children, production_id, self_.language)
     }
 }
 
@@ -509,7 +510,16 @@ unsafe fn parser_new_node_from_builder_span(
     children: &SubtreeArray,
     production_id: u32,
 ) -> MutableSubtree {
-    if self_.tree_arena.is_null() {
+    if let Some(mut arena) = self_.tree_arena {
+        subtree_new_node_in_arena(
+            arena.as_mut(),
+            symbol,
+            children.contents,
+            children.size,
+            production_id,
+            self_.language,
+        )
+    } else {
         let mut owned_children = array_new();
         array_reserve(&mut owned_children, children.size);
         if children.size > 0 {
@@ -521,15 +531,6 @@ unsafe fn parser_new_node_from_builder_span(
         }
         owned_children.size = children.size;
         subtree_new_node(symbol, &mut owned_children, production_id, self_.language)
-    } else {
-        subtree_new_node_in_arena(
-            self_.tree_arena,
-            symbol,
-            children.contents,
-            children.size,
-            production_id,
-            self_.language,
-        )
     }
 }
 
@@ -1295,8 +1296,7 @@ unsafe fn parser_has_outstanding_parse(self_: &TSParser) -> bool {
 }
 
 unsafe fn parser_take_finished_tree(self_: &mut TSParser) -> *mut TSTree {
-    let arena = self_.tree_arena;
-    self_.tree_arena = ptr::null_mut();
+    let arena = self_.tree_arena.take();
     let result = tree_new_with_arena(
         self_.finished_tree,
         self_.language,
@@ -1332,7 +1332,7 @@ pub unsafe extern "C" fn ts_parser_new() -> *mut TSParser {
                 last_external_token: NULL_SUBTREE,
                 byte_index: 0,
             },
-            tree_arena: ptr::null_mut(),
+            tree_arena: None,
             external_scanner_payload: ptr::null_mut(),
             dot_graph_file: ptr::null_mut(),
             accept_count: 0,
@@ -1362,9 +1362,8 @@ pub unsafe extern "C" fn ts_parser_delete(self_: *mut TSParser) {
     if !parser.reduce_actions.contents.is_null() {
         array_delete(&mut parser.reduce_actions);
     }
-    if !parser.tree_arena.is_null() {
-        tree_arena_release(parser.tree_arena);
-        parser.tree_arena = ptr::null_mut();
+    if let Some(arena) = parser.tree_arena.take() {
+        tree_arena_release(arena);
     }
     lexer_delete(&mut parser.lexer);
     parser_set_cached_token(parser, 0, NULL_SUBTREE, NULL_SUBTREE);
@@ -1474,9 +1473,8 @@ pub unsafe extern "C" fn ts_parser_reset(self_: *mut TSParser) {
         subtree_release(&mut parser.tree_pool, parser.finished_tree);
         parser.finished_tree = NULL_SUBTREE;
     }
-    if !parser.tree_arena.is_null() {
-        tree_arena_release(parser.tree_arena);
-        parser.tree_arena = ptr::null_mut();
+    if let Some(arena) = parser.tree_arena.take() {
+        tree_arena_release(arena);
     }
     parser.accept_count = 0;
     parser.has_error = false;
@@ -1536,7 +1534,7 @@ pub unsafe extern "C-unwind" fn ts_parser_parse(
         }
     } else {
         parser_external_scanner_create(parser);
-        parser.tree_arena = tree_arena_new();
+        parser.tree_arena = Some(tree_arena_new());
         parser_log(parser, |_, log| log.write_str("new_parse"));
     }
 

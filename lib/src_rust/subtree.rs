@@ -1,6 +1,7 @@
 use core::ffi::c_void;
 use core::{
     ptr,
+    ptr::NonNull,
     sync::atomic::{AtomicU32, Ordering},
 };
 
@@ -639,10 +640,10 @@ const fn align_up(value: usize, alignment: usize) -> usize {
     (value + alignment - 1) & !(alignment - 1)
 }
 
-pub unsafe fn tree_arena_new() -> *mut TreeArena {
-    let arena = malloc(core::mem::size_of::<TreeArena>()).cast::<TreeArena>();
+pub unsafe fn tree_arena_new() -> NonNull<TreeArena> {
+    let arena = NonNull::new_unchecked(malloc(core::mem::size_of::<TreeArena>()).cast());
     ptr::write(
-        arena,
+        arena.as_ptr(),
         TreeArena {
             ref_count: AtomicU32::new(1),
             pages: ptr::null_mut(),
@@ -652,30 +653,24 @@ pub unsafe fn tree_arena_new() -> *mut TreeArena {
     arena
 }
 
-pub unsafe fn tree_arena_retain(arena: *mut TreeArena) {
-    if !arena.is_null() {
-        let prev = (*arena).ref_count.fetch_add(1, Ordering::SeqCst);
-        debug_assert!(prev.wrapping_add(1) != 0);
-    }
+pub unsafe fn tree_arena_retain(arena: NonNull<TreeArena>) {
+    let prev = (*arena.as_ptr()).ref_count.fetch_add(1, Ordering::SeqCst);
+    debug_assert!(prev.wrapping_add(1) != 0);
 }
 
-pub unsafe fn tree_arena_release(arena: *mut TreeArena) {
-    if arena.is_null() {
+pub unsafe fn tree_arena_release(arena: NonNull<TreeArena>) {
+    if (*arena.as_ptr()).ref_count.fetch_sub(1, Ordering::SeqCst) != 1 {
         return;
     }
 
-    if (*arena).ref_count.fetch_sub(1, Ordering::SeqCst) != 1 {
-        return;
-    }
-
-    let mut page = (*arena).pages;
+    let mut page = (*arena.as_ptr()).pages;
     while !page.is_null() {
         let next = (*page).next;
         free((*page).contents.cast::<c_void>());
         free(page.cast::<c_void>());
         page = next;
     }
-    free(arena.cast::<c_void>());
+    free(arena.as_ptr().cast::<c_void>());
 }
 
 /// Try to satisfy an arena allocation from the current bump page.
@@ -723,10 +718,7 @@ unsafe fn tree_arena_alloc_new_page(
 /// Internal nodes are stored as `[Subtree children...][SubtreeHeapData]`. The
 /// arena uses page-sized bump allocation because accepted trees free all arena
 /// nodes together when the last copied `TSTree` is deleted.
-unsafe fn tree_arena_alloc(arena: *mut TreeArena, size: usize, alignment: usize) -> *mut c_void {
-    debug_assert!(!arena.is_null());
-    let arena = ptr_mut(arena);
-
+unsafe fn tree_arena_alloc(arena: &mut TreeArena, size: usize, alignment: usize) -> *mut c_void {
     let result = tree_arena_try_current_page(arena, size, alignment);
     if !result.is_null() {
         return result;
@@ -1348,7 +1340,7 @@ pub unsafe fn subtree_new_node(
 /// This has the same memory layout as `subtree_new_node`, but allocation
 /// comes from the returned tree's arena instead of the transient subtree pool.
 pub unsafe fn subtree_new_node_in_arena(
-    arena: *mut TreeArena,
+    arena: &mut TreeArena,
     symbol: TSSymbol,
     children: *const Subtree,
     child_count: u32,
