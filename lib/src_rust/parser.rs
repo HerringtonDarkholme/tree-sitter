@@ -9,11 +9,10 @@
 //!
 //! The action-level work is divided by purpose:
 //!
-//! - `lexing` obtains or reuses a lookahead token;
+//! - `lexing` obtains or reuses a lookahead token and manages external scanners;
 //! - `advance` interprets parse-table entries and manages versions;
 //! - `actions` executes shift, reduce, and accept stack/tree mutations;
 //! - `recovery` searches for a useful continuation after invalid input;
-//! - `external_scanner` preserves scanner state across alternatives;
 //! - `balancing` prepares the accepted subtree for long-lived navigation; and
 //! - `logging` renders parser, stack, and tree diagnostics.
 //!
@@ -208,10 +207,10 @@ use logging::{parser_log, parser_log_stack, parser_log_tree};
 mod advance;
 use advance::{parser_advance, parser_condense_stack};
 
-mod external_scanner;
-use external_scanner::{parser_external_scanner_create, parser_external_scanner_destroy};
 mod lexing;
-use lexing::parser_set_cached_token;
+use lexing::{
+    parser_external_scanner_create, parser_external_scanner_destroy, parser_set_cached_token,
+};
 
 mod actions;
 mod recovery;

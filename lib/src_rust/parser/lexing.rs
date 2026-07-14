@@ -5,18 +5,26 @@
 //! generated main or keyword lexer and the language's external scanner. The
 //! current parse state selects the lexical mode, and serialized external
 //! scanner state is restored before scanning an alternative GLR path.
+//!
+//! This module also owns the external scanner payload lifecycle. Scanner state
+//! is serialized into token subtrees so each GLR version can restore the state
+//! associated with its own parsing path.
 
-use core::fmt::Write;
+use core::{fmt::Write, ptr};
 
 use crate::ffi::{TSStateId, TSSymbol};
 
 use super::super::error_costs::ERROR_STATE;
 use super::super::language::{
-    language_full, language_has_actions, language_is_reserved_word, language_lex_mode_for_state,
-    language_table_entry, ts_language_next_state, TableEntry,
+    language_enabled_external_tokens, language_full, language_has_actions,
+    language_is_reserved_word, language_lex_mode_for_state, language_table_entry,
+    ts_language_next_state, TableEntry,
 };
 use super::super::length::{length_sub, length_zero, Length};
-use super::super::lexer::{lexer_advance, lexer_finish, lexer_is_eof, lexer_reset, lexer_start};
+use super::super::lexer::{
+    lexer_advance, lexer_finish, lexer_is_eof, lexer_reset, lexer_start,
+    TREE_SITTER_SERIALIZATION_BUFFER_SIZE,
+};
 use super::super::stack::StackVersion;
 use super::super::subtree::{
     subtree_new_error, subtree_new_leaf, Subtree, NULL_SUBTREE, TS_BUILTIN_SYM_END,
@@ -24,12 +32,79 @@ use super::super::subtree::{
 };
 use super::super::utils::ptr_ref;
 use super::advance::{parser_call_keyword_lex_fn, parser_call_main_lex_fn};
-use super::external_scanner::{
-    parser_external_scanner_deserialize, parser_external_scanner_scan,
-    parser_external_scanner_serialize,
-};
 use super::logging::{parser_log, parser_log_lookahead, parser_symbol_name, DisplayCStr};
 use super::TSParser;
+
+// ---------------------------------------------------------------------------
+// External scanner lifecycle and state
+// ---------------------------------------------------------------------------
+
+pub(super) unsafe fn parser_external_scanner_create(parser: &mut TSParser) {
+    if parser.language.is_null() {
+        return;
+    }
+
+    let language = language_full(parser.language);
+    if language.external_scanner.states.is_null() {
+        return;
+    }
+
+    if let Some(create) = language.external_scanner.create {
+        parser.external_scanner_payload = create();
+    }
+}
+
+pub(super) unsafe fn parser_external_scanner_destroy(parser: &mut TSParser) {
+    if !parser.language.is_null() && !parser.external_scanner_payload.is_null() {
+        let language = language_full(parser.language);
+        if let Some(destroy) = language.external_scanner.destroy {
+            destroy(parser.external_scanner_payload);
+        }
+    }
+    parser.external_scanner_payload = ptr::null_mut();
+}
+
+unsafe fn parser_external_scanner_serialize(parser: &mut TSParser) -> u32 {
+    let serialize = language_full(parser.language)
+        .external_scanner
+        .serialize
+        .unwrap();
+    let length = serialize(
+        parser.external_scanner_payload,
+        parser.lexer.debug_buffer.as_mut_ptr().cast::<i8>(),
+    );
+    debug_assert!(length as usize <= TREE_SITTER_SERIALIZATION_BUFFER_SIZE);
+    length
+}
+
+unsafe fn parser_external_scanner_deserialize(parser: &mut TSParser, external_token: Subtree) {
+    let (data, length) = if !external_token.is_null() {
+        let state = external_token.external_scanner_state();
+        (state.as_bytes().as_ptr(), state.length)
+    } else {
+        (ptr::null(), 0)
+    };
+
+    let deserialize = language_full(parser.language)
+        .external_scanner
+        .deserialize
+        .unwrap();
+    deserialize(parser.external_scanner_payload, data.cast::<i8>(), length);
+}
+
+unsafe fn parser_external_scanner_scan(
+    parser: &mut TSParser,
+    external_lex_state: TSStateId,
+) -> bool {
+    let language = language_full(parser.language);
+    let valid_tokens =
+        language_enabled_external_tokens(parser.language, u32::from(external_lex_state));
+    (language.external_scanner.scan.unwrap())(
+        parser.external_scanner_payload,
+        &mut parser.lexer.data,
+        valid_tokens,
+    )
+}
 
 // ---------------------------------------------------------------------------
 // Internal helpers — token reuse & lexing
