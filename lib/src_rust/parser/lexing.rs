@@ -156,7 +156,7 @@ unsafe fn parser_new_leaf_lookahead(
     );
 
     if found_external_token {
-        let mut_result = result.into_mut();
+        let mut mut_result = result.into_mut();
         mut_result.set_external_scanner_state(
             &self_.lexer.debug_buffer[..external_scanner_state_len as usize],
         );

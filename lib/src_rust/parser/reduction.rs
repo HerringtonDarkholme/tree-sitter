@@ -152,7 +152,7 @@ pub(super) unsafe fn parser_shift(
 unsafe fn parser_finish_reduction(
     parser: &mut TSParser,
     version: StackVersion,
-    parent: MutableSubtree,
+    mut parent: MutableSubtree,
     state: TSStateId,
     action: ReduceAction,
     end_of_non_terminal_extra: bool,
