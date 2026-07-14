@@ -211,8 +211,9 @@ unsafe fn parser_lex(
     }
 
     let stack = ptr_ref(self_.stack);
-    let start_position = stack.position(version);
-    let external_token = stack.last_external_token(version);
+    let head = stack.head(version);
+    let start_position = head.position();
+    let external_token = head.last_external_token();
 
     let mut found_external_token = false;
     let mut error_mode = parse_state == ERROR_STATE;

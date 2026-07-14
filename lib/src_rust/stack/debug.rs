@@ -12,7 +12,7 @@ use crate::ffi::TSLanguage;
 use super::super::error_costs::ERROR_STATE;
 use super::super::language::language_write_symbol_as_dot_string;
 use super::super::utils::Array;
-use super::{fprintf, stack_head, stderr_file, Stack, StackIterator, StackNode, StackStatus};
+use super::{fprintf, stderr_file, Stack, StackIterator, StackNode, StackStatus};
 
 /// Print the stack as a DOT graph for debugging.
 pub unsafe fn stack_print_dot_graph(
@@ -33,12 +33,12 @@ pub unsafe fn stack_print_dot_graph(
 
     stack.iterators.clear();
     for i in 0..stack.heads.size {
-        if stack_head(stack, i).status == StackStatus::Halted {
+        if stack.head(i).is_halted() {
             continue;
         }
         let node_count_since_error = stack.node_count_since_error(i);
         let error_cost = stack.error_cost(i);
-        let head = stack_head(stack, i);
+        let head = stack.head(i);
 
         fprintf(
             f,

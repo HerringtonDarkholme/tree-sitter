@@ -15,8 +15,8 @@ use super::super::subtree::{
 use super::super::utils::{ptr_mut, Array};
 use super::stack_node::stack_node_retain;
 use super::{
-    stack_head, Stack, StackHead, StackIterationAction, StackIterator, StackLink, StackNode,
-    StackSlice, StackSliceArray, StackStatus, StackSummary, StackSummaryEntry, StackVersion,
+    Stack, StackHead, StackIterationAction, StackIterator, StackLink, StackNode, StackSlice,
+    StackSliceArray, StackStatus, StackSummary, StackSummaryEntry, StackVersion,
     MAX_ITERATOR_COUNT,
 };
 
@@ -26,7 +26,7 @@ unsafe fn stack_add_version(
     original_version: StackVersion,
     node: NonNull<StackNode>,
 ) -> StackVersion {
-    let original_head = stack_head(self_, original_version);
+    let original_head = self_.head(original_version);
     let head = StackHead {
         node,
         node_count_at_last_error: original_head.node_count_at_last_error,
@@ -53,7 +53,7 @@ unsafe fn stack_add_slice(
 ) {
     for (i, slice) in self_.slices.as_slice().iter().enumerate().rev() {
         let version = slice.version;
-        if stack_head(self_, version).node == node {
+        if self_.head(version).node == node {
             let slice = StackSlice {
                 subtrees: ptr::read(subtrees),
                 version,
@@ -84,7 +84,7 @@ where
     stack.slices.clear();
     stack.iterators.clear();
 
-    let head = stack_head(stack, version);
+    let head = stack.head(version);
     let mut new_iterator = StackIterator {
         node: head.node,
         subtrees: Array::new(),

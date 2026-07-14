@@ -71,7 +71,7 @@ unsafe fn parser_do_all_potential_reductions(
             continue;
         }
 
-        let state = ptr_ref(self_.stack).state(version);
+        let state = ptr_ref(self_.stack).head(version).state();
         let mut has_shift_action = false;
         self_.reduce_actions.clear();
 
@@ -154,7 +154,7 @@ unsafe fn parser_recover_to_state(
             continue;
         }
 
-        if stack.state(slice.version) != goal_state {
+        if stack.head(slice.version).state() != goal_state {
             stack.halt(slice.version);
             subtree_array_delete(&mut self_.tree_pool, &mut slice.subtrees);
             pop.erase(i);
@@ -210,7 +210,7 @@ pub(super) unsafe fn parser_recover(
     let mut did_recover = false;
     let stack = ptr_mut(self_.stack);
     let previous_version_count = stack.version_count();
-    let position = stack.position(version);
+    let position = stack.head(version).position();
     let node_count_since_error = stack.node_count_since_error(version);
     let current_error_cost = stack.error_cost(version);
     let summary = stack_get_summary(stack, version);
@@ -232,7 +232,8 @@ pub(super) unsafe fn parser_recover(
             // Check for redundant versions
             let would_merge = 'merge: {
                 for j in 0..previous_version_count {
-                    if stack.state(j) == entry.state && stack.position(j).bytes == position.bytes {
+                    let head = stack.head(j);
+                    if head.state() == entry.state && head.position().bytes == position.bytes {
                         break 'merge true;
                     }
                 }
@@ -270,7 +271,7 @@ pub(super) unsafe fn parser_recover(
     // Remove halted versions
     let mut i = previous_version_count;
     while i < stack.version_count() {
-        if !stack.is_active(i) {
+        if !stack.head(i).is_active() {
             parser_log(self_, |_, log| write!(log, "removed paused version:{i}"));
             stack_remove_version(stack, i);
             parser_log_stack(self_);
@@ -378,7 +379,7 @@ unsafe fn parser_try_insert_missing_token(
     lookahead: Subtree,
     position: Length,
 ) -> bool {
-    let state = ptr_ref(self_.stack).state(version);
+    let state = ptr_ref(self_.stack).head(version).state();
     let language = language_full(self_.language);
     let mut missing_symbol: TSSymbol = 1;
     while u32::from(missing_symbol) < language.token_count {
@@ -424,7 +425,7 @@ unsafe fn parser_try_insert_missing_token(
                     log,
                     "recover_with_missing symbol:{}, state:{}",
                     DisplayCStr(parser_symbol_name(context.language, missing_symbol)),
-                    u32::from(ptr_ref(context.stack).state(candidate))
+                    u32::from(ptr_ref(context.stack).head(candidate).state())
                 )
             });
             return true;
@@ -447,7 +448,7 @@ pub(super) unsafe fn parser_handle_error(
     // a reduction to take place.
     parser_do_all_potential_reductions(self_, version, 0);
     let version_count = ptr_ref(self_.stack).version_count();
-    let position = ptr_ref(self_.stack).position(version);
+    let position = ptr_ref(self_.stack).head(version).position();
 
     // Push a discontinuity onto the stack. Merge all of the stack versions that
     // were created in the previous step.

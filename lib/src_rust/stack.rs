@@ -90,6 +90,7 @@ pub struct StackSummaryEntry {
 
 pub type StackSummary = Array<StackSummaryEntry>;
 
+/// Current parser configuration and per-version recovery state.
 pub struct StackHead {
     /// Current top node for this parser version.
     node: NonNull<StackNode>,
@@ -104,6 +105,36 @@ pub struct StackHead {
     /// Active versions parse normally; paused versions wait for recovery;
     /// halted versions are removed by stack condensation.
     status: StackStatus,
+}
+
+impl StackHead {
+    pub const fn state(&self) -> TSStateId {
+        unsafe { self.node.as_ref().state }
+    }
+
+    pub const fn position(&self) -> Length {
+        unsafe { self.node.as_ref().position }
+    }
+
+    pub const fn last_external_token(&self) -> Subtree {
+        self.last_external_token
+    }
+
+    pub const fn dynamic_precedence(&self) -> i32 {
+        unsafe { self.node.as_ref().dynamic_precedence }
+    }
+
+    pub const fn is_active(&self) -> bool {
+        matches!(self.status, StackStatus::Active)
+    }
+
+    pub const fn is_halted(&self) -> bool {
+        matches!(self.status, StackStatus::Halted)
+    }
+
+    pub const fn is_paused(&self) -> bool {
+        matches!(self.status, StackStatus::Paused)
+    }
 }
 
 pub struct Stack {
@@ -132,32 +163,17 @@ impl Stack {
         self.halted_version_count
     }
 
-    pub unsafe fn state(&self, version: StackVersion) -> TSStateId {
-        stack_head(self, version).node.as_ref().state
+    /// Return the head for one GLR stack version.
+    ///
+    /// # Safety
+    ///
+    /// `version` must identify a current stack version.
+    pub unsafe fn head(&self, version: StackVersion) -> &StackHead {
+        self.heads.get_unchecked(version)
     }
 
-    pub unsafe fn position(&self, version: StackVersion) -> Length {
-        stack_head(self, version).node.as_ref().position
-    }
-
-    pub unsafe fn last_external_token(&self, version: StackVersion) -> Subtree {
-        stack_head(self, version).last_external_token
-    }
-
-    pub unsafe fn dynamic_precedence(&self, version: StackVersion) -> i32 {
-        stack_head(self, version).node.as_ref().dynamic_precedence
-    }
-
-    pub unsafe fn is_active(&self, version: StackVersion) -> bool {
-        stack_head(self, version).status == StackStatus::Active
-    }
-
-    pub unsafe fn is_halted(&self, version: StackVersion) -> bool {
-        stack_head(self, version).status == StackStatus::Halted
-    }
-
-    pub unsafe fn is_paused(&self, version: StackVersion) -> bool {
-        stack_head(self, version).status == StackStatus::Paused
+    unsafe fn head_mut(&mut self, version: StackVersion) -> &mut StackHead {
+        self.heads.get_unchecked_mut(version)
     }
 
     pub unsafe fn set_last_external_token(&mut self, version: StackVersion, token: Subtree) {
@@ -173,7 +189,7 @@ impl Stack {
     }
 
     pub unsafe fn error_cost(&self, version: StackVersion) -> u32 {
-        let head = stack_head(self, version);
+        let head = self.head(version);
         let node = head.node.as_ref();
         let mut result = node.error_cost;
         if head.status == StackStatus::Paused
@@ -185,7 +201,7 @@ impl Stack {
     }
 
     pub unsafe fn node_count_since_error(&mut self, version: StackVersion) -> u32 {
-        let head = stack_head_mut(self, version);
+        let head = self.head_mut(version);
         let node = head.node.as_ref();
         if node.node_count < head.node_count_at_last_error {
             head.node_count_at_last_error = node.node_count;
@@ -194,7 +210,7 @@ impl Stack {
     }
 
     pub unsafe fn has_advanced_since_error(&self, version: StackVersion) -> bool {
-        let head = stack_head(self, version);
+        let head = self.head(version);
         let mut node = head.node;
         if node.as_ref().error_cost == 0 {
             return true;
@@ -219,24 +235,24 @@ impl Stack {
     }
 
     pub unsafe fn halt(&mut self, version: StackVersion) {
-        if !self.is_halted(version) {
+        if !self.head(version).is_halted() {
             self.halted_version_count += 1;
-            stack_head_mut(self, version).status = StackStatus::Halted;
+            self.head_mut(version).status = StackStatus::Halted;
         }
     }
 
     pub unsafe fn pause(&mut self, version: StackVersion, lookahead: Subtree) {
-        if self.is_halted(version) {
+        if self.head(version).is_halted() {
             self.halted_version_count -= 1;
         }
-        let head = stack_head_mut(self, version);
+        let head = self.head_mut(version);
         head.status = StackStatus::Paused;
         head.lookahead_when_paused = lookahead;
         head.node_count_at_last_error = head.node.as_ref().node_count;
     }
 
     pub unsafe fn resume(&mut self, version: StackVersion) -> Subtree {
-        let head = stack_head_mut(self, version);
+        let head = self.head_mut(version);
         debug_assert!(head.status == StackStatus::Paused);
         let result = head.lookahead_when_paused;
         head.status = StackStatus::Active;
@@ -282,16 +298,6 @@ unsafe fn stderr_file() -> *mut c_void {
 #[cfg(not(target_os = "windows"))]
 unsafe fn stderr_file() -> *mut c_void {
     stderr
-}
-
-#[inline]
-unsafe fn stack_head(self_: &Stack, version: StackVersion) -> &StackHead {
-    self_.heads.get_unchecked(version)
-}
-
-#[inline]
-unsafe fn stack_head_mut(self_: &mut Stack, version: StackVersion) -> &mut StackHead {
-    self_.heads.get_unchecked_mut(version)
 }
 
 #[inline]
@@ -422,7 +428,7 @@ pub unsafe fn stack_pop_count(
 
 /// Pop an error from the top of a version.
 pub unsafe fn stack_pop_error(self_: &mut Stack, version: StackVersion) -> SubtreeArray {
-    let node = stack_head(self_, version).node;
+    let node = self_.head(version).node;
     for link in &node.as_ref().links[..node.as_ref().link_count as usize] {
         let subtree = link.subtree;
         if !subtree.is_null() && subtree.is_error() {
@@ -462,7 +468,7 @@ pub unsafe fn stack_record_summary(self_: &mut Stack, version: StackVersion, max
     let summary_ptr =
         NonNull::new_unchecked(malloc(core::mem::size_of::<StackSummary>()).cast::<StackSummary>());
     ptr::write(summary_ptr.as_ptr(), summary);
-    let head = stack_head_mut(self_, version);
+    let head = self_.head_mut(version);
     if let Some(mut previous) = head.summary.replace(summary_ptr) {
         previous.as_mut().delete();
         free(previous.as_ptr().cast::<c_void>());
@@ -471,9 +477,7 @@ pub unsafe fn stack_record_summary(self_: &mut Stack, version: StackVersion, max
 
 /// Get the recorded summary for a version.
 pub unsafe fn stack_get_summary(stack: &Stack, version: StackVersion) -> Option<&StackSummary> {
-    stack_head(stack, version)
-        .summary
-        .map(|summary| summary.as_ref())
+    stack.head(version).summary.map(|summary| summary.as_ref())
 }
 
 /// Remove a version from the stack.
@@ -577,8 +581,8 @@ pub unsafe fn stack_can_merge(
     version1: StackVersion,
     version2: StackVersion,
 ) -> bool {
-    let head1 = stack_head(stack, version1);
-    let head2 = stack_head(stack, version2);
+    let head1 = stack.head(version1);
+    let head2 = stack.head(version2);
     let node1 = head1.node.as_ref();
     let node2 = head2.node.as_ref();
     head1.status == StackStatus::Active

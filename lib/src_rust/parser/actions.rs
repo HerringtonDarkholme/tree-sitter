@@ -274,7 +274,7 @@ pub(super) unsafe fn parser_reduce(
             }
         }
 
-        let state = stack.state(slice_version);
+        let state = stack.head(slice_version).state();
         let parse_state = if invalidate_parse_state || pop.size > 1 || initial_version_count > 1 {
             TS_TREE_STATE_NONE
         } else {

@@ -222,7 +222,7 @@ use balancing::parser_balance_subtree;
 unsafe fn parser_has_outstanding_parse(self_: &TSParser) -> bool {
     self_.canceled_balancing
         || !self_.external_scanner_payload.is_null()
-        || ptr_ref(self_.stack).state(0) != 1
+        || ptr_ref(self_.stack).head(0).state() != 1
         || ptr_mut(self_.stack).node_count_since_error(0) != 0
 }
 
@@ -465,15 +465,17 @@ pub unsafe extern "C-unwind" fn ts_parser_parse(
                 break;
             }
 
-            while ptr_ref(parser.stack).is_active(version) {
+            while ptr_ref(parser.stack).head(version).is_active() {
                 parser_log(parser, |context, log| {
+                    let stack = ptr_ref(context.stack);
+                    let head = stack.head(version);
                     write!(
                         log,
                         "process version:{version}, version_count:{}, state:{}, row:{}, col:{}",
-                        ptr_ref(context.stack).version_count(),
-                        i32::from(ptr_ref(context.stack).state(version)),
-                        ptr_ref(context.stack).position(version).extent.row,
-                        ptr_ref(context.stack).position(version).extent.column
+                        stack.version_count(),
+                        i32::from(head.state()),
+                        head.position().extent.row,
+                        head.position().extent.column
                     )
                 });
 
@@ -483,7 +485,7 @@ pub unsafe extern "C-unwind" fn ts_parser_parse(
 
                 parser_log_stack(parser);
 
-                let position = ptr_ref(parser.stack).position(version).bytes;
+                let position = ptr_ref(parser.stack).head(version).position().bytes;
                 if position > last_position || (version > 0 && position == last_position) {
                     last_position = position;
                     break;
