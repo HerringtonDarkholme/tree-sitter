@@ -27,7 +27,7 @@ unsafe fn stack_add_version(
     array_push(&mut self_.heads, head);
     stack_node_retain(node);
     let head = array_back_ref(&self_.heads);
-    if !head.last_external_token.heap_ptr().is_null() {
+    if !head.last_external_token.is_null() {
         subtree_retain(head.last_external_token);
     }
     self_.heads.size - 1
@@ -170,7 +170,7 @@ where
 
                 next_iterator.node = link.node;
                 let subtree = link.subtree;
-                if subtree.heap_ptr().is_null() {
+                if subtree.is_null() {
                     next_iterator.subtree_count += 1;
                 } else {
                     if include_subtrees {

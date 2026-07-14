@@ -111,7 +111,7 @@ enum ExternalScannerStateData {
 ///   byte 6: `padding_bytes`
 ///   byte 7: `size_bytes`
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct SubtreeInlineData {
     /// Byte 0: packed bitfields (`is_inline`, `visible`, `named`, `extra`,
     /// `has_changes`, `is_missing`, `is_keyword`)
@@ -425,7 +425,7 @@ impl SubtreeHeapData {
 // ---------------------------------------------------------------------------
 
 #[repr(C, align(8))]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Subtree {
     /// Inline bytes, or the byte representation of a heap pointer.
     pub data: SubtreeInlineData,

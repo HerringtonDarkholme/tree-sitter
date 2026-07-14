@@ -291,13 +291,13 @@ unsafe fn stack_node_release(
         let first_predecessor = if node.link_count > 0 {
             for i in (1..usize::from(node.link_count)).rev() {
                 let link = node.links[i];
-                if !link.subtree.heap_ptr().is_null() {
+                if !link.subtree.is_null() {
                     subtree_release(subtree_pool, link.subtree);
                 }
                 stack_node_release(ptr_mut(link.node), pool, subtree_pool);
             }
             let link = node.links[0];
-            if !link.subtree.heap_ptr().is_null() {
+            if !link.subtree.is_null() {
                 subtree_release(subtree_pool, link.subtree);
             }
             link.node
@@ -373,7 +373,7 @@ unsafe fn stack_node_new(
         (*node).dynamic_precedence = (*previous_node).dynamic_precedence;
         (*node).node_count = (*previous_node).node_count;
 
-        if !subtree.heap_ptr().is_null() {
+        if !subtree.is_null() {
             (*node).error_cost += subtree_error_cost(subtree);
             (*node).position = length_add((*node).position, subtree_total_size(subtree));
             (*node).node_count += stack_subtree_node_count(subtree);
@@ -386,10 +386,10 @@ unsafe fn stack_node_new(
 
 /// Check if two subtrees are equivalent for merging purposes.
 unsafe fn stack_subtree_is_equivalent(left: Subtree, right: Subtree) -> bool {
-    if left.heap_ptr() == right.heap_ptr() {
+    if left == right {
         return true;
     }
-    if left.heap_ptr().is_null() || right.heap_ptr().is_null() {
+    if left.is_null() || right.is_null() {
         return false;
     }
 
@@ -462,7 +462,7 @@ unsafe fn stack_node_add_link(
                     );
                 }
                 let mut dynamic_precedence = link_node.dynamic_precedence;
-                if !link.subtree.heap_ptr().is_null() {
+                if !link.subtree.is_null() {
                     dynamic_precedence += subtree_dynamic_precedence(link.subtree);
                 }
                 if dynamic_precedence > self_.dynamic_precedence {
@@ -484,7 +484,7 @@ unsafe fn stack_node_add_link(
     self_.links[self_.link_count as usize] = link;
     self_.link_count += 1;
 
-    if !link.subtree.heap_ptr().is_null() {
+    if !link.subtree.is_null() {
         subtree_retain(link.subtree);
         node_count += stack_subtree_node_count(link.subtree);
         dynamic_precedence += subtree_dynamic_precedence(link.subtree);
@@ -505,10 +505,10 @@ unsafe fn stack_head_delete(
     subtree_pool: &mut SubtreePool,
 ) {
     if !self_.node.is_null() {
-        if !self_.last_external_token.heap_ptr().is_null() {
+        if !self_.last_external_token.is_null() {
             subtree_release(subtree_pool, self_.last_external_token);
         }
-        if !self_.lookahead_when_paused.heap_ptr().is_null() {
+        if !self_.lookahead_when_paused.is_null() {
             subtree_release(subtree_pool, self_.lookahead_when_paused);
         }
         if let Some(mut summary) = self_.summary.take() {
@@ -617,10 +617,10 @@ pub unsafe fn stack_set_last_external_token(
 ) {
     let subtree_pool = ptr_mut(self_.subtree_pool);
     let head = array_get_mut(&mut self_.heads, version);
-    if !token.heap_ptr().is_null() {
+    if !token.is_null() {
         subtree_retain(token);
     }
-    if !head.last_external_token.heap_ptr().is_null() {
+    if !head.last_external_token.is_null() {
         subtree_release(subtree_pool, head.last_external_token);
     }
     head.last_external_token = token;
@@ -632,7 +632,7 @@ pub unsafe fn stack_error_cost(self_: &Stack, version: StackVersion) -> u32 {
     let node = ptr_ref(head.node);
     let mut result = node.error_cost;
     if head.status == StackStatus::Paused
-        || (node.state == ERROR_STATE && node.links[0].subtree.heap_ptr().is_null())
+        || (node.state == ERROR_STATE && node.links[0].subtree.is_null())
     {
         result += ERROR_COST_PER_RECOVERY;
     }
@@ -660,7 +660,7 @@ pub unsafe fn stack_push(
     let node_pool = &mut stack.node_pool;
     let head = array_get_mut(heads, version);
     let new_node = stack_node_new(head.node, subtree, state, node_pool);
-    if subtree.heap_ptr().is_null() {
+    if subtree.is_null() {
         head.node_count_at_last_error = (*new_node).node_count;
     }
     head.node = new_node;
@@ -708,7 +708,7 @@ pub unsafe fn stack_pop_error(self_: &mut Stack, version: StackVersion) -> Subtr
     let node = stack_head(self_, version).node;
     for i in 0..(*node).link_count as usize {
         let subtree = (*node).links[i].subtree;
-        if !subtree.heap_ptr().is_null() && subtree_is_error(subtree) {
+        if !subtree.is_null() && subtree_is_error(subtree) {
             let mut found_error = false;
             let pop = stack_iter(
                 self_,
@@ -778,7 +778,7 @@ pub unsafe fn stack_has_advanced_since_error(self_: &Stack, version: StackVersio
     loop {
         if (*node).link_count > 0 {
             let subtree = (*node).links[0].subtree;
-            if !subtree.heap_ptr().is_null() {
+            if !subtree.is_null() {
                 if subtree_total_bytes(subtree) > 0 {
                     return true;
                 } else if (*node).node_count > head.node_count_at_last_error
@@ -844,7 +844,7 @@ pub unsafe fn stack_copy_version(stack: &mut Stack, version: StackVersion) -> St
     array_push(&mut stack.heads, version_head);
     let head = array_back_mut(&mut stack.heads);
     stack_node_retain(ptr_mut(head.node));
-    if !head.last_external_token.heap_ptr().is_null() {
+    if !head.last_external_token.is_null() {
         subtree_retain(head.last_external_token);
     }
     if head.status == StackStatus::Halted {
