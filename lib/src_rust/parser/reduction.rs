@@ -2,11 +2,10 @@ use super::{
     array_swap, language_full, language_lookup, parser_log, parser_symbol_name, ptr, ptr_mut,
     ptr_ref, stack_merge, stack_pop_all, stack_pop_count, stack_push, stack_remove_version,
     subtree_array_clear, subtree_array_delete, subtree_array_remove_trailing_extras,
-    subtree_compare, subtree_from_mut, subtree_last_external_token, subtree_make_mut,
-    subtree_new_node, subtree_release, subtree_retain, subtree_set_extra, ts_language_next_state,
-    DisplayCStr, MutableSubtree, ReduceAction, StackVersion, Subtree, SubtreeArray, TSParser,
-    TSStateId, TSSymbol, Write, MAX_VERSION_COUNT, MAX_VERSION_COUNT_OVERFLOW, NULL_SUBTREE,
-    STACK_VERSION_NONE, TS_BUILTIN_SYM_ERROR, TS_BUILTIN_SYM_ERROR_REPEAT, TS_TREE_STATE_NONE,
+    subtree_compare, subtree_new_node, ts_language_next_state, DisplayCStr, MutableSubtree,
+    ReduceAction, StackVersion, Subtree, SubtreeArray, TSParser, TSStateId, TSSymbol, Write,
+    MAX_VERSION_COUNT, MAX_VERSION_COUNT_OVERFLOW, NULL_SUBTREE, STACK_VERSION_NONE,
+    TS_BUILTIN_SYM_ERROR, TS_BUILTIN_SYM_ERROR_REPEAT, TS_TREE_STATE_NONE,
 };
 
 pub(super) unsafe fn parser_select_tree(
@@ -115,7 +114,7 @@ unsafe fn parser_select_children(
     parser.scratch_trees.assign(children);
     let scratch_tree =
         subtree_new_node(left.symbol(), &mut parser.scratch_trees, 0, parser.language);
-    parser_select_tree(parser, left, subtree_from_mut(scratch_tree))
+    parser_select_tree(parser, left, scratch_tree.into_immutable())
 }
 
 pub(super) unsafe fn parser_new_node(
@@ -136,9 +135,9 @@ pub(super) unsafe fn parser_shift(
 ) {
     let is_leaf = lookahead.child_count() == 0;
     let subtree_to_push = if extra != lookahead.extra() && is_leaf {
-        let mut result = subtree_make_mut(&mut parser.tree_pool, lookahead);
-        subtree_set_extra(&mut result, extra);
-        subtree_from_mut(result)
+        let mut result = lookahead.make_mut(&mut parser.tree_pool);
+        result.set_extra(extra);
+        result.into_immutable()
     } else {
         lookahead
     };
@@ -146,7 +145,7 @@ pub(super) unsafe fn parser_shift(
     let stack = ptr_mut(parser.stack);
     stack_push(stack, version, subtree_to_push, state);
     if subtree_to_push.has_external_tokens() {
-        stack.set_last_external_token(version, subtree_last_external_token(subtree_to_push));
+        stack.set_last_external_token(version, subtree_to_push.last_external_token());
     }
 }
 
@@ -175,7 +174,7 @@ unsafe fn parser_finish_reduction(
     parent.heap_data_mut().children_mut().dynamic_precedence += action.dynamic_precedence;
 
     let stack = ptr_mut(parser.stack);
-    stack_push(stack, version, subtree_from_mut(parent), next_state);
+    stack_push(stack, version, parent.into_immutable(), next_state);
     for &extra in parser.trailing_extras.as_slice() {
         stack_push(stack, version, extra, next_state);
     }
@@ -239,9 +238,9 @@ pub(super) unsafe fn parser_reduce(
             let mut next_children = next_slice.subtrees;
             subtree_array_remove_trailing_extras(&mut next_children, &mut parser.trailing_extras2);
 
-            if parser_select_children(parser, subtree_from_mut(parent), &next_children) {
+            if parser_select_children(parser, parent.into_immutable(), &next_children) {
                 subtree_array_clear(&mut parser.tree_pool, &mut parser.trailing_extras);
-                subtree_release(&mut parser.tree_pool, subtree_from_mut(parent));
+                parent.into_immutable().release(&mut parser.tree_pool);
                 array_swap(&mut parser.trailing_extras, &mut parser.trailing_extras2);
                 parent = parser_new_node(
                     parser,
@@ -309,16 +308,17 @@ pub(super) unsafe fn parser_accept(
                 debug_assert!(!tree.data.is_inline());
                 let children = tree.children();
                 for &child in children {
-                    subtree_retain(child);
+                    child.retain();
                 }
                 trees.splice(index as u32, 1, children.len() as u32, children.as_ptr());
-                root = subtree_from_mut(parser_new_node(
+                root = parser_new_node(
                     parser,
                     tree.symbol(),
                     &mut trees,
                     u32::from(tree.heap_data().children().production_id),
-                ));
-                subtree_release(&mut parser.tree_pool, tree);
+                )
+                .into_immutable();
+                tree.release(&mut parser.tree_pool);
                 break;
             }
         }
@@ -328,11 +328,11 @@ pub(super) unsafe fn parser_accept(
         if parser.finished_tree.is_null() || parser_select_tree(parser, parser.finished_tree, root)
         {
             if !parser.finished_tree.is_null() {
-                subtree_release(&mut parser.tree_pool, parser.finished_tree);
+                parser.finished_tree.release(&mut parser.tree_pool);
             }
             parser.finished_tree = root;
         } else {
-            subtree_release(&mut parser.tree_pool, root);
+            root.release(&mut parser.tree_pool);
         }
     }
 

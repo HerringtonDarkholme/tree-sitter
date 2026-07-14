@@ -6,10 +6,7 @@ use crate::ffi::{TSInputEdit, TSLanguage, TSRange, TSSymbol};
 use super::error_costs::ERROR_STATE;
 use super::language::language_alias_at;
 use super::length::{length_add, length_min, length_zero, Length, LENGTH_MAX};
-use super::subtree::{
-    subtree_external_scanner_state_eq, subtree_last_external_token, Subtree, NULL_SUBTREE,
-    TS_BUILTIN_SYM_ERROR, TS_TREE_STATE_NONE,
-};
+use super::subtree::{Subtree, NULL_SUBTREE, TS_BUILTIN_SYM_ERROR, TS_TREE_STATE_NONE};
 use super::tree_cursor::{tree_cursor_entry_slice, TreeCursor, TreeCursorEntry};
 use super::utils::Array;
 use super::utils::{ptr_mut, ptr_ref};
@@ -251,7 +248,7 @@ impl DiffIterator {
                 if !(*child).extra() {
                     structural_child_index += 1;
                 }
-                let last_external_token = subtree_last_external_token(*child);
+                let last_external_token = (*child).last_external_token();
                 if !last_external_token.is_null() {
                     self.prev_external_token = last_external_token;
                 }
@@ -290,7 +287,7 @@ impl DiffIterator {
                 .unwrap_unchecked()
                 .subtree;
             let child_index = entry.child_index + 1;
-            let last_external_token = subtree_last_external_token(*entry.subtree);
+            let last_external_token = (*entry.subtree).last_external_token();
             if !last_external_token.is_null() {
                 self.prev_external_token = last_external_token;
             }
@@ -366,10 +363,9 @@ impl DiffIterator {
             || old_has_external_tokens != new_has_external_tokens
             || old_tree.has_changes()
             || (old_has_external_tokens
-                && !subtree_external_scanner_state_eq(
-                    self.prev_external_token,
-                    new_iter.prev_external_token,
-                ))
+                && !self
+                    .prev_external_token
+                    .has_same_external_scanner_state(new_iter.prev_external_token))
         {
             return IteratorComparison::MayDiffer;
         }

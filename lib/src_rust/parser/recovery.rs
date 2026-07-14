@@ -5,14 +5,12 @@ use super::{
     parser_symbol_name, parser_version_status, ptr, ptr_mut, ptr_ref, stack_copy_version,
     stack_get_summary, stack_merge, stack_pop_count, stack_pop_error, stack_push,
     stack_record_summary, stack_remove_version, stack_renumber_version, subtree_array_delete,
-    subtree_array_remove_trailing_extras, subtree_from_mut, subtree_last_external_token,
-    subtree_make_mut, subtree_new_error_node, subtree_new_missing_leaf, subtree_release,
-    subtree_retain, subtree_set_extra, ts_language_next_state, DisplayCStr, Length, ReduceAction,
-    StackVersion, Subtree, SubtreeArray, TSParser, TSStateId, TSSymbol, TableEntry, Write,
-    ERROR_COST_PER_SKIPPED_CHAR, ERROR_COST_PER_SKIPPED_LINE, ERROR_COST_PER_SKIPPED_TREE,
-    ERROR_STATE, MAX_SUMMARY_DEPTH, MAX_VERSION_COUNT, NULL_SUBTREE, STACK_VERSION_NONE,
-    TSPARSE_ACTION_TYPE_RECOVER, TSPARSE_ACTION_TYPE_REDUCE, TSPARSE_ACTION_TYPE_SHIFT,
-    TS_BUILTIN_SYM_ERROR_REPEAT,
+    subtree_array_remove_trailing_extras, subtree_new_error_node, subtree_new_missing_leaf,
+    ts_language_next_state, DisplayCStr, Length, ReduceAction, StackVersion, Subtree, SubtreeArray,
+    TSParser, TSStateId, TSSymbol, TableEntry, Write, ERROR_COST_PER_SKIPPED_CHAR,
+    ERROR_COST_PER_SKIPPED_LINE, ERROR_COST_PER_SKIPPED_TREE, ERROR_STATE, MAX_SUMMARY_DEPTH,
+    MAX_VERSION_COUNT, NULL_SUBTREE, STACK_VERSION_NONE, TSPARSE_ACTION_TYPE_RECOVER,
+    TSPARSE_ACTION_TYPE_REDUCE, TSPARSE_ACTION_TYPE_SHIFT, TS_BUILTIN_SYM_ERROR_REPEAT,
 };
 
 // ---------------------------------------------------------------------------
@@ -149,7 +147,7 @@ unsafe fn parser_recover_to_state(
                     .subtrees
                     .splice(0, 0, error_child_count, error_children.as_ptr());
                 for child in error_children {
-                    subtree_retain(*child);
+                    (*child).retain();
                 }
             }
             subtree_array_delete(&mut self_.tree_pool, &mut error_trees);
@@ -277,7 +275,7 @@ pub(super) unsafe fn parser_recover(
             || lookahead.has_external_scanner_state_change());
     if cannot_skip_after_recovery || parser_better_version_exists(self_, version, false, new_cost) {
         stack.halt(version);
-        subtree_release(&mut self_.tree_pool, lookahead);
+        lookahead.release(&mut self_.tree_pool);
         return;
     }
 
@@ -291,9 +289,9 @@ pub(super) unsafe fn parser_recover(
         action.type_ == TSPARSE_ACTION_TYPE_SHIFT && action.shift.extra
     };
     if marks_extra {
-        let mut mutable_lookahead = subtree_make_mut(&mut self_.tree_pool, lookahead);
-        subtree_set_extra(&mut mutable_lookahead, true);
-        lookahead = subtree_from_mut(mutable_lookahead);
+        let mut mutable_lookahead = lookahead.make_mut(&mut self_.tree_pool);
+        mutable_lookahead.set_extra(true);
+        lookahead = mutable_lookahead.into_immutable();
     }
 
     // Wrap the lookahead in an ERROR
@@ -327,14 +325,14 @@ pub(super) unsafe fn parser_recover(
 
         stack_renumber_version(stack, pop.get_unchecked(0).version, version);
         let slot = &mut pop.get_unchecked_mut(0).subtrees;
-        slot.push(subtree_from_mut(error_repeat));
+        slot.push(error_repeat.into_immutable());
         error_repeat = parser_new_node(self_, TS_BUILTIN_SYM_ERROR_REPEAT, slot, 0);
     }
 
     // Push the ERROR
-    stack_push(stack, version, subtree_from_mut(error_repeat), ERROR_STATE);
+    stack_push(stack, version, error_repeat.into_immutable(), ERROR_STATE);
     if lookahead.has_external_tokens() {
-        stack.set_last_external_token(version, subtree_last_external_token(lookahead));
+        stack.set_last_external_token(version, lookahead.last_external_token());
     }
 
     let mut has_error = true;

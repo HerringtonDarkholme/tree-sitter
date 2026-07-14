@@ -35,12 +35,9 @@ use super::stack::{
 };
 use super::subtree::{
     subtree_array_clear, subtree_array_delete, subtree_array_remove_trailing_extras,
-    subtree_compare, subtree_compress, subtree_external_scanner_state_eq, subtree_from_mut,
-    subtree_last_external_token, subtree_make_mut, subtree_new_error, subtree_new_error_node,
-    subtree_new_leaf, subtree_new_missing_leaf, subtree_new_node, subtree_pool_delete,
-    subtree_pool_new, subtree_print_dot_graph, subtree_release, subtree_retain,
-    subtree_set_external_scanner_state, subtree_set_extra, subtree_set_symbol,
-    subtree_to_mut_unsafe, MutableSubtree, Subtree, SubtreeArray, SubtreePool, NULL_SUBTREE,
+    subtree_compare, subtree_compress, subtree_new_error, subtree_new_error_node, subtree_new_leaf,
+    subtree_new_missing_leaf, subtree_new_node, subtree_pool_delete, subtree_pool_new,
+    subtree_print_dot_graph, MutableSubtree, Subtree, SubtreeArray, SubtreePool, NULL_SUBTREE,
     TS_BUILTIN_SYM_END, TS_BUILTIN_SYM_ERROR, TS_BUILTIN_SYM_ERROR_REPEAT, TS_TREE_STATE_NONE,
 };
 use super::tree::TSTree;
@@ -360,7 +357,7 @@ unsafe fn parser_check_progress(
     {
         if let Some(lookahead) = lookahead {
             if !lookahead.is_null() {
-                subtree_release(&mut self_.tree_pool, *lookahead);
+                (*lookahead).release(&mut self_.tree_pool);
             }
         }
         return false;
@@ -493,7 +490,7 @@ unsafe fn parser_halt_after_merged_reduction(
     lookahead: Subtree,
 ) {
     if !lookahead.is_null() {
-        subtree_release(&mut self_.tree_pool, lookahead);
+        lookahead.release(&mut self_.tree_pool);
     }
     ptr_mut(self_.stack).halt(version);
 }
@@ -526,13 +523,9 @@ unsafe fn parser_try_keyword_fallback(
         )
     });
 
-    let mut mutable_lookahead = subtree_make_mut(&mut self_.tree_pool, *lookahead);
-    subtree_set_symbol(
-        &mut mutable_lookahead,
-        keyword_capture_token,
-        self_.language,
-    );
-    *lookahead = subtree_from_mut(mutable_lookahead);
+    let mut mutable_lookahead = (*lookahead).make_mut(&mut self_.tree_pool);
+    mutable_lookahead.set_symbol(keyword_capture_token, self_.language);
+    *lookahead = mutable_lookahead.into_immutable();
     true
 }
 
@@ -912,7 +905,7 @@ pub unsafe extern "C" fn ts_parser_reset(self_: *mut TSParser) {
     stack_clear(ptr_mut(parser.stack));
     parser_set_cached_token(parser, 0, NULL_SUBTREE, NULL_SUBTREE);
     if !parser.finished_tree.is_null() {
-        subtree_release(&mut parser.tree_pool, parser.finished_tree);
+        parser.finished_tree.release(&mut parser.tree_pool);
         parser.finished_tree = NULL_SUBTREE;
     }
     parser.accept_count = 0;

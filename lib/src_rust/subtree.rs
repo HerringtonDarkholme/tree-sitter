@@ -699,6 +699,144 @@ impl Subtree {
     pub unsafe fn is_eof(self) -> bool {
         self.symbol() == TS_BUILTIN_SYM_END
     }
+
+    #[inline]
+    pub const fn into_mut(self) -> MutableSubtree {
+        MutableSubtree { data: self.data }
+    }
+
+    pub unsafe fn clone_mut(self) -> MutableSubtree {
+        let data = self.heap_data();
+        let alloc_size = subtree_alloc_size(data.child_count);
+        let new_children = malloc(alloc_size).cast::<Self>();
+        ptr::copy_nonoverlapping(self.children_ptr(), new_children, data.child_count as usize);
+        let result = new_children
+            .add(data.child_count as usize)
+            .cast::<SubtreeHeapData>();
+        for &child in core::slice::from_raw_parts(new_children, data.child_count as usize) {
+            child.retain();
+        }
+        let content = match &data.data {
+            SubtreeHeapDataContent::Children(children) => {
+                SubtreeHeapDataContent::Children(*children)
+            }
+            SubtreeHeapDataContent::ExternalScannerState(state) => {
+                SubtreeHeapDataContent::ExternalScannerState(state.copy())
+            }
+            SubtreeHeapDataContent::LookaheadChar(character) => {
+                SubtreeHeapDataContent::LookaheadChar(*character)
+            }
+        };
+        ptr::write(
+            result,
+            SubtreeHeapData {
+                ref_count: AtomicU32::new(1),
+                padding: data.padding,
+                size: data.size,
+                lookahead_bytes: data.lookahead_bytes,
+                error_cost: data.error_cost,
+                child_count: data.child_count,
+                symbol: data.symbol,
+                parse_state: data.parse_state,
+                flags: data.flags,
+                data: content,
+            },
+        );
+        MutableSubtree::from_heap(result)
+    }
+
+    pub unsafe fn make_mut(self, pool: &mut SubtreePool) -> MutableSubtree {
+        if self.data.is_inline() {
+            return self.into_mut();
+        }
+        if self.heap_data().ref_count() == 1 {
+            return self.into_mut();
+        }
+        let result = self.clone_mut();
+        self.release(pool);
+        result
+    }
+
+    pub unsafe fn retain(self) {
+        if self.data.is_inline() {
+            return;
+        }
+        let ref_count = &self.heap_data().ref_count;
+        debug_assert!(ref_count.load(Ordering::Relaxed) > 0);
+        let previous = ref_count.fetch_add(1, Ordering::SeqCst);
+        debug_assert!(previous.wrapping_add(1) != 0);
+    }
+
+    pub unsafe fn release(self, pool: &mut SubtreePool) {
+        if self.data.is_inline() {
+            return;
+        }
+        pool.tree_stack.clear();
+
+        let ref_count = &self.heap_data().ref_count;
+        debug_assert!(ref_count.load(Ordering::Relaxed) > 0);
+        if ref_count.fetch_sub(1, Ordering::SeqCst) == 1 {
+            pool.tree_stack.push(self.into_mut());
+        }
+
+        while !pool.tree_stack.is_empty() {
+            let tree = pool.tree_stack.pop();
+            if tree.heap_data().child_count > 0 {
+                let children = tree.into_immutable().children();
+                for &child in children {
+                    if child.data.is_inline() {
+                        continue;
+                    }
+                    let child_ref = &child.heap_data().ref_count;
+                    debug_assert!(child_ref.load(Ordering::Relaxed) > 0);
+                    if child_ref.fetch_sub(1, Ordering::SeqCst) == 1 {
+                        pool.tree_stack.push(child.into_mut());
+                    }
+                }
+                free(children.as_ptr().cast_mut().cast::<c_void>());
+            } else {
+                if tree.heap_data().has_external_tokens() {
+                    tree.heap_data_mut().external_scanner_state_mut().delete();
+                }
+                subtree_pool_free(pool, tree);
+            }
+        }
+    }
+
+    pub unsafe fn last_external_token(self) -> Self {
+        let mut tree = self;
+        if !tree.has_external_tokens() {
+            return NULL_SUBTREE;
+        }
+        loop {
+            let data = tree.heap_data();
+            if data.child_count == 0 {
+                return tree;
+            }
+            for &child in tree.children().iter().rev() {
+                if child.has_external_tokens() {
+                    tree = child;
+                    break;
+                }
+            }
+        }
+    }
+
+    pub unsafe fn external_scanner_state<'a>(self) -> &'a ExternalScannerState {
+        if self.is_null() || self.data.is_inline() {
+            return &EMPTY_EXTERNAL_SCANNER_STATE;
+        }
+        let data = self.heap_data();
+        if data.has_external_tokens() && data.child_count == 0 {
+            data.external_scanner_state()
+        } else {
+            &EMPTY_EXTERNAL_SCANNER_STATE
+        }
+    }
+
+    pub unsafe fn has_same_external_scanner_state(self, other: Self) -> bool {
+        self.external_scanner_state().as_bytes() == other.external_scanner_state().as_bytes()
+    }
 }
 
 impl MutableSubtree {
@@ -729,6 +867,34 @@ impl MutableSubtree {
         } else {
             self.heap_data_mut().set_extra(is_extra);
         }
+    }
+
+    #[inline]
+    pub const fn into_immutable(self) -> Subtree {
+        Subtree { data: self.data }
+    }
+
+    pub unsafe fn set_symbol(&mut self, symbol: TSSymbol, language: *const TSLanguage) {
+        let metadata = ts_language_symbol_metadata(language, symbol);
+        if self.data.is_inline() {
+            debug_assert!(symbol < TSSymbol::from(u8::MAX));
+            self.data.symbol = symbol as u8;
+            self.data.set_named(metadata.named);
+            self.data.set_visible(metadata.visible);
+        } else {
+            let data = self.heap_data_mut();
+            data.symbol = symbol;
+            data.set_named(metadata.named);
+            data.set_visible(metadata.visible);
+        }
+    }
+
+    pub unsafe fn set_external_scanner_state(self, bytes: &[u8]) {
+        let data = self.heap_data_mut();
+        debug_assert_eq!(data.child_count, 0);
+        debug_assert!(data.has_external_tokens());
+        data.data =
+            SubtreeHeapDataContent::ExternalScannerState(ExternalScannerState::from_bytes(bytes));
     }
 }
 
@@ -855,11 +1021,6 @@ unsafe fn mutable_subtree_data_mut<'a>(self_: MutableSubtree) -> &'a mut Subtree
 }
 
 #[inline]
-const unsafe fn subtree_data_ref<'a>(self_: Subtree) -> &'a SubtreeHeapData {
-    self_.heap_data()
-}
-
-#[inline]
 unsafe fn mutable_subtree_child(self_: MutableSubtree, index: usize) -> Subtree {
     *mutable_subtree_children(self_).get_unchecked(index)
 }
@@ -867,11 +1028,6 @@ unsafe fn mutable_subtree_child(self_: MutableSubtree, index: usize) -> Subtree 
 #[inline]
 unsafe fn mutable_subtree_child_mut<'a>(self_: MutableSubtree, index: usize) -> &'a mut Subtree {
     mutable_subtree_children(self_).get_unchecked_mut(index)
-}
-
-#[inline]
-pub unsafe fn subtree_set_extra(self_: &mut MutableSubtree, is_extra: bool) {
-    self_.set_extra(is_extra);
 }
 
 // Source spans
@@ -961,12 +1117,12 @@ pub unsafe fn subtree_is_error(self_: Subtree) -> bool {
 
 #[inline]
 pub const fn subtree_from_mut(self_: MutableSubtree) -> Subtree {
-    Subtree { data: self_.data }
+    self_.into_immutable()
 }
 
 #[inline]
 pub const fn subtree_to_mut_unsafe(self_: Subtree) -> MutableSubtree {
-    MutableSubtree { data: self_.data }
+    self_.into_mut()
 }
 
 // Subtree private helpers
@@ -1106,47 +1262,6 @@ pub unsafe fn subtree_new_error(
     result
 }
 
-pub unsafe fn subtree_clone(self_: Subtree) -> MutableSubtree {
-    let data = subtree_data_ref(self_);
-    let alloc_size = subtree_alloc_size(data.child_count);
-    let new_children = malloc(alloc_size).cast::<Subtree>();
-    let old_children = subtree_children(self_);
-    ptr::copy_nonoverlapping(old_children, new_children, data.child_count as usize);
-    let result = new_children
-        .add(data.child_count as usize)
-        .cast::<SubtreeHeapData>();
-    if data.child_count > 0 {
-        for i in 0..data.child_count {
-            subtree_retain(*new_children.add(i as usize));
-        }
-    }
-    let content = match &data.data {
-        SubtreeHeapDataContent::Children(children) => SubtreeHeapDataContent::Children(*children),
-        SubtreeHeapDataContent::ExternalScannerState(state) => {
-            SubtreeHeapDataContent::ExternalScannerState(state.copy())
-        }
-        SubtreeHeapDataContent::LookaheadChar(character) => {
-            SubtreeHeapDataContent::LookaheadChar(*character)
-        }
-    };
-    ptr::write(
-        result,
-        SubtreeHeapData {
-            ref_count: AtomicU32::new(1),
-            padding: data.padding,
-            size: data.size,
-            lookahead_bytes: data.lookahead_bytes,
-            error_cost: data.error_cost,
-            child_count: data.child_count,
-            symbol: data.symbol,
-            parse_state: data.parse_state,
-            flags: data.flags,
-            data: content,
-        },
-    );
-    MutableSubtree::from_heap(result)
-}
-
 unsafe fn subtree_init_node_data(
     data: *mut SubtreeHeapData,
     symbol: TSSymbol,
@@ -1255,84 +1370,6 @@ pub unsafe fn subtree_new_missing_leaf(
 }
 
 // Subtree mutation and ownership
-
-pub unsafe fn subtree_set_symbol(
-    self_: &mut MutableSubtree,
-    symbol: TSSymbol,
-    language: *const TSLanguage,
-) {
-    let metadata = ts_language_symbol_metadata(language, symbol);
-    if self_.data.is_inline() {
-        debug_assert!(symbol < TSSymbol::from(u8::MAX));
-        self_.data.symbol = symbol as u8;
-        self_.data.set_named(metadata.named);
-        self_.data.set_visible(metadata.visible);
-    } else {
-        let data = mutable_subtree_data_mut(*self_);
-        data.symbol = symbol;
-        data.set_named(metadata.named);
-        data.set_visible(metadata.visible);
-    }
-}
-
-pub unsafe fn subtree_make_mut(pool: &mut SubtreePool, self_: Subtree) -> MutableSubtree {
-    if self_.data.is_inline() {
-        return MutableSubtree { data: self_.data };
-    }
-    if self_.heap_data().ref_count() == 1 {
-        return subtree_to_mut_unsafe(self_);
-    }
-    let result = subtree_clone(self_);
-    subtree_release(pool, self_);
-    result
-}
-
-pub unsafe fn subtree_retain(self_: Subtree) {
-    if self_.data.is_inline() {
-        return;
-    }
-    let ref_count = &self_.heap_data().ref_count;
-    debug_assert!(ref_count.load(Ordering::Relaxed) > 0);
-    let prev = ref_count.fetch_add(1, Ordering::SeqCst);
-    debug_assert!(prev.wrapping_add(1) != 0);
-}
-
-pub unsafe fn subtree_release(pool: &mut SubtreePool, self_: Subtree) {
-    if self_.data.is_inline() {
-        return;
-    }
-    pool.tree_stack.size = 0;
-
-    let ref_count = &self_.heap_data().ref_count;
-    debug_assert!(ref_count.load(Ordering::Relaxed) > 0);
-    if ref_count.fetch_sub(1, Ordering::SeqCst) == 1 {
-        pool.tree_stack.push(subtree_to_mut_unsafe(self_));
-    }
-
-    while pool.tree_stack.size > 0 {
-        let tree = pool.tree_stack.pop();
-        if tree.heap_data().child_count > 0 {
-            let children = subtree_children_slice(subtree_from_mut(tree));
-            for child in children {
-                let child = *child;
-                if child.data.is_inline() {
-                    continue;
-                }
-                let child_ref = &child.heap_data().ref_count;
-                debug_assert!(child_ref.load(Ordering::Relaxed) > 0);
-                if child_ref.fetch_sub(1, Ordering::SeqCst) == 1 {
-                    pool.tree_stack.push(subtree_to_mut_unsafe(child));
-                }
-            }
-            free(children.as_ptr().cast_mut().cast::<c_void>());
-        } else {
-            if tree.heap_data().has_external_tokens() {
-                tree.heap_data_mut().external_scanner_state_mut().delete();
-            }
-            subtree_pool_free(pool, tree);
-        }
-    }
-}
 
 // Subtree balancing and summarization
 
@@ -1564,56 +1601,6 @@ pub unsafe fn subtree_compare(left: Subtree, right: Subtree, pool: &mut SubtreeP
 mod edit;
 pub use edit::subtree_edit;
 
-pub unsafe fn subtree_last_external_token(mut tree: Subtree) -> Subtree {
-    if !subtree_has_external_tokens(tree) {
-        return NULL_SUBTREE;
-    }
-    loop {
-        let data = subtree_data_ref(tree);
-        if data.child_count == 0 {
-            break;
-        }
-        let children = subtree_children_slice(tree);
-        let mut i = data.child_count as usize;
-        while i > 0 {
-            i -= 1;
-            let child = *children.get_unchecked(i);
-            if subtree_has_external_tokens(child) {
-                tree = child;
-                break;
-            }
-        }
-    }
-    tree
-}
-
-pub unsafe fn subtree_external_scanner_state(self_: &Subtree) -> &ExternalScannerState {
-    if self_.is_null() || self_.data.is_inline() {
-        return &EMPTY_EXTERNAL_SCANNER_STATE;
-    }
-
-    let data = subtree_data_ref(*self_);
-    if data.has_external_tokens() && data.child_count == 0 {
-        data.external_scanner_state()
-    } else {
-        &EMPTY_EXTERNAL_SCANNER_STATE
-    }
-}
-
-pub unsafe fn subtree_set_external_scanner_state(self_: MutableSubtree, bytes: &[u8]) {
-    let data = mutable_subtree_data_mut(self_);
-    debug_assert_eq!(data.child_count, 0);
-    debug_assert!(data.has_external_tokens());
-    data.data =
-        SubtreeHeapDataContent::ExternalScannerState(ExternalScannerState::from_bytes(bytes));
-}
-
-pub unsafe fn subtree_external_scanner_state_eq(self_: Subtree, other: Subtree) -> bool {
-    let state_self = subtree_external_scanner_state(&self_);
-    let state_other = subtree_external_scanner_state(&other);
-    state_self.as_bytes() == state_other.as_bytes()
-}
-
 mod debug;
 pub use debug::{subtree_print_dot_graph, subtree_string};
 
@@ -1673,7 +1660,7 @@ mod tests {
             assert_eq!(subtree_size(tree).bytes, 260);
             assert!(tree.has_changes());
 
-            subtree_release(&mut pool, tree);
+            tree.release(&mut pool);
             subtree_pool_delete(&mut pool);
         }
     }
@@ -1697,7 +1684,7 @@ mod tests {
             assert!((*tree.child(0)).has_changes());
             assert!(!(*tree.child(1)).has_changes());
 
-            subtree_release(&mut pool, tree);
+            tree.release(&mut pool);
             subtree_pool_delete(&mut pool);
         }
     }
@@ -1744,7 +1731,7 @@ mod tests {
                 TS_BUILTIN_SYM_ERROR
             );
 
-            subtree_release(&mut pool, parent_tree);
+            parent_tree.release(&mut pool);
             subtree_pool_delete(&mut pool);
         }
     }

@@ -2,10 +2,9 @@ use core::ptr::NonNull;
 
 use super::{
     ptr, ptr_mut, stack_head, stack_node_retain, subtree_alloc_size, subtree_array_copy,
-    subtree_array_delete, subtree_array_reverse, subtree_retain, Array, Stack, StackHead,
-    StackIterationAction, StackIterator, StackLink, StackNode, StackSlice, StackSliceArray,
-    StackStatus, StackSummary, StackSummaryEntry, StackVersion, Subtree, SubtreeArray,
-    MAX_ITERATOR_COUNT, NULL_SUBTREE,
+    subtree_array_delete, subtree_array_reverse, Array, Stack, StackHead, StackIterationAction,
+    StackIterator, StackLink, StackNode, StackSlice, StackSliceArray, StackStatus, StackSummary,
+    StackSummaryEntry, StackVersion, Subtree, SubtreeArray, MAX_ITERATOR_COUNT, NULL_SUBTREE,
 };
 
 /// Add a new version to the stack, cloning metadata from an existing version.
@@ -27,7 +26,7 @@ unsafe fn stack_add_version(
     stack_node_retain(node);
     let head = self_.heads.last_unchecked();
     if !head.last_external_token.is_null() {
-        subtree_retain(head.last_external_token);
+        head.last_external_token.retain();
     }
     self_.heads.size - 1
 }
@@ -152,7 +151,7 @@ where
                     if include_subtrees {
                         let subtrees = &mut next_iterator.subtrees;
                         subtrees.push(subtree);
-                        subtree_retain(subtree);
+                        subtree.retain();
                     }
 
                     if !subtree.extra() {

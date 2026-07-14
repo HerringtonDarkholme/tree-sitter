@@ -8,9 +8,7 @@ use super::get_changed_ranges::{
 };
 use super::length::{length_add, Length};
 use super::node::node_new;
-use super::subtree::{
-    subtree_edit, subtree_pool_delete, subtree_pool_new, subtree_release, subtree_retain, Subtree,
-};
+use super::subtree::{subtree_edit, subtree_pool_delete, subtree_pool_new, Subtree};
 // Only used by `TSTree::print_dot_graph`, which is unavailable on wasm.
 #[cfg(not(target_family = "wasm"))]
 use super::subtree::subtree_print_dot_graph;
@@ -111,14 +109,14 @@ impl TSTree {
 
     /// Copy a tree by retaining its shared immutable subtree storage.
     unsafe fn copy(&self) -> *mut Self {
-        subtree_retain(self.root);
+        self.root.retain();
         Self::new(self.root, self.language, self.included_ranges())
     }
 
     /// Release all references and buffers owned by this tree.
     unsafe fn delete(&mut self) {
         let mut pool = subtree_pool_new(0);
-        subtree_release(&mut pool, self.root);
+        self.root.release(&mut pool);
         subtree_pool_delete(&mut pool);
         self.included_ranges.delete();
     }
@@ -361,7 +359,7 @@ mod tests {
     use super::*;
     use crate::core_impl::length::length_zero;
     use crate::core_impl::subtree::{
-        subtree_from_mut, subtree_new_error, subtree_new_node, TS_BUILTIN_SYM_ERROR_REPEAT,
+        subtree_new_error, subtree_new_node, TS_BUILTIN_SYM_ERROR_REPEAT,
     };
 
     #[test]
@@ -389,12 +387,8 @@ mod tests {
             let mut children = Array::new();
             children.push(child1);
             children.push(child2);
-            let root = subtree_from_mut(subtree_new_node(
-                TS_BUILTIN_SYM_ERROR_REPEAT,
-                &mut children,
-                0,
-                ptr::null(),
-            ));
+            let root = subtree_new_node(TS_BUILTIN_SYM_ERROR_REPEAT, &mut children, 0, ptr::null())
+                .into_immutable();
 
             assert_eq!(root.child_count(), 2);
             let tree = TSTree::new(root, ptr::null(), &[]);

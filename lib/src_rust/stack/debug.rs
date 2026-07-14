@@ -1,9 +1,8 @@
 use core::ptr::NonNull;
 
 use super::{
-    c_void, fprintf, language_write_symbol_as_dot_string, ptr, stack_head, stderr_file,
-    subtree_external_scanner_state, Array, Stack, StackIterator, StackNode, StackStatus,
-    TSLanguage, ERROR_STATE,
+    c_void, fprintf, language_write_symbol_as_dot_string, ptr, stack_head, stderr_file, Array,
+    Stack, StackIterator, StackNode, StackStatus, TSLanguage, ERROR_STATE,
 };
 
 /// Print the stack as a DOT graph for debugging.
@@ -66,7 +65,7 @@ pub unsafe fn stack_print_dot_graph(
         }
 
         if !head.last_external_token.is_null() {
-            let state = subtree_external_scanner_state(&head.last_external_token);
+            let state = head.last_external_token.external_scanner_state();
             fprintf(f, c"\nexternal_scanner_state:".as_ptr().cast::<i8>());
             for &byte in state.as_bytes() {
                 fprintf(f, c" %2X".as_ptr().cast::<i8>(), u32::from(byte));

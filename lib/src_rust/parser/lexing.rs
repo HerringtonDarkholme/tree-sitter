@@ -1,15 +1,12 @@
-use super::super::subtree::subtree_external_scanner_state;
 use super::{
     language_full, language_has_actions, language_is_reserved_word, language_lex_mode_for_state,
     language_table_entry, length_sub, length_zero, lexer_advance, lexer_finish, lexer_is_eof,
     lexer_reset, lexer_start, parser_call_keyword_lex_fn, parser_call_main_lex_fn,
     parser_external_scanner_deserialize, parser_external_scanner_scan,
     parser_external_scanner_serialize, parser_log, parser_log_lookahead, parser_symbol_name,
-    ptr_ref, subtree_external_scanner_state_eq, subtree_new_error, subtree_new_leaf,
-    subtree_release, subtree_retain, subtree_set_external_scanner_state, subtree_to_mut_unsafe,
-    ts_language_next_state, DisplayCStr, Length, StackVersion, Subtree, TSParser, TSStateId,
-    TSSymbol, TableEntry, Write, ERROR_STATE, NULL_SUBTREE, TS_BUILTIN_SYM_END,
-    TS_BUILTIN_SYM_ERROR,
+    ptr_ref, subtree_new_error, subtree_new_leaf, ts_language_next_state, DisplayCStr, Length,
+    StackVersion, Subtree, TSParser, TSStateId, TSSymbol, TableEntry, Write, ERROR_STATE,
+    NULL_SUBTREE, TS_BUILTIN_SYM_END, TS_BUILTIN_SYM_ERROR,
 };
 
 // ---------------------------------------------------------------------------
@@ -159,9 +156,8 @@ unsafe fn parser_new_leaf_lookahead(
     );
 
     if found_external_token {
-        let mut_result = subtree_to_mut_unsafe(result);
-        subtree_set_external_scanner_state(
-            mut_result,
+        let mut_result = result.into_mut();
+        mut_result.set_external_scanner_state(
             &self_.lexer.debug_buffer[..external_scanner_state_len as usize],
         );
         mut_result
@@ -230,7 +226,7 @@ unsafe fn parser_lex(
 
             if found_token {
                 external_scanner_state_len = parser_external_scanner_serialize(self_);
-                let external_scanner_state = subtree_external_scanner_state(&external_token);
+                let external_scanner_state = external_token.external_scanner_state();
                 external_scanner_state_changed = external_scanner_state.as_bytes()
                     != &self_.lexer.debug_buffer[..external_scanner_state_len as usize];
 
@@ -352,7 +348,9 @@ unsafe fn parser_get_cached_token(
     let cache = &self_.token_cache;
     if !cache.token.is_null()
         && cache.byte_index == position as u32
-        && subtree_external_scanner_state_eq(cache.last_external_token, last_external_token)
+        && cache
+            .last_external_token
+            .has_same_external_scanner_state(last_external_token)
     {
         let mut table_entry = TableEntry::empty();
         language_table_entry(
@@ -362,7 +360,7 @@ unsafe fn parser_get_cached_token(
             &mut table_entry,
         );
         if parser_can_reuse_token(self_, state, cache.token, &table_entry) {
-            subtree_retain(cache.token);
+            cache.token.retain();
             return Some((cache.token, table_entry));
         }
     }
@@ -377,16 +375,16 @@ pub(super) unsafe fn parser_set_cached_token(
 ) {
     let cache = &mut self_.token_cache;
     if !token.is_null() {
-        subtree_retain(token);
+        token.retain();
     }
     if !last_external_token.is_null() {
-        subtree_retain(last_external_token);
+        last_external_token.retain();
     }
     if !cache.token.is_null() {
-        subtree_release(&mut self_.tree_pool, cache.token);
+        cache.token.release(&mut self_.tree_pool);
     }
     if !cache.last_external_token.is_null() {
-        subtree_release(&mut self_.tree_pool, cache.last_external_token);
+        cache.last_external_token.release(&mut self_.tree_pool);
     }
     cache.token = token;
     cache.byte_index = byte_index;

@@ -2,9 +2,9 @@ use core::ffi::c_void;
 use core::ptr::{self, NonNull};
 
 use super::{
-    calloc, free, malloc, subtree_release, subtree_retain, Array, ExternalScannerState,
-    ExternalScannerStateData, MutableSubtree, Subtree, SubtreeArray, SubtreeHeapData, SubtreePool,
-    EXTERNAL_SCANNER_STATE_INLINE_SIZE, TS_MAX_TREE_POOL_SIZE,
+    calloc, free, malloc, Array, ExternalScannerState, ExternalScannerStateData, MutableSubtree,
+    Subtree, SubtreeArray, SubtreeHeapData, SubtreePool, EXTERNAL_SCANNER_STATE_INLINE_SIZE,
+    TS_MAX_TREE_POOL_SIZE,
 };
 
 impl ExternalScannerState {
@@ -58,7 +58,7 @@ pub unsafe fn subtree_array_copy(source: &SubtreeArray, destination: &mut Subtre
                 .as_mut_slice()
                 .copy_from_slice(source.as_slice());
             for &tree in destination.as_slice() {
-                subtree_retain(tree);
+                tree.retain();
             }
         }
     }
@@ -66,7 +66,7 @@ pub unsafe fn subtree_array_copy(source: &SubtreeArray, destination: &mut Subtre
 
 pub unsafe fn subtree_array_clear(pool: &mut SubtreePool, trees: &mut SubtreeArray) {
     for &tree in trees.as_slice() {
-        subtree_release(pool, tree);
+        tree.release(pool);
     }
     trees.size = 0;
 }

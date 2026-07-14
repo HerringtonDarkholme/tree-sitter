@@ -2,9 +2,9 @@ use core::ffi::c_void;
 use core::ptr::{self, NonNull};
 
 use super::{
-    free, length_add, length_zero, malloc, subtree_external_scanner_state_eq, subtree_release,
-    subtree_retain, Length, StackHead, StackLink, StackNodeArray, Subtree, SubtreePool, TSStateId,
-    MAX_LINK_COUNT, MAX_NODE_POOL_SIZE, NULL_SUBTREE, TS_BUILTIN_SYM_ERROR_REPEAT,
+    free, length_add, length_zero, malloc, Length, StackHead, StackLink, StackNodeArray, Subtree,
+    SubtreePool, TSStateId, MAX_LINK_COUNT, MAX_NODE_POOL_SIZE, NULL_SUBTREE,
+    TS_BUILTIN_SYM_ERROR_REPEAT,
 };
 
 /// Node in the persistent GLR stack graph.
@@ -49,13 +49,13 @@ pub(super) unsafe fn stack_node_release(
             for i in (1..usize::from(node.link_count)).rev() {
                 let link = node.links[i];
                 if !link.subtree.is_null() {
-                    subtree_release(subtree_pool, link.subtree);
+                    link.subtree.release(subtree_pool);
                 }
                 stack_node_release(link.node, pool, subtree_pool);
             }
             let link = node.links[0];
             if !link.subtree.is_null() {
-                subtree_release(subtree_pool, link.subtree);
+                link.subtree.release(subtree_pool);
             }
             Some(link.node)
         } else {
@@ -168,7 +168,7 @@ unsafe fn stack_subtree_is_equivalent(left: Subtree, right: Subtree) -> bool {
         && left.size().bytes == right.size().bytes
         && left_child_count == right_child_count
         && left.extra() == right.extra()
-        && subtree_external_scanner_state_eq(left, right)
+        && left.has_same_external_scanner_state(right)
 }
 
 /// Add a predecessor edge, merging equivalent paths to keep the graph shallow.
@@ -187,8 +187,8 @@ pub(super) unsafe fn stack_node_add_link(
         if stack_subtree_is_equivalent(existing_link.subtree, link.subtree) {
             if existing_link.node == link.node {
                 if link.subtree.dynamic_precedence() > existing_link.subtree.dynamic_precedence() {
-                    subtree_retain(link.subtree);
-                    subtree_release(subtree_pool, existing_link.subtree);
+                    link.subtree.retain();
+                    existing_link.subtree.release(subtree_pool);
                     existing_link.subtree = link.subtree;
                     node.dynamic_precedence =
                         link.node.as_ref().dynamic_precedence + link.subtree.dynamic_precedence();
@@ -233,7 +233,7 @@ pub(super) unsafe fn stack_node_add_link(
     node.link_count += 1;
 
     if !link.subtree.is_null() {
-        subtree_retain(link.subtree);
+        link.subtree.retain();
         node_count += stack_subtree_node_count(link.subtree);
         dynamic_precedence += link.subtree.dynamic_precedence();
     }
@@ -253,10 +253,10 @@ pub(super) unsafe fn stack_head_delete(
     subtree_pool: &mut SubtreePool,
 ) {
     if !head.last_external_token.is_null() {
-        subtree_release(subtree_pool, head.last_external_token);
+        head.last_external_token.release(subtree_pool);
     }
     if !head.lookahead_when_paused.is_null() {
-        subtree_release(subtree_pool, head.lookahead_when_paused);
+        head.lookahead_when_paused.release(subtree_pool);
     }
     if let Some(mut summary) = head.summary.take() {
         summary.as_mut().delete();

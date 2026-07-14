@@ -4,9 +4,8 @@ use core::{ptr::NonNull, sync::atomic::AtomicU32};
 
 use super::{
     length_add, length_saturating_sub, length_sub, length_zero, subtree_can_inline,
-    subtree_from_mut, subtree_make_mut, subtree_pool_allocate, subtree_set_has_changes, Edit,
-    EditEntry, Length, MutableSubtree, Subtree, SubtreeHeapData, SubtreeHeapDataContent,
-    SubtreePool, TSInputEdit, TSSymbol,
+    subtree_pool_allocate, subtree_set_has_changes, Edit, EditEntry, Length, MutableSubtree,
+    Subtree, SubtreeHeapData, SubtreeHeapDataContent, SubtreePool, TSInputEdit, TSSymbol,
 };
 
 /// Calculate the edited padding and content size for one subtree.
@@ -53,7 +52,7 @@ unsafe fn subtree_apply_edit_size(
     size: Length,
     lookahead_bytes: u32,
 ) -> Subtree {
-    let mut result = subtree_make_mut(pool, tree);
+    let mut result = tree.make_mut(pool);
 
     if result.data.is_inline() {
         if subtree_can_inline(padding, size, lookahead_bytes) {
@@ -93,7 +92,7 @@ unsafe fn subtree_apply_edit_size(
     }
 
     subtree_set_has_changes(&mut result);
-    subtree_from_mut(result)
+    result.into_immutable()
 }
 
 /// Translate an edit into each affected child's coordinate space.

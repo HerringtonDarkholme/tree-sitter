@@ -19,8 +19,7 @@ use super::error_costs::{ERROR_COST_PER_RECOVERY, ERROR_STATE};
 use super::language::language_write_symbol_as_dot_string;
 use super::length::{length_add, length_zero, Length};
 use super::subtree::{
-    subtree_alloc_size, subtree_external_scanner_state, subtree_external_scanner_state_eq,
-    subtree_release, subtree_retain, Subtree, SubtreeArray, SubtreePool, NULL_SUBTREE,
+    subtree_alloc_size, Subtree, SubtreeArray, SubtreePool, NULL_SUBTREE,
     TS_BUILTIN_SYM_ERROR_REPEAT,
 };
 use super::subtree::{subtree_array_copy, subtree_array_delete, subtree_array_reverse};
@@ -162,10 +161,10 @@ impl Stack {
         let subtree_pool = ptr_mut(self.subtree_pool);
         let head = self.heads.get_unchecked_mut(version);
         if !token.is_null() {
-            subtree_retain(token);
+            token.retain();
         }
         if !head.last_external_token.is_null() {
-            subtree_release(subtree_pool, head.last_external_token);
+            head.last_external_token.release(subtree_pool);
         }
         head.last_external_token = token;
     }
@@ -525,7 +524,7 @@ pub unsafe fn stack_copy_version(stack: &mut Stack, version: StackVersion) -> St
     let head = stack.heads.last_unchecked_mut();
     stack_node_retain(head.node);
     if !head.last_external_token.is_null() {
-        subtree_retain(head.last_external_token);
+        head.last_external_token.retain();
     }
     if head.status == StackStatus::Halted {
         stack.halted_version_count += 1;
@@ -575,7 +574,9 @@ pub unsafe fn stack_can_merge(
         && node1.state == node2.state
         && node1.position.bytes == node2.position.bytes
         && node1.error_cost == node2.error_cost
-        && subtree_external_scanner_state_eq(head1.last_external_token, head2.last_external_token)
+        && head1
+            .last_external_token
+            .has_same_external_scanner_state(head2.last_external_token)
 }
 
 /// Clear all versions, resetting to initial state.
