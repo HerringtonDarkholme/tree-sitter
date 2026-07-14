@@ -20,9 +20,19 @@ use super::{
 /// A parser version points at one node head. Pushing creates a new node linked
 /// to the previous head; popping walks backward through links and may fork when
 /// a node has multiple predecessors.
+///
+/// The node represents a current parser configuration, not one complete parse
+/// history. When separate versions reach a compatible state and position,
+/// their predecessor links are combined here. This shares all future parsing
+/// work while retaining every past path needed to construct reduction
+/// children.
 pub(super) struct StackNode {
     pub(super) state: TSStateId,
     pub(super) position: Length,
+    /// Alternative backward histories for this parser configuration.
+    ///
+    /// A fresh push initializes link zero. `stack_node_add_link` adds links
+    /// when compatible version heads merge.
     pub(super) links: [StackLink; MAX_LINK_COUNT],
     pub(super) link_count: u16,
     pub(super) ref_count: u32,
@@ -179,7 +189,13 @@ unsafe fn stack_subtree_is_equivalent(left: Subtree, right: Subtree) -> bool {
         && left.has_same_external_scanner_state(right)
 }
 
-/// Add a predecessor edge, merging equivalent paths to keep the graph shallow.
+/// Add one alternative predecessor to an existing parser configuration.
+///
+/// This is the operation that turns a linear stack node into a GLR graph node.
+/// It is used while merging compatible version heads: the current state stays
+/// shared, while this link preserves another subtree and predecessor history.
+/// Equivalent links and predecessor configurations are combined recursively
+/// to keep the graph shallow.
 pub(super) unsafe fn stack_node_add_link(
     node: &mut StackNode,
     link: StackLink,

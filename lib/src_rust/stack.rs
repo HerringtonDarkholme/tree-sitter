@@ -43,12 +43,20 @@ pub const STACK_VERSION_NONE: StackVersion = u32::MAX;
 
 /// Directed edge from a stack node to one predecessor.
 ///
-/// The subtree is the syntax node that was shifted/reduced between the
-/// predecessor and the current node. Multiple links model GLR ambiguity: the
-/// same parse state/position can be reached through different child lists.
+/// Logically, the edge is the forward LR step
+/// `predecessor --subtree--> current`; it is stored backward so reductions can
+/// pop toward older states. The subtree is the syntax value shifted or reduced
+/// during that step.
+///
+/// A newly pushed node has one link. When compatible GLR versions reconverge,
+/// `stack_merge` copies their predecessor links into one surviving current
+/// node. Multiple links therefore preserve different pasts while sharing a
+/// parser configuration with the same future behavior.
 #[derive(Clone, Copy)]
 pub struct StackLink {
+    /// Parser configuration before `subtree` was recognized.
     node: NonNull<StackNode>,
+    /// Syntax value recognized between the predecessor and current states.
     subtree: Subtree,
 }
 
@@ -533,7 +541,12 @@ pub unsafe fn stack_copy_version(stack: &mut Stack, version: StackVersion) -> St
     stack.heads.size - 1
 }
 
-/// Merge two versions if possible.
+/// Merge two versions that have equivalent current parser configurations.
+///
+/// The current nodes are alternatives for the same future, so this does not
+/// link one current node to the other. It copies `version2`'s predecessor links
+/// into `version1`'s current node, then removes `version2`. A later graph pop
+/// follows every retained link and reconstructs each distinct past.
 pub unsafe fn stack_merge(
     stack: &mut Stack,
     version1: StackVersion,
@@ -559,7 +572,11 @@ pub unsafe fn stack_merge(
     true
 }
 
-/// Check if two versions can be merged.
+/// Check whether two active heads can share one current graph node.
+///
+/// Equal state and byte position give them the same parse-table future. Equal
+/// error cost and external-scanner state ensure that sharing does not erase
+/// information used to rank versions or lex their next token.
 pub unsafe fn stack_can_merge(
     stack: &Stack,
     version1: StackVersion,
