@@ -84,18 +84,46 @@ There are four actions worth remembering:
 - **Accept** records a complete syntax tree.
 - **Recover** starts explicit error recovery.
 
-For a production such as `sum -> expression + expression`, reduction looks
-like this:
+### What “subtree” means in an LR parser
+
+A subtree is not a separate part of LR theory. The essential LR algorithm
+needs grammar symbols and parse states; an implementation can attach a value
+to each recognized symbol. Tree-sitter's attached value is a `Subtree`.
+
+The distinction is:
+
+- a **parse state** records what the LR algorithm can do next; and
+- a **subtree** records the syntax already recognized on the way to that
+  state.
+
+A shifted token produces a leaf subtree. For example, after shifting the
+tokens in `1 + 2`, one parse path conceptually contains:
 
 ```text
-before reduction                 after reduction
-
-... expression  +  expression   ... sum
-        \        |       /            |
-         existing subtrees          new parent
+state 0 -- "1" --> state 4 -- "+" --> state 7 -- "2" --> state 4
+           ^                    ^                    ^
+       leaf subtree         leaf subtree         leaf subtree
 ```
 
-The distinction between shift and reduce explains most of the runtime:
+The real graph-structured stack stores states in stack nodes and subtrees on
+the links between them. A linear LR stack can be pictured the same way; it
+simply has one predecessor link at each node.
+
+When the parser reduces `expression + expression` to `expression`, it pops the
+three corresponding subtrees, makes a parent subtree containing them, and
+pushes that parent with the next LR state:
+
+```text
+expression   "+"   expression       expression
+     \        |        /       ->    /    |    \
+      existing subtrees         expression "+" expression
+```
+
+The accepted root subtree eventually becomes the root of the public syntax
+tree. During parsing, a subtree can therefore be a token, a completed grammar
+production, a missing node, or an `ERROR` node. In all cases it means “the
+piece of syntax already recognized by this parse path.” The distinction
+between shift and reduce explains most of the runtime:
 lexing supplies a lookahead, shifting moves forward in the input, and reducing
 builds larger tree nodes without moving forward.
 
