@@ -1,7 +1,9 @@
+use core::ptr::NonNull;
+
 use super::{
     array_back_mut, array_clear, array_delete, array_get_mut, array_get_ref, array_new, array_push,
     array_reserve, c_void, external_scanner_state_data, fprintf,
-    language_write_symbol_as_dot_string, ptr, ptr_ref, stack_error_cost, stack_head,
+    language_write_symbol_as_dot_string, ptr, stack_error_cost, stack_head,
     stack_node_count_since_error, stderr_file, subtree_dynamic_precedence, subtree_error_cost,
     subtree_external_scanner_state, subtree_extra, subtree_named, subtree_symbol, subtree_visible,
     Array, Stack, StackIterator, StackNode, StackStatus, TSLanguage, ERROR_STATE,
@@ -22,7 +24,7 @@ pub unsafe fn stack_print_dot_graph(
     fprintf(f, c"rankdir=\"RL\";\n".as_ptr().cast::<i8>());
     fprintf(f, c"edge [arrowhead=none]\n".as_ptr().cast::<i8>());
 
-    let mut visited_nodes: Array<*mut StackNode> = array_new();
+    let mut visited_nodes: Array<NonNull<StackNode>> = array_new();
 
     array_clear(&mut stack.iterators);
     for i in 0..stack.heads.size {
@@ -44,7 +46,7 @@ pub unsafe fn stack_print_dot_graph(
             f,
             c"node_head_%u -> node_%p [".as_ptr().cast::<i8>(),
             i,
-            head.node as *const c_void,
+            head.node.as_ptr().cast::<c_void>(),
         );
 
         if head.status == StackStatus::Paused {
@@ -95,22 +97,19 @@ pub unsafe fn stack_print_dot_graph(
 
         for i in 0..stack.iterators.size {
             let iterator = ptr::read(array_get_ref(&stack.iterators, i));
-            let mut node = iterator.node;
+            let node = iterator.node;
 
-            for j in 0..visited_nodes.size {
-                if *array_get_ref(&visited_nodes, j) == node {
-                    node = ptr::null_mut();
-                    break;
-                }
-            }
-
-            if node.is_null() {
+            if visited_nodes.as_slice().contains(&node) {
                 continue;
             }
             all_iterators_done = false;
-            let node_ref = ptr_ref(node);
+            let node_ref = node.as_ref();
 
-            fprintf(f, c"node_%p [".as_ptr().cast::<i8>(), node as *const c_void);
+            fprintf(
+                f,
+                c"node_%p [".as_ptr().cast::<i8>(),
+                node.as_ptr().cast::<c_void>(),
+            );
             if node_ref.state == ERROR_STATE {
                 fprintf(f, c"label=\"?\"".as_ptr().cast::<i8>());
             } else if node_ref.link_count == 1
@@ -141,8 +140,8 @@ pub unsafe fn stack_print_dot_graph(
                 fprintf(
                     f,
                     c"node_%p -> node_%p [".as_ptr().cast::<i8>(),
-                    node as *const c_void,
-                    link.node as *const c_void,
+                    node.as_ptr().cast::<c_void>(),
+                    link.node.as_ptr().cast::<c_void>(),
                 );
                 let subtree = link.subtree;
                 if !subtree.is_null() && subtree_extra(subtree) {

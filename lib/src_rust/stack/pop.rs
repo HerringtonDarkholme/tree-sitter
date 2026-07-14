@@ -1,6 +1,8 @@
+use core::ptr::NonNull;
+
 use super::{
     array_back_mut, array_back_ref, array_clear, array_erase, array_get_mut, array_get_ref,
-    array_insert, array_new, array_push, array_reserve, ptr, ptr_mut, ptr_ref, stack_head,
+    array_insert, array_new, array_push, array_reserve, ptr, ptr_mut, stack_head,
     stack_node_retain, subtree_alloc_size, subtree_array_copy, subtree_array_delete,
     subtree_array_reverse, subtree_extra, subtree_is_error, subtree_retain, Stack, StackHead,
     StackIterationAction, StackIterator, StackLink, StackNode, StackSlice, StackSliceArray,
@@ -12,12 +14,11 @@ use super::{
 unsafe fn stack_add_version(
     self_: &mut Stack,
     original_version: StackVersion,
-    node: &mut StackNode,
+    node: NonNull<StackNode>,
 ) -> StackVersion {
-    let node_ptr = ptr::from_mut(node);
     let original_head = stack_head(self_, original_version);
     let head = StackHead {
-        node: node_ptr,
+        node,
         node_count_at_last_error: original_head.node_count_at_last_error,
         last_external_token: original_head.last_external_token,
         status: StackStatus::Active,
@@ -37,13 +38,12 @@ unsafe fn stack_add_version(
 unsafe fn stack_add_slice(
     self_: &mut Stack,
     original_version: StackVersion,
-    node: &mut StackNode,
+    node: NonNull<StackNode>,
     subtrees: &SubtreeArray,
 ) {
-    let node_ptr = ptr::from_mut(node);
     for i in (0..self_.slices.size).rev() {
         let version = array_get_ref(&self_.slices, i).version;
-        if stack_head(self_, version).node == node_ptr {
+        if stack_head(self_, version).node == node {
             let slice = StackSlice {
                 subtrees: ptr::read(subtrees),
                 version,
@@ -99,9 +99,9 @@ where
             let node = iterator.node;
 
             let (should_pop, should_stop) = match action_for(iterator) {
-                StackIterationAction::Continue => (false, (*node).link_count == 0),
+                StackIterationAction::Continue => (false, node.as_ref().link_count == 0),
                 StackIterationAction::Stop => (false, true),
-                StackIterationAction::Pop => (true, (*node).link_count == 0),
+                StackIterationAction::Pop => (true, node.as_ref().link_count == 0),
                 StackIterationAction::PopAndStop => (true, true),
             };
 
@@ -112,7 +112,7 @@ where
                     subtree_array_copy(&source_subtrees, &mut subtrees);
                 }
                 subtree_array_reverse(&mut subtrees);
-                stack_add_slice(stack, version, ptr_mut(node), &subtrees);
+                stack_add_slice(stack, version, node, &subtrees);
             }
 
             if should_stop {
@@ -127,18 +127,18 @@ where
 
             // Copy all alternate branches, then reuse the current iterator for
             // link 0 so the common path avoids an extra subtree-array clone.
-            let link_count = u32::from((*node).link_count);
+            let link_count = u32::from(node.as_ref().link_count);
             for branch_index in 1..=link_count {
                 let next_iterator: &mut StackIterator;
                 let link: StackLink;
                 if branch_index == link_count {
-                    link = (*node).links[0];
+                    link = node.as_ref().links[0];
                     next_iterator = array_get_mut(&mut stack.iterators, i);
                 } else {
                     if stack.iterators.size >= MAX_ITERATOR_COUNT {
                         continue;
                     }
-                    link = (*node).links[branch_index as usize];
+                    link = node.as_ref().links[branch_index as usize];
                     let current_iterator = ptr::read(array_get_ref(&stack.iterators, i));
                     array_push(&mut stack.iterators, current_iterator);
                     next_iterator = array_back_mut(&mut stack.iterators);
@@ -196,8 +196,8 @@ pub(super) unsafe fn pop_error_action(
     }
 }
 
-pub(super) unsafe fn pop_all_action(iterator: &StackIterator) -> StackIterationAction {
-    let node = ptr_ref(iterator.node);
+pub(super) const unsafe fn pop_all_action(iterator: &StackIterator) -> StackIterationAction {
+    let node = iterator.node.as_ref();
     if node.link_count == 0 {
         StackIterationAction::Pop
     } else {
@@ -210,7 +210,7 @@ pub(super) unsafe fn summarize_stack_action(
     summary: &mut StackSummary,
     max_depth: u32,
 ) -> StackIterationAction {
-    let node = ptr_ref(iterator.node);
+    let node = iterator.node.as_ref();
     let state = node.state;
     let depth = iterator.subtree_count;
     if depth > max_depth {
