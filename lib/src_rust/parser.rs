@@ -1,7 +1,6 @@
 use core::ffi::{c_char, c_void, CStr};
 use core::fmt::{self, Write};
 use core::ptr;
-use core::ptr::NonNull;
 
 use crate::ffi::{
     TSInput, TSInputEncoding, TSInputEncodingUTF8, TSLanguage, TSLogTypeParse, TSLogger,
@@ -47,15 +46,14 @@ use super::subtree::{
     subtree_has_external_scanner_state_change, subtree_has_external_tokens, subtree_is_eof,
     subtree_is_error, subtree_is_keyword, subtree_last_external_token, subtree_lookahead_bytes,
     subtree_make_mut, subtree_new_error, subtree_new_error_node, subtree_new_leaf,
-    subtree_new_missing_leaf, subtree_new_node, subtree_new_node_in_arena, subtree_parse_state,
-    subtree_pool_delete, subtree_pool_new, subtree_print_dot_graph, subtree_release,
-    subtree_repeat_depth, subtree_retain, subtree_set_extra, subtree_set_symbol, subtree_size,
-    subtree_symbol, subtree_to_mut_unsafe, subtree_total_bytes, subtree_total_size, tree_arena_new,
-    tree_arena_release, ExternalScannerState, MutableSubtree, Subtree, SubtreeArray, SubtreePool,
-    TreeArena, NULL_SUBTREE, TS_BUILTIN_SYM_END, TS_BUILTIN_SYM_ERROR, TS_BUILTIN_SYM_ERROR_REPEAT,
-    TS_TREE_STATE_NONE,
+    subtree_new_missing_leaf, subtree_new_node, subtree_parse_state, subtree_pool_delete,
+    subtree_pool_new, subtree_print_dot_graph, subtree_release, subtree_repeat_depth,
+    subtree_retain, subtree_set_extra, subtree_set_symbol, subtree_size, subtree_symbol,
+    subtree_to_mut_unsafe, subtree_total_bytes, subtree_total_size, ExternalScannerState,
+    MutableSubtree, Subtree, SubtreeArray, SubtreePool, NULL_SUBTREE, TS_BUILTIN_SYM_END,
+    TS_BUILTIN_SYM_ERROR, TS_BUILTIN_SYM_ERROR_REPEAT, TS_TREE_STATE_NONE,
 };
-use super::tree::{tree_new_with_arena, TSTree};
+use super::tree::{tree_new, TSTree};
 use super::utils::{
     array_assign, array_back_ref, array_clear, array_delete, array_erase, array_get_mut,
     array_get_ref, array_new, array_pop, array_push, array_reserve, array_splice, array_swap,
@@ -164,8 +162,6 @@ pub struct TSParser {
     scratch_trees: SubtreeArray,
     /// Cached lexer result for repeated same-position lookups.
     token_cache: TokenCache,
-    /// Arena that owns internal nodes in the returned tree.
-    tree_arena: Option<NonNull<TreeArena>>,
     /// Language-owned external scanner payload.
     external_scanner_payload: *mut c_void,
     /// Optional parse debug graph output.
@@ -473,20 +469,7 @@ unsafe fn parser_new_node(
     children: &mut SubtreeArray,
     production_id: u32,
 ) -> MutableSubtree {
-    if let Some(mut arena) = self_.tree_arena {
-        let result = subtree_new_node_in_arena(
-            arena.as_mut(),
-            symbol,
-            children.contents,
-            children.size,
-            production_id,
-            self_.language,
-        );
-        array_delete(children);
-        result
-    } else {
-        subtree_new_node(symbol, children, production_id, self_.language)
-    }
+    subtree_new_node(symbol, children, production_id, self_.language)
 }
 
 const unsafe fn parser_builder_span_subtrees(
@@ -510,28 +493,17 @@ unsafe fn parser_new_node_from_builder_span(
     children: &SubtreeArray,
     production_id: u32,
 ) -> MutableSubtree {
-    if let Some(mut arena) = self_.tree_arena {
-        subtree_new_node_in_arena(
-            arena.as_mut(),
-            symbol,
+    let mut owned_children = array_new();
+    array_reserve(&mut owned_children, children.size);
+    if children.size > 0 {
+        ptr::copy_nonoverlapping(
             children.contents,
-            children.size,
-            production_id,
-            self_.language,
-        )
-    } else {
-        let mut owned_children = array_new();
-        array_reserve(&mut owned_children, children.size);
-        if children.size > 0 {
-            ptr::copy_nonoverlapping(
-                children.contents,
-                owned_children.contents,
-                children.size as usize,
-            );
-        }
-        owned_children.size = children.size;
-        subtree_new_node(symbol, &mut owned_children, production_id, self_.language)
+            owned_children.contents,
+            children.size as usize,
+        );
     }
+    owned_children.size = children.size;
+    subtree_new_node(symbol, &mut owned_children, production_id, self_.language)
 }
 
 unsafe fn parser_release_builder_span(self_: &mut TSParser, span: StackSliceSpan) {
@@ -1296,12 +1268,10 @@ unsafe fn parser_has_outstanding_parse(self_: &TSParser) -> bool {
 }
 
 unsafe fn parser_take_finished_tree(self_: &mut TSParser) -> *mut TSTree {
-    let arena = self_.tree_arena.take();
-    let result = tree_new_with_arena(
+    let result = tree_new(
         self_.finished_tree,
         self_.language,
         lexer_included_ranges_slice(&self_.lexer),
-        arena,
     );
     self_.finished_tree = NULL_SUBTREE;
     result
@@ -1332,7 +1302,6 @@ pub unsafe extern "C" fn ts_parser_new() -> *mut TSParser {
                 last_external_token: NULL_SUBTREE,
                 byte_index: 0,
             },
-            tree_arena: None,
             external_scanner_payload: ptr::null_mut(),
             dot_graph_file: ptr::null_mut(),
             accept_count: 0,
@@ -1361,9 +1330,6 @@ pub unsafe extern "C" fn ts_parser_delete(self_: *mut TSParser) {
     stack_delete(ptr_mut(parser.stack));
     if !parser.reduce_actions.contents.is_null() {
         array_delete(&mut parser.reduce_actions);
-    }
-    if let Some(arena) = parser.tree_arena.take() {
-        tree_arena_release(arena);
     }
     lexer_delete(&mut parser.lexer);
     parser_set_cached_token(parser, 0, NULL_SUBTREE, NULL_SUBTREE);
@@ -1473,9 +1439,6 @@ pub unsafe extern "C" fn ts_parser_reset(self_: *mut TSParser) {
         subtree_release(&mut parser.tree_pool, parser.finished_tree);
         parser.finished_tree = NULL_SUBTREE;
     }
-    if let Some(arena) = parser.tree_arena.take() {
-        tree_arena_release(arena);
-    }
     parser.accept_count = 0;
     parser.has_error = false;
     parser.canceled_balancing = false;
@@ -1491,11 +1454,11 @@ pub unsafe extern "C" fn ts_parser_reset(self_: *mut TSParser) {
 /// Parse one input document and return a new tree.
 ///
 /// The driver owns the outer GLR loop:
-/// - initialize lexer, external scanner, and tree arena;
+/// - initialize the lexer and external scanner;
 /// - process every active stack version until none can advance normally;
 /// - condense/merge/prune stack versions;
 /// - recover when all versions are paused at errors;
-/// - balance the accepted tree and transfer arena ownership into `TSTree`.
+/// - balance the accepted tree and transfer its root into `TSTree`.
 ///
 /// Returning null means parsing was canceled. Parser-owned scratch state is
 /// reset before returning unless the parse is intentionally resumable.
@@ -1534,7 +1497,6 @@ pub unsafe extern "C-unwind" fn ts_parser_parse(
         }
     } else {
         parser_external_scanner_create(parser);
-        parser.tree_arena = Some(tree_arena_new());
         parser_log(parser, |_, log| log.write_str("new_parse"));
     }
 

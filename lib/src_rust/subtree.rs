@@ -236,7 +236,7 @@ pub struct SubtreeHeapData {
     /// bit 0: `visible`, bit 1: `named`, bit 2: `extra`, bits 3-4: unused,
     /// bit 5: `has_changes`, bit 6: `has_external_tokens`,
     /// bit 7: `has_external_scanner_state_change`, bit 8: `depends_on_column`,
-    /// bit 9: `is_missing`, bit 10: `is_keyword`, bit 11: `arena_owned`
+    /// bit 9: `is_missing`, bit 10: `is_keyword`
     pub flags: u16,
 
     // Anonymous union: children-info / external_scanner_state / lookahead_char
@@ -253,7 +253,6 @@ const HEAP_HAS_EXTERNAL_SCANNER_STATE_CHANGE: u16 = 1 << 7;
 const HEAP_DEPENDS_ON_COLUMN: u16 = 1 << 8;
 const HEAP_IS_MISSING: u16 = 1 << 9;
 const HEAP_IS_KEYWORD: u16 = 1 << 10;
-const HEAP_ARENA_OWNED: u16 = 1 << 11;
 
 #[inline(always)]
 fn set_u16_flag(flags: &mut u16, mask: u16, value: bool) {
@@ -302,11 +301,6 @@ impl SubtreeHeapData {
         self.flags & HEAP_IS_KEYWORD != 0
     }
     #[inline(always)]
-    pub const fn arena_owned(&self) -> bool {
-        self.flags & HEAP_ARENA_OWNED != 0
-    }
-
-    #[inline(always)]
     pub fn set_visible(&mut self, value: bool) {
         set_u16_flag(&mut self.flags, HEAP_VISIBLE, value);
     }
@@ -342,11 +336,6 @@ impl SubtreeHeapData {
     pub fn set_is_missing(&mut self, value: bool) {
         set_u16_flag(&mut self.flags, HEAP_IS_MISSING, value);
     }
-    #[inline(always)]
-    pub fn set_arena_owned(&mut self, value: bool) {
-        set_u16_flag(&mut self.flags, HEAP_ARENA_OWNED, value);
-    }
-
     /// Build flags from individual booleans (for struct initialization)
     #[allow(clippy::too_many_arguments)]
     #[inline]
@@ -446,31 +435,6 @@ pub struct SubtreePool {
     free_trees: MutableSubtreeArray,
     /// Scratch stack used by iterative release/compress operations.
     pub(super) tree_stack: MutableSubtreeArray,
-}
-
-/// Arena for tree-owned internal nodes.
-///
-/// Parser reductions can allocate accepted internal nodes in this arena. The
-/// returned `TSTree` retains the arena, so copying a tree only bumps the arena
-/// refcount instead of cloning every internal node.
-pub struct TreeArena {
-    /// Shared ownership count across copied trees.
-    ref_count: AtomicU32,
-    /// Singly linked list of allocated pages.
-    pages: Option<NonNull<TreeArenaPage>>,
-    /// Page currently used for bump allocation.
-    current_page: Option<NonNull<TreeArenaPage>>,
-}
-
-struct TreeArenaPage {
-    /// Next older page in the arena list.
-    next: Option<NonNull<Self>>,
-    /// Bump allocation buffer.
-    contents: NonNull<u8>,
-    /// Bytes currently used in `contents`.
-    size: usize,
-    /// Allocated byte capacity.
-    capacity: usize,
 }
 
 // ---------------------------------------------------------------------------
@@ -629,102 +593,6 @@ pub unsafe fn subtree_array_reverse(self_: &mut SubtreeArray) {
         let trees = core::slice::from_raw_parts_mut(self_.contents, self_.size as usize);
         trees.reverse();
     }
-}
-
-// Tree arena
-
-const TREE_ARENA_PAGE_SIZE: usize = 16 * 1024;
-
-const fn align_up(value: usize, alignment: usize) -> usize {
-    debug_assert!(alignment.is_power_of_two());
-    (value + alignment - 1) & !(alignment - 1)
-}
-
-pub unsafe fn tree_arena_new() -> NonNull<TreeArena> {
-    let arena = NonNull::new_unchecked(malloc(core::mem::size_of::<TreeArena>()).cast());
-    ptr::write(
-        arena.as_ptr(),
-        TreeArena {
-            ref_count: AtomicU32::new(1),
-            pages: None,
-            current_page: None,
-        },
-    );
-    arena
-}
-
-pub unsafe fn tree_arena_retain(arena: NonNull<TreeArena>) {
-    let prev = (*arena.as_ptr()).ref_count.fetch_add(1, Ordering::SeqCst);
-    debug_assert!(prev.wrapping_add(1) != 0);
-}
-
-pub unsafe fn tree_arena_release(arena: NonNull<TreeArena>) {
-    if (*arena.as_ptr()).ref_count.fetch_sub(1, Ordering::SeqCst) != 1 {
-        return;
-    }
-
-    let mut page = (*arena.as_ptr()).pages;
-    while let Some(current) = page {
-        let next = (*current.as_ptr()).next;
-        free((*current.as_ptr()).contents.as_ptr().cast::<c_void>());
-        free(current.as_ptr().cast::<c_void>());
-        page = next;
-    }
-    free(arena.as_ptr().cast::<c_void>());
-}
-
-/// Try to satisfy an arena allocation from the current bump page.
-unsafe fn tree_arena_try_current_page(
-    arena: &mut TreeArena,
-    size: usize,
-    alignment: usize,
-) -> *mut c_void {
-    if let Some(mut current_page) = arena.current_page {
-        let page = current_page.as_mut();
-        let offset = align_up(page.size, alignment);
-        if offset + size <= page.capacity {
-            page.size = offset + size;
-            return page.contents.as_ptr().add(offset).cast::<c_void>();
-        }
-    }
-    ptr::null_mut()
-}
-
-/// Allocate a new arena page and return the first allocation from it.
-unsafe fn tree_arena_alloc_new_page(
-    arena: &mut TreeArena,
-    size: usize,
-    alignment: usize,
-) -> *mut c_void {
-    let capacity = TREE_ARENA_PAGE_SIZE.max(size + alignment);
-    let page = NonNull::new_unchecked(malloc(core::mem::size_of::<TreeArenaPage>()).cast());
-    let contents = NonNull::new_unchecked(malloc(capacity).cast::<u8>());
-    ptr::write(
-        page.as_ptr(),
-        TreeArenaPage {
-            next: arena.pages,
-            contents,
-            size,
-            capacity,
-        },
-    );
-    arena.pages = Some(page);
-    arena.current_page = Some(page);
-    contents.as_ptr().cast::<c_void>()
-}
-
-/// Allocate bytes from the tree arena.
-///
-/// Internal nodes are stored as `[Subtree children...][SubtreeHeapData]`. The
-/// arena uses page-sized bump allocation because accepted trees free all arena
-/// nodes together when the last copied `TSTree` is deleted.
-unsafe fn tree_arena_alloc(arena: &mut TreeArena, size: usize, alignment: usize) -> *mut c_void {
-    let result = tree_arena_try_current_page(arena, size, alignment);
-    if !result.is_null() {
-        return result;
-    }
-
-    tree_arena_alloc_new_page(arena, size, alignment)
 }
 
 // Subtree pool
@@ -1260,7 +1128,6 @@ pub unsafe fn subtree_clone(self_: Subtree) -> MutableSubtree {
         );
     }
     (*result).ref_count = 1;
-    (*result).set_arena_owned(false);
     MutableSubtree { ptr: result }
 }
 
@@ -1270,7 +1137,6 @@ unsafe fn subtree_init_node_data(
     child_count: u32,
     production_id: u32,
     language: *const TSLanguage,
-    extra_flags: u16,
 ) -> MutableSubtree {
     let metadata = ts_language_symbol_metadata(language, symbol);
     *data = SubtreeHeapData {
@@ -1292,7 +1158,7 @@ unsafe fn subtree_init_node_data(
             false,
             false,
             false,
-        ) | extra_flags,
+        ),
         data: SubtreeHeapDataContent {
             children: SubtreeChildrenData {
                 visible_child_count: 0,
@@ -1330,42 +1196,7 @@ pub unsafe fn subtree_new_node(
         .add((*children).size as usize)
         .cast::<SubtreeHeapData>();
 
-    let result = subtree_init_node_data(data, symbol, (*children).size, production_id, language, 0);
-    subtree_summarize_children(result, language);
-    result
-}
-
-/// Create an arena-owned internal node.
-///
-/// This has the same memory layout as `subtree_new_node`, but allocation
-/// comes from the returned tree's arena instead of the transient subtree pool.
-pub unsafe fn subtree_new_node_in_arena(
-    arena: &mut TreeArena,
-    symbol: TSSymbol,
-    children: *const Subtree,
-    child_count: u32,
-    production_id: u32,
-    language: *const TSLanguage,
-) -> MutableSubtree {
-    let byte_size = subtree_alloc_size(child_count);
-    let allocation = tree_arena_alloc(arena, byte_size, core::mem::align_of::<SubtreeHeapData>())
-        .cast::<Subtree>();
-
-    if child_count > 0 {
-        ptr::copy_nonoverlapping(children, allocation, child_count as usize);
-    }
-
-    let data = allocation
-        .add(child_count as usize)
-        .cast::<SubtreeHeapData>();
-    let result = subtree_init_node_data(
-        data,
-        symbol,
-        child_count,
-        production_id,
-        language,
-        HEAP_ARENA_OWNED,
-    );
+    let result = subtree_init_node_data(data, symbol, (*children).size, production_id, language);
     subtree_summarize_children(result, language);
     result
 }
@@ -1477,9 +1308,7 @@ pub unsafe fn subtree_release(pool: &mut SubtreePool, self_: Subtree) {
                     array_push(&mut pool.tree_stack, subtree_to_mut_unsafe(child));
                 }
             }
-            if !(*tree.ptr).arena_owned() {
-                free(children.as_ptr().cast_mut().cast::<c_void>());
-            }
+            free(children.as_ptr().cast_mut().cast::<c_void>());
         } else {
             if (*tree.ptr).has_external_tokens() {
                 let external_scanner_state =
@@ -1487,9 +1316,7 @@ pub unsafe fn subtree_release(pool: &mut SubtreePool, self_: Subtree) {
                         .cast::<ExternalScannerState>();
                 external_scanner_state_delete(ptr_mut(external_scanner_state));
             }
-            if !(*tree.ptr).arena_owned() {
-                subtree_pool_free(pool, tree);
-            }
+            subtree_pool_free(pool, tree);
         }
     }
 }

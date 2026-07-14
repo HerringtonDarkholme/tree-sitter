@@ -1,5 +1,4 @@
 use core::ffi::c_void;
-use core::ptr::NonNull;
 
 use crate::ffi::{TSLanguage, TSNode, TSPoint, TSRange};
 
@@ -11,7 +10,7 @@ use super::length::{length_add, Length};
 use super::node::node_new;
 use super::subtree::{
     subtree_edit, subtree_padding, subtree_pool_delete, subtree_pool_new, subtree_release,
-    subtree_retain, tree_arena_release, tree_arena_retain, Subtree, TreeArena,
+    subtree_retain, Subtree,
 };
 // Only used by `tree_print_dot_graph_ref`, which is unavailable on wasm.
 #[cfg(not(target_family = "wasm"))]
@@ -46,10 +45,9 @@ use crate::ffi::TSInputEdit;
 
 /// Owned parse tree returned by the parser.
 ///
-/// The tree retains the root subtree, a copied language reference, the included
-/// ranges used for parsing, and optionally the arena that owns internal nodes
-/// created during the Rust parser's normal parse path. Public APIs expose only
-/// opaque pointers to trees, so this structure uses Rust layout.
+/// The tree retains the root subtree, a copied language reference, and the
+/// included ranges used for parsing. Public APIs expose only opaque pointers to
+/// trees, so this structure uses Rust layout.
 pub struct TSTree {
     /// Root syntax subtree, retained by the tree.
     pub(super) root: Subtree,
@@ -57,8 +55,6 @@ pub struct TSTree {
     pub(super) language: *const TSLanguage,
     /// Copied included ranges for tree comparison and public APIs.
     pub(super) included_ranges: Array<TSRange>,
-    /// Shared arena for arena-owned internal nodes.
-    pub(super) arena: Option<NonNull<TreeArena>>,
 }
 
 unsafe fn copy_ranges(included_ranges: &[TSRange]) -> Array<TSRange> {
@@ -100,19 +96,11 @@ unsafe fn tree_included_ranges_slice_mut(tree: &mut TSTree) -> &mut [TSRange] {
 
 /// Copy a tree by retaining shared immutable storage.
 ///
-/// Subtrees and arenas are reference counted, so copying a tree is cheap and
-/// does not clone the entire syntax graph.
+/// Subtrees are reference counted, so copying a tree is cheap and does not
+/// clone the entire syntax graph.
 unsafe fn tree_copy_ref(tree: &TSTree) -> *mut TSTree {
     subtree_retain(tree.root);
-    if let Some(arena) = tree.arena {
-        tree_arena_retain(arena);
-    }
-    tree_new_with_arena(
-        tree.root,
-        tree.language,
-        tree_included_ranges_slice(tree),
-        tree.arena,
-    )
+    tree_new(tree.root, tree.language, tree_included_ranges_slice(tree))
 }
 
 /// Release all owned references and buffers for a tree.
@@ -120,9 +108,6 @@ unsafe fn tree_delete_ref(tree: &mut TSTree) {
     let mut pool = subtree_pool_new(0);
     subtree_release(&mut pool, tree.root);
     subtree_pool_delete(&mut pool);
-    if let Some(arena) = tree.arena {
-        tree_arena_release(arena);
-    }
     array_delete(&mut tree.included_ranges);
 }
 
@@ -196,11 +181,10 @@ unsafe fn tree_print_dot_graph_ref(tree: &TSTree, file_descriptor: i32) {
 // Lifecycle: tree_new, ts_tree_copy, ts_tree_delete
 // ---------------------------------------------------------------------------
 
-pub unsafe fn tree_new_with_arena(
+pub unsafe fn tree_new(
     root: Subtree,
     language: *const TSLanguage,
     included_ranges: &[TSRange],
-    arena: Option<NonNull<TreeArena>>,
 ) -> *mut TSTree {
     let result = malloc(core::mem::size_of::<TSTree>()).cast::<TSTree>();
     core::ptr::write(
@@ -209,7 +193,6 @@ pub unsafe fn tree_new_with_arena(
             root,
             language,
             included_ranges: copy_ranges(included_ranges),
-            arena,
         },
     );
     result
@@ -403,12 +386,13 @@ mod tests {
     use super::*;
     use crate::core_impl::length::length_zero;
     use crate::core_impl::subtree::{
-        subtree_child_count, subtree_from_mut, subtree_new_error, subtree_new_node_in_arena,
-        tree_arena_new, TS_BUILTIN_SYM_ERROR_REPEAT,
+        subtree_child_count, subtree_from_mut, subtree_new_error, subtree_new_node,
+        TS_BUILTIN_SYM_ERROR_REPEAT,
     };
+    use crate::core_impl::utils::{array_new, array_push};
 
     #[test]
-    fn arena_tree_copy_delete_uses_tree_arena_lifetime() {
+    fn copied_tree_retains_its_root() {
         unsafe {
             let mut pool = subtree_pool_new(0);
             let child1 = subtree_new_error(
@@ -429,25 +413,22 @@ mod tests {
                 0,
                 ptr::null(),
             );
-            let children = [child1, child2];
-
-            let mut arena = tree_arena_new();
-            let root = subtree_from_mut(subtree_new_node_in_arena(
-                arena.as_mut(),
+            let mut children = array_new();
+            array_push(&mut children, child1);
+            array_push(&mut children, child2);
+            let root = subtree_from_mut(subtree_new_node(
                 TS_BUILTIN_SYM_ERROR_REPEAT,
-                children.as_ptr(),
-                children.len() as u32,
+                &mut children,
                 0,
                 ptr::null(),
             ));
 
             assert_eq!(subtree_child_count(root), 2);
-            let tree = tree_new_with_arena(root, ptr::null(), &[], Some(arena));
+            let tree = tree_new(root, ptr::null(), &[]);
             let copy = ts_tree_copy(tree);
 
-            assert_eq!((*tree).arena, Some(arena));
-            assert_eq!((*copy).arena, Some(arena));
             ts_tree_delete(tree);
+            assert_eq!(subtree_child_count((*copy).root), 2);
             ts_tree_delete(copy);
             subtree_pool_delete(&mut pool);
         }
