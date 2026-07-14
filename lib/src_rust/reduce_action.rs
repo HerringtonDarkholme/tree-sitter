@@ -1,6 +1,6 @@
 use crate::ffi::TSSymbol;
 
-use super::utils::{array_push, Array};
+use super::utils::Array;
 
 /// Candidate reduction used while searching recovery actions.
 ///
@@ -27,5 +27,5 @@ pub unsafe fn reduce_action_set_add(actions: &mut ReduceActionSet, new_action: R
             return;
         }
     }
-    array_push(actions, new_action);
+    actions.push(new_action);
 }

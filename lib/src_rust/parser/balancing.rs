@@ -1,7 +1,6 @@
 use super::{
-    array_clear, array_pop, array_push, parser_check_progress, subtree_child, subtree_child_count,
-    subtree_children_slice, subtree_compress, subtree_from_mut, subtree_repeat_depth,
-    subtree_to_mut_unsafe, TSParser,
+    parser_check_progress, subtree_child, subtree_child_count, subtree_children_slice,
+    subtree_compress, subtree_from_mut, subtree_repeat_depth, subtree_to_mut_unsafe, TSParser,
 };
 
 /// Incrementally rebalance the accepted tree, preserving work across cancellation.
@@ -9,12 +8,12 @@ pub(super) unsafe fn parser_balance_subtree(parser: &mut TSParser) -> bool {
     let finished_tree = parser.finished_tree;
 
     if !parser.canceled_balancing {
-        array_clear(&mut parser.tree_pool.tree_stack);
+        parser.tree_pool.tree_stack.clear();
         if subtree_child_count(finished_tree) > 0 && finished_tree.heap_data().ref_count() == 1 {
-            array_push(
-                &mut parser.tree_pool.tree_stack,
-                subtree_to_mut_unsafe(finished_tree),
-            );
+            parser
+                .tree_pool
+                .tree_stack
+                .push(subtree_to_mut_unsafe(finished_tree));
         }
     }
 
@@ -59,15 +58,15 @@ pub(super) unsafe fn parser_balance_subtree(parser: &mut TSParser) -> bool {
             }
         }
 
-        array_pop(&mut parser.tree_pool.tree_stack);
+        parser.tree_pool.tree_stack.pop();
 
         for child_index in 0..tree.heap_data().child_count {
             let child = *subtree_child(subtree_from_mut(tree), child_index);
             if subtree_child_count(child) > 0 && child.heap_data().ref_count() == 1 {
-                array_push(
-                    &mut parser.tree_pool.tree_stack,
-                    subtree_to_mut_unsafe(child),
-                );
+                parser
+                    .tree_pool
+                    .tree_stack
+                    .push(subtree_to_mut_unsafe(child));
             }
         }
     }

@@ -13,7 +13,7 @@ use super::subtree::{
     subtree_visible, Subtree, NULL_SUBTREE, TS_BUILTIN_SYM_ERROR, TS_TREE_STATE_NONE,
 };
 use super::tree_cursor::{tree_cursor_entry_slice, TreeCursor, TreeCursorEntry};
-use super::utils::{array_new, Array};
+use super::utils::Array;
 use super::utils::{ptr_mut, ptr_ref};
 
 // ---------------------------------------------------------------------------
@@ -489,7 +489,7 @@ pub unsafe fn subtree_get_changed_ranges_ref(
     // Walk both trees in lockstep. Matching subtrees can be skipped wholesale;
     // maybe-matching subtrees are descended into; differing subtrees emit one
     // changed range and advance both iterators past the differing span.
-    let mut results = array_new();
+    let mut results = Array::new();
 
     let mut old_iter = DiffIterator::new(old_cursor, old_tree, language);
     let mut new_iter = DiffIterator::new(new_cursor, new_tree, language);

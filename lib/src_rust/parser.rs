@@ -55,7 +55,7 @@ use super::subtree::{
 use super::tree::{tree_new, TSTree};
 use super::utils::{
     array_assign, array_clear, array_delete, array_erase, array_get_mut, array_get_ref, array_new,
-    array_pop, array_push, array_reserve, array_splice, array_swap,
+    array_push, array_reserve, array_splice, array_swap,
 };
 use super::utils::{ptr_mut, ptr_ref};
 

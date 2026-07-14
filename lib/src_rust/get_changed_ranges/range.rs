@@ -1,7 +1,6 @@
 use crate::ffi::{TSInputEdit, TSRange};
 
 use super::super::point::{point_add, point_sub, POINT_MAX};
-use super::super::utils::array_push;
 use super::{Length, TSRangeArray};
 
 pub fn range_edit_ref(range: &mut TSRange, edit: &TSInputEdit) {
@@ -65,14 +64,11 @@ pub(super) unsafe fn range_array_add(ranges: &mut TSRangeArray, start: Length, e
     }
 
     if start.bytes < end.bytes {
-        array_push(
-            ranges,
-            TSRange {
-                start_point: start.extent,
-                end_point: end.extent,
-                start_byte: start.bytes,
-                end_byte: end.bytes,
-            },
-        );
+        ranges.push(TSRange {
+            start_point: start.extent,
+            end_point: end.extent,
+            start_byte: start.bytes,
+            end_byte: end.bytes,
+        });
     }
 }
