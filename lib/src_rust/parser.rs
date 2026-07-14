@@ -26,8 +26,8 @@ use core::ptr;
 
 use crate::ffi::{
     TSInput, TSInputEncoding, TSInputEncodingUTF8, TSLanguage, TSLogger, TSParseOptions,
-    TSParseState, TSPoint, TSRange,
-    TREE_SITTER_LANGUAGE_VERSION, TREE_SITTER_MIN_COMPATIBLE_LANGUAGE_VERSION,
+    TSParseState, TSPoint, TSRange, TREE_SITTER_LANGUAGE_VERSION,
+    TREE_SITTER_MIN_COMPATIBLE_LANGUAGE_VERSION,
 };
 
 use super::alloc::{free, malloc};
@@ -39,9 +39,7 @@ use super::lexer::{
     lexer_set_included_ranges, lexer_set_input, Lexer,
 };
 use super::reduce_action::ReduceActionSet;
-use super::stack::{
-    stack_clear, stack_delete, stack_new, Stack, StackVersion,
-};
+use super::stack::{stack_clear, stack_delete, stack_new, Stack, StackVersion};
 use super::subtree::{
     subtree_pool_delete, subtree_pool_new, Subtree, SubtreeArray, SubtreePool, NULL_SUBTREE,
 };
@@ -205,17 +203,13 @@ unsafe extern "C" fn ts_string_input_read(
 }
 
 mod logging;
-use logging::{
-    parser_log, parser_log_stack, parser_log_tree,
-};
+use logging::{parser_log, parser_log_stack, parser_log_tree};
 
 mod advance;
 use advance::{parser_advance, parser_condense_stack};
 
 mod external_scanner;
-use external_scanner::{
-    parser_external_scanner_create, parser_external_scanner_destroy,
-};
+use external_scanner::{parser_external_scanner_create, parser_external_scanner_destroy};
 mod lexing;
 use lexing::parser_set_cached_token;
 
