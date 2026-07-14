@@ -28,10 +28,7 @@ use super::subtree::{
 };
 use super::subtree::{subtree_array_copy, subtree_array_delete, subtree_array_reverse};
 use super::utils::ptr_mut;
-use super::utils::{
-    array_back_mut, array_back_ref, array_clear, array_delete, array_erase, array_get_mut,
-    array_get_ref, array_insert, array_new, array_push, array_reserve, Array,
-};
+use super::utils::Array;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -168,12 +165,12 @@ unsafe fn stderr_file() -> *mut c_void {
 
 #[inline]
 unsafe fn stack_head(self_: &Stack, version: StackVersion) -> &StackHead {
-    array_get_ref(&self_.heads, version)
+    self_.heads.get_unchecked(version)
 }
 
 #[inline]
 unsafe fn stack_head_mut(self_: &mut Stack, version: StackVersion) -> &mut StackHead {
-    array_get_mut(&mut self_.heads, version)
+    self_.heads.get_unchecked_mut(version)
 }
 
 #[inline]
@@ -216,17 +213,17 @@ use pop::{pop_all_action, pop_count_action, pop_error_action, stack_iter, summar
 
 /// Create a new parse stack.
 pub unsafe fn stack_new(subtree_pool: &mut SubtreePool) -> *mut Stack {
-    let mut node_pool = array_new();
-    array_reserve(&mut node_pool, MAX_NODE_POOL_SIZE);
+    let mut node_pool = Array::new();
+    node_pool.reserve(MAX_NODE_POOL_SIZE);
     let base_node = stack_node_new(None, NULL_SUBTREE, 1, &mut node_pool);
 
     let self_ = malloc(core::mem::size_of::<Stack>()).cast::<Stack>();
     ptr::write(
         self_,
         Stack {
-            heads: array_new(),
-            slices: array_new(),
-            iterators: array_new(),
+            heads: Array::new(),
+            slices: Array::new(),
+            iterators: Array::new(),
             node_pool,
             halted_version_count: 0,
             base_node,
@@ -235,9 +232,9 @@ pub unsafe fn stack_new(subtree_pool: &mut SubtreePool) -> *mut Stack {
     );
     let stack = ptr_mut(self_);
 
-    array_reserve(&mut stack.heads, 4);
-    array_reserve(&mut stack.slices, 4);
-    array_reserve(&mut stack.iterators, 4);
+    stack.heads.reserve(4);
+    stack.slices.reserve(4);
+    stack.iterators.reserve(4);
 
     stack_clear(stack);
 
@@ -247,10 +244,10 @@ pub unsafe fn stack_new(subtree_pool: &mut SubtreePool) -> *mut Stack {
 /// Free the parse stack.
 pub unsafe fn stack_delete(self_: &mut Stack) {
     if !self_.slices.contents.is_null() {
-        array_delete(&mut self_.slices);
+        self_.slices.delete();
     }
     if !self_.iterators.contents.is_null() {
-        array_delete(&mut self_.iterators);
+        self_.iterators.delete();
     }
     let subtree_pool = ptr_mut(self_.subtree_pool);
     stack_node_release(self_.base_node, &mut self_.node_pool, subtree_pool);
@@ -259,14 +256,14 @@ pub unsafe fn stack_delete(self_: &mut Stack) {
     for head in heads.as_mut_slice() {
         stack_head_delete(head, node_pool, subtree_pool);
     }
-    array_clear(heads);
+    heads.clear();
     if !node_pool.contents.is_null() {
         for node in node_pool.as_slice() {
             free(node.as_ptr().cast::<c_void>());
         }
-        array_delete(node_pool);
+        node_pool.delete();
     }
-    array_delete(heads);
+    heads.delete();
     free(ptr::from_mut(self_).cast::<c_void>());
 }
 
@@ -302,7 +299,7 @@ pub unsafe fn stack_set_last_external_token(
     token: Subtree,
 ) {
     let subtree_pool = ptr_mut(self_.subtree_pool);
-    let head = array_get_mut(&mut self_.heads, version);
+    let head = self_.heads.get_unchecked_mut(version);
     if !token.is_null() {
         subtree_retain(token);
     }
@@ -344,7 +341,7 @@ pub unsafe fn stack_push(
 ) {
     let heads = &mut stack.heads;
     let node_pool = &mut stack.node_pool;
-    let head = array_get_mut(heads, version);
+    let head = heads.get_unchecked_mut(version);
     let new_node = stack_node_new(Some(head.node), subtree, state, node_pool);
     if subtree.is_null() {
         head.node_count_at_last_error = new_node.as_ref().node_count;
@@ -381,14 +378,14 @@ pub unsafe fn stack_pop_error(self_: &mut Stack, version: StackVersion) -> Subtr
             );
             if pop.size > 0 {
                 debug_assert_eq!(pop.size, 1);
-                let first_pop = array_get_ref(&pop, 0);
+                let first_pop = pop.get_unchecked(0);
                 stack_renumber_version(self_, first_pop.version, version);
                 return ptr::read(&first_pop.subtrees);
             }
             break;
         }
     }
-    array_new()
+    Array::new()
 }
 
 /// Pop all entries from a version.
@@ -398,7 +395,7 @@ pub unsafe fn stack_pop_all(self_: &mut Stack, version: StackVersion) -> StackSl
 
 /// Record a summary of parse states near the top of a version.
 pub unsafe fn stack_record_summary(self_: &mut Stack, version: StackVersion, max_depth: u32) {
-    let mut summary = array_new();
+    let mut summary = Array::new();
     stack_iter(
         self_,
         version,
@@ -410,7 +407,7 @@ pub unsafe fn stack_record_summary(self_: &mut Stack, version: StackVersion, max
     ptr::write(summary_ptr.as_ptr(), summary);
     let head = stack_head_mut(self_, version);
     if let Some(mut previous) = head.summary.replace(summary_ptr) {
-        array_delete(previous.as_mut());
+        previous.as_mut().delete();
         free(previous.as_ptr().cast::<c_void>());
     }
 }
@@ -459,11 +456,11 @@ pub unsafe fn stack_remove_version(self_: &mut Stack, version: StackVersion) {
     let heads = &mut self_.heads;
     let node_pool = &mut self_.node_pool;
     let subtree_pool = ptr_mut(self_.subtree_pool);
-    if array_get_ref(heads, version).status == StackStatus::Halted {
+    if heads.get_unchecked(version).status == StackStatus::Halted {
         self_.halted_version_count -= 1;
     }
-    stack_head_delete(array_get_mut(heads, version), node_pool, subtree_pool);
-    array_erase(heads, version);
+    stack_head_delete(heads.get_unchecked_mut(version), node_pool, subtree_pool);
+    heads.erase(version);
 }
 
 /// Renumber version v1 to v2 (move v1 into v2's slot, removing v2).
@@ -486,23 +483,23 @@ pub unsafe fn stack_renumber_version(stack: &mut Stack, v1: StackVersion, v2: St
     }
     stack_head_delete(target_head, node_pool, subtree_pool);
     *target_head = ptr::read(source_head);
-    array_erase(heads, v1);
+    heads.erase(v1);
 }
 
 /// Swap two versions.
 pub unsafe fn stack_swap_versions(stack: &mut Stack, v1: StackVersion, v2: StackVersion) {
-    let temp = ptr::read(array_get_ref(&stack.heads, v1));
-    let other = ptr::read(array_get_ref(&stack.heads, v2));
-    ptr::write(array_get_mut(&mut stack.heads, v1), other);
-    ptr::write(array_get_mut(&mut stack.heads, v2), temp);
+    let temp = ptr::read(stack.heads.get_unchecked(v1));
+    let other = ptr::read(stack.heads.get_unchecked(v2));
+    ptr::write(stack.heads.get_unchecked_mut(v1), other);
+    ptr::write(stack.heads.get_unchecked_mut(v2), temp);
 }
 
 /// Copy a version, creating a new one.
 pub unsafe fn stack_copy_version(stack: &mut Stack, version: StackVersion) -> StackVersion {
     debug_assert!(version < stack.heads.size);
-    let version_head = ptr::read(array_get_ref(&stack.heads, version));
-    array_push(&mut stack.heads, version_head);
-    let head = array_back_mut(&mut stack.heads);
+    let version_head = ptr::read(stack.heads.get_unchecked(version));
+    stack.heads.push(version_head);
+    let head = stack.heads.last_unchecked_mut();
     stack_node_retain(head.node);
     if !head.last_external_token.is_null() {
         subtree_retain(head.last_external_token);
@@ -611,19 +608,16 @@ pub unsafe fn stack_clear(self_: &mut Stack) {
     for head in heads.as_mut_slice() {
         stack_head_delete(head, node_pool, subtree_pool);
     }
-    array_clear(heads);
+    heads.clear();
     self_.halted_version_count = 0;
-    array_push(
-        heads,
-        StackHead {
-            node: self_.base_node,
-            status: StackStatus::Active,
-            last_external_token: NULL_SUBTREE,
-            lookahead_when_paused: NULL_SUBTREE,
-            summary: None,
-            node_count_at_last_error: 0,
-        },
-    );
+    heads.push(StackHead {
+        node: self_.base_node,
+        status: StackStatus::Active,
+        last_external_token: NULL_SUBTREE,
+        lookahead_when_paused: NULL_SUBTREE,
+        summary: None,
+        node_count_at_last_error: 0,
+    });
 }
 
 mod debug;

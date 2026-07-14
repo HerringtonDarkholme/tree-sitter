@@ -1,12 +1,11 @@
 use core::ptr::NonNull;
 
 use super::{
-    array_back_mut, array_clear, array_delete, array_get_mut, array_get_ref, array_new, array_push,
-    array_reserve, c_void, external_scanner_state_data, fprintf,
-    language_write_symbol_as_dot_string, ptr, stack_error_cost, stack_head,
-    stack_node_count_since_error, stderr_file, subtree_dynamic_precedence, subtree_error_cost,
-    subtree_external_scanner_state, subtree_extra, subtree_named, subtree_symbol, subtree_visible,
-    Array, Stack, StackIterator, StackNode, StackStatus, TSLanguage, ERROR_STATE,
+    c_void, external_scanner_state_data, fprintf, language_write_symbol_as_dot_string, ptr,
+    stack_error_cost, stack_head, stack_node_count_since_error, stderr_file,
+    subtree_dynamic_precedence, subtree_error_cost, subtree_external_scanner_state, subtree_extra,
+    subtree_named, subtree_symbol, subtree_visible, Array, Stack, StackIterator, StackNode,
+    StackStatus, TSLanguage, ERROR_STATE,
 };
 
 /// Print the stack as a DOT graph for debugging.
@@ -15,7 +14,7 @@ pub unsafe fn stack_print_dot_graph(
     language: *const TSLanguage,
     mut f: *mut c_void,
 ) -> bool {
-    array_reserve(&mut stack.iterators, 32);
+    stack.iterators.reserve(32);
     if f.is_null() {
         f = stderr_file();
     }
@@ -24,9 +23,9 @@ pub unsafe fn stack_print_dot_graph(
     fprintf(f, c"rankdir=\"RL\";\n".as_ptr().cast::<i8>());
     fprintf(f, c"edge [arrowhead=none]\n".as_ptr().cast::<i8>());
 
-    let mut visited_nodes: Array<NonNull<StackNode>> = array_new();
+    let mut visited_nodes: Array<NonNull<StackNode>> = Array::new();
 
-    array_clear(&mut stack.iterators);
+    stack.iterators.clear();
     for i in 0..stack.heads.size {
         if stack_head(stack, i).status == StackStatus::Halted {
             continue;
@@ -85,17 +84,17 @@ pub unsafe fn stack_print_dot_graph(
 
         let iter = StackIterator {
             node: head.node,
-            subtrees: array_new(),
+            subtrees: Array::new(),
             subtree_count: 0,
         };
-        array_push(&mut stack.iterators, iter);
+        stack.iterators.push(iter);
     }
 
     loop {
         let mut all_iterators_done = true;
 
         for i in 0..stack.iterators.size {
-            let iterator = ptr::read(array_get_ref(&stack.iterators, i));
+            let iterator = ptr::read(stack.iterators.get_unchecked(i));
             let node = iterator.node;
 
             if visited_nodes.as_slice().contains(&node) {
@@ -173,15 +172,15 @@ pub unsafe fn stack_print_dot_graph(
                 fprintf(f, c"];\n".as_ptr().cast::<i8>());
 
                 let next_iterator = if j == 0 {
-                    array_get_mut(&mut stack.iterators, i)
+                    stack.iterators.get_unchecked_mut(i)
                 } else {
-                    array_push(&mut stack.iterators, ptr::read(&iterator));
-                    array_back_mut(&mut stack.iterators)
+                    stack.iterators.push(ptr::read(&iterator));
+                    stack.iterators.last_unchecked_mut()
                 };
                 next_iterator.node = link.node;
             }
 
-            array_push(&mut visited_nodes, node);
+            visited_nodes.push(node);
         }
         if all_iterators_done {
             break;
@@ -190,6 +189,6 @@ pub unsafe fn stack_print_dot_graph(
 
     fprintf(f, c"}\n".as_ptr().cast::<i8>());
 
-    array_delete(&mut visited_nodes);
+    visited_nodes.delete();
     true
 }

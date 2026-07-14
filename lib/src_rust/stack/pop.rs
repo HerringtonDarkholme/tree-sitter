@@ -1,13 +1,11 @@
 use core::ptr::NonNull;
 
 use super::{
-    array_back_mut, array_back_ref, array_clear, array_erase, array_get_mut, array_get_ref,
-    array_insert, array_new, array_push, array_reserve, ptr, ptr_mut, stack_head,
-    stack_node_retain, subtree_alloc_size, subtree_array_copy, subtree_array_delete,
-    subtree_array_reverse, subtree_extra, subtree_is_error, subtree_retain, Stack, StackHead,
-    StackIterationAction, StackIterator, StackLink, StackNode, StackSlice, StackSliceArray,
-    StackStatus, StackSummary, StackSummaryEntry, StackVersion, Subtree, SubtreeArray,
-    MAX_ITERATOR_COUNT, NULL_SUBTREE,
+    ptr, ptr_mut, stack_head, stack_node_retain, subtree_alloc_size, subtree_array_copy,
+    subtree_array_delete, subtree_array_reverse, subtree_extra, subtree_is_error, subtree_retain,
+    Array, Stack, StackHead, StackIterationAction, StackIterator, StackLink, StackNode, StackSlice,
+    StackSliceArray, StackStatus, StackSummary, StackSummaryEntry, StackVersion, Subtree,
+    SubtreeArray, MAX_ITERATOR_COUNT, NULL_SUBTREE,
 };
 
 /// Add a new version to the stack, cloning metadata from an existing version.
@@ -25,9 +23,9 @@ unsafe fn stack_add_version(
         lookahead_when_paused: NULL_SUBTREE,
         summary: None,
     };
-    array_push(&mut self_.heads, head);
+    self_.heads.push(head);
     stack_node_retain(node);
-    let head = array_back_ref(&self_.heads);
+    let head = self_.heads.last_unchecked();
     if !head.last_external_token.is_null() {
         subtree_retain(head.last_external_token);
     }
@@ -48,7 +46,7 @@ unsafe fn stack_add_slice(
                 subtrees: ptr::read(subtrees),
                 version,
             };
-            array_insert(&mut self_.slices, i as u32 + 1, slice);
+            self_.slices.insert(i as u32 + 1, slice);
             return;
         }
     }
@@ -58,7 +56,7 @@ unsafe fn stack_add_slice(
         subtrees: ptr::read(subtrees),
         version,
     };
-    array_push(&mut self_.slices, slice);
+    self_.slices.push(slice);
 }
 
 /// Core iteration function for walking the stack graph.
@@ -71,13 +69,13 @@ pub(super) unsafe fn stack_iter<F>(
 where
     F: FnMut(&StackIterator) -> StackIterationAction,
 {
-    array_clear(&mut stack.slices);
-    array_clear(&mut stack.iterators);
+    stack.slices.clear();
+    stack.iterators.clear();
 
     let head = stack_head(stack, version);
     let mut new_iterator = StackIterator {
         node: head.node,
-        subtrees: array_new(),
+        subtrees: Array::new(),
         subtree_count: 0,
     };
 
@@ -85,17 +83,17 @@ where
         let reserve_count =
             subtree_alloc_size(goal_subtree_count) / core::mem::size_of::<Subtree>();
         let subtrees = &mut new_iterator.subtrees;
-        array_reserve(subtrees, u32::try_from(reserve_count).unwrap());
+        subtrees.reserve(u32::try_from(reserve_count).unwrap());
     }
     let include_subtrees = goal_subtree_count.is_some();
 
-    array_push(&mut stack.iterators, new_iterator);
+    stack.iterators.push(new_iterator);
 
     while !stack.iterators.is_empty() {
         let mut i: u32 = 0;
         let mut active_iterator_count = stack.iterators.size;
         while i < active_iterator_count {
-            let iterator = array_get_ref(&stack.iterators, i);
+            let iterator = stack.iterators.get_unchecked(i);
             let node = iterator.node;
 
             let (should_pop, should_stop) = match action_for(iterator) {
@@ -106,7 +104,7 @@ where
             };
 
             if should_pop {
-                let mut subtrees = ptr::read(&array_get_ref(&stack.iterators, i).subtrees);
+                let mut subtrees = ptr::read(&stack.iterators.get_unchecked(i).subtrees);
                 if !should_stop {
                     let source_subtrees = ptr::read(&subtrees);
                     subtree_array_copy(&source_subtrees, &mut subtrees);
@@ -117,10 +115,10 @@ where
 
             if should_stop {
                 if !should_pop {
-                    let iter = array_get_mut(&mut stack.iterators, i);
+                    let iter = stack.iterators.get_unchecked_mut(i);
                     subtree_array_delete(ptr_mut(stack.subtree_pool), &mut iter.subtrees);
                 }
-                array_erase(&mut stack.iterators, i);
+                stack.iterators.erase(i);
                 active_iterator_count -= 1;
                 continue;
             }
@@ -133,15 +131,15 @@ where
                 let link: StackLink;
                 if branch_index == link_count {
                     link = node.as_ref().links[0];
-                    next_iterator = array_get_mut(&mut stack.iterators, i);
+                    next_iterator = stack.iterators.get_unchecked_mut(i);
                 } else {
                     if stack.iterators.size >= MAX_ITERATOR_COUNT {
                         continue;
                     }
                     link = node.as_ref().links[branch_index as usize];
-                    let current_iterator = ptr::read(array_get_ref(&stack.iterators, i));
-                    array_push(&mut stack.iterators, current_iterator);
-                    next_iterator = array_back_mut(&mut stack.iterators);
+                    let current_iterator = ptr::read(stack.iterators.get_unchecked(i));
+                    stack.iterators.push(current_iterator);
+                    next_iterator = stack.iterators.last_unchecked_mut();
                     let source_subtrees = ptr::read(&next_iterator.subtrees);
                     subtree_array_copy(&source_subtrees, &mut next_iterator.subtrees);
                 }
@@ -153,7 +151,7 @@ where
                 } else {
                     if include_subtrees {
                         let subtrees = &mut next_iterator.subtrees;
-                        array_push(subtrees, subtree);
+                        subtrees.push(subtree);
                         subtree_retain(subtree);
                     }
 
@@ -224,13 +222,10 @@ pub(super) unsafe fn summarize_stack_action(
             return StackIterationAction::Continue;
         }
     }
-    array_push(
-        summary,
-        StackSummaryEntry {
-            position: node.position,
-            depth,
-            state,
-        },
-    );
+    summary.push(StackSummaryEntry {
+        position: node.position,
+        depth,
+        state,
+    });
     StackIterationAction::Continue
 }
