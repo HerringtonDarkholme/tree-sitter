@@ -10,7 +10,7 @@
 //! with function pointers to static functions in this module, so generated
 //! parsers can call them without linking against this library.
 
-use core::ffi::{c_char, c_void};
+use core::ffi::c_char;
 use core::ptr;
 
 use crate::ffi::{
@@ -18,11 +18,10 @@ use crate::ffi::{
     TSPoint, TSRange,
 };
 
-use super::alloc::{free, realloc};
 use super::language::TSLexer;
 use super::length::{length_is_undefined, Length, LENGTH_UNDEFINED};
 use super::unicode::{ts_decode_utf16_be, ts_decode_utf16_le, ts_decode_utf8, TS_DECODE_ERROR};
-use super::utils::{ptr_mut, ptr_ref};
+use super::utils::{array_delete, array_new, array_reserve, ptr_mut, ptr_ref, Array};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -79,7 +78,7 @@ pub struct Lexer {
     pub token_end_position: Length,
 
     /// Sorted ranges that should be visible to this parse.
-    pub included_ranges: *mut TSRange,
+    pub included_ranges: Array<TSRange>,
     /// Borrowed chunk returned by `TSInput::read`; owned by the caller.
     pub chunk: *const c_char,
     /// Source reader and encoding callbacks.
@@ -87,8 +86,6 @@ pub struct Lexer {
     /// Optional logging callback.
     pub logger: TSLogger,
 
-    /// Number of included ranges. A single default range is the common case.
-    pub included_range_count: u32,
     /// Included range containing, or immediately following, `current_position`.
     pub current_included_range_index: u32,
     /// Byte offset where `chunk` starts in the full source document.
@@ -127,7 +124,7 @@ pub unsafe fn lexer_new() -> Lexer {
             extent: TSPoint { row: 0, column: 0 },
         },
         token_end_position: LENGTH_UNDEFINED,
-        included_ranges: ptr::null_mut(),
+        included_ranges: array_new(),
         chunk: ptr::null(),
         input: TSInput {
             payload: ptr::null_mut(),
@@ -139,7 +136,6 @@ pub unsafe fn lexer_new() -> Lexer {
             payload: ptr::null_mut(),
             log: None,
         },
-        included_range_count: 0,
         current_included_range_index: 0,
         chunk_start: 0,
         chunk_size: 0,
@@ -203,7 +199,7 @@ unsafe extern "C" fn ts_lexer__eof(lexer: *const TSLexer) -> bool {
 
 #[inline]
 pub const fn lexer_is_eof(self_: &Lexer) -> bool {
-    self_.current_included_range_index == self_.included_range_count
+    self_.current_included_range_index == self_.included_ranges.size
 }
 
 /// Clear the currently stored chunk of source code.
@@ -214,9 +210,9 @@ fn lexer_clear_chunk(self_: &mut Lexer) {
 }
 
 unsafe fn lexer_included_range(self_: &Lexer, index: usize) -> &TSRange {
-    debug_assert!(index < self_.included_range_count as usize);
-    debug_assert!(!self_.included_ranges.is_null());
-    ptr_ref(self_.included_ranges.add(index))
+    debug_assert!(index < self_.included_ranges.size as usize);
+    debug_assert!(!self_.included_ranges.contents.is_null());
+    ptr_ref(self_.included_ranges.contents.add(index))
 }
 
 /// Call the input callback to obtain a new chunk of source code.
@@ -229,7 +225,7 @@ unsafe fn lexer_get_chunk(self_: &mut Lexer) {
         &mut self_.chunk_size,
     );
     if self_.chunk_size == 0 {
-        self_.current_included_range_index = self_.included_range_count;
+        self_.current_included_range_index = self_.included_ranges.size;
         self_.chunk = ptr::null();
     }
 }
@@ -287,7 +283,7 @@ fn lexer_finish_goto_in_range(self_: &mut Lexer) {
 
 /// Finish a seek beyond the included ranges at their final end position.
 fn lexer_finish_goto_at_eof(self_: &mut Lexer, end_position: Length) {
-    self_.current_included_range_index = self_.included_range_count;
+    self_.current_included_range_index = self_.included_ranges.size;
     self_.current_position = end_position;
     lexer_clear_chunk(self_);
     self_.lookahead_size = 1;
@@ -302,7 +298,7 @@ unsafe fn lexer_goto(self_: &mut Lexer, position: Length) {
 
     self_.current_position = position;
 
-    if self_.included_range_count == 1 {
+    if self_.included_ranges.size == 1 {
         let included_range = *lexer_included_range(self_, 0);
         if included_range.end_byte > self_.current_position.bytes
             && included_range.end_byte > included_range.start_byte
@@ -329,7 +325,7 @@ unsafe fn lexer_goto(self_: &mut Lexer, position: Length) {
 
     // Move to the first valid position at or after the given position.
     let found_included_range = 'range_search: {
-        for i in 0..self_.included_range_count {
+        for i in 0..self_.included_ranges.size {
             let included_range = lexer_included_range(self_, i as usize);
             if included_range.end_byte > self_.current_position.bytes
                 && included_range.end_byte > included_range.start_byte
@@ -351,7 +347,7 @@ unsafe fn lexer_goto(self_: &mut Lexer, position: Length) {
     if found_included_range {
         lexer_finish_goto_in_range(self_);
     } else {
-        let last_range_index = self_.included_range_count as usize - 1;
+        let last_range_index = self_.included_ranges.size as usize - 1;
         let last_included_range = lexer_included_range(self_, last_range_index);
         lexer_finish_goto_at_eof(
             self_,
@@ -399,10 +395,10 @@ unsafe fn lexer_seek_visible_range(self_: &mut Lexer) -> bool {
         {
             break;
         }
-        if self_.current_included_range_index < self_.included_range_count {
+        if self_.current_included_range_index < self_.included_ranges.size {
             self_.current_included_range_index += 1;
         }
-        if self_.current_included_range_index < self_.included_range_count {
+        if self_.current_included_range_index < self_.included_ranges.size {
             let next_range_index = self_.current_included_range_index as usize;
             let next_range = lexer_included_range(self_, next_range_index);
             self_.current_position = Length {
@@ -557,7 +553,7 @@ unsafe extern "C" fn ts_lexer__get_column(lexer: *mut TSLexer) -> u32 {
 #[allow(non_snake_case)]
 unsafe extern "C" fn ts_lexer__is_at_included_range_start(lexer: *const TSLexer) -> bool {
     let self_ = lexer_ref(lexer);
-    if self_.current_included_range_index < self_.included_range_count {
+    if self_.current_included_range_index < self_.included_ranges.size {
         let range_index = self_.current_included_range_index as usize;
         let current_range = lexer_included_range(self_, range_index);
         self_.current_position.bytes == current_range.start_byte
@@ -582,9 +578,9 @@ extern "C-unwind" {
 // Parser-facing lexer functions.
 // ===========================================================================
 
-/// Free the lexer's `included_ranges` allocation.
+/// Free the lexer's included-range storage.
 pub unsafe fn lexer_delete(self_: &mut Lexer) {
-    free(self_.included_ranges.cast::<c_void>());
+    array_delete(&mut self_.included_ranges);
 }
 
 /// Set the input source for the lexer.
@@ -674,28 +670,27 @@ pub unsafe fn lexer_set_included_ranges(
     }
 
     let count = count as usize;
-    self_.included_ranges = realloc(
-        self_.included_ranges.cast::<c_void>(),
-        count * core::mem::size_of::<TSRange>(),
-    )
-    .cast::<TSRange>();
-    core::ptr::copy_nonoverlapping(ranges, self_.included_ranges, count);
-    self_.included_range_count = count as u32;
+    array_reserve(&mut self_.included_ranges, u32::try_from(count).unwrap());
+    core::ptr::copy_nonoverlapping(ranges, self_.included_ranges.contents, count);
+    self_.included_ranges.size = u32::try_from(count).unwrap();
     lexer_goto(self_, self_.current_position);
     true
 }
 
 /// Get the current included ranges.
 pub unsafe fn lexer_included_ranges(self_: &Lexer, count: *mut u32) -> *mut TSRange {
-    *count = self_.included_range_count;
-    self_.included_ranges
+    *count = self_.included_ranges.size;
+    self_.included_ranges.contents
 }
 
 /// Borrow the current included ranges for internal Rust callers.
 pub const unsafe fn lexer_included_ranges_slice(self_: &Lexer) -> &[TSRange] {
-    if self_.included_range_count == 0 {
+    if self_.included_ranges.size == 0 {
         &[]
     } else {
-        core::slice::from_raw_parts(self_.included_ranges, self_.included_range_count as usize)
+        core::slice::from_raw_parts(
+            self_.included_ranges.contents,
+            self_.included_ranges.size as usize,
+        )
     }
 }
