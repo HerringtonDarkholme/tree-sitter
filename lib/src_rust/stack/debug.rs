@@ -2,10 +2,9 @@ use core::ptr::NonNull;
 
 use super::{
     c_void, external_scanner_state_data, fprintf, language_write_symbol_as_dot_string, ptr,
-    stack_error_cost, stack_head, stack_node_count_since_error, stderr_file,
-    subtree_dynamic_precedence, subtree_error_cost, subtree_external_scanner_state, subtree_extra,
-    subtree_named, subtree_symbol, subtree_visible, Array, Stack, StackIterator, StackNode,
-    StackStatus, TSLanguage, ERROR_STATE,
+    stack_head, stderr_file, subtree_dynamic_precedence, subtree_error_cost,
+    subtree_external_scanner_state, subtree_extra, subtree_named, subtree_symbol, subtree_visible,
+    Array, Stack, StackIterator, StackNode, StackStatus, TSLanguage, ERROR_STATE,
 };
 
 /// Print the stack as a DOT graph for debugging.
@@ -30,8 +29,8 @@ pub unsafe fn stack_print_dot_graph(
         if stack_head(stack, i).status == StackStatus::Halted {
             continue;
         }
-        let node_count_since_error = stack_node_count_since_error(stack, i);
-        let error_cost = stack_error_cost(stack, i);
+        let node_count_since_error = stack.node_count_since_error(i);
+        let error_cost = stack.error_cost(i);
         let head = stack_head(stack, i);
 
         fprintf(

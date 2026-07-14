@@ -3,9 +3,8 @@ use super::{
     language_table_entry, length_sub, lexer_mark_end, lexer_reset, parser_accept,
     parser_better_version_exists, parser_log, parser_log_stack, parser_new_node, parser_reduce,
     parser_symbol_name, parser_version_status, ptr, ptr_mut, ptr_ref, stack_copy_version,
-    stack_error_cost, stack_get_summary, stack_halt, stack_merge, stack_node_count_since_error,
-    stack_pop_count, stack_pop_error, stack_push, stack_record_summary, stack_remove_version,
-    stack_renumber_version, stack_set_last_external_token, subtree_array_delete,
+    stack_get_summary, stack_merge, stack_pop_count, stack_pop_error, stack_push,
+    stack_record_summary, stack_remove_version, stack_renumber_version, subtree_array_delete,
     subtree_array_remove_trailing_extras, subtree_child_count, subtree_children_slice,
     subtree_from_mut, subtree_has_external_scanner_state_change, subtree_has_external_tokens,
     subtree_is_eof, subtree_is_error, subtree_last_external_token, subtree_lookahead_bytes,
@@ -136,7 +135,7 @@ unsafe fn parser_recover_to_state(
         }
 
         if stack.state(slice.version) != goal_state {
-            stack_halt(stack, slice.version);
+            stack.halt(slice.version);
             subtree_array_delete(&mut self_.tree_pool, &mut slice.subtrees);
             pop.erase(i);
             continue;
@@ -192,8 +191,8 @@ pub(super) unsafe fn parser_recover(
     let stack = ptr_mut(self_.stack);
     let previous_version_count = stack.version_count();
     let position = stack.position(version);
-    let node_count_since_error = stack_node_count_since_error(stack, version);
-    let current_error_cost = stack_error_cost(stack, version);
+    let node_count_since_error = stack.node_count_since_error(version);
+    let current_error_cost = stack.error_cost(version);
     let summary = stack_get_summary(stack, version);
 
     // Strategy 1: Find a previous state where the lookahead is valid.
@@ -279,7 +278,7 @@ pub(super) unsafe fn parser_recover(
         && (stack.version_count() > MAX_VERSION_COUNT
             || subtree_has_external_scanner_state_change(lookahead));
     if cannot_skip_after_recovery || parser_better_version_exists(self_, version, false, new_cost) {
-        stack_halt(stack, version);
+        stack.halt(version);
         subtree_release(&mut self_.tree_pool, lookahead);
         return;
     }
@@ -340,7 +339,7 @@ pub(super) unsafe fn parser_recover(
     // Push the ERROR
     stack_push(stack, version, subtree_from_mut(error_repeat), ERROR_STATE);
     if subtree_has_external_tokens(lookahead) {
-        stack_set_last_external_token(stack, version, subtree_last_external_token(lookahead));
+        stack.set_last_external_token(version, subtree_last_external_token(lookahead));
     }
 
     let mut has_error = true;

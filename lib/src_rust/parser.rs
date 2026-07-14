@@ -28,12 +28,10 @@ use super::lexer::{
 };
 use super::reduce_action::{ReduceAction, ReduceActionSet};
 use super::stack::{
-    stack_can_merge, stack_clear, stack_copy_version, stack_delete, stack_error_cost,
-    stack_get_summary, stack_halt, stack_has_advanced_since_error, stack_merge, stack_new,
-    stack_node_count_since_error, stack_pause, stack_pop_all, stack_pop_count, stack_pop_error,
-    stack_print_dot_graph, stack_push, stack_record_summary, stack_remove_version,
-    stack_renumber_version, stack_resume, stack_set_last_external_token, stack_swap_versions,
-    Stack, StackVersion, STACK_VERSION_NONE,
+    stack_can_merge, stack_clear, stack_copy_version, stack_delete, stack_get_summary, stack_merge,
+    stack_new, stack_pop_all, stack_pop_count, stack_pop_error, stack_print_dot_graph, stack_push,
+    stack_record_summary, stack_remove_version, stack_renumber_version, stack_swap_versions, Stack,
+    StackVersion, STACK_VERSION_NONE,
 };
 use super::subtree::{
     external_scanner_state_eq, subtree_array_clear, subtree_array_delete,
@@ -258,14 +256,14 @@ const fn parser_compare_versions(a: ErrorStatus, b: ErrorStatus) -> ErrorCompari
 
 unsafe fn parser_version_status(self_: &mut TSParser, version: StackVersion) -> ErrorStatus {
     let stack = ptr_mut(self_.stack);
-    let mut cost = stack_error_cost(stack, version);
+    let mut cost = stack.error_cost(version);
     let is_paused = stack.is_paused(version);
     if is_paused {
         cost += ERROR_COST_PER_SKIPPED_TREE;
     }
     ErrorStatus {
         cost,
-        node_count: stack_node_count_since_error(stack, version),
+        node_count: stack.node_count_since_error(version),
         dynamic_precedence: stack.dynamic_precedence(version),
         is_in_error: is_paused || stack.state(version) == ERROR_STATE,
     }
@@ -287,7 +285,7 @@ unsafe fn parser_better_version_exists(
         cost,
         is_in_error,
         dynamic_precedence: stack.dynamic_precedence(version),
-        node_count: stack_node_count_since_error(stack, version),
+        node_count: stack.node_count_since_error(version),
     };
 
     let n = stack.version_count();
@@ -507,7 +505,7 @@ unsafe fn parser_halt_after_merged_reduction(
     if !lookahead.is_null() {
         subtree_release(&mut self_.tree_pool, lookahead);
     }
-    stack_halt(ptr_mut(self_.stack), version);
+    ptr_mut(self_.stack).halt(version);
 }
 
 unsafe fn parser_try_keyword_fallback(
@@ -556,7 +554,7 @@ unsafe fn parser_pause_with_error(self_: &mut TSParser, version: StackVersion, l
             DisplayCStr(parser_tree_name(context.language, lookahead))
         )
     });
-    stack_pause(ptr_mut(self_.stack), version, lookahead);
+    ptr_mut(self_.stack).pause(version, lookahead);
 }
 
 /// Advance one stack version until it shifts, accepts, recovers, pauses, or halts.
@@ -722,8 +720,8 @@ unsafe fn parser_condense_stack(self_: &mut TSParser) -> u32 {
             if ptr_ref(self_.stack).is_paused(i) {
                 if !has_unpaused_version && self_.accept_count < MAX_VERSION_COUNT {
                     parser_log(self_, |_, log| write!(log, "resume version:{i}"));
-                    min_error_cost = stack_error_cost(ptr_ref(self_.stack), i);
-                    let lookahead = stack_resume(ptr_mut(self_.stack), i);
+                    min_error_cost = ptr_ref(self_.stack).error_cost(i);
+                    let lookahead = ptr_mut(self_.stack).resume(i);
                     parser_handle_error(self_, i, lookahead);
                     has_unpaused_version = true;
                 } else {
@@ -754,7 +752,7 @@ unsafe fn parser_has_outstanding_parse(self_: &TSParser) -> bool {
     self_.canceled_balancing
         || !self_.external_scanner_payload.is_null()
         || ptr_ref(self_.stack).state(0) != 1
-        || stack_node_count_since_error(ptr_mut(self_.stack), 0) != 0
+        || ptr_mut(self_.stack).node_count_since_error(0) != 0
 }
 
 unsafe fn parser_take_finished_tree(self_: &mut TSParser) -> *mut TSTree {

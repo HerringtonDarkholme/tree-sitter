@@ -5,13 +5,12 @@ use super::{
     lexer_finish, lexer_is_eof, lexer_reset, lexer_start, parser_call_keyword_lex_fn,
     parser_call_main_lex_fn, parser_external_scanner_deserialize, parser_external_scanner_scan,
     parser_external_scanner_serialize, parser_log, parser_log_lookahead, parser_symbol_name,
-    ptr_ref, stack_has_advanced_since_error, subtree_child_count,
-    subtree_external_scanner_state_eq, subtree_is_keyword, subtree_new_error, subtree_new_leaf,
-    subtree_parse_state, subtree_release, subtree_retain, subtree_set_external_scanner_state,
-    subtree_size, subtree_symbol, subtree_to_mut_unsafe, subtree_total_size,
-    ts_language_next_state, DisplayCStr, Length, StackVersion, Subtree, TSParser, TSStateId,
-    TSSymbol, TableEntry, Write, ERROR_STATE, NULL_SUBTREE, TS_BUILTIN_SYM_END,
-    TS_BUILTIN_SYM_ERROR,
+    ptr_ref, subtree_child_count, subtree_external_scanner_state_eq, subtree_is_keyword,
+    subtree_new_error, subtree_new_leaf, subtree_parse_state, subtree_release, subtree_retain,
+    subtree_set_external_scanner_state, subtree_size, subtree_symbol, subtree_to_mut_unsafe,
+    subtree_total_size, ts_language_next_state, DisplayCStr, Length, StackVersion, Subtree,
+    TSParser, TSStateId, TSSymbol, TableEntry, Write, ERROR_STATE, NULL_SUBTREE,
+    TS_BUILTIN_SYM_END, TS_BUILTIN_SYM_ERROR,
 };
 
 // ---------------------------------------------------------------------------
@@ -251,7 +250,7 @@ unsafe fn parser_lex(
                         ts_language_next_state(self_.language, parse_state, symbol);
                     let token_is_extra = next_parse_state == parse_state;
                     if error_mode
-                        || !stack_has_advanced_since_error(ptr_ref(self_.stack), version)
+                        || !ptr_ref(self_.stack).has_advanced_since_error(version)
                         || token_is_extra
                     {
                         parser_log(self_, |context, log| {

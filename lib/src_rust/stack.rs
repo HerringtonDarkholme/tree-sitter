@@ -160,6 +160,90 @@ impl Stack {
     pub unsafe fn is_paused(&self, version: StackVersion) -> bool {
         stack_head(self, version).status == StackStatus::Paused
     }
+
+    pub unsafe fn set_last_external_token(&mut self, version: StackVersion, token: Subtree) {
+        let subtree_pool = ptr_mut(self.subtree_pool);
+        let head = self.heads.get_unchecked_mut(version);
+        if !token.is_null() {
+            subtree_retain(token);
+        }
+        if !head.last_external_token.is_null() {
+            subtree_release(subtree_pool, head.last_external_token);
+        }
+        head.last_external_token = token;
+    }
+
+    pub unsafe fn error_cost(&self, version: StackVersion) -> u32 {
+        let head = stack_head(self, version);
+        let node = head.node.as_ref();
+        let mut result = node.error_cost;
+        if head.status == StackStatus::Paused
+            || (node.state == ERROR_STATE && node.links[0].subtree.is_null())
+        {
+            result += ERROR_COST_PER_RECOVERY;
+        }
+        result
+    }
+
+    pub unsafe fn node_count_since_error(&mut self, version: StackVersion) -> u32 {
+        let head = stack_head_mut(self, version);
+        let node = head.node.as_ref();
+        if node.node_count < head.node_count_at_last_error {
+            head.node_count_at_last_error = node.node_count;
+        }
+        node.node_count - head.node_count_at_last_error
+    }
+
+    pub unsafe fn has_advanced_since_error(&self, version: StackVersion) -> bool {
+        let head = stack_head(self, version);
+        let mut node = head.node;
+        if node.as_ref().error_cost == 0 {
+            return true;
+        }
+        loop {
+            let node_ref = node.as_ref();
+            if node_ref.link_count > 0 {
+                let subtree = node_ref.links[0].subtree;
+                if !subtree.is_null() {
+                    if subtree_total_bytes(subtree) > 0 {
+                        return true;
+                    } else if node_ref.node_count > head.node_count_at_last_error
+                        && subtree_error_cost(subtree) == 0
+                    {
+                        node = node_ref.links[0].node;
+                        continue;
+                    }
+                }
+            }
+            return false;
+        }
+    }
+
+    pub unsafe fn halt(&mut self, version: StackVersion) {
+        if !self.is_halted(version) {
+            self.halted_version_count += 1;
+            stack_head_mut(self, version).status = StackStatus::Halted;
+        }
+    }
+
+    pub unsafe fn pause(&mut self, version: StackVersion, lookahead: Subtree) {
+        if self.is_halted(version) {
+            self.halted_version_count -= 1;
+        }
+        let head = stack_head_mut(self, version);
+        head.status = StackStatus::Paused;
+        head.lookahead_when_paused = lookahead;
+        head.node_count_at_last_error = head.node.as_ref().node_count;
+    }
+
+    pub unsafe fn resume(&mut self, version: StackVersion) -> Subtree {
+        let head = stack_head_mut(self, version);
+        debug_assert!(head.status == StackStatus::Paused);
+        let result = head.lookahead_when_paused;
+        head.status = StackStatus::Active;
+        head.lookahead_when_paused = NULL_SUBTREE;
+        result
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -306,45 +390,6 @@ pub unsafe fn stack_delete(self_: &mut Stack) {
 }
 
 /// Set the last external token for a version.
-pub unsafe fn stack_set_last_external_token(
-    self_: &mut Stack,
-    version: StackVersion,
-    token: Subtree,
-) {
-    let subtree_pool = ptr_mut(self_.subtree_pool);
-    let head = self_.heads.get_unchecked_mut(version);
-    if !token.is_null() {
-        subtree_retain(token);
-    }
-    if !head.last_external_token.is_null() {
-        subtree_release(subtree_pool, head.last_external_token);
-    }
-    head.last_external_token = token;
-}
-
-/// Get the error cost for a version.
-pub unsafe fn stack_error_cost(self_: &Stack, version: StackVersion) -> u32 {
-    let head = stack_head(self_, version);
-    let node = head.node.as_ref();
-    let mut result = node.error_cost;
-    if head.status == StackStatus::Paused
-        || (node.state == ERROR_STATE && node.links[0].subtree.is_null())
-    {
-        result += ERROR_COST_PER_RECOVERY;
-    }
-    result
-}
-
-/// Get the node count since last error for a version.
-pub unsafe fn stack_node_count_since_error(self_: &mut Stack, version: StackVersion) -> u32 {
-    let head = stack_head_mut(self_, version);
-    let node = head.node.as_ref();
-    if node.node_count < head.node_count_at_last_error {
-        head.node_count_at_last_error = node.node_count;
-    }
-    node.node_count - head.node_count_at_last_error
-}
-
 /// Push a subtree onto a version.
 pub unsafe fn stack_push(
     stack: &mut Stack,
@@ -430,33 +475,6 @@ pub unsafe fn stack_get_summary(stack: &Stack, version: StackVersion) -> Option<
     stack_head(stack, version)
         .summary
         .map(|summary| summary.as_ref())
-}
-
-/// Check if a version has advanced since the last error.
-pub unsafe fn stack_has_advanced_since_error(self_: &Stack, version: StackVersion) -> bool {
-    let head = stack_head(self_, version);
-    let mut node = head.node;
-    if node.as_ref().error_cost == 0 {
-        return true;
-    }
-    loop {
-        let node_ref = node.as_ref();
-        if node_ref.link_count > 0 {
-            let subtree = node_ref.links[0].subtree;
-            if !subtree.is_null() {
-                if subtree_total_bytes(subtree) > 0 {
-                    return true;
-                } else if node_ref.node_count > head.node_count_at_last_error
-                    && subtree_error_cost(subtree) == 0
-                {
-                    node = node_ref.links[0].node;
-                    continue;
-                }
-            }
-        }
-        break;
-    }
-    false
 }
 
 /// Remove a version from the stack.
@@ -563,35 +581,6 @@ pub unsafe fn stack_can_merge(
         && subtree_external_scanner_state_eq(&head1.last_external_token, &head2.last_external_token)
 }
 
-/// Halt a version.
-pub unsafe fn stack_halt(self_: &mut Stack, version: StackVersion) {
-    if stack_head(self_, version).status != StackStatus::Halted {
-        self_.halted_version_count += 1;
-        stack_head_mut(self_, version).status = StackStatus::Halted;
-    }
-}
-
-/// Pause a version with a lookahead token.
-pub unsafe fn stack_pause(stack: &mut Stack, version: StackVersion, lookahead: Subtree) {
-    if stack_head(stack, version).status == StackStatus::Halted {
-        stack.halted_version_count -= 1;
-    }
-    let head = stack_head_mut(stack, version);
-    head.status = StackStatus::Paused;
-    head.lookahead_when_paused = lookahead;
-    head.node_count_at_last_error = head.node.as_ref().node_count;
-}
-
-/// Resume a paused version, returning its stored lookahead.
-pub unsafe fn stack_resume(stack: &mut Stack, version: StackVersion) -> Subtree {
-    let head = stack_head_mut(stack, version);
-    debug_assert!(head.status == StackStatus::Paused);
-    let result = head.lookahead_when_paused;
-    head.status = StackStatus::Active;
-    head.lookahead_when_paused = NULL_SUBTREE;
-    result
-}
-
 /// Clear all versions, resetting to initial state.
 pub unsafe fn stack_clear(self_: &mut Stack) {
     stack_node_retain(self_.base_node);
@@ -631,18 +620,18 @@ mod tests {
             assert_eq!(stack.halted_version_count(), 0);
 
             let halted = stack_copy_version(stack, 0);
-            stack_halt(stack, halted);
+            stack.halt(halted);
             assert_eq!(stack.halted_version_count(), 1);
 
             let halted_copy = stack_copy_version(stack, halted);
             assert_eq!(stack.halted_version_count(), 2);
 
-            stack_pause(stack, halted_copy, NULL_SUBTREE);
+            stack.pause(halted_copy, NULL_SUBTREE);
             assert_eq!(stack.halted_version_count(), 1);
-            let _ = stack_resume(stack, halted_copy);
+            let _ = stack.resume(halted_copy);
             assert_eq!(stack.halted_version_count(), 1);
 
-            stack_halt(stack, halted_copy);
+            stack.halt(halted_copy);
             assert_eq!(stack.halted_version_count(), 2);
             stack_remove_version(stack, halted_copy);
             assert_eq!(stack.halted_version_count(), 1);

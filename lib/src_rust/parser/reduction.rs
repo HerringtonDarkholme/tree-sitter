@@ -1,15 +1,14 @@
 use super::{
     array_swap, language_full, language_lookup, parser_log, parser_symbol_name, ptr, ptr_mut,
-    ptr_ref, stack_halt, stack_merge, stack_pop_all, stack_pop_count, stack_push,
-    stack_remove_version, stack_set_last_external_token, subtree_array_clear, subtree_array_delete,
-    subtree_array_remove_trailing_extras, subtree_child_count, subtree_children_slice,
-    subtree_compare, subtree_dynamic_precedence, subtree_error_cost, subtree_extra,
-    subtree_from_mut, subtree_has_external_tokens, subtree_is_eof, subtree_last_external_token,
-    subtree_make_mut, subtree_new_node, subtree_release, subtree_retain, subtree_set_extra,
-    subtree_symbol, ts_language_next_state, DisplayCStr, MutableSubtree, ReduceAction,
-    StackVersion, Subtree, SubtreeArray, TSParser, TSStateId, TSSymbol, Write, MAX_VERSION_COUNT,
-    MAX_VERSION_COUNT_OVERFLOW, NULL_SUBTREE, STACK_VERSION_NONE, TS_BUILTIN_SYM_ERROR,
-    TS_BUILTIN_SYM_ERROR_REPEAT, TS_TREE_STATE_NONE,
+    ptr_ref, stack_merge, stack_pop_all, stack_pop_count, stack_push, stack_remove_version,
+    subtree_array_clear, subtree_array_delete, subtree_array_remove_trailing_extras,
+    subtree_child_count, subtree_children_slice, subtree_compare, subtree_dynamic_precedence,
+    subtree_error_cost, subtree_extra, subtree_from_mut, subtree_has_external_tokens,
+    subtree_is_eof, subtree_last_external_token, subtree_make_mut, subtree_new_node,
+    subtree_release, subtree_retain, subtree_set_extra, subtree_symbol, ts_language_next_state,
+    DisplayCStr, MutableSubtree, ReduceAction, StackVersion, Subtree, SubtreeArray, TSParser,
+    TSStateId, TSSymbol, Write, MAX_VERSION_COUNT, MAX_VERSION_COUNT_OVERFLOW, NULL_SUBTREE,
+    STACK_VERSION_NONE, TS_BUILTIN_SYM_ERROR, TS_BUILTIN_SYM_ERROR_REPEAT, TS_TREE_STATE_NONE,
 };
 
 pub(super) unsafe fn parser_select_tree(
@@ -153,7 +152,7 @@ pub(super) unsafe fn parser_shift(
     let stack = ptr_mut(parser.stack);
     stack_push(stack, version, subtree_to_push, state);
     if subtree_has_external_tokens(subtree_to_push) {
-        stack_set_last_external_token(stack, version, subtree_last_external_token(subtree_to_push));
+        stack.set_last_external_token(version, subtree_last_external_token(subtree_to_push));
     }
 }
 
@@ -344,5 +343,5 @@ pub(super) unsafe fn parser_accept(
     }
 
     stack_remove_version(stack, pop.as_slice()[0].version);
-    stack_halt(stack, version);
+    stack.halt(version);
 }
