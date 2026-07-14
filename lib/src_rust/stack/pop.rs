@@ -22,7 +22,7 @@ unsafe fn stack_add_version(
         last_external_token: original_head.last_external_token,
         status: StackStatus::Active,
         lookahead_when_paused: NULL_SUBTREE,
-        summary: ptr::null_mut(),
+        summary: None,
     };
     array_push(&mut self_.heads, head);
     stack_node_retain(node);

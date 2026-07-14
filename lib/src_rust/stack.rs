@@ -10,6 +10,7 @@
 
 use core::ffi::c_void;
 use core::ptr;
+use core::ptr::NonNull;
 
 use crate::ffi::{TSLanguage, TSStateId};
 
@@ -136,7 +137,7 @@ pub struct StackHead {
     /// Current top node for this parser version.
     node: *mut StackNode,
     /// Optional recovery summary, recorded lazily.
-    summary: *mut StackSummary,
+    summary: Option<NonNull<StackSummary>>,
     /// Node-count checkpoint used by recovery progress heuristics.
     node_count_at_last_error: u32,
     /// Last token carrying external scanner state for this version.
@@ -510,9 +511,9 @@ unsafe fn stack_head_delete(
         if !self_.lookahead_when_paused.ptr.is_null() {
             subtree_release(subtree_pool, self_.lookahead_when_paused);
         }
-        if !self_.summary.is_null() {
-            array_delete(ptr_mut(self_.summary));
-            free(self_.summary.cast::<c_void>());
+        if let Some(mut summary) = self_.summary.take() {
+            array_delete(summary.as_mut());
+            free(summary.as_ptr().cast::<c_void>());
         }
         stack_node_release(ptr_mut(self_.node), pool, subtree_pool);
     }
@@ -741,19 +742,21 @@ pub unsafe fn stack_record_summary(self_: &mut Stack, version: StackVersion, max
         |iterator| summarize_stack_action(iterator, &mut summary, max_depth),
         None,
     );
-    let summary_ptr = malloc(core::mem::size_of::<StackSummary>()).cast::<StackSummary>();
-    ptr::write(summary_ptr, summary);
+    let summary_ptr =
+        NonNull::new_unchecked(malloc(core::mem::size_of::<StackSummary>()).cast::<StackSummary>());
+    ptr::write(summary_ptr.as_ptr(), summary);
     let head = stack_head_mut(self_, version);
-    if !head.summary.is_null() {
-        array_delete(ptr_mut(head.summary));
-        free(head.summary.cast::<c_void>());
+    if let Some(mut previous) = head.summary.replace(summary_ptr) {
+        array_delete(previous.as_mut());
+        free(previous.as_ptr().cast::<c_void>());
     }
-    head.summary = summary_ptr;
 }
 
 /// Get the recorded summary for a version.
-pub unsafe fn stack_get_summary(stack: &Stack, version: StackVersion) -> *mut StackSummary {
-    stack_head(stack, version).summary
+pub unsafe fn stack_get_summary(stack: &Stack, version: StackVersion) -> Option<&StackSummary> {
+    stack_head(stack, version)
+        .summary
+        .map(|summary| summary.as_ref())
 }
 
 /// Get the dynamic precedence of a version.
@@ -818,9 +821,8 @@ pub unsafe fn stack_renumber_version(stack: &mut Stack, v1: StackVersion, v2: St
     if target_head.status == StackStatus::Halted {
         stack.halted_version_count -= 1;
     }
-    if !target_head.summary.is_null() && source_head.summary.is_null() {
-        source_head.summary = target_head.summary;
-        target_head.summary = ptr::null_mut();
+    if source_head.summary.is_none() {
+        source_head.summary = target_head.summary.take();
     }
     stack_head_delete(target_head, node_pool, subtree_pool);
     *target_head = ptr::read(source_head);
@@ -848,7 +850,7 @@ pub unsafe fn stack_copy_version(stack: &mut Stack, version: StackVersion) -> St
     if head.status == StackStatus::Halted {
         stack.halted_version_count += 1;
     }
-    head.summary = ptr::null_mut();
+    head.summary = None;
     stack.heads.size - 1
 }
 
@@ -958,7 +960,7 @@ pub unsafe fn stack_clear(self_: &mut Stack) {
             status: StackStatus::Active,
             last_external_token: NULL_SUBTREE,
             lookahead_when_paused: NULL_SUBTREE,
-            summary: ptr::null_mut(),
+            summary: None,
             node_count_at_last_error: 0,
         },
     );

@@ -203,13 +203,12 @@ pub(super) unsafe fn parser_recover(
     let stack = ptr_mut(self_.stack);
     let previous_version_count = stack_version_count(stack);
     let position = stack_position(stack, version);
-    let summary = stack_get_summary(stack, version);
     let node_count_since_error = stack_node_count_since_error(stack, version);
     let current_error_cost = stack_error_cost(stack, version);
+    let summary = stack_get_summary(stack, version);
 
     // Strategy 1: Find a previous state where the lookahead is valid.
-    if !summary.is_null() && !subtree_is_error(lookahead) {
-        let summary = ptr_ref(summary);
+    if let Some(summary) = summary.filter(|_| !subtree_is_error(lookahead)) {
         for i in 0..summary.size {
             let entry = *array_get_ref(summary, i);
 

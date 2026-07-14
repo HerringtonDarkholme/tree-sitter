@@ -58,9 +58,9 @@ pub unsafe fn stack_print_dot_graph(
             error_cost,
         );
 
-        if !head.summary.is_null() {
+        if let Some(summary) = head.summary {
             fprintf(f, c"\nsummary:".as_ptr().cast::<i8>());
-            let summary = ptr_ref(head.summary);
+            let summary = summary.as_ref();
             for j in 0..summary.size {
                 let entry = array_get_ref(summary, j);
                 fprintf(f, c" %u".as_ptr().cast::<i8>(), u32::from(entry.state));
