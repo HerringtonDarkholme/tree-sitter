@@ -2,10 +2,10 @@ use super::{
     array_swap, language_full, language_lookup, parser_log, parser_symbol_name, ptr, ptr_mut,
     ptr_ref, stack_merge, stack_pop_all, stack_pop_count, stack_push, stack_remove_version,
     subtree_array_clear, subtree_array_delete, subtree_array_remove_trailing_extras,
-    subtree_compare, subtree_new_node, ts_language_next_state, DisplayCStr, MutableSubtree,
-    ReduceAction, StackVersion, Subtree, SubtreeArray, TSParser, TSStateId, TSSymbol, Write,
-    MAX_VERSION_COUNT, MAX_VERSION_COUNT_OVERFLOW, NULL_SUBTREE, STACK_VERSION_NONE,
-    TS_BUILTIN_SYM_ERROR, TS_BUILTIN_SYM_ERROR_REPEAT, TS_TREE_STATE_NONE,
+    subtree_compare, subtree_new_node, subtree_new_scratch_node, ts_language_next_state,
+    DisplayCStr, MutableSubtree, ReduceAction, StackVersion, Subtree, SubtreeArray, TSParser,
+    TSStateId, TSSymbol, Write, MAX_VERSION_COUNT, MAX_VERSION_COUNT_OVERFLOW, NULL_SUBTREE,
+    STACK_VERSION_NONE, TS_BUILTIN_SYM_ERROR, TS_BUILTIN_SYM_ERROR_REPEAT, TS_TREE_STATE_NONE,
 };
 
 pub(super) unsafe fn parser_select_tree(
@@ -113,14 +113,14 @@ unsafe fn parser_select_children(
 ) -> bool {
     parser.scratch_trees.assign(children);
     let scratch_tree =
-        subtree_new_node(left.symbol(), &mut parser.scratch_trees, 0, parser.language);
-    parser_select_tree(parser, left, scratch_tree.into_immutable())
+        subtree_new_scratch_node(left.symbol(), &mut parser.scratch_trees, parser.language);
+    parser_select_tree(parser, left, scratch_tree)
 }
 
 pub(super) unsafe fn parser_new_node(
     parser: &mut TSParser,
     symbol: TSSymbol,
-    children: &mut SubtreeArray,
+    children: SubtreeArray,
     production_id: u32,
 ) -> MutableSubtree {
     subtree_new_node(symbol, children, production_id, parser.language)
@@ -225,7 +225,7 @@ pub(super) unsafe fn parser_reduce(
         let mut parent = parser_new_node(
             parser,
             action.symbol,
-            &mut children,
+            children,
             u32::from(action.production_id),
         );
 
@@ -245,7 +245,7 @@ pub(super) unsafe fn parser_reduce(
                 parent = parser_new_node(
                     parser,
                     action.symbol,
-                    &mut next_children,
+                    next_children,
                     u32::from(action.production_id),
                 );
             } else {
@@ -314,7 +314,7 @@ pub(super) unsafe fn parser_accept(
                 root = parser_new_node(
                     parser,
                     tree.symbol(),
-                    &mut trees,
+                    trees,
                     u32::from(tree.heap_data().children().production_id),
                 )
                 .into_immutable();

@@ -1104,7 +1104,7 @@ pub use storage::{
 };
 use storage::{
     subtree_clone_allocation, subtree_free_internal_node, subtree_pool_allocate, subtree_pool_free,
-    subtree_take_children,
+    subtree_reuse_children, subtree_take_children,
 };
 
 // Compatibility accessors still used by the legacy query implementation.
@@ -1307,26 +1307,41 @@ unsafe fn subtree_init_node_data(
     MutableSubtree::from_heap(data)
 }
 
-/// Create a heap internal node by moving child storage into the node allocation.
+/// Create a heap internal node by taking ownership of its child array.
 ///
 /// The child array is resized so the `SubtreeHeapData` header can live directly
 /// after the child slice in one compact allocation:
 /// `[child_0, child_1, ... child_n][SubtreeHeapData]`.
 pub unsafe fn subtree_new_node(
     symbol: TSSymbol,
-    children: &mut SubtreeArray,
+    children: SubtreeArray,
     production_id: u32,
     language: *const TSLanguage,
 ) -> MutableSubtree {
-    let data = subtree_take_children(children);
+    let (data, child_count) = subtree_take_children(children);
 
-    let result = subtree_init_node_data(data, symbol, children.size, production_id, language);
+    let result = subtree_init_node_data(data, symbol, child_count, production_id, language);
     subtree_summarize_children(result, language);
     result
 }
 
-pub unsafe fn subtree_new_error_node(
+/// Build a temporary internal node in parser-owned reusable storage.
+///
+/// The returned subtree borrows `children`'s allocation and must not be
+/// retained or released. It becomes invalid as soon as `children` is changed.
+pub(super) unsafe fn subtree_new_scratch_node(
+    symbol: TSSymbol,
     children: &mut SubtreeArray,
+    language: *const TSLanguage,
+) -> Subtree {
+    let data = subtree_reuse_children(children);
+    let result = subtree_init_node_data(data, symbol, children.size, 0, language);
+    subtree_summarize_children(result, language);
+    result.into_immutable()
+}
+
+pub unsafe fn subtree_new_error_node(
+    children: SubtreeArray,
     extra: bool,
     language: *const TSLanguage,
 ) -> Subtree {
@@ -1662,8 +1677,8 @@ mod tests {
             let mut children = Array::new();
             children.push(inline_leaf(5));
             children.push(inline_leaf(5));
-            let parent = subtree_new_node(TS_BUILTIN_SYM_ERROR, &mut children, 0, ptr::null())
-                .into_immutable();
+            let parent =
+                subtree_new_node(TS_BUILTIN_SYM_ERROR, children, 0, ptr::null()).into_immutable();
 
             let tree = subtree_edit(parent, &insertion(2, 1), &mut pool);
             assert!(tree.has_changes());
@@ -1672,6 +1687,26 @@ mod tests {
 
             tree.release(&mut pool);
             subtree_pool_delete(&mut pool);
+        }
+    }
+
+    #[test]
+    fn scratch_node_borrows_reusable_child_storage() {
+        unsafe {
+            let mut children = Array::new();
+            children.push(inline_leaf(2));
+            children.push(inline_leaf(3));
+
+            let first = subtree_new_scratch_node(TS_BUILTIN_SYM_ERROR, &mut children, ptr::null());
+            assert_eq!(first.child_count(), 2);
+
+            children.clear();
+            children.push(inline_leaf(4));
+            let second = subtree_new_scratch_node(TS_BUILTIN_SYM_ERROR, &mut children, ptr::null());
+            assert_eq!(second.child_count(), 1);
+            assert_eq!(second.child(0).size().bytes, 4);
+
+            children.delete();
         }
     }
 
@@ -1702,8 +1737,7 @@ mod tests {
             children.push(child1);
             children.push(child2);
 
-            let parent =
-                subtree_new_node(TS_BUILTIN_SYM_ERROR_REPEAT, &mut children, 0, ptr::null());
+            let parent = subtree_new_node(TS_BUILTIN_SYM_ERROR_REPEAT, children, 0, ptr::null());
             let parent_tree = parent.into_immutable();
 
             assert_eq!(parent_tree.child_count(), 2);

@@ -156,7 +156,7 @@ unsafe fn parser_recover_to_state(
         subtree_array_remove_trailing_extras(&mut slice.subtrees, &mut self_.trailing_extras);
 
         if !slice.subtrees.is_empty() {
-            let error = subtree_new_error_node(&mut slice.subtrees, true, self_.language);
+            let error = subtree_new_error_node(slice.subtrees, true, self_.language);
             stack_push(stack, slice.version, error, goal_state);
         } else {
             slice.subtrees.delete();
@@ -258,8 +258,8 @@ pub(super) unsafe fn parser_recover(
     // EOF: wrap everything and terminate
     if lookahead.is_eof() {
         parser_log(self_, |_, log| log.write_str("recover_eof"));
-        let mut children = SubtreeArray::new();
-        let parent = subtree_new_error_node(&mut children, false, self_.language);
+        let children = SubtreeArray::new();
+        let parent = subtree_new_error_node(children, false, self_.language);
         stack_push(stack, version, parent, 1);
         parser_accept(self_, version, lookahead);
         return;
@@ -305,7 +305,7 @@ pub(super) unsafe fn parser_recover(
     let mut children = SubtreeArray::new();
     children.reserve(1);
     children.push(lookahead);
-    let mut error_repeat = parser_new_node(self_, TS_BUILTIN_SYM_ERROR_REPEAT, &mut children, 0);
+    let mut error_repeat = parser_new_node(self_, TS_BUILTIN_SYM_ERROR_REPEAT, children, 0);
 
     // Merge with existing error on top of stack
     if node_count_since_error > 0 {
@@ -326,7 +326,8 @@ pub(super) unsafe fn parser_recover(
         stack_renumber_version(stack, pop.get_unchecked(0).version, version);
         let slot = &mut pop.get_unchecked_mut(0).subtrees;
         slot.push(error_repeat.into_immutable());
-        error_repeat = parser_new_node(self_, TS_BUILTIN_SYM_ERROR_REPEAT, slot, 0);
+        let children = core::mem::replace(slot, SubtreeArray::new());
+        error_repeat = parser_new_node(self_, TS_BUILTIN_SYM_ERROR_REPEAT, children, 0);
     }
 
     // Push the ERROR

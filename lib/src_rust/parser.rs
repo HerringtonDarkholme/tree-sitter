@@ -36,9 +36,10 @@ use super::stack::{
 use super::subtree::{
     subtree_array_clear, subtree_array_delete, subtree_array_remove_trailing_extras,
     subtree_compare, subtree_compress, subtree_new_error, subtree_new_error_node, subtree_new_leaf,
-    subtree_new_missing_leaf, subtree_new_node, subtree_pool_delete, subtree_pool_new,
-    subtree_print_dot_graph, MutableSubtree, Subtree, SubtreeArray, SubtreePool, NULL_SUBTREE,
-    TS_BUILTIN_SYM_END, TS_BUILTIN_SYM_ERROR, TS_BUILTIN_SYM_ERROR_REPEAT, TS_TREE_STATE_NONE,
+    subtree_new_missing_leaf, subtree_new_node, subtree_new_scratch_node, subtree_pool_delete,
+    subtree_pool_new, subtree_print_dot_graph, MutableSubtree, Subtree, SubtreeArray, SubtreePool,
+    NULL_SUBTREE, TS_BUILTIN_SYM_END, TS_BUILTIN_SYM_ERROR, TS_BUILTIN_SYM_ERROR_REPEAT,
+    TS_TREE_STATE_NONE,
 };
 use super::tree::TSTree;
 use super::utils::{array_swap, Array};

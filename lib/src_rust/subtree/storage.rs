@@ -149,10 +149,8 @@ pub(super) unsafe fn subtree_clone_allocation(tree: Subtree) -> NonNull<SubtreeH
     )
 }
 
-/// Place a node header after an array's initialized children.
-pub(super) unsafe fn subtree_take_children(
-    children: &mut SubtreeArray,
-) -> NonNull<SubtreeHeapData> {
+/// Ensure an array has room for a node header after its initialized children.
+unsafe fn subtree_reserve_header(children: &mut SubtreeArray) -> NonNull<SubtreeHeapData> {
     let byte_size = subtree_alloc_size(children.size);
     if (children.capacity as usize) * core::mem::size_of::<Subtree>() < byte_size {
         children.contents =
@@ -165,6 +163,24 @@ pub(super) unsafe fn subtree_take_children(
             .add(children.size as usize)
             .cast::<SubtreeHeapData>(),
     )
+}
+
+/// Transfer a child array's allocation into a new internal node.
+pub(super) unsafe fn subtree_take_children(
+    mut children: SubtreeArray,
+) -> (NonNull<SubtreeHeapData>, u32) {
+    let child_count = children.size;
+    (subtree_reserve_header(&mut children), child_count)
+}
+
+/// Place a temporary node header in reusable parser scratch storage.
+///
+/// The returned header remains valid only until `children` is changed or
+/// deleted. Unlike `subtree_take_children`, this does not transfer ownership.
+pub(super) unsafe fn subtree_reuse_children(
+    children: &mut SubtreeArray,
+) -> NonNull<SubtreeHeapData> {
+    subtree_reserve_header(children)
 }
 
 /// Free the combined child-and-header allocation of an internal node.

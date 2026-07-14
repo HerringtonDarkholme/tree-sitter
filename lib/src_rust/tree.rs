@@ -387,7 +387,7 @@ mod tests {
             let mut children = Array::new();
             children.push(child1);
             children.push(child2);
-            let root = subtree_new_node(TS_BUILTIN_SYM_ERROR_REPEAT, &mut children, 0, ptr::null())
+            let root = subtree_new_node(TS_BUILTIN_SYM_ERROR_REPEAT, children, 0, ptr::null())
                 .into_immutable();
 
             assert_eq!(root.child_count(), 2);
