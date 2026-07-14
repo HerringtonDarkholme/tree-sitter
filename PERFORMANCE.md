@@ -163,6 +163,32 @@ broader baseline replaces it.
 
 ## Checkpoints
 
+### 2026-07-14 EDT - subtree ownership and readability split
+
+- Trial head: `2ade6c9b` (`Separate tree cursor navigation`).
+- Baseline: `b6361bb3` (`Restore compact subtree unions`).
+- Changes under test: make internal-node construction consume child arrays,
+  separate reusable parser scratch-node construction, bind returned subtree
+  references to handle borrows, and move subtree/parser/cursor implementation
+  sections into focused modules.
+- Both revisions were run sequentially with the same grammar cache and command:
+
+```sh
+cargo xtask perf-gate --language typescript \
+  --typescript-path /Users/hd/code/test/typescript \
+  --repetitions 10 --error-limit 2 --report-only --offline
+```
+
+| Revision | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| Compact baseline | 11 | 23455.3 | 21802.2 | +7.58% |
+| Readability split | 11 | 23331.3 | 22020.2 | +5.95% |
+
+Direct Rust throughput changed by -0.53%, which is within run-to-run noise for
+this benchmark. The readability-split run had no individual regression above
+the 5% reporting threshold, so the ownership and module-boundary changes are
+kept.
+
 ### 2026-07-14 EDT - restore compact `repr(C)` subtree unions
 
 - Trial head: `b6361bb3` (`Restore compact subtree unions`).
