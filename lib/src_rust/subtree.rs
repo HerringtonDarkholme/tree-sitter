@@ -407,6 +407,10 @@ impl SubtreeHeapData {
 // Subtree / MutableSubtree
 // ---------------------------------------------------------------------------
 
+/// Internal syntax-tree handle.
+///
+/// Public `TSNode` values contain only an opaque pointer to this handle, so its
+/// Rust layout is not part of the C ABI.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Subtree {
     /// Sentinel used when no subtree is present.
@@ -417,6 +421,7 @@ pub enum Subtree {
     Heap(NonNull<SubtreeHeapData>),
 }
 
+/// Unique-mutation capability for a `Subtree`.
 #[derive(Clone, Copy)]
 pub struct MutableSubtree(Subtree);
 
