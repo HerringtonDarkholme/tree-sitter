@@ -25,11 +25,7 @@ pub unsafe extern "C" fn ts_tree_cursor_current_node(self_: *const TSTreeCursor)
         let parent_entry = entries.get_unchecked(cursor.stack.size as usize - 2);
         language_alias_at(
             (*cursor.tree).language,
-            u32::from(
-                (*(*parent_entry.subtree).heap_ptr())
-                    .children()
-                    .production_id,
-            ),
+            u32::from((*parent_entry.subtree).heap_data().children().production_id),
             last_entry.structural_child_index,
         )
     } else {
@@ -53,7 +49,7 @@ unsafe fn tree_cursor_child_symbol(
     if !subtree_extra(child) {
         let alias = language_alias_at(
             language,
-            u32::from((*parent.heap_ptr()).children().production_id),
+            u32::from(parent.heap_data().children().production_id),
             structural_child_index,
         );
         if alias != 0 {
@@ -76,7 +72,7 @@ unsafe fn tree_cursor_record_later_siblings(
     }
 
     let parent_subtree = *parent.subtree;
-    let sibling_count = (*parent_subtree.heap_ptr()).child_count;
+    let sibling_count = parent_subtree.heap_data().child_count;
     let mut structural_child_index = entry.structural_child_index;
     if !subtree_extra(*entry.subtree) {
         structural_child_index += 1;
@@ -92,7 +88,7 @@ unsafe fn tree_cursor_record_later_siblings(
             *has_later_named_siblings |= metadata.named;
         } else if subtree_visible_child_count(*sibling) > 0 {
             *has_later_siblings = true;
-            *has_later_named_siblings |= (*sibling.heap_ptr()).children().named_child_count > 0;
+            *has_later_named_siblings |= sibling.heap_data().children().named_child_count > 0;
         }
         if *has_later_named_siblings {
             return;
@@ -117,7 +113,7 @@ unsafe fn tree_cursor_update_field_status(
 
     let field_map = language_field_map_slice(
         language,
-        u32::from((*(*parent.subtree).heap_ptr()).children().production_id),
+        u32::from((*parent.subtree).heap_data().children().production_id),
     );
 
     for map in field_map {

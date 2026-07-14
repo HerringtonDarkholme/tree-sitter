@@ -448,6 +448,16 @@ impl Subtree {
     pub const fn heap_ptr(self) -> *const SubtreeHeapData {
         unsafe { core::mem::transmute::<SubtreeInlineData, *const SubtreeHeapData>(self.data) }
     }
+
+    /// Whether this handle is the null subtree sentinel.
+    pub fn is_null(self) -> bool {
+        self.heap_ptr().is_null()
+    }
+
+    /// Borrow the heap node represented by this non-inline handle.
+    pub const unsafe fn heap_data<'a>(self) -> &'a SubtreeHeapData {
+        &*self.heap_ptr()
+    }
 }
 
 impl MutableSubtree {

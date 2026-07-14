@@ -9,7 +9,7 @@ use super::{
 unsafe fn node_field_name_from_language(node: TSNode, structural_child_index: u32) -> *const i8 {
     let field_map = language_field_map_slice(
         node_language(node),
-        u32::from((*node_subtree(node).heap_ptr()).children().production_id),
+        u32::from(node_subtree(node).heap_data().children().production_id),
     );
     let language = language_full(node_language(node));
     for entry in field_map {

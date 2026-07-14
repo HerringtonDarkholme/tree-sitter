@@ -229,11 +229,7 @@ unsafe fn tree_cursor_is_entry_visible(self_: &TreeCursor, index: u32) -> bool {
         let parent_entry = entries.get_unchecked((index - 1) as usize);
         return language_alias_at(
             (*self_.tree).language,
-            u32::from(
-                (*(*parent_entry.subtree).heap_ptr())
-                    .children()
-                    .production_id,
-            ),
+            u32::from((*parent_entry.subtree).heap_data().children().production_id),
             entry.structural_child_index,
         ) != 0;
     }
@@ -257,7 +253,7 @@ unsafe fn tree_cursor_iterate_children(self_: &TreeCursor) -> CursorChildIterato
     }
     let alias_sequence = language_alias_sequence_slice(
         (*self_.tree).language,
-        u32::from((*(*last_entry.subtree).heap_ptr()).children().production_id),
+        u32::from((*last_entry.subtree).heap_data().children().production_id),
     );
 
     let mut descendant_index = last_entry.descendant_index;
@@ -276,9 +272,7 @@ unsafe fn tree_cursor_iterate_children(self_: &TreeCursor) -> CursorChildIterato
 }
 
 unsafe fn tree_cursor_child_iterator_next(self_: &mut CursorChildIterator) -> Option<CursorChild> {
-    if self_.parent.heap_ptr().is_null()
-        || self_.child_index == (*self_.parent.heap_ptr()).child_count
-    {
+    if self_.parent.is_null() || self_.child_index == self_.parent.heap_data().child_count {
         return None;
     }
     let child = subtree_child(self_.parent, self_.child_index);
@@ -307,7 +301,7 @@ unsafe fn tree_cursor_child_iterator_next(self_: &mut CursorChildIterator) -> Op
     self_.position = length_add(self_.position, subtree_size(*child));
     self_.child_index += 1;
 
-    if self_.child_index < (*self_.parent.heap_ptr()).child_count {
+    if self_.child_index < self_.parent.heap_data().child_count {
         let next_child = *subtree_child(self_.parent, self_.child_index);
         self_.position = length_add(self_.position, subtree_padding(next_child));
     }
@@ -338,7 +332,7 @@ const fn length_backtrack(a: Length, b: Length) -> Length {
 unsafe fn tree_cursor_child_iterator_previous(
     self_: &mut CursorChildIterator,
 ) -> Option<CursorChild> {
-    if self_.parent.heap_ptr().is_null() || self_.child_index == u32::MAX {
+    if self_.parent.is_null() || self_.child_index == u32::MAX {
         return None;
     }
     let child = subtree_child(self_.parent, self_.child_index);
@@ -366,7 +360,7 @@ unsafe fn tree_cursor_child_iterator_previous(
     }
 
     // unsigned can underflow so compare it to child_count
-    if self_.child_index < (*self_.parent.heap_ptr()).child_count {
+    if self_.child_index < self_.parent.heap_data().child_count {
         let previous_child = *subtree_child(self_.parent, self_.child_index);
         let size = subtree_size(previous_child);
         self_.position = length_backtrack(self_.position, size);
@@ -552,7 +546,7 @@ pub unsafe extern "C" fn ts_tree_cursor_goto_first_child(self_: *mut TSTreeCurso
 
 unsafe fn tree_cursor_goto_last_child_internal(cursor: &mut TreeCursor) -> TreeCursorStep {
     let mut iterator = tree_cursor_iterate_children(cursor);
-    if iterator.parent.heap_ptr().is_null() || (*iterator.parent.heap_ptr()).child_count == 0 {
+    if iterator.parent.is_null() || iterator.parent.heap_data().child_count == 0 {
         return TreeCursorStep::None;
     }
 
@@ -795,11 +789,7 @@ pub unsafe extern "C" fn ts_tree_cursor_parent_node(self_: *const TSTreeCursor) 
             let parent_entry = entries.get_unchecked(i as usize - 1);
             alias_symbol = language_alias_at(
                 (*cursor.tree).language,
-                u32::from(
-                    (*(*parent_entry.subtree).heap_ptr())
-                        .children()
-                        .production_id,
-                ),
+                u32::from((*parent_entry.subtree).heap_data().children().production_id),
                 entry.structural_child_index,
             );
             is_visible = alias_symbol != 0 || subtree_visible(*entry.subtree);
