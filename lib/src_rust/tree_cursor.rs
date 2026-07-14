@@ -2,7 +2,9 @@ use core::ptr;
 
 use crate::ffi::{TSNode, TSPoint, TSSymbol, TSTreeCursor};
 
-use super::language::{language_alias_at, language_alias_sequence, ts_language_symbol_metadata};
+use super::language::{
+    language_alias_at, language_alias_sequence_slice, ts_language_symbol_metadata,
+};
 use super::length::{length_add, length_is_undefined, length_zero, Length, LENGTH_UNDEFINED};
 use super::node::{node_new, ts_node_start_byte, ts_node_start_point};
 use super::point::point_gt;
@@ -194,7 +196,7 @@ struct CursorChildIterator {
     /// Visible descendant index of the next child.
     descendant_index: u32,
     /// Alias sequence for the parent production.
-    alias_sequence: *const TSSymbol,
+    alias_sequence: &'static [TSSymbol],
 }
 
 #[derive(Clone, Copy)]
@@ -250,10 +252,10 @@ unsafe fn tree_cursor_iterate_children(self_: &TreeCursor) -> CursorChildIterato
             child_index: 0,
             structural_child_index: 0,
             descendant_index: 0,
-            alias_sequence: ptr::null(),
+            alias_sequence: &[],
         };
     }
-    let alias_sequence = language_alias_sequence(
+    let alias_sequence = language_alias_sequence_slice(
         (*self_.tree).language,
         u32::from((*(*last_entry.subtree).heap_ptr()).children().production_id),
     );
@@ -290,12 +292,10 @@ unsafe fn tree_cursor_child_iterator_next(self_: &mut CursorChildIterator) -> Op
     let mut visible = subtree_visible(*child);
     let extra = subtree_extra(*child);
     if !extra {
-        if !self_.alias_sequence.is_null() {
-            visible |= *self_
-                .alias_sequence
-                .add(self_.structural_child_index as usize)
-                != 0;
-        }
+        visible |= self_
+            .alias_sequence
+            .get(self_.structural_child_index as usize)
+            .is_some_and(|alias| *alias != 0);
         self_.structural_child_index += 1;
     }
 
@@ -355,11 +355,11 @@ unsafe fn tree_cursor_child_iterator_previous(
     self_.position = length_backtrack(self_.position, subtree_padding(*child));
     self_.child_index = self_.child_index.wrapping_sub(1);
 
-    if !extra && !self_.alias_sequence.is_null() {
-        visible |= *self_
+    if !extra {
+        visible |= self_
             .alias_sequence
-            .add(self_.structural_child_index as usize)
-            != 0;
+            .get(self_.structural_child_index as usize)
+            .is_some_and(|alias| *alias != 0);
         if self_.structural_child_index > 0 {
             self_.structural_child_index -= 1;
         }

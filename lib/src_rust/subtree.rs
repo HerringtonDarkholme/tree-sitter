@@ -13,7 +13,7 @@ use super::error_costs::{
     ERROR_COST_PER_SKIPPED_LINE, ERROR_COST_PER_SKIPPED_TREE,
 };
 use super::language::{
-    language_alias_sequence, language_field_map_slice, language_full,
+    language_alias_sequence_slice, language_field_map_slice, language_full,
     language_write_symbol_as_dot_string, ts_language_symbol_metadata, ts_language_symbol_name,
 };
 use super::length::{length_add, length_saturating_sub, length_sub, length_zero, Length};
@@ -1452,7 +1452,7 @@ pub unsafe fn subtree_summarize_children(self_: MutableSubtree, language: *const
 
     let mut structural_index: u32 = 0;
     let alias_sequence =
-        language_alias_sequence(language, u32::from(data.children().production_id));
+        language_alias_sequence_slice(language, u32::from(data.children().production_id));
     let mut lookahead_end_byte: u32 = 0;
 
     let children = subtree_children_slice(subtree_from_mut(self_));
@@ -1500,16 +1500,14 @@ pub unsafe fn subtree_summarize_children(self_: MutableSubtree, language: *const
         data.children_mut().dynamic_precedence += subtree_dynamic_precedence(child);
         data.children_mut().visible_descendant_count += subtree_visible_descendant_count(child);
 
-        if !subtree_extra(child)
-            && subtree_symbol(child) != 0
-            && !alias_sequence.is_null()
-            && *alias_sequence.add(structural_index as usize) != 0
-        {
+        let alias_symbol = alias_sequence
+            .get(structural_index as usize)
+            .copied()
+            .unwrap_or(0);
+        if !subtree_extra(child) && subtree_symbol(child) != 0 && alias_symbol != 0 {
             data.children_mut().visible_descendant_count += 1;
             data.children_mut().visible_child_count += 1;
-            if ts_language_symbol_metadata(language, *alias_sequence.add(structural_index as usize))
-                .named
-            {
+            if ts_language_symbol_metadata(language, alias_symbol).named {
                 data.children_mut().named_child_count += 1;
             }
         } else if subtree_visible(child) {

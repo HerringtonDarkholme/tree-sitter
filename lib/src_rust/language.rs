@@ -448,19 +448,25 @@ pub const unsafe fn language_enabled_external_tokens(
     }
 }
 
-/// Get the alias sequence for a production ID.
+/// Borrow the alias symbols for a production.
+///
+/// Generated language tables have static storage duration. An empty slice
+/// means that the production has no aliases. Raw table access stays confined
+/// to this language boundary.
 #[inline]
-pub const unsafe fn language_alias_sequence(
+pub const unsafe fn language_alias_sequence_slice(
     self_: *const TSLanguage,
     production_id: u32,
-) -> *const TSSymbol {
-    if production_id != 0 {
-        let l = lang(self_);
-        l.alias_sequences
-            .add(production_id as usize * l.max_alias_sequence_length as usize)
-    } else {
-        ptr::null()
+) -> &'static [TSSymbol] {
+    if production_id == 0 {
+        return &[];
     }
+    let l = lang(self_);
+    core::slice::from_raw_parts(
+        l.alias_sequences
+            .add(production_id as usize * l.max_alias_sequence_length as usize),
+        l.max_alias_sequence_length as usize,
+    )
 }
 
 /// Get the alias at a specific position in a production's alias sequence.
@@ -470,11 +476,9 @@ pub const unsafe fn language_alias_at(
     production_id: u32,
     child_index: u32,
 ) -> TSSymbol {
-    if production_id != 0 {
-        let l = lang(self_);
-        *l.alias_sequences.add(
-            production_id as usize * l.max_alias_sequence_length as usize + child_index as usize,
-        )
+    let aliases = language_alias_sequence_slice(self_, production_id);
+    if child_index < aliases.len() as u32 {
+        aliases[child_index as usize]
     } else {
         0
     }

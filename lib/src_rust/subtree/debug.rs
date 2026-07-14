@@ -1,5 +1,5 @@
 use super::{
-    c_void, language_alias_sequence, language_field_map_slice, language_full,
+    c_void, language_alias_sequence_slice, language_field_map_slice, language_full,
     language_write_symbol_as_dot_string, malloc, ptr, subtree_child_count, subtree_children_slice,
     subtree_depends_on_column, subtree_error_cost, subtree_extra, subtree_has_changes,
     subtree_is_error, subtree_lookahead_bytes, subtree_missing, subtree_named, subtree_parse_state,
@@ -146,7 +146,7 @@ unsafe fn subtree_write_to_string(
     }
 
     if subtree_child_count(self_) > 0 {
-        let alias_sequence = language_alias_sequence(
+        let alias_sequence = language_alias_sequence_slice(
             language,
             u32::from((*self_.heap_ptr()).children().production_id),
         );
@@ -170,11 +170,10 @@ unsafe fn subtree_write_to_string(
                     ptr::null(),
                 ));
             } else {
-                let subtree_alias_symbol = if !alias_sequence.is_null() {
-                    *alias_sequence.add(structural_child_index as usize)
-                } else {
-                    0
-                };
+                let subtree_alias_symbol = alias_sequence
+                    .get(structural_child_index as usize)
+                    .copied()
+                    .unwrap_or(0);
                 let subtree_alias_is_named = if subtree_alias_symbol != 0 {
                     ts_language_symbol_metadata(language, subtree_alias_symbol).named
                 } else {

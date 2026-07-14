@@ -3,7 +3,7 @@ use core::ptr;
 use crate::ffi::{TSFieldId, TSInputEdit, TSLanguage, TSNode, TSPoint, TSStateId, TSSymbol};
 
 use super::language::{
-    language_alias_sequence, language_field_map_slice, language_full, language_public_symbol,
+    language_alias_sequence_slice, language_field_map_slice, language_full, language_public_symbol,
     ts_language_field_id_for_name, ts_language_next_state, ts_language_symbol_metadata,
     ts_language_symbol_name,
 };
@@ -47,7 +47,7 @@ struct NodeChildIterator {
     /// Index among non-extra children, used for fields and aliases.
     structural_child_index: u32,
     /// Alias symbols for the parent production.
-    alias_sequence: *const TSSymbol,
+    alias_sequence: &'static [TSSymbol],
 }
 
 // ---------------------------------------------------------------------------
@@ -162,10 +162,10 @@ unsafe fn node_iterate_children(node: &TSNode) -> NodeChildIterator {
             position: length_zero(),
             child_index: 0,
             structural_child_index: 0,
-            alias_sequence: ptr::null(),
+            alias_sequence: &[],
         };
     }
-    let alias_sequence = language_alias_sequence(
+    let alias_sequence = language_alias_sequence_slice(
         node_language(*node),
         u32::from((*subtree.heap_ptr()).children().production_id),
     );
@@ -196,11 +196,11 @@ unsafe fn node_child_iterator_next(self_: &mut NodeChildIterator, result: &mut T
     let child = subtree_child(self_.parent, self_.child_index);
     let mut alias_symbol: TSSymbol = 0;
     if !subtree_extra(*child) {
-        if !self_.alias_sequence.is_null() {
-            alias_symbol = *self_
-                .alias_sequence
-                .add(self_.structural_child_index as usize);
-        }
+        alias_symbol = self_
+            .alias_sequence
+            .get(self_.structural_child_index as usize)
+            .copied()
+            .unwrap_or(0);
         self_.structural_child_index += 1;
     }
     if self_.child_index > 0 {
