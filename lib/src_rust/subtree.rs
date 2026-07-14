@@ -895,7 +895,7 @@ pub const unsafe fn subtree_child_count(self_: Subtree) -> u32 {
 
 #[inline]
 pub unsafe fn subtree_repeat_depth(self_: Subtree) -> u32 {
-    if self_.data.is_inline() {
+    if self_.data.is_inline() || (*self_.heap_ptr()).child_count == 0 {
         0
     } else {
         u32::from((*self_.heap_ptr()).children().repeat_depth)
