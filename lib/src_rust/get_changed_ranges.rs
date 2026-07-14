@@ -221,7 +221,7 @@ impl DiffIterator {
             let parent = *parent_entry.subtree;
             return language_alias_at(
                 self.language,
-                u32::from((*parent.heap_ptr()).children().production_id),
+                u32::from(parent.heap_data().children().production_id),
                 entry.structural_child_index,
             ) != 0;
         }
@@ -252,7 +252,7 @@ impl DiffIterator {
                 let parent = entries.get_unchecked((i - 1) as usize).subtree;
                 result.alias_symbol = language_alias_at(
                     self.language,
-                    u32::from((*(*parent).heap_ptr()).children().production_id),
+                    u32::from((*parent).heap_data().children().production_id),
                     entry.structural_child_index,
                 );
             }
@@ -341,7 +341,7 @@ impl DiffIterator {
                     structural_child_index += 1;
                 }
                 let last_external_token = subtree_last_external_token(*child);
-                if !last_external_token.heap_ptr().is_null() {
+                if !last_external_token.is_null() {
                     self.prev_external_token = last_external_token;
                 }
             }
@@ -380,7 +380,7 @@ impl DiffIterator {
                 .subtree;
             let child_index = entry.child_index + 1;
             let last_external_token = subtree_last_external_token(*entry.subtree);
-            if !last_external_token.heap_ptr().is_null() {
+            if !last_external_token.is_null() {
                 self.prev_external_token = last_external_token;
             }
             if subtree_child_count(*parent) > child_index {
@@ -426,10 +426,10 @@ impl DiffIterator {
         let old_symbol = subtree_symbol(old_tree);
         let new_symbol = subtree_symbol(new_tree);
 
-        if old_tree.heap_ptr().is_null() && new_tree.heap_ptr().is_null() {
+        if old_tree.is_null() && new_tree.is_null() {
             return IteratorComparison::Matches;
         }
-        if old_tree.heap_ptr().is_null() || new_tree.heap_ptr().is_null() {
+        if old_tree.is_null() || new_tree.is_null() {
             return IteratorComparison::Differs;
         }
         if old_visible.alias_symbol != new_visible.alias_symbol || old_symbol != new_symbol {

@@ -89,8 +89,8 @@ unsafe fn subtree_apply_edit_size(
             result = MutableSubtree::from_heap(data);
         }
     } else {
-        (*result.heap_ptr()).padding = padding;
-        (*result.heap_ptr()).size = size;
+        result.heap_data_mut().padding = padding;
+        result.heap_data_mut().size = size;
     }
 
     subtree_set_has_changes(&mut result);
