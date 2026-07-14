@@ -12,17 +12,12 @@ use core::ffi::c_void;
 use core::ptr;
 use core::ptr::NonNull;
 
-use crate::ffi::{TSLanguage, TSStateId};
+use crate::ffi::TSStateId;
 
 use super::alloc::{free, malloc};
 use super::error_costs::{ERROR_COST_PER_RECOVERY, ERROR_STATE};
-use super::language::language_write_symbol_as_dot_string;
-use super::length::{length_add, length_zero, Length};
-use super::subtree::{
-    subtree_alloc_size, Subtree, SubtreeArray, SubtreePool, NULL_SUBTREE,
-    TS_BUILTIN_SYM_ERROR_REPEAT,
-};
-use super::subtree::{subtree_array_copy, subtree_array_delete, subtree_array_reverse};
+use super::length::Length;
+use super::subtree::{Subtree, SubtreeArray, SubtreePool, NULL_SUBTREE};
 use super::utils::ptr_mut;
 use super::utils::Array;
 

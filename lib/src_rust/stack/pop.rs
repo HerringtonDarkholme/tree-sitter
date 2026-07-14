@@ -6,13 +6,18 @@
 //! that traversal for reducing a fixed child count, removing an error, popping
 //! the whole stack, and recording state summaries for recovery.
 
-use core::ptr::NonNull;
+use core::ptr::{self, NonNull};
 
+use super::super::subtree::{
+    subtree_alloc_size, subtree_array_copy, subtree_array_delete, subtree_array_reverse, Subtree,
+    SubtreeArray, NULL_SUBTREE,
+};
+use super::super::utils::{ptr_mut, Array};
+use super::stack_node::stack_node_retain;
 use super::{
-    ptr, ptr_mut, stack_head, stack_node_retain, subtree_alloc_size, subtree_array_copy,
-    subtree_array_delete, subtree_array_reverse, Array, Stack, StackHead, StackIterationAction,
-    StackIterator, StackLink, StackNode, StackSlice, StackSliceArray, StackStatus, StackSummary,
-    StackSummaryEntry, StackVersion, Subtree, SubtreeArray, MAX_ITERATOR_COUNT, NULL_SUBTREE,
+    stack_head, Stack, StackHead, StackIterationAction, StackIterator, StackLink, StackNode,
+    StackSlice, StackSliceArray, StackStatus, StackSummary, StackSummaryEntry, StackVersion,
+    MAX_ITERATOR_COUNT,
 };
 
 /// Add a new version to the stack, cloning metadata from an existing version.

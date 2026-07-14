@@ -4,12 +4,15 @@
 //! state, error cost, and external-scanner state. It is diagnostic-only and is
 //! kept separate from stack mutation and traversal.
 
-use core::ptr::NonNull;
+use core::ffi::c_void;
+use core::ptr::{self, NonNull};
 
-use super::{
-    c_void, fprintf, language_write_symbol_as_dot_string, ptr, stack_head, stderr_file, Array,
-    Stack, StackIterator, StackNode, StackStatus, TSLanguage, ERROR_STATE,
-};
+use crate::ffi::TSLanguage;
+
+use super::super::error_costs::ERROR_STATE;
+use super::super::language::language_write_symbol_as_dot_string;
+use super::super::utils::Array;
+use super::{fprintf, stack_head, stderr_file, Stack, StackIterator, StackNode, StackStatus};
 
 /// Print the stack as a DOT graph for debugging.
 pub unsafe fn stack_print_dot_graph(

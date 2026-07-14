@@ -9,11 +9,12 @@
 use core::ffi::c_void;
 use core::ptr::{self, NonNull};
 
-use super::{
-    free, length_add, length_zero, malloc, Length, StackHead, StackLink, StackNodeArray, Subtree,
-    SubtreePool, TSStateId, MAX_LINK_COUNT, MAX_NODE_POOL_SIZE, NULL_SUBTREE,
-    TS_BUILTIN_SYM_ERROR_REPEAT,
-};
+use crate::ffi::TSStateId;
+
+use super::super::alloc::{free, malloc};
+use super::super::length::{length_add, length_zero, Length};
+use super::super::subtree::{Subtree, SubtreePool, NULL_SUBTREE, TS_BUILTIN_SYM_ERROR_REPEAT};
+use super::{StackHead, StackLink, StackNodeArray, MAX_LINK_COUNT, MAX_NODE_POOL_SIZE};
 
 /// Node in the persistent GLR stack graph.
 ///
