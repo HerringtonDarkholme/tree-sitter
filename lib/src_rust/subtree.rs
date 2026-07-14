@@ -470,6 +470,16 @@ impl MutableSubtree {
     pub const fn heap_ptr(self) -> *mut SubtreeHeapData {
         unsafe { core::mem::transmute::<SubtreeInlineData, *mut SubtreeHeapData>(self.data) }
     }
+
+    /// Borrow the heap node represented by this mutable handle.
+    pub const unsafe fn heap_data<'a>(self) -> &'a SubtreeHeapData {
+        &*self.heap_ptr()
+    }
+
+    /// Mutably borrow the heap node represented by this handle.
+    pub const unsafe fn heap_data_mut<'a>(self) -> &'a mut SubtreeHeapData {
+        &mut *self.heap_ptr()
+    }
 }
 
 pub const NULL_SUBTREE: Subtree = Subtree::from_heap(ptr::null());
