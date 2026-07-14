@@ -124,6 +124,44 @@ pub struct Stack {
     subtree_pool: *mut SubtreePool,
 }
 
+impl Stack {
+    pub const fn version_count(&self) -> u32 {
+        self.heads.size
+    }
+
+    pub const fn halted_version_count(&self) -> u32 {
+        self.halted_version_count
+    }
+
+    pub unsafe fn state(&self, version: StackVersion) -> TSStateId {
+        stack_head(self, version).node.as_ref().state
+    }
+
+    pub unsafe fn position(&self, version: StackVersion) -> Length {
+        stack_head(self, version).node.as_ref().position
+    }
+
+    pub unsafe fn last_external_token(&self, version: StackVersion) -> Subtree {
+        stack_head(self, version).last_external_token
+    }
+
+    pub unsafe fn dynamic_precedence(&self, version: StackVersion) -> i32 {
+        stack_head(self, version).node.as_ref().dynamic_precedence
+    }
+
+    pub unsafe fn is_active(&self, version: StackVersion) -> bool {
+        stack_head(self, version).status == StackStatus::Active
+    }
+
+    pub unsafe fn is_halted(&self, version: StackVersion) -> bool {
+        stack_head(self, version).status == StackStatus::Halted
+    }
+
+    pub unsafe fn is_paused(&self, version: StackVersion) -> bool {
+        stack_head(self, version).status == StackStatus::Paused
+    }
+}
+
 #[derive(Clone, Copy)]
 enum StackIterationAction {
     Continue,
@@ -269,27 +307,27 @@ pub unsafe fn stack_delete(self_: &mut Stack) {
 
 /// Get the number of versions in the stack.
 pub const fn stack_version_count(self_: &Stack) -> u32 {
-    self_.heads.size
+    self_.version_count()
 }
 
 /// Get the number of halted versions.
 pub const fn stack_halted_version_count(self_: &Stack) -> u32 {
-    self_.halted_version_count
+    self_.halted_version_count()
 }
 
 /// Get the state at the top of a version.
 pub unsafe fn stack_state(self_: &Stack, version: StackVersion) -> TSStateId {
-    stack_head(self_, version).node.as_ref().state
+    self_.state(version)
 }
 
 /// Get the position of a version.
 pub unsafe fn stack_position(self_: &Stack, version: StackVersion) -> Length {
-    stack_head(self_, version).node.as_ref().position
+    self_.position(version)
 }
 
 /// Get the last external token for a version.
 pub unsafe fn stack_last_external_token(self_: &Stack, version: StackVersion) -> Subtree {
-    stack_head(self_, version).last_external_token
+    self_.last_external_token(version)
 }
 
 /// Set the last external token for a version.
@@ -417,11 +455,6 @@ pub unsafe fn stack_get_summary(stack: &Stack, version: StackVersion) -> Option<
     stack_head(stack, version)
         .summary
         .map(|summary| summary.as_ref())
-}
-
-/// Get the dynamic precedence of a version.
-pub unsafe fn stack_dynamic_precedence(self_: &Stack, version: StackVersion) -> i32 {
-    stack_head(self_, version).node.as_ref().dynamic_precedence
 }
 
 /// Check if a version has advanced since the last error.
@@ -576,17 +609,7 @@ pub unsafe fn stack_pause(stack: &mut Stack, version: StackVersion, lookahead: S
 
 /// Check if a version is active.
 pub unsafe fn stack_is_active(self_: &Stack, version: StackVersion) -> bool {
-    stack_head(self_, version).status == StackStatus::Active
-}
-
-/// Check if a version is halted.
-pub unsafe fn stack_is_halted(self_: &Stack, version: StackVersion) -> bool {
-    stack_head(self_, version).status == StackStatus::Halted
-}
-
-/// Check if a version is paused.
-pub unsafe fn stack_is_paused(self_: &Stack, version: StackVersion) -> bool {
-    stack_head(self_, version).status == StackStatus::Paused
+    self_.is_active(version)
 }
 
 /// Resume a paused version, returning its stored lookahead.

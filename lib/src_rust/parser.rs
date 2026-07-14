@@ -28,14 +28,13 @@ use super::lexer::{
 };
 use super::reduce_action::{ReduceAction, ReduceActionSet};
 use super::stack::{
-    stack_can_merge, stack_clear, stack_copy_version, stack_delete, stack_dynamic_precedence,
-    stack_error_cost, stack_get_summary, stack_halt, stack_halted_version_count,
-    stack_has_advanced_since_error, stack_is_active, stack_is_halted, stack_is_paused,
-    stack_last_external_token, stack_merge, stack_new, stack_node_count_since_error, stack_pause,
-    stack_pop_all, stack_pop_count, stack_pop_error, stack_position, stack_print_dot_graph,
-    stack_push, stack_record_summary, stack_remove_version, stack_renumber_version, stack_resume,
-    stack_set_last_external_token, stack_state, stack_swap_versions, stack_version_count, Stack,
-    StackVersion, STACK_VERSION_NONE,
+    stack_can_merge, stack_clear, stack_copy_version, stack_delete, stack_error_cost,
+    stack_get_summary, stack_halt, stack_halted_version_count, stack_has_advanced_since_error,
+    stack_is_active, stack_last_external_token, stack_merge, stack_new,
+    stack_node_count_since_error, stack_pause, stack_pop_all, stack_pop_count, stack_pop_error,
+    stack_position, stack_print_dot_graph, stack_push, stack_record_summary, stack_remove_version,
+    stack_renumber_version, stack_resume, stack_set_last_external_token, stack_state,
+    stack_swap_versions, stack_version_count, Stack, StackVersion, STACK_VERSION_NONE,
 };
 use super::subtree::{
     external_scanner_state_eq, subtree_array_clear, subtree_array_delete,
@@ -261,15 +260,15 @@ const fn parser_compare_versions(a: ErrorStatus, b: ErrorStatus) -> ErrorCompari
 unsafe fn parser_version_status(self_: &mut TSParser, version: StackVersion) -> ErrorStatus {
     let stack = ptr_mut(self_.stack);
     let mut cost = stack_error_cost(stack, version);
-    let is_paused = stack_is_paused(stack, version);
+    let is_paused = stack.is_paused(version);
     if is_paused {
         cost += ERROR_COST_PER_SKIPPED_TREE;
     }
     ErrorStatus {
         cost,
         node_count: stack_node_count_since_error(stack, version),
-        dynamic_precedence: stack_dynamic_precedence(stack, version),
-        is_in_error: is_paused || stack_state(stack, version) == ERROR_STATE,
+        dynamic_precedence: stack.dynamic_precedence(version),
+        is_in_error: is_paused || stack.state(version) == ERROR_STATE,
     }
 }
 
@@ -284,20 +283,17 @@ unsafe fn parser_better_version_exists(
     }
 
     let stack = ptr_mut(self_.stack);
-    let position = stack_position(stack, version);
+    let position = stack.position(version);
     let status = ErrorStatus {
         cost,
         is_in_error,
-        dynamic_precedence: stack_dynamic_precedence(stack, version),
+        dynamic_precedence: stack.dynamic_precedence(version),
         node_count: stack_node_count_since_error(stack, version),
     };
 
-    let n = stack_version_count(stack);
+    let n = stack.version_count();
     for i in 0..n {
-        if i == version
-            || !stack_is_active(stack, i)
-            || stack_position(stack, i).bytes < position.bytes
-        {
+        if i == version || !stack.is_active(i) || stack.position(i).bytes < position.bytes {
             continue;
         }
         let status_i = parser_version_status(self_, i);
@@ -485,7 +481,7 @@ unsafe fn parser_continue_after_reduction(
 ) -> bool {
     stack_renumber_version(ptr_mut(self_.stack), last_reduction_version, version);
     parser_log_stack(self_);
-    *state = stack_state(ptr_ref(self_.stack), version);
+    *state = ptr_ref(self_.stack).state(version);
 
     // At the end of a non-terminal extra rule, the lexer will return a null
     // subtree, because the parser needs to perform a fixed reduction regardless
@@ -573,9 +569,9 @@ unsafe fn parser_pause_with_error(self_: &mut TSParser, version: StackVersion, l
 /// lookahead and return to the outer parse loop.
 unsafe fn parser_advance(self_: &mut TSParser, version: StackVersion) -> bool {
     let stack = ptr_ref(self_.stack);
-    let mut state = stack_state(stack, version);
-    let position = stack_position(stack, version).bytes;
-    let last_external_token = stack_last_external_token(stack, version);
+    let mut state = stack.state(version);
+    let position = stack.position(version).bytes;
+    let last_external_token = stack.last_external_token(version);
 
     let (mut lookahead, mut table_entry, mut needs_lex) =
         parser_get_initial_lookahead(self_, state, position, last_external_token);
@@ -651,9 +647,9 @@ unsafe fn parser_condense_stack(self_: &mut TSParser) -> u32 {
     let mut made_changes = false;
     let mut min_error_cost = u32::MAX;
     let mut i: StackVersion = 0;
-    while i < stack_version_count(ptr_ref(self_.stack)) {
+    while i < ptr_ref(self_.stack).version_count() {
         // Prune any versions that have been marked for removal.
-        if stack_is_halted(ptr_ref(self_.stack), i) {
+        if ptr_ref(self_.stack).is_halted(i) {
             stack_remove_version(ptr_mut(self_.stack), i);
             continue;
         }
@@ -711,7 +707,7 @@ unsafe fn parser_condense_stack(self_: &mut TSParser) -> u32 {
 
     // Enforce a hard upper bound on the number of stack versions by
     // discarding the least promising versions.
-    while stack_version_count(ptr_ref(self_.stack)) > MAX_VERSION_COUNT {
+    while ptr_ref(self_.stack).version_count() > MAX_VERSION_COUNT {
         stack_remove_version(ptr_mut(self_.stack), MAX_VERSION_COUNT);
         made_changes = true;
     }
@@ -719,12 +715,12 @@ unsafe fn parser_condense_stack(self_: &mut TSParser) -> u32 {
     // If the best-performing stack version is currently paused, or all
     // versions are paused, then resume the best paused version and begin
     // the error recovery process. Otherwise, remove the paused versions.
-    if stack_version_count(ptr_ref(self_.stack)) > 0 {
+    if ptr_ref(self_.stack).version_count() > 0 {
         let mut has_unpaused_version = false;
         let mut i: StackVersion = 0;
-        let mut n = stack_version_count(ptr_ref(self_.stack));
+        let mut n = ptr_ref(self_.stack).version_count();
         while i < n {
-            if stack_is_paused(ptr_ref(self_.stack), i) {
+            if ptr_ref(self_.stack).is_paused(i) {
                 if !has_unpaused_version && self_.accept_count < MAX_VERSION_COUNT {
                     parser_log(self_, |_, log| write!(log, "resume version:{i}"));
                     min_error_cost = stack_error_cost(ptr_ref(self_.stack), i);
@@ -758,7 +754,7 @@ use balancing::parser_balance_subtree;
 unsafe fn parser_has_outstanding_parse(self_: &TSParser) -> bool {
     self_.canceled_balancing
         || !self_.external_scanner_payload.is_null()
-        || stack_state(ptr_ref(self_.stack), 0) != 1
+        || ptr_ref(self_.stack).state(0) != 1
         || stack_node_count_since_error(ptr_mut(self_.stack), 0) != 0
 }
 
@@ -996,22 +992,20 @@ pub unsafe extern "C-unwind" fn ts_parser_parse(
     loop {
         let mut version: StackVersion = 0;
         loop {
-            version_count = stack_version_count(ptr_ref(parser.stack));
+            version_count = ptr_ref(parser.stack).version_count();
             if version >= version_count {
                 break;
             }
 
-            while stack_is_active(ptr_ref(parser.stack), version) {
+            while ptr_ref(parser.stack).is_active(version) {
                 parser_log(parser, |context, log| {
                     write!(
                         log,
                         "process version:{version}, version_count:{}, state:{}, row:{}, col:{}",
-                        stack_version_count(ptr_ref(context.stack)),
-                        i32::from(stack_state(ptr_ref(context.stack), version)),
-                        stack_position(ptr_ref(context.stack), version).extent.row,
-                        stack_position(ptr_ref(context.stack), version)
-                            .extent
-                            .column
+                        ptr_ref(context.stack).version_count(),
+                        i32::from(ptr_ref(context.stack).state(version)),
+                        ptr_ref(context.stack).position(version).extent.row,
+                        ptr_ref(context.stack).position(version).extent.column
                     )
                 });
 
@@ -1021,7 +1015,7 @@ pub unsafe extern "C-unwind" fn ts_parser_parse(
 
                 parser_log_stack(parser);
 
-                let position = stack_position(ptr_ref(parser.stack), version).bytes;
+                let position = ptr_ref(parser.stack).position(version).bytes;
                 if position > last_position || (version > 0 && position == last_position) {
                     last_position = position;
                     break;
