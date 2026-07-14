@@ -134,7 +134,7 @@ pub unsafe fn range_array_intersects_ref(
 }
 
 // ---------------------------------------------------------------------------
-// Internal helpers — skeletons
+// Internal range and diff helpers
 // ---------------------------------------------------------------------------
 
 unsafe fn range_array_add(arr: &mut TSRangeArray, start: Length, end: Length) {
@@ -486,7 +486,7 @@ impl DiffIterator {
 }
 
 // ---------------------------------------------------------------------------
-// Exported functions — skeletons
+// Range and changed-tree entry points
 // ---------------------------------------------------------------------------
 
 pub unsafe fn range_array_get_changed_ranges_ref(

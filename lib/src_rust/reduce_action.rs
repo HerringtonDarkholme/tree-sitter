@@ -6,17 +6,16 @@ use super::utils::{array_get_ref, array_push, Array};
 ///
 /// Recovery can scan many lookahead symbols for a parse state. This compact
 /// record deduplicates equivalent reduce actions before applying them.
-#[repr(C)]
 #[derive(Clone, Copy)]
 pub struct ReduceAction {
     /// Number of stack entries consumed by the reduce action.
-    pub count: u32,
+    pub(super) count: u32,
     /// Grammar symbol produced by the reduction.
-    pub symbol: TSSymbol,
+    pub(super) symbol: TSSymbol,
     /// Dynamic precedence delta for conflict resolution.
-    pub dynamic_precedence: i32,
+    pub(super) dynamic_precedence: i32,
     /// Production id used for alias/field metadata on the new subtree.
-    pub production_id: u16,
+    pub(super) production_id: u16,
 }
 
 /// `ReduceActionSet` — Array(ReduceAction)

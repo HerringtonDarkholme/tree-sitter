@@ -29,7 +29,10 @@ pub unsafe fn ptr_mut<'a, T>(ptr: *mut T) -> &'a mut T {
 // Generic array helpers, mirrors C `array.h`
 // ---------------------------------------------------------------------------
 
-/// Generic dynamic array, mirrors C `Array(T)`.
+/// Generic dynamic array used by the runtime.
+///
+/// Its layout remains fixed because `TreeCursor` stores one directly inside
+/// the public `TSTreeCursor` value. Other uses are internal Rust storage.
 #[repr(C)]
 pub struct Array<T> {
     pub contents: *mut T,

@@ -20,7 +20,7 @@ use super::utils::array_new;
 use super::utils::{ptr_mut, ptr_ref};
 
 // ---------------------------------------------------------------------------
-// Extern C functions (still in C or other Rust modules)
+// Platform C-library functions used for DOT output.
 // ---------------------------------------------------------------------------
 
 #[cfg(not(target_family = "wasm"))]
@@ -47,19 +47,19 @@ use crate::ffi::TSInputEdit;
 ///
 /// The tree retains the root subtree, a copied language reference, the included
 /// ranges used for parsing, and optionally the arena that owns internal nodes
-/// created during the Rust parser's normal parse path.
-#[repr(C)]
+/// created during the Rust parser's normal parse path. Public APIs expose only
+/// opaque pointers to trees, so this structure uses Rust layout.
 pub struct TSTree {
     /// Root syntax subtree, retained by the tree.
-    pub root: Subtree,
+    pub(super) root: Subtree,
     /// Language used to parse this tree.
-    pub language: *const TSLanguage,
+    pub(super) language: *const TSLanguage,
     /// Copied included ranges for tree comparison and public APIs.
-    pub included_ranges: *mut TSRange,
+    pub(super) included_ranges: *mut TSRange,
     /// Number of entries in `included_ranges`.
-    pub included_range_count: u32,
+    pub(super) included_range_count: u32,
     /// Shared arena for arena-owned internal nodes.
-    pub arena: *mut TreeArena,
+    pub(super) arena: *mut TreeArena,
 }
 
 unsafe fn tree_init_ref(
