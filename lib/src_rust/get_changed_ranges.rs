@@ -63,15 +63,6 @@ struct VisibleState {
     start_byte: u32,
 }
 
-// ---------------------------------------------------------------------------
-// Array helpers for TSRangeArray
-// ---------------------------------------------------------------------------
-
-#[inline]
-const unsafe fn range_array_slice(arr: &TSRangeArray) -> &[TSRange] {
-    core::slice::from_raw_parts(arr.contents, arr.size as usize)
-}
-
 pub fn range_edit_ref(range: &mut TSRange, edit: &TSInputEdit) {
     if range.end_byte >= edit.old_end_byte {
         if range.end_byte != u32::MAX {
@@ -112,8 +103,7 @@ pub unsafe fn range_array_intersects_ref(
     start_byte: u32,
     end_byte: u32,
 ) -> bool {
-    for i in start_index..ranges.size {
-        let range = range_array_slice(ranges).get_unchecked(i as usize);
+    for range in ranges.as_slice().iter().skip(start_index as usize) {
         if range.end_byte > start_byte {
             if range.start_byte >= end_byte {
                 break;
@@ -129,12 +119,7 @@ pub unsafe fn range_array_intersects_ref(
 // ---------------------------------------------------------------------------
 
 unsafe fn range_array_add(arr: &mut TSRangeArray, start: Length, end: Length) {
-    if arr.size > 0 {
-        let last_range = arr
-            .contents
-            .add(arr.size as usize - 1)
-            .as_mut()
-            .unwrap_unchecked();
+    if let Some(last_range) = arr.as_mut_slice().last_mut() {
         if start.bytes <= last_range.end_byte {
             last_range.end_byte = end.bytes;
             last_range.end_point = end.extent;
@@ -670,9 +655,10 @@ pub unsafe fn subtree_get_changed_ranges_ref(
 
         // Keep track of the current position in the included range differences
         // array in order to avoid scanning the entire array on each iteration.
-        while included_range_difference_index < included_range_differences_array.size {
-            let range = range_array_slice(included_range_differences_array)
-                .get_unchecked(included_range_difference_index as usize);
+        while let Some(range) = included_range_differences_array
+            .as_slice()
+            .get(included_range_difference_index as usize)
+        {
             if range.end_byte <= position.bytes {
                 included_range_difference_index += 1;
             } else {
