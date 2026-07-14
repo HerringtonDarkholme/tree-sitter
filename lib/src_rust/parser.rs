@@ -48,7 +48,7 @@ use super::subtree::{
     NULL_SUBTREE, TS_BUILTIN_SYM_END, TS_BUILTIN_SYM_ERROR, TS_BUILTIN_SYM_ERROR_REPEAT,
     TS_TREE_STATE_NONE,
 };
-use super::tree::{tree_new, TSTree};
+use super::tree::TSTree;
 use super::utils::{array_swap, Array};
 use super::utils::{ptr_mut, ptr_ref};
 
@@ -756,7 +756,7 @@ unsafe fn parser_has_outstanding_parse(self_: &TSParser) -> bool {
 }
 
 unsafe fn parser_take_finished_tree(self_: &mut TSParser) -> *mut TSTree {
-    let result = tree_new(
+    let result = TSTree::new(
         self_.finished_tree,
         self_.language,
         lexer_included_ranges_slice(&self_.lexer),

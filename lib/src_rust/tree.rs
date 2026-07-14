@@ -12,7 +12,7 @@ use super::subtree::{
     subtree_edit, subtree_padding, subtree_pool_delete, subtree_pool_new, subtree_release,
     subtree_retain, Subtree,
 };
-// Only used by `tree_print_dot_graph_ref`, which is unavailable on wasm.
+// Only used by `TSTree::print_dot_graph`, which is unavailable on wasm.
 #[cfg(not(target_family = "wasm"))]
 use super::subtree::subtree_print_dot_graph;
 use super::tree_cursor::{tree_cursor_init_ref, TreeCursor};
@@ -72,63 +72,6 @@ unsafe fn copy_ranges(included_ranges: &[TSRange]) -> Array<TSRange> {
     result
 }
 
-const unsafe fn tree_included_ranges_slice(tree: &TSTree) -> &[TSRange] {
-    tree.included_ranges.as_slice()
-}
-
-unsafe fn tree_included_ranges_slice_mut(tree: &mut TSTree) -> &mut [TSRange] {
-    tree.included_ranges.as_mut_slice()
-}
-
-/// Copy a tree by retaining shared immutable storage.
-///
-/// Subtrees are reference counted, so copying a tree is cheap and does not
-/// clone the entire syntax graph.
-unsafe fn tree_copy_ref(tree: &TSTree) -> *mut TSTree {
-    subtree_retain(tree.root);
-    tree_new(tree.root, tree.language, tree_included_ranges_slice(tree))
-}
-
-/// Release all owned references and buffers for a tree.
-unsafe fn tree_delete_ref(tree: &mut TSTree) {
-    let mut pool = subtree_pool_new(0);
-    subtree_release(&mut pool, tree.root);
-    subtree_pool_delete(&mut pool);
-    tree.included_ranges.delete();
-}
-
-pub unsafe fn tree_root_node_ref(tree_ptr: *const TSTree, tree: &TSTree) -> TSNode {
-    node_new(tree_ptr, &tree.root, subtree_padding(tree.root), 0)
-}
-
-unsafe fn tree_root_node_with_offset_ref(
-    tree_ptr: *const TSTree,
-    tree: &TSTree,
-    offset_bytes: u32,
-    offset_extent: TSPoint,
-) -> TSNode {
-    let offset = Length {
-        bytes: offset_bytes,
-        extent: offset_extent,
-    };
-    node_new(
-        tree_ptr,
-        &tree.root,
-        length_add(offset, subtree_padding(tree.root)),
-        0,
-    )
-}
-
-unsafe fn tree_included_ranges_ref(tree: &TSTree, length: &mut u32) -> *mut TSRange {
-    let included_ranges = tree_included_ranges_slice(tree);
-    *length = u32::try_from(included_ranges.len()).unwrap();
-    let ranges = calloc(included_ranges.len(), core::mem::size_of::<TSRange>()).cast::<TSRange>();
-    if !included_ranges.is_empty() {
-        core::ptr::copy_nonoverlapping(included_ranges.as_ptr(), ranges, included_ranges.len());
-    }
-    ranges
-}
-
 const fn tree_cursor_empty() -> TreeCursor {
     TreeCursor {
         tree: core::ptr::null(),
@@ -137,57 +80,112 @@ const fn tree_cursor_empty() -> TreeCursor {
     }
 }
 
-/// Apply an edit to the tree's ranges and root subtree.
-///
-/// The edit rewrites byte/point positions in-place where possible and marks
-/// affected subtrees as changed for later tree comparison.
-unsafe fn tree_edit_ref(tree: &mut TSTree, edit: &TSInputEdit) {
-    for range in tree_included_ranges_slice_mut(tree) {
-        range_edit_ref(range, edit);
+// ---------------------------------------------------------------------------
+// Lifecycle
+// ---------------------------------------------------------------------------
+
+impl TSTree {
+    pub unsafe fn new(
+        root: Subtree,
+        language: *const TSLanguage,
+        included_ranges: &[TSRange],
+    ) -> *mut Self {
+        let result = malloc(core::mem::size_of::<Self>()).cast::<Self>();
+        core::ptr::write(
+            result,
+            Self {
+                root,
+                language,
+                included_ranges: copy_ranges(included_ranges),
+            },
+        );
+        result
     }
-    let mut pool = subtree_pool_new(0);
-    tree.root = subtree_edit(tree.root, edit, &mut pool);
-    subtree_pool_delete(&mut pool);
-}
 
-#[cfg(not(target_family = "wasm"))]
-unsafe fn tree_print_dot_graph_ref(tree: &TSTree, file_descriptor: i32) {
-    // On Windows `_ts_dup` takes the OS handle behind the fd (mirroring
-    // lib/src/tree.c); elsewhere it duplicates the fd directly.
-    #[cfg(target_os = "windows")]
-    let dup_fd = _ts_dup(win_dot_graph::_get_osfhandle(file_descriptor) as win_dot_graph::Handle);
-    #[cfg(not(target_os = "windows"))]
-    let dup_fd = _ts_dup(file_descriptor);
-    let file = fdopen(dup_fd, c"a".as_ptr().cast::<i8>());
-    subtree_print_dot_graph(tree.root, tree.language, file);
-    fclose(file);
-}
+    pub const unsafe fn included_ranges(&self) -> &[TSRange] {
+        self.included_ranges.as_slice()
+    }
 
-// ---------------------------------------------------------------------------
-// Lifecycle: tree_new, ts_tree_copy, ts_tree_delete
-// ---------------------------------------------------------------------------
+    unsafe fn included_ranges_mut(&mut self) -> &mut [TSRange] {
+        self.included_ranges.as_mut_slice()
+    }
 
-pub unsafe fn tree_new(
-    root: Subtree,
-    language: *const TSLanguage,
-    included_ranges: &[TSRange],
-) -> *mut TSTree {
-    let result = malloc(core::mem::size_of::<TSTree>()).cast::<TSTree>();
-    core::ptr::write(
-        result,
-        TSTree {
-            root,
-            language,
-            included_ranges: copy_ranges(included_ranges),
-        },
-    );
-    result
+    /// Copy a tree by retaining its shared immutable subtree storage.
+    unsafe fn copy(&self) -> *mut Self {
+        subtree_retain(self.root);
+        Self::new(self.root, self.language, self.included_ranges())
+    }
+
+    /// Release all references and buffers owned by this tree.
+    unsafe fn delete(&mut self) {
+        let mut pool = subtree_pool_new(0);
+        subtree_release(&mut pool, self.root);
+        subtree_pool_delete(&mut pool);
+        self.included_ranges.delete();
+    }
+
+    pub unsafe fn root_node(&self, tree_ptr: *const Self) -> TSNode {
+        node_new(tree_ptr, &self.root, subtree_padding(self.root), 0)
+    }
+
+    unsafe fn root_node_with_offset(
+        &self,
+        tree_ptr: *const Self,
+        offset_bytes: u32,
+        offset_extent: TSPoint,
+    ) -> TSNode {
+        let offset = Length {
+            bytes: offset_bytes,
+            extent: offset_extent,
+        };
+        node_new(
+            tree_ptr,
+            &self.root,
+            length_add(offset, subtree_padding(self.root)),
+            0,
+        )
+    }
+
+    unsafe fn copy_included_ranges(&self, length: &mut u32) -> *mut TSRange {
+        let included_ranges = self.included_ranges();
+        *length = u32::try_from(included_ranges.len()).unwrap();
+        let ranges =
+            calloc(included_ranges.len(), core::mem::size_of::<TSRange>()).cast::<TSRange>();
+        if !included_ranges.is_empty() {
+            core::ptr::copy_nonoverlapping(included_ranges.as_ptr(), ranges, included_ranges.len());
+        }
+        ranges
+    }
+
+    /// Apply an edit to this tree's ranges and root subtree.
+    unsafe fn edit(&mut self, edit: &TSInputEdit) {
+        for range in self.included_ranges_mut() {
+            range_edit_ref(range, edit);
+        }
+        let mut pool = subtree_pool_new(0);
+        self.root = subtree_edit(self.root, edit, &mut pool);
+        subtree_pool_delete(&mut pool);
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    unsafe fn print_dot_graph(&self, file_descriptor: i32) {
+        // On Windows `_ts_dup` takes the OS handle behind the fd (mirroring
+        // lib/src/tree.c); elsewhere it duplicates the fd directly.
+        #[cfg(target_os = "windows")]
+        let dup_fd =
+            _ts_dup(win_dot_graph::_get_osfhandle(file_descriptor) as win_dot_graph::Handle);
+        #[cfg(not(target_os = "windows"))]
+        let dup_fd = _ts_dup(file_descriptor);
+        let file = fdopen(dup_fd, c"a".as_ptr().cast::<i8>());
+        subtree_print_dot_graph(self.root, self.language, file);
+        fclose(file);
+    }
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_tree_copy(self_: *const TSTree) -> *mut TSTree {
     let tree = ptr_ref(self_);
-    tree_copy_ref(tree)
+    tree.copy()
 }
 
 #[no_mangle]
@@ -196,7 +194,7 @@ pub unsafe extern "C" fn ts_tree_delete(self_: *mut TSTree) {
         return;
     }
     let tree = ptr_mut(self_);
-    tree_delete_ref(tree);
+    tree.delete();
     free(self_.cast::<c_void>());
 }
 
@@ -208,7 +206,7 @@ pub unsafe extern "C" fn ts_tree_delete(self_: *mut TSTree) {
 #[no_mangle]
 pub unsafe extern "C" fn ts_tree_root_node(self_: *const TSTree) -> TSNode {
     let tree = ptr_ref(self_);
-    tree_root_node_ref(self_, tree)
+    tree.root_node(self_)
 }
 
 #[no_mangle]
@@ -218,7 +216,7 @@ pub unsafe extern "C" fn ts_tree_root_node_with_offset(
     offset_extent: TSPoint,
 ) -> TSNode {
     let tree = ptr_ref(self_);
-    tree_root_node_with_offset_ref(self_, tree, offset_bytes, offset_extent)
+    tree.root_node_with_offset(self_, offset_bytes, offset_extent)
 }
 
 #[no_mangle]
@@ -234,7 +232,7 @@ pub unsafe extern "C" fn ts_tree_included_ranges(
 ) -> *mut TSRange {
     let tree = ptr_ref(self_);
     let length = ptr_mut(length);
-    tree_included_ranges_ref(tree, length)
+    tree.copy_included_ranges(length)
 }
 
 // ---------------------------------------------------------------------------
@@ -246,7 +244,7 @@ pub unsafe extern "C" fn ts_tree_included_ranges(
 pub unsafe extern "C" fn ts_tree_edit(self_: *mut TSTree, edit: *const TSInputEdit) {
     let tree = ptr_mut(self_);
     let edit = ptr_ref(edit);
-    tree_edit_ref(tree, edit);
+    tree.edit(edit);
 }
 
 #[no_mangle]
@@ -260,12 +258,12 @@ pub unsafe extern "C" fn ts_tree_get_changed_ranges(
     let length = ptr_mut(length);
     let mut cursor1 = tree_cursor_empty();
     let mut cursor2 = tree_cursor_empty();
-    tree_cursor_init_ref(&mut cursor1, tree_root_node_ref(old_tree, old_tree_ref));
-    tree_cursor_init_ref(&mut cursor2, tree_root_node_ref(new_tree, new_tree_ref));
+    tree_cursor_init_ref(&mut cursor1, old_tree_ref.root_node(old_tree));
+    tree_cursor_init_ref(&mut cursor2, new_tree_ref.root_node(new_tree));
 
     let mut included_range_differences = Array::new();
-    let old_included_ranges = tree_included_ranges_slice(old_tree_ref);
-    let new_included_ranges = tree_included_ranges_slice(new_tree_ref);
+    let old_included_ranges = old_tree_ref.included_ranges();
+    let new_included_ranges = new_tree_ref.included_ranges();
     range_array_get_changed_ranges_ref(
         old_included_ranges,
         new_included_ranges,
@@ -347,7 +345,7 @@ pub unsafe extern "C" fn _ts_dup(handle: win_dot_graph::Handle) -> i32 {
 #[no_mangle]
 pub unsafe extern "C" fn ts_tree_print_dot_graph(self_: *const TSTree, file_descriptor: i32) {
     let tree = ptr_ref(self_);
-    tree_print_dot_graph_ref(tree, file_descriptor);
+    tree.print_dot_graph(file_descriptor);
 }
 
 #[cfg(target_family = "wasm")]
@@ -401,7 +399,7 @@ mod tests {
             ));
 
             assert_eq!(subtree_child_count(root), 2);
-            let tree = tree_new(root, ptr::null(), &[]);
+            let tree = TSTree::new(root, ptr::null(), &[]);
             let copy = ts_tree_copy(tree);
 
             ts_tree_delete(tree);

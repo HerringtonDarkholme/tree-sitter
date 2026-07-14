@@ -16,7 +16,7 @@ use super::subtree::{
     subtree_total_bytes, subtree_visible, subtree_visible_descendant_count, Subtree, NULL_SUBTREE,
     TS_BUILTIN_SYM_ERROR, TS_TREE_STATE_NONE,
 };
-use super::tree::{tree_root_node_ref, TSTree};
+use super::tree::TSTree;
 use super::utils::{ptr_mut, ptr_ref};
 
 mod fields;
@@ -419,7 +419,7 @@ pub const unsafe extern "C" fn ts_node_named_child_count(self_: TSNode) -> u32 {
 #[no_mangle]
 pub unsafe extern "C" fn ts_node_parent(self_: TSNode) -> TSNode {
     let tree = node_tree(self_);
-    let mut node = tree_root_node_ref(tree, ptr_ref(tree));
+    let mut node = ptr_ref(tree).root_node(tree);
     if node.id == self_.id {
         return node_null();
     }
