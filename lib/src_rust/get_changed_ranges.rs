@@ -7,10 +7,8 @@ use super::error_costs::ERROR_STATE;
 use super::language::language_alias_at;
 use super::length::{length_add, length_min, length_zero, Length, LENGTH_MAX};
 use super::subtree::{
-    subtree_child, subtree_child_count, subtree_error_cost, subtree_external_scanner_state_eq,
-    subtree_extra, subtree_has_changes, subtree_has_external_tokens, subtree_last_external_token,
-    subtree_padding, subtree_parse_state, subtree_size, subtree_symbol, subtree_total_size,
-    subtree_visible, Subtree, NULL_SUBTREE, TS_BUILTIN_SYM_ERROR, TS_TREE_STATE_NONE,
+    subtree_external_scanner_state_eq, subtree_last_external_token, Subtree, NULL_SUBTREE,
+    TS_BUILTIN_SYM_ERROR, TS_TREE_STATE_NONE,
 };
 use super::tree_cursor::{tree_cursor_entry_slice, TreeCursor, TreeCursorEntry};
 use super::utils::Array;
@@ -102,7 +100,7 @@ impl DiffIterator {
         if self.in_padding {
             entry.position
         } else {
-            length_add(entry.position, subtree_padding(*entry.subtree))
+            length_add(entry.position, (*entry.subtree).padding())
         }
     }
 
@@ -111,11 +109,11 @@ impl DiffIterator {
         let entry = tree_cursor_entry_slice(&self.cursor.stack)
             .last()
             .unwrap_unchecked();
-        let result = length_add(entry.position, subtree_padding(*entry.subtree));
+        let result = length_add(entry.position, (*entry.subtree).padding());
         if self.in_padding {
             result
         } else {
-            length_add(result, subtree_size(*entry.subtree))
+            length_add(result, (*entry.subtree).size())
         }
     }
 
@@ -126,7 +124,7 @@ impl DiffIterator {
     unsafe fn tree_is_visible(&self) -> bool {
         let entries = tree_cursor_entry_slice(&self.cursor.stack);
         let entry = entries.last().unwrap_unchecked();
-        if subtree_visible(*entry.subtree) {
+        if (*entry.subtree).visible() {
             return true;
         }
         if self.cursor.stack.size > 1 {
@@ -170,7 +168,7 @@ impl DiffIterator {
                 );
             }
 
-            if subtree_visible(*entry.subtree) || result.alias_symbol != 0 {
+            if (*entry.subtree).visible() || result.alias_symbol != 0 {
                 result.tree = *entry.subtree;
                 result.start_byte = entry.position.bytes;
                 break;
@@ -221,11 +219,11 @@ impl DiffIterator {
                 .unwrap_unchecked();
             let mut position = entry.position;
             let mut structural_child_index: u32 = 0;
-            let n = subtree_child_count(*entry.subtree);
+            let n = (*entry.subtree).child_count();
             for i in 0..n {
-                let child = subtree_child(*entry.subtree, i);
-                let child_left = length_add(position, subtree_padding(*child));
-                let child_right = length_add(child_left, subtree_size(*child));
+                let child = (*entry.subtree).child(i);
+                let child_left = length_add(position, (*child).padding());
+                let child_right = length_add(child_left, (*child).size());
 
                 if child_right.bytes > goal_position {
                     self.cursor.stack.push(TreeCursorEntry {
@@ -250,7 +248,7 @@ impl DiffIterator {
                 }
 
                 position = child_right;
-                if !subtree_extra(*child) {
+                if !(*child).extra() {
                     structural_child_index += 1;
                 }
                 let last_external_token = subtree_last_external_token(*child);
@@ -296,13 +294,13 @@ impl DiffIterator {
             if !last_external_token.is_null() {
                 self.prev_external_token = last_external_token;
             }
-            if subtree_child_count(*parent) > child_index {
-                let position = length_add(entry.position, subtree_total_size(*entry.subtree));
+            if (*parent).child_count() > child_index {
+                let position = length_add(entry.position, (*entry.subtree).total_size());
                 let mut structural_child_index = entry.structural_child_index;
-                if !subtree_extra(*entry.subtree) {
+                if !(*entry.subtree).extra() {
                     structural_child_index += 1;
                 }
-                let next_child = subtree_child(*parent, child_index);
+                let next_child = (*parent).child(child_index);
 
                 self.cursor.stack.push(TreeCursorEntry {
                     subtree: core::ptr::from_ref::<Subtree>(next_child),
@@ -313,7 +311,7 @@ impl DiffIterator {
                 });
 
                 if self.tree_is_visible() {
-                    if subtree_padding(*next_child).bytes > 0 {
+                    if (*next_child).padding().bytes > 0 {
                         self.in_padding = true;
                     } else {
                         self.visible_depth += 1;
@@ -336,8 +334,8 @@ impl DiffIterator {
         let new_visible = new_iter.visible_state();
         let old_tree = old_visible.tree;
         let new_tree = new_visible.tree;
-        let old_symbol = subtree_symbol(old_tree);
-        let new_symbol = subtree_symbol(new_tree);
+        let old_symbol = old_tree.symbol();
+        let new_symbol = new_tree.symbol();
 
         if old_tree.is_null() && new_tree.is_null() {
             return IteratorComparison::Matches;
@@ -349,14 +347,14 @@ impl DiffIterator {
             return IteratorComparison::Differs;
         }
 
-        let old_size = subtree_size(old_tree).bytes;
-        let new_size = subtree_size(new_tree).bytes;
-        let old_state = subtree_parse_state(old_tree);
-        let new_state = subtree_parse_state(new_tree);
-        let old_has_external_tokens = subtree_has_external_tokens(old_tree);
-        let new_has_external_tokens = subtree_has_external_tokens(new_tree);
-        let old_error_cost = subtree_error_cost(old_tree);
-        let new_error_cost = subtree_error_cost(new_tree);
+        let old_size = old_tree.size().bytes;
+        let new_size = new_tree.size().bytes;
+        let old_state = old_tree.parse_state();
+        let new_state = new_tree.parse_state();
+        let old_has_external_tokens = old_tree.has_external_tokens();
+        let new_has_external_tokens = new_tree.has_external_tokens();
+        let old_error_cost = old_tree.error_cost();
+        let new_error_cost = new_tree.error_cost();
 
         if old_visible.start_byte != new_visible.start_byte
             || old_symbol == TS_BUILTIN_SYM_ERROR
@@ -366,7 +364,7 @@ impl DiffIterator {
             || (old_state == ERROR_STATE) != (new_state == ERROR_STATE)
             || old_error_cost != new_error_cost
             || old_has_external_tokens != new_has_external_tokens
-            || subtree_has_changes(old_tree)
+            || old_tree.has_changes()
             || (old_has_external_tokens
                 && !subtree_external_scanner_state_eq(
                     self.prev_external_token,
@@ -599,8 +597,8 @@ pub unsafe fn subtree_get_changed_ranges_ref(
         }
     }
 
-    let old_size = subtree_total_size(*old_tree);
-    let new_size = subtree_total_size(*new_tree);
+    let old_size = (*old_tree).total_size();
+    let new_size = (*new_tree).total_size();
     if old_size.bytes < new_size.bytes {
         range_array_add(&mut results, old_size, new_size);
     } else if new_size.bytes < old_size.bytes {

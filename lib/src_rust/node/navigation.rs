@@ -1,8 +1,8 @@
 use super::{
     node_child_count, node_child_iterator_next, node_end_byte, node_is_null, node_is_relevant,
     node_iterate_children, node_null, node_relevant_child_count, node_start_byte, node_start_point,
-    node_subtree, point_eq, point_gt, point_lt, point_lte, subtree_child, subtree_child_count,
-    subtree_total_bytes, ts_node_parent, NodeChildIterator, Subtree, TSNode, TSPoint,
+    node_subtree, point_eq, point_gt, point_lt, point_lte, ts_node_parent, NodeChildIterator,
+    Subtree, TSNode, TSPoint,
 };
 
 pub(super) unsafe fn node_child(
@@ -50,14 +50,14 @@ pub(super) unsafe fn node_child(
 /// at the same byte. This recursive check lets previous-sibling logic decide
 /// whether an equal end byte means "inside this child" or "before this child".
 unsafe fn subtree_has_trailing_empty_descendant(self_: Subtree, other: Subtree) -> bool {
-    let count = subtree_child_count(self_);
+    let count = self_.child_count();
     if count == 0 {
         return false;
     }
     let mut i = count - 1;
     loop {
-        let child = *subtree_child(self_, i);
-        if subtree_total_bytes(child) > 0 {
+        let child = *(self_).child(i);
+        if child.total_bytes() > 0 {
             break;
         }
         if child == other || subtree_has_trailing_empty_descendant(child, other) {
@@ -78,7 +78,7 @@ unsafe fn subtree_has_trailing_empty_descendant(self_: Subtree, other: Subtree) 
 /// sibling APIs skip implementation-only nodes while preserving source order.
 pub(super) unsafe fn node_prev_sibling(self_: TSNode, include_anonymous: bool) -> TSNode {
     let self_subtree = node_subtree(self_);
-    let self_is_empty = subtree_total_bytes(self_subtree) == 0;
+    let self_is_empty = self_subtree.total_bytes() == 0;
     let target_end_byte = node_end_byte(self_);
 
     let mut node = ts_node_parent(self_);
@@ -232,7 +232,7 @@ pub(super) unsafe fn node_first_child_for_byte(
                     if node_is_relevant(child, include_anonymous) {
                         return child;
                     } else if node_child_count(child) > 0 {
-                        if iterator.child_index < subtree_child_count(node_subtree(child)) {
+                        if iterator.child_index < node_subtree(child).child_count() {
                             resume_iterator = Some(iterator);
                         }
                         did_descend = true;

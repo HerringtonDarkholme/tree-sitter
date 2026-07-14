@@ -2,9 +2,9 @@ use core::ffi::c_void;
 use core::ptr::{self, NonNull};
 
 use super::{
-    calloc, free, malloc, subtree_extra, subtree_release, subtree_retain, Array,
-    ExternalScannerState, ExternalScannerStateData, MutableSubtree, Subtree, SubtreeArray,
-    SubtreeHeapData, SubtreePool, EXTERNAL_SCANNER_STATE_INLINE_SIZE, TS_MAX_TREE_POOL_SIZE,
+    calloc, free, malloc, subtree_release, subtree_retain, Array, ExternalScannerState,
+    ExternalScannerStateData, MutableSubtree, Subtree, SubtreeArray, SubtreeHeapData, SubtreePool,
+    EXTERNAL_SCANNER_STATE_INLINE_SIZE, TS_MAX_TREE_POOL_SIZE,
 };
 
 impl ExternalScannerState {
@@ -87,7 +87,7 @@ pub unsafe fn subtree_array_remove_trailing_extras(
 ) {
     destination.size = 0;
     while let Some(&last) = trees.as_slice().last() {
-        if subtree_extra(last) {
+        if last.extra() {
             trees.size -= 1;
             destination.push(last);
         } else {

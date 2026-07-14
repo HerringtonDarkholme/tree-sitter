@@ -821,16 +821,6 @@ pub const unsafe fn subtree_extra(self_: Subtree) -> bool {
 }
 
 #[inline]
-pub const unsafe fn subtree_has_changes(self_: Subtree) -> bool {
-    self_.has_changes()
-}
-
-#[inline]
-pub const unsafe fn subtree_missing(self_: Subtree) -> bool {
-    self_.missing()
-}
-
-#[inline]
 pub const unsafe fn subtree_is_keyword(self_: Subtree) -> bool {
     self_.is_keyword()
 }
@@ -953,11 +943,6 @@ pub const unsafe fn subtree_visible_descendant_count(self_: Subtree) -> u32 {
     self_.visible_descendant_count()
 }
 
-#[inline]
-pub const unsafe fn subtree_visible_child_count(self_: Subtree) -> u32 {
-    self_.visible_child_count()
-}
-
 // Error cost
 
 #[inline]
@@ -970,11 +955,6 @@ pub const unsafe fn subtree_error_cost(self_: Subtree) -> u32 {
 #[inline]
 pub const unsafe fn subtree_dynamic_precedence(self_: Subtree) -> i32 {
     self_.dynamic_precedence()
-}
-
-#[inline]
-pub const unsafe fn subtree_production_id(self_: Subtree) -> u16 {
-    self_.production_id()
 }
 
 #[inline]
@@ -1702,7 +1682,7 @@ mod tests {
 
             assert!(tree.data.is_inline());
             assert_eq!(subtree_size(tree).bytes, 6);
-            assert!(subtree_has_changes(tree));
+            assert!(tree.has_changes());
 
             subtree_pool_delete(&mut pool);
         }
@@ -1716,7 +1696,7 @@ mod tests {
 
             assert!(!tree.data.is_inline());
             assert_eq!(subtree_size(tree).bytes, 260);
-            assert!(subtree_has_changes(tree));
+            assert!(tree.has_changes());
 
             subtree_release(&mut pool, tree);
             subtree_pool_delete(&mut pool);
@@ -1738,9 +1718,9 @@ mod tests {
             ));
 
             let tree = subtree_edit(parent, &insertion(2, 1), &mut pool);
-            assert!(subtree_has_changes(tree));
-            assert!(subtree_has_changes(*subtree_child(tree, 0)));
-            assert!(!subtree_has_changes(*subtree_child(tree, 1)));
+            assert!(tree.has_changes());
+            assert!((*tree.child(0)).has_changes());
+            assert!(!(*tree.child(1)).has_changes());
 
             subtree_release(&mut pool, tree);
             subtree_pool_delete(&mut pool);

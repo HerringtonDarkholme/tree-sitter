@@ -1,10 +1,6 @@
 use super::{
     c_void, language_alias_sequence_slice, language_field_map_slice, language_full,
-    language_write_symbol_as_dot_string, malloc, ptr, subtree_child_count, subtree_children_slice,
-    subtree_depends_on_column, subtree_error_cost, subtree_extra, subtree_has_changes,
-    subtree_is_error, subtree_lookahead_bytes, subtree_missing, subtree_named, subtree_parse_state,
-    subtree_production_id, subtree_repeat_depth, subtree_symbol, subtree_total_bytes,
-    subtree_visible, subtree_visible_descendant_count, ts_language_symbol_metadata,
+    language_write_symbol_as_dot_string, malloc, ptr, ts_language_symbol_metadata,
     ts_language_symbol_name, Subtree, TSLanguage, TSSymbol,
 };
 
@@ -59,11 +55,11 @@ unsafe fn subtree_write_to_string(
     };
     let is_root = field_name == ROOT_FIELD.as_ptr().cast::<i8>();
     let is_visible = include_all
-        || subtree_missing(self_)
+        || self_.missing()
         || (if alias_symbol != 0 {
             alias_is_named
         } else {
-            subtree_visible(self_) && subtree_named(self_)
+            self_.visible() && self_.named()
         });
 
     if is_visible {
@@ -78,10 +74,7 @@ unsafe fn subtree_write_to_string(
             }
         }
 
-        if subtree_is_error(self_)
-            && subtree_child_count(self_) == 0
-            && self_.heap_data().size.bytes > 0
-        {
+        if self_.is_error() && self_.child_count() == 0 && self_.heap_data().size.bytes > 0 {
             cursor = cursor
                 .add(snprintf(*writer, limit, c"(UNEXPECTED ".as_ptr().cast::<i8>()) as usize);
             cursor = cursor.add(subtree_write_char_to_string(
@@ -93,13 +86,13 @@ unsafe fn subtree_write_to_string(
             let symbol = if alias_symbol != 0 {
                 alias_symbol
             } else {
-                subtree_symbol(self_)
+                self_.symbol()
             };
             let symbol_name = ts_language_symbol_name(language, symbol);
-            if subtree_missing(self_) {
+            if self_.missing() {
                 cursor = cursor
                     .add(snprintf(*writer, limit, c"(MISSING ".as_ptr().cast::<i8>()) as usize);
-                if alias_is_named || subtree_named(self_) {
+                if alias_is_named || self_.named() {
                     cursor = cursor.add(snprintf(
                         *writer,
                         limit,
@@ -126,13 +119,13 @@ unsafe fn subtree_write_to_string(
         let symbol = if alias_symbol != 0 {
             alias_symbol
         } else {
-            subtree_symbol(self_)
+            self_.symbol()
         };
         let symbol_name = ts_language_symbol_name(language, symbol);
-        if subtree_child_count(self_) > 0 {
+        if self_.child_count() > 0 {
             cursor = cursor
                 .add(snprintf(*writer, limit, c"(%s".as_ptr().cast::<i8>(), symbol_name) as usize);
-        } else if subtree_named(self_) {
+        } else if self_.named() {
             cursor = cursor
                 .add(snprintf(*writer, limit, c"(%s)".as_ptr().cast::<i8>(), symbol_name) as usize);
         } else {
@@ -145,7 +138,7 @@ unsafe fn subtree_write_to_string(
         }
     }
 
-    if subtree_child_count(self_) > 0 {
+    if self_.child_count() > 0 {
         let alias_sequence = language_alias_sequence_slice(
             language,
             u32::from(self_.heap_data().children().production_id),
@@ -156,9 +149,9 @@ unsafe fn subtree_write_to_string(
         );
 
         let mut structural_child_index: u32 = 0;
-        for child in subtree_children_slice(self_) {
+        for child in self_.children() {
             let child = *child;
-            if subtree_extra(child) {
+            if child.extra() {
                 cursor = cursor.add(subtree_write_to_string(
                     child,
                     *writer,
@@ -252,13 +245,13 @@ unsafe fn subtree_print_dot_graph_recursive(
     f: *mut c_void,
 ) {
     let tree = *self_;
-    let subtree_symbol = subtree_symbol(tree);
+    let subtree_symbol = tree.symbol();
     let symbol = if alias_symbol != 0 {
         alias_symbol
     } else {
         subtree_symbol
     };
-    let end_offset = start_offset + subtree_total_bytes(tree);
+    let end_offset = start_offset + tree.total_bytes();
     fprintf(
         f,
         c"tree_%p [label=\"".as_ptr().cast::<i8>(),
@@ -267,13 +260,13 @@ unsafe fn subtree_print_dot_graph_recursive(
     language_write_symbol_as_dot_string(language, f, symbol);
     fprintf(f, c"\"".as_ptr().cast::<i8>());
 
-    if subtree_child_count(tree) == 0 {
+    if tree.child_count() == 0 {
         fprintf(f, c", shape=plaintext".as_ptr().cast::<i8>());
     }
-    if subtree_extra(tree) {
+    if tree.extra() {
         fprintf(f, c", fontcolor=gray".as_ptr().cast::<i8>());
     }
-    if subtree_has_changes(tree) {
+    if tree.has_changes() {
         fprintf(f, c", color=green, penwidth=2".as_ptr().cast::<i8>());
     }
 
@@ -282,19 +275,16 @@ unsafe fn subtree_print_dot_graph_recursive(
         c", tooltip=\"range: %u - %u\nstate: %d\nerror-cost: %u\nhas-changes: %u\ndepends-on-column: %u\ndescendant-count: %u\nrepeat-depth: %u\nlookahead-bytes: %u".as_ptr().cast::<i8>(),
         start_offset,
         end_offset,
-        i32::from(subtree_parse_state(tree)),
-        subtree_error_cost(tree),
-        u32::from(subtree_has_changes(tree)),
-        u32::from(subtree_depends_on_column(tree)),
-        subtree_visible_descendant_count(tree),
-        subtree_repeat_depth(tree),
-        subtree_lookahead_bytes(tree),
+        i32::from(tree.parse_state()),
+        tree.error_cost(),
+        u32::from(tree.has_changes()),
+        u32::from(tree.depends_on_column()),
+        tree.visible_descendant_count(),
+        tree.repeat_depth(),
+        tree.lookahead_bytes(),
     );
 
-    if subtree_is_error(tree)
-        && subtree_child_count(tree) == 0
-        && tree.heap_data().lookahead_char() != 0
-    {
+    if tree.is_error() && tree.child_count() == 0 && tree.heap_data().lookahead_char() != 0 {
         fprintf(
             f,
             c"\ncharacter: '%c'".as_ptr().cast::<i8>(),
@@ -307,11 +297,11 @@ unsafe fn subtree_print_dot_graph_recursive(
     let mut child_start_offset = start_offset;
     let lang = language_full(language);
     let mut child_info_offset =
-        u32::from(lang.max_alias_sequence_length) * u32::from(subtree_production_id(tree));
-    for (i, child) in subtree_children_slice(tree).iter().enumerate() {
+        u32::from(lang.max_alias_sequence_length) * u32::from(tree.production_id());
+    for (i, child) in tree.children().iter().enumerate() {
         let child_ptr = ptr::from_ref(child);
         let mut subtree_alias_symbol: TSSymbol = 0;
-        if !subtree_extra(*child) && child_info_offset != 0 {
+        if !(*child).extra() && child_info_offset != 0 {
             subtree_alias_symbol = *lang.alias_sequences.add(child_info_offset as usize);
             child_info_offset += 1;
         }
@@ -329,7 +319,7 @@ unsafe fn subtree_print_dot_graph_recursive(
             child_ptr.cast::<c_void>(),
             i,
         );
-        child_start_offset += subtree_total_bytes(*child);
+        child_start_offset += (*child).total_bytes();
     }
 }
 

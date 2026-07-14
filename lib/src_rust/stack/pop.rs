@@ -2,10 +2,10 @@ use core::ptr::NonNull;
 
 use super::{
     ptr, ptr_mut, stack_head, stack_node_retain, subtree_alloc_size, subtree_array_copy,
-    subtree_array_delete, subtree_array_reverse, subtree_extra, subtree_is_error, subtree_retain,
-    Array, Stack, StackHead, StackIterationAction, StackIterator, StackLink, StackNode, StackSlice,
-    StackSliceArray, StackStatus, StackSummary, StackSummaryEntry, StackVersion, Subtree,
-    SubtreeArray, MAX_ITERATOR_COUNT, NULL_SUBTREE,
+    subtree_array_delete, subtree_array_reverse, subtree_retain, Array, Stack, StackHead,
+    StackIterationAction, StackIterator, StackLink, StackNode, StackSlice, StackSliceArray,
+    StackStatus, StackSummary, StackSummaryEntry, StackVersion, Subtree, SubtreeArray,
+    MAX_ITERATOR_COUNT, NULL_SUBTREE,
 };
 
 /// Add a new version to the stack, cloning metadata from an existing version.
@@ -155,7 +155,7 @@ where
                         subtree_retain(subtree);
                     }
 
-                    if !subtree_extra(subtree) {
+                    if !subtree.extra() {
                         next_iterator.subtree_count += 1;
                     }
                 }
@@ -183,7 +183,7 @@ pub(super) unsafe fn pop_error_action(
     found_error: &mut bool,
 ) -> StackIterationAction {
     if let Some(&first_subtree) = iterator.subtrees.as_slice().first() {
-        if !*found_error && subtree_is_error(first_subtree) {
+        if !*found_error && first_subtree.is_error() {
             *found_error = true;
             StackIterationAction::PopAndStop
         } else {

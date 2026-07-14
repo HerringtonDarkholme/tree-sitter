@@ -2,12 +2,9 @@ use core::ffi::c_void;
 use core::ptr::{self, NonNull};
 
 use super::{
-    free, length_add, length_zero, malloc, subtree_child_count, subtree_dynamic_precedence,
-    subtree_error_cost, subtree_external_scanner_state_eq, subtree_extra, subtree_padding,
-    subtree_release, subtree_retain, subtree_size, subtree_symbol, subtree_total_size,
-    subtree_visible, subtree_visible_descendant_count, Length, StackHead, StackLink,
-    StackNodeArray, Subtree, SubtreePool, TSStateId, MAX_LINK_COUNT, MAX_NODE_POOL_SIZE,
-    NULL_SUBTREE, TS_BUILTIN_SYM_ERROR_REPEAT,
+    free, length_add, length_zero, malloc, subtree_external_scanner_state_eq, subtree_release,
+    subtree_retain, Length, StackHead, StackLink, StackNodeArray, Subtree, SubtreePool, TSStateId,
+    MAX_LINK_COUNT, MAX_NODE_POOL_SIZE, NULL_SUBTREE, TS_BUILTIN_SYM_ERROR_REPEAT,
 };
 
 /// Node in the persistent GLR stack graph.
@@ -80,11 +77,11 @@ pub(super) unsafe fn stack_node_release(
 }
 
 unsafe fn stack_subtree_node_count(subtree: Subtree) -> u32 {
-    let mut count = subtree_visible_descendant_count(subtree);
-    if subtree_visible(subtree) {
+    let mut count = subtree.visible_descendant_count();
+    if subtree.visible() {
         count += 1;
     }
-    if subtree_symbol(subtree) == TS_BUILTIN_SYM_ERROR_REPEAT {
+    if subtree.symbol() == TS_BUILTIN_SYM_ERROR_REPEAT {
         count += 1;
     }
     count
@@ -135,10 +132,10 @@ pub(super) unsafe fn stack_node_new(
         node_data.node_count = previous.node_count;
 
         if !subtree.is_null() {
-            node_data.error_cost += subtree_error_cost(subtree);
-            node_data.position = length_add(node_data.position, subtree_total_size(subtree));
+            node_data.error_cost += subtree.error_cost();
+            node_data.position = length_add(node_data.position, subtree.total_size());
             node_data.node_count += stack_subtree_node_count(subtree);
-            node_data.dynamic_precedence += subtree_dynamic_precedence(subtree);
+            node_data.dynamic_precedence += subtree.dynamic_precedence();
         }
     }
 
@@ -153,24 +150,24 @@ unsafe fn stack_subtree_is_equivalent(left: Subtree, right: Subtree) -> bool {
         return false;
     }
 
-    let left_symbol = subtree_symbol(left);
-    let right_symbol = subtree_symbol(right);
+    let left_symbol = left.symbol();
+    let right_symbol = right.symbol();
     if left_symbol != right_symbol {
         return false;
     }
 
-    let left_error_cost = subtree_error_cost(left);
-    let right_error_cost = subtree_error_cost(right);
+    let left_error_cost = left.error_cost();
+    let right_error_cost = right.error_cost();
     if left_error_cost > 0 && right_error_cost > 0 {
         return true;
     }
 
-    let left_child_count = subtree_child_count(left);
-    let right_child_count = subtree_child_count(right);
-    subtree_padding(left).bytes == subtree_padding(right).bytes
-        && subtree_size(left).bytes == subtree_size(right).bytes
+    let left_child_count = left.child_count();
+    let right_child_count = right.child_count();
+    left.padding().bytes == right.padding().bytes
+        && left.size().bytes == right.size().bytes
         && left_child_count == right_child_count
-        && subtree_extra(left) == subtree_extra(right)
+        && left.extra() == right.extra()
         && subtree_external_scanner_state_eq(left, right)
 }
 
@@ -189,14 +186,12 @@ pub(super) unsafe fn stack_node_add_link(
         let existing_link = &mut node.links[i];
         if stack_subtree_is_equivalent(existing_link.subtree, link.subtree) {
             if existing_link.node == link.node {
-                if subtree_dynamic_precedence(link.subtree)
-                    > subtree_dynamic_precedence(existing_link.subtree)
-                {
+                if link.subtree.dynamic_precedence() > existing_link.subtree.dynamic_precedence() {
                     subtree_retain(link.subtree);
                     subtree_release(subtree_pool, existing_link.subtree);
                     existing_link.subtree = link.subtree;
-                    node.dynamic_precedence = link.node.as_ref().dynamic_precedence
-                        + subtree_dynamic_precedence(link.subtree);
+                    node.dynamic_precedence =
+                        link.node.as_ref().dynamic_precedence + link.subtree.dynamic_precedence();
                 }
                 return;
             }
@@ -216,7 +211,7 @@ pub(super) unsafe fn stack_node_add_link(
                 }
                 let mut dynamic_precedence = link_node.dynamic_precedence;
                 if !link.subtree.is_null() {
-                    dynamic_precedence += subtree_dynamic_precedence(link.subtree);
+                    dynamic_precedence += link.subtree.dynamic_precedence();
                 }
                 if dynamic_precedence > node.dynamic_precedence {
                     node.dynamic_precedence = dynamic_precedence;
@@ -240,7 +235,7 @@ pub(super) unsafe fn stack_node_add_link(
     if !link.subtree.is_null() {
         subtree_retain(link.subtree);
         node_count += stack_subtree_node_count(link.subtree);
-        dynamic_precedence += subtree_dynamic_precedence(link.subtree);
+        dynamic_precedence += link.subtree.dynamic_precedence();
     }
 
     if node_count > node.node_count {

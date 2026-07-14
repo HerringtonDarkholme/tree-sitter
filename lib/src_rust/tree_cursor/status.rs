@@ -4,8 +4,7 @@ use crate::ffi::{TSFieldId, TSLanguage, TSNode, TSSymbol, TSTreeCursor};
 
 use super::super::language::{language_field_map_slice, language_full};
 use super::{
-    cursor_ref, language_alias_at, node_new, out_param_mut, subtree_child, subtree_extra,
-    subtree_symbol, subtree_visible_child_count, tree_cursor_entry_slice,
+    cursor_ref, language_alias_at, node_new, out_param_mut, tree_cursor_entry_slice,
     tree_cursor_is_entry_visible, ts_language_symbol_metadata, Subtree, TreeCursorEntry,
 };
 
@@ -18,7 +17,7 @@ pub unsafe extern "C" fn ts_tree_cursor_current_node(self_: *const TSTreeCursor)
     let cursor = cursor_ref(self_);
     let entries = tree_cursor_entry_slice(&cursor.stack);
     let last_entry = entries.last().unwrap_unchecked();
-    let is_extra = subtree_extra(*last_entry.subtree);
+    let is_extra = (*last_entry.subtree).extra();
     let alias_symbol = if is_extra {
         0
     } else if cursor.stack.size > 1 {
@@ -46,7 +45,7 @@ unsafe fn tree_cursor_child_symbol(
     child: Subtree,
     structural_child_index: u32,
 ) -> TSSymbol {
-    if !subtree_extra(child) {
+    if !child.extra() {
         let alias = language_alias_at(
             language,
             u32::from(parent.heap_data().children().production_id),
@@ -56,7 +55,7 @@ unsafe fn tree_cursor_child_symbol(
             return alias;
         }
     }
-    subtree_symbol(child)
+    child.symbol()
 }
 
 /// Record whether an entry has later visible or named siblings.
@@ -74,11 +73,11 @@ unsafe fn tree_cursor_record_later_siblings(
     let parent_subtree = *parent.subtree;
     let sibling_count = parent_subtree.heap_data().child_count;
     let mut structural_child_index = entry.structural_child_index;
-    if !subtree_extra(*entry.subtree) {
+    if !(*entry.subtree).extra() {
         structural_child_index += 1;
     }
     for child_index in entry.child_index + 1..sibling_count {
-        let sibling = subtree_child(parent_subtree, child_index);
+        let sibling = (parent_subtree).child(child_index);
         let metadata = ts_language_symbol_metadata(
             language,
             tree_cursor_child_symbol(language, parent_subtree, *sibling, structural_child_index),
@@ -86,14 +85,14 @@ unsafe fn tree_cursor_record_later_siblings(
         if metadata.visible {
             *has_later_siblings = true;
             *has_later_named_siblings |= metadata.named;
-        } else if subtree_visible_child_count(*sibling) > 0 {
+        } else if (*sibling).visible_child_count() > 0 {
             *has_later_siblings = true;
             *has_later_named_siblings |= sibling.heap_data().children().named_child_count > 0;
         }
         if *has_later_named_siblings {
             return;
         }
-        if !subtree_extra(*sibling) {
+        if !(*sibling).extra() {
             structural_child_index += 1;
         }
     }
@@ -107,7 +106,7 @@ unsafe fn tree_cursor_update_field_status(
     field_id: &mut TSFieldId,
     can_have_later_siblings_with_this_field: &mut bool,
 ) {
-    if subtree_extra(*entry.subtree) {
+    if (*entry.subtree).extra() {
         return;
     }
 
@@ -210,7 +209,7 @@ pub unsafe extern "C" fn ts_tree_cursor_current_field_id(self_: *const TSTreeCur
             break;
         }
 
-        if subtree_extra(*entry.subtree) {
+        if (*entry.subtree).extra() {
             break;
         }
 

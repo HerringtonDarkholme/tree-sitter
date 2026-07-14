@@ -2,9 +2,8 @@ use core::ptr::NonNull;
 
 use super::{
     c_void, fprintf, language_write_symbol_as_dot_string, ptr, stack_head, stderr_file,
-    subtree_dynamic_precedence, subtree_error_cost, subtree_external_scanner_state, subtree_extra,
-    subtree_named, subtree_symbol, subtree_visible, Array, Stack, StackIterator, StackNode,
-    StackStatus, TSLanguage, ERROR_STATE,
+    subtree_external_scanner_state, Array, Stack, StackIterator, StackNode, StackStatus,
+    TSLanguage, ERROR_STATE,
 };
 
 /// Print the stack as a DOT graph for debugging.
@@ -106,7 +105,7 @@ pub unsafe fn stack_print_dot_graph(
                 fprintf(f, c"label=\"?\"".as_ptr().cast::<i8>());
             } else if node_ref.link_count == 1
                 && !node_ref.links[0].subtree.is_null()
-                && subtree_extra(node_ref.links[0].subtree)
+                && node_ref.links[0].subtree.extra()
             {
                 fprintf(f, c"shape=point margin=0 label=\"\"".as_ptr().cast::<i8>());
             } else {
@@ -136,7 +135,7 @@ pub unsafe fn stack_print_dot_graph(
                     link.node.as_ptr().cast::<c_void>(),
                 );
                 let subtree = link.subtree;
-                if !subtree.is_null() && subtree_extra(subtree) {
+                if !subtree.is_null() && subtree.extra() {
                     fprintf(f, c"fontcolor=gray ".as_ptr().cast::<i8>());
                 }
 
@@ -144,11 +143,11 @@ pub unsafe fn stack_print_dot_graph(
                     fprintf(f, c"color=red".as_ptr().cast::<i8>());
                 } else {
                     fprintf(f, c"label=\"".as_ptr().cast::<i8>());
-                    let quoted = subtree_visible(subtree) && !subtree_named(subtree);
+                    let quoted = subtree.visible() && !subtree.named();
                     if quoted {
                         fprintf(f, c"'".as_ptr().cast::<i8>());
                     }
-                    language_write_symbol_as_dot_string(language, f, subtree_symbol(subtree));
+                    language_write_symbol_as_dot_string(language, f, subtree.symbol());
                     if quoted {
                         fprintf(f, c"'".as_ptr().cast::<i8>());
                     }
@@ -158,8 +157,8 @@ pub unsafe fn stack_print_dot_graph(
                         c"labeltooltip=\"error_cost: %u\ndynamic_precedence: %d\""
                             .as_ptr()
                             .cast::<i8>(),
-                        subtree_error_cost(subtree),
-                        subtree_dynamic_precedence(subtree),
+                        subtree.error_cost(),
+                        subtree.dynamic_precedence(),
                     );
                 }
 

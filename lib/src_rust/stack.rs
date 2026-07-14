@@ -19,11 +19,8 @@ use super::error_costs::{ERROR_COST_PER_RECOVERY, ERROR_STATE};
 use super::language::language_write_symbol_as_dot_string;
 use super::length::{length_add, length_zero, Length};
 use super::subtree::{
-    subtree_alloc_size, subtree_child_count, subtree_dynamic_precedence, subtree_error_cost,
-    subtree_external_scanner_state, subtree_external_scanner_state_eq, subtree_extra,
-    subtree_is_error, subtree_named, subtree_padding, subtree_release, subtree_retain,
-    subtree_size, subtree_symbol, subtree_total_bytes, subtree_total_size, subtree_visible,
-    subtree_visible_descendant_count, Subtree, SubtreeArray, SubtreePool, NULL_SUBTREE,
+    subtree_alloc_size, subtree_external_scanner_state, subtree_external_scanner_state_eq,
+    subtree_release, subtree_retain, Subtree, SubtreeArray, SubtreePool, NULL_SUBTREE,
     TS_BUILTIN_SYM_ERROR_REPEAT,
 };
 use super::subtree::{subtree_array_copy, subtree_array_delete, subtree_array_reverse};
@@ -205,10 +202,10 @@ impl Stack {
             if node_ref.link_count > 0 {
                 let subtree = node_ref.links[0].subtree;
                 if !subtree.is_null() {
-                    if subtree_total_bytes(subtree) > 0 {
+                    if subtree.total_bytes() > 0 {
                         return true;
                     } else if node_ref.node_count > head.node_count_at_last_error
-                        && subtree_error_cost(subtree) == 0
+                        && subtree.error_cost() == 0
                     {
                         node = node_ref.links[0].node;
                         continue;
@@ -426,7 +423,7 @@ pub unsafe fn stack_pop_error(self_: &mut Stack, version: StackVersion) -> Subtr
     let node = stack_head(self_, version).node;
     for link in &node.as_ref().links[..node.as_ref().link_count as usize] {
         let subtree = link.subtree;
-        if !subtree.is_null() && subtree_is_error(subtree) {
+        if !subtree.is_null() && subtree.is_error() {
             let mut found_error = false;
             let pop = stack_iter(
                 self_,

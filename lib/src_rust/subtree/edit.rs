@@ -4,10 +4,9 @@ use core::{ptr::NonNull, sync::atomic::AtomicU32};
 
 use super::{
     length_add, length_saturating_sub, length_sub, length_zero, subtree_can_inline,
-    subtree_children_slice, subtree_depends_on_column, subtree_from_mut, subtree_lookahead_bytes,
-    subtree_make_mut, subtree_padding, subtree_pool_allocate, subtree_set_has_changes,
-    subtree_size, subtree_total_size, Edit, EditEntry, Length, MutableSubtree, Subtree,
-    SubtreeHeapData, SubtreeHeapDataContent, SubtreePool, TSInputEdit, TSSymbol,
+    subtree_from_mut, subtree_make_mut, subtree_pool_allocate, subtree_set_has_changes, Edit,
+    EditEntry, Length, MutableSubtree, Subtree, SubtreeHeapData, SubtreeHeapDataContent,
+    SubtreePool, TSInputEdit, TSSymbol,
 };
 
 /// Calculate the edited padding and content size for one subtree.
@@ -17,10 +16,10 @@ use super::{
 unsafe fn subtree_edited_size(tree: Subtree, edit: Edit) -> Option<(Length, Length, u32)> {
     let is_noop = edit.old_end.bytes == edit.start.bytes && edit.new_end.bytes == edit.start.bytes;
     let is_pure_insertion = edit.old_end.bytes == edit.start.bytes;
-    let mut size = subtree_size(tree);
-    let mut padding = subtree_padding(tree);
+    let mut size = tree.size();
+    let mut padding = tree.padding();
     let total_size = length_add(padding, size);
-    let lookahead_bytes = subtree_lookahead_bytes(tree);
+    let lookahead_bytes = tree.lookahead_bytes();
     let end_byte = total_size.bytes + lookahead_bytes;
     if edit.start.bytes > end_byte || (is_noop && edit.start.bytes == end_byte) {
         return None;
@@ -105,25 +104,25 @@ unsafe fn subtree_schedule_edited_children(
 ) {
     let tree = tree.as_ptr();
     let is_pure_insertion = edit.old_end.bytes == edit.start.bytes;
-    let parent_depends_on_column = subtree_depends_on_column(*tree);
+    let parent_depends_on_column = (*tree).depends_on_column();
     let column_shifted = edit.new_end.extent.column != edit.old_end.extent.column;
-    let padding = subtree_padding(*tree);
+    let padding = (*tree).padding();
     let mut child_right = length_zero();
-    let children = subtree_children_slice(*tree);
+    let children = (*tree).children();
 
     for (i, child) in children.iter().enumerate() {
-        let child_size = subtree_total_size(*child);
+        let child_size = (*child).total_size();
         let child_left = child_right;
         child_right = length_add(child_left, child_size);
 
-        if child_right.bytes + subtree_lookahead_bytes(*child) < edit.start.bytes {
+        if child_right.bytes + (*child).lookahead_bytes() < edit.start.bytes {
             continue;
         }
 
         if ((child_left.bytes > edit.old_end.bytes)
             || (child_left.bytes == edit.old_end.bytes && child_size.bytes > 0 && i > 0))
             && (!parent_depends_on_column || child_left.extent.row > padding.extent.row)
-            && (!subtree_depends_on_column(*child)
+            && (!(*child).depends_on_column()
                 || !column_shifted
                 || child_left.extent.row > edit.old_end.extent.row)
         {

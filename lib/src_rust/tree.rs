@@ -9,8 +9,7 @@ use super::get_changed_ranges::{
 use super::length::{length_add, Length};
 use super::node::node_new;
 use super::subtree::{
-    subtree_edit, subtree_padding, subtree_pool_delete, subtree_pool_new, subtree_release,
-    subtree_retain, Subtree,
+    subtree_edit, subtree_pool_delete, subtree_pool_new, subtree_release, subtree_retain, Subtree,
 };
 // Only used by `TSTree::print_dot_graph`, which is unavailable on wasm.
 #[cfg(not(target_family = "wasm"))]
@@ -125,7 +124,7 @@ impl TSTree {
     }
 
     pub unsafe fn root_node(&self, tree_ptr: *const Self) -> TSNode {
-        node_new(tree_ptr, &self.root, subtree_padding(self.root), 0)
+        node_new(tree_ptr, &self.root, self.root.padding(), 0)
     }
 
     unsafe fn root_node_with_offset(
@@ -141,7 +140,7 @@ impl TSTree {
         node_new(
             tree_ptr,
             &self.root,
-            length_add(offset, subtree_padding(self.root)),
+            length_add(offset, self.root.padding()),
             0,
         )
     }
@@ -362,8 +361,7 @@ mod tests {
     use super::*;
     use crate::core_impl::length::length_zero;
     use crate::core_impl::subtree::{
-        subtree_child_count, subtree_from_mut, subtree_new_error, subtree_new_node,
-        TS_BUILTIN_SYM_ERROR_REPEAT,
+        subtree_from_mut, subtree_new_error, subtree_new_node, TS_BUILTIN_SYM_ERROR_REPEAT,
     };
 
     #[test]
@@ -398,12 +396,12 @@ mod tests {
                 ptr::null(),
             ));
 
-            assert_eq!(subtree_child_count(root), 2);
+            assert_eq!(root.child_count(), 2);
             let tree = TSTree::new(root, ptr::null(), &[]);
             let copy = ts_tree_copy(tree);
 
             ts_tree_delete(tree);
-            assert_eq!(subtree_child_count((*copy).root), 2);
+            assert_eq!((*copy).root.child_count(), 2);
             ts_tree_delete(copy);
             subtree_pool_delete(&mut pool);
         }

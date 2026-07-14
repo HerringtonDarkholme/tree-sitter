@@ -1,7 +1,7 @@
 use super::{
     language_field_map_slice, language_full, node_child_iterator_next, node_is_relevant,
     node_iterate_children, node_language, node_null, node_relevant_child_count, node_subtree, ptr,
-    subtree_extra, TSNode,
+    TSNode,
 };
 
 /// Look up the direct field attached to a structural child.
@@ -40,7 +40,7 @@ unsafe fn node_field_name_for_child(
         while node_child_iterator_next(&mut iterator, &mut child) {
             if node_is_relevant(child, include_anonymous) {
                 if visible_index == child_index {
-                    if subtree_extra(node_subtree(child)) {
+                    if node_subtree(child).extra() {
                         return ptr::null();
                     }
                     let field_name =
