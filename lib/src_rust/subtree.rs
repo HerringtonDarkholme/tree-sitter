@@ -860,6 +860,26 @@ impl MutableSubtree {
         &mut *self.heap_ptr()
     }
 
+    /// Mutably borrow this internal node's children.
+    pub unsafe fn children_mut<'a>(self) -> &'a mut [Subtree] {
+        let count = self.heap_data().child_count as usize;
+        if count == 0 {
+            &mut []
+        } else {
+            core::slice::from_raw_parts_mut(self.into_immutable().children_ptr(), count)
+        }
+    }
+
+    #[inline]
+    unsafe fn child(self, index: usize) -> Subtree {
+        *self.children_mut().get_unchecked(index)
+    }
+
+    #[inline]
+    unsafe fn child_mut<'a>(self, index: usize) -> &'a mut Subtree {
+        self.children_mut().get_unchecked_mut(index)
+    }
+
     #[inline]
     pub unsafe fn set_extra(&mut self, is_extra: bool) {
         if self.data.is_inline() {
@@ -975,31 +995,6 @@ pub unsafe fn subtree_symbol(self_: Subtree) -> TSSymbol {
 #[inline]
 pub const fn subtree_alloc_size(child_count: u32) -> usize {
     child_count as usize * core::mem::size_of::<Subtree>() + core::mem::size_of::<SubtreeHeapData>()
-}
-
-#[inline]
-unsafe fn mutable_subtree_children<'a>(self_: MutableSubtree) -> &'a mut [Subtree] {
-    let count = self_.heap_data().child_count as usize;
-    if count == 0 {
-        &mut []
-    } else {
-        core::slice::from_raw_parts_mut(self_.into_immutable().children_ptr(), count)
-    }
-}
-
-#[inline]
-unsafe fn mutable_subtree_data_mut<'a>(self_: MutableSubtree) -> &'a mut SubtreeHeapData {
-    self_.heap_data_mut()
-}
-
-#[inline]
-unsafe fn mutable_subtree_child(self_: MutableSubtree, index: usize) -> Subtree {
-    *mutable_subtree_children(self_).get_unchecked(index)
-}
-
-#[inline]
-unsafe fn mutable_subtree_child_mut<'a>(self_: MutableSubtree, index: usize) -> &'a mut Subtree {
-    mutable_subtree_children(self_).get_unchecked_mut(index)
 }
 
 #[inline]
@@ -1152,14 +1147,14 @@ pub unsafe fn subtree_new_error(
 }
 
 unsafe fn subtree_init_node_data(
-    data: *mut SubtreeHeapData,
+    data: NonNull<SubtreeHeapData>,
     symbol: TSSymbol,
     child_count: u32,
     production_id: u32,
     language: *const TSLanguage,
 ) -> MutableSubtree {
     let metadata = ts_language_symbol_metadata(language, symbol);
-    *data = SubtreeHeapData {
+    data.as_ptr().write(SubtreeHeapData {
         ref_count: AtomicU32::new(1),
         padding: length_zero(),
         size: length_zero(),
@@ -1187,8 +1182,8 @@ unsafe fn subtree_init_node_data(
             repeat_depth: 0,
             production_id: production_id as u16,
         }),
-    };
-    MutableSubtree::from_heap(data)
+    });
+    MutableSubtree::from_heap(data.as_ptr())
 }
 
 /// Create a heap internal node by moving child storage into the node allocation.
@@ -1198,29 +1193,30 @@ unsafe fn subtree_init_node_data(
 /// `[child_0, child_1, ... child_n][SubtreeHeapData]`.
 pub unsafe fn subtree_new_node(
     symbol: TSSymbol,
-    children: *mut SubtreeArray,
+    children: &mut SubtreeArray,
     production_id: u32,
     language: *const TSLanguage,
 ) -> MutableSubtree {
     // Allocate the node's data at the end of the array of children.
-    let new_byte_size = subtree_alloc_size((*children).size);
-    if ((*children).capacity as usize) * core::mem::size_of::<Subtree>() < new_byte_size {
-        (*children).contents =
-            realloc((*children).contents.cast::<c_void>(), new_byte_size).cast::<Subtree>();
-        (*children).capacity = (new_byte_size / core::mem::size_of::<Subtree>()) as u32;
+    let new_byte_size = subtree_alloc_size(children.size);
+    if (children.capacity as usize) * core::mem::size_of::<Subtree>() < new_byte_size {
+        children.contents =
+            realloc(children.contents.cast::<c_void>(), new_byte_size).cast::<Subtree>();
+        children.capacity = (new_byte_size / core::mem::size_of::<Subtree>()) as u32;
     }
-    let data = (*children)
+    let data = children
         .contents
-        .add((*children).size as usize)
+        .add(children.size as usize)
         .cast::<SubtreeHeapData>();
+    let data = NonNull::new_unchecked(data);
 
-    let result = subtree_init_node_data(data, symbol, (*children).size, production_id, language);
+    let result = subtree_init_node_data(data, symbol, children.size, production_id, language);
     subtree_summarize_children(result, language);
     result
 }
 
 pub unsafe fn subtree_new_error_node(
-    children: *mut SubtreeArray,
+    children: &mut SubtreeArray,
     extra: bool,
     language: *const TSLanguage,
 ) -> Subtree {
@@ -1275,7 +1271,7 @@ pub unsafe fn subtree_compress(
             break;
         }
 
-        let child = mutable_subtree_child(tree, 0).into_mut();
+        let child = tree.child(0).into_mut();
         if child.data.is_inline()
             || child.heap_data().child_count < 2
             || child.heap_data().ref_count() > 1
@@ -1284,7 +1280,7 @@ pub unsafe fn subtree_compress(
             break;
         }
 
-        let grandchild = mutable_subtree_child(child, 0).into_mut();
+        let grandchild = child.child(0).into_mut();
         if grandchild.data.is_inline()
             || grandchild.heap_data().child_count < 2
             || grandchild.heap_data().ref_count() > 1
@@ -1295,18 +1291,19 @@ pub unsafe fn subtree_compress(
 
         // Rotate: tree[0] = grandchild, child[0] = grandchild[last], grandchild[last] = child
         let gc_last = grandchild.heap_data().child_count as usize - 1;
-        *mutable_subtree_child_mut(tree, 0) = grandchild.into_immutable();
-        *mutable_subtree_child_mut(child, 0) = mutable_subtree_child(grandchild, gc_last);
-        *mutable_subtree_child_mut(grandchild, gc_last) = child.into_immutable();
+        *tree.child_mut(0) = grandchild.into_immutable();
+        *child.child_mut(0) = grandchild.child(gc_last);
+        *grandchild.child_mut(gc_last) = child.into_immutable();
         stack.push(tree);
         tree = grandchild;
     }
 
     while stack.size > initial_stack_size {
         tree = stack.pop();
-        let child = mutable_subtree_child(tree, 0).into_mut();
-        let grandchild =
-            mutable_subtree_child(child, child.heap_data().child_count as usize - 1).into_mut();
+        let child = tree.child(0).into_mut();
+        let grandchild = child
+            .child(child.heap_data().child_count as usize - 1)
+            .into_mut();
         subtree_summarize_children(grandchild, language);
         subtree_summarize_children(child, language);
         subtree_summarize_children(tree, language);
@@ -1316,7 +1313,7 @@ pub unsafe fn subtree_compress(
 pub unsafe fn subtree_summarize_children(self_: MutableSubtree, language: *const TSLanguage) {
     debug_assert!(!self_.data.is_inline());
 
-    let data = mutable_subtree_data_mut(self_);
+    let data = self_.heap_data_mut();
     data.children_mut().named_child_count = 0;
     data.children_mut().visible_child_count = 0;
     data.error_cost = 0;
