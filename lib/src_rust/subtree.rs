@@ -17,7 +17,7 @@ use super::language::{
     language_write_symbol_as_dot_string, ts_language_symbol_metadata, ts_language_symbol_name,
 };
 use super::length::{length_add, length_saturating_sub, length_sub, length_zero, Length};
-use super::utils::{array_delete, array_new, array_pop, array_push, array_reserve, Array};
+use super::utils::{array_pop, array_push, Array};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -1605,7 +1605,7 @@ mod tests {
     fn edit_marks_the_affected_child() {
         unsafe {
             let mut pool = subtree_pool_new(4);
-            let mut children = array_new();
+            let mut children = Array::new();
             array_push(&mut children, inline_leaf(5));
             array_push(&mut children, inline_leaf(5));
             let parent = subtree_from_mut(subtree_new_node(
@@ -1648,7 +1648,7 @@ mod tests {
                 ptr::null(),
             );
 
-            let mut children = array_new();
+            let mut children = Array::new();
             array_push(&mut children, child1);
             array_push(&mut children, child2);
 

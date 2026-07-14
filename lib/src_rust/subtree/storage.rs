@@ -2,10 +2,9 @@ use core::ffi::c_void;
 use core::ptr::{self, NonNull};
 
 use super::{
-    array_delete, array_new, array_pop, array_push, array_reserve, calloc, free, malloc,
-    subtree_extra, subtree_release, subtree_retain, ExternalScannerState, ExternalScannerStateData,
-    MutableSubtree, Subtree, SubtreeArray, SubtreeHeapData, SubtreePool,
-    EXTERNAL_SCANNER_STATE_INLINE_SIZE, TS_MAX_TREE_POOL_SIZE,
+    calloc, free, malloc, subtree_extra, subtree_release, subtree_retain, Array,
+    ExternalScannerState, ExternalScannerStateData, MutableSubtree, Subtree, SubtreeArray,
+    SubtreeHeapData, SubtreePool, EXTERNAL_SCANNER_STATE_INLINE_SIZE, TS_MAX_TREE_POOL_SIZE,
 };
 
 pub unsafe fn external_scanner_state_new(data: *const u8, length: u32) -> ExternalScannerState {
@@ -111,7 +110,7 @@ pub unsafe fn subtree_array_remove_trailing_extras(
     while let Some(&last) = trees.as_slice().last() {
         if subtree_extra(last) {
             trees.size -= 1;
-            array_push(destination, last);
+            destination.push(last);
         } else {
             break;
         }
@@ -125,10 +124,10 @@ pub fn subtree_array_reverse(trees: &mut SubtreeArray) {
 
 pub unsafe fn subtree_pool_new(capacity: u32) -> SubtreePool {
     let mut pool = SubtreePool {
-        free_trees: array_new(),
-        tree_stack: array_new(),
+        free_trees: Array::new(),
+        tree_stack: Array::new(),
     };
-    array_reserve(&mut pool.free_trees, capacity);
+    pool.free_trees.reserve(capacity);
     pool
 }
 
@@ -137,16 +136,16 @@ pub unsafe fn subtree_pool_delete(pool: &mut SubtreePool) {
         for &tree in pool.free_trees.as_slice() {
             free(tree.heap_ptr().cast::<c_void>());
         }
-        array_delete(&mut pool.free_trees);
+        pool.free_trees.delete();
     }
     if !pool.tree_stack.contents.is_null() {
-        array_delete(&mut pool.tree_stack);
+        pool.tree_stack.delete();
     }
 }
 
 pub(super) unsafe fn subtree_pool_allocate(pool: &mut SubtreePool) -> *mut SubtreeHeapData {
     if pool.free_trees.size > 0 {
-        array_pop(&mut pool.free_trees).heap_ptr()
+        pool.free_trees.pop().heap_ptr()
     } else {
         malloc(core::mem::size_of::<SubtreeHeapData>()).cast::<SubtreeHeapData>()
     }
@@ -154,7 +153,7 @@ pub(super) unsafe fn subtree_pool_allocate(pool: &mut SubtreePool) -> *mut Subtr
 
 pub(super) unsafe fn subtree_pool_free(pool: &mut SubtreePool, tree: MutableSubtree) {
     if pool.free_trees.capacity > 0 && pool.free_trees.size < TS_MAX_TREE_POOL_SIZE {
-        array_push(&mut pool.free_trees, tree);
+        pool.free_trees.push(tree);
     } else {
         free(tree.heap_ptr().cast::<c_void>());
     }
