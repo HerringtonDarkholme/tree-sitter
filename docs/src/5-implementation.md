@@ -88,6 +88,72 @@ There are four actions worth remembering:
 - **Accept** records a complete syntax tree.
 - **Recover** starts explicit error recovery.
 
+### What an LR parse table looks like
+
+Consider these productions:
+
+```text
+R1: expression -> number
+R2: expression -> expression "+" number
+```
+
+An LR table has terminal columns for actions and non-terminal columns for
+gotos. Here is a small illustrative table for this grammar:
+
+| State | `number` | `+` | EOF | `expression` |
+| ---: | --- | --- | --- | --- |
+| 0 | shift 2 |  |  | goto 1 |
+| 1 |  | shift 3 | accept |  |
+| 2 |  | reduce R1 | reduce R1 |  |
+| 3 | shift 4 |  |  |  |
+| 4 |  | reduce R2 | reduce R2 |  |
+
+The state numbers have no meaning outside this generated table. Each row
+describes one parser configuration:
+
+- For a terminal lookahead, read the ACTION part: shift, reduce, accept, or an
+  error represented by an empty cell.
+- After reducing to a non-terminal, read the GOTO part to find the next state.
+
+For `1 + 2`, treating each number as the token `number`, the lookups are:
+
+```text
+stack state 0, lookahead number -> shift 2
+stack state 2, lookahead +      -> reduce R1
+
+    pop one grammar value
+    predecessor state is 0
+    goto[0, expression] = 1
+
+stack state 1, lookahead +      -> shift 3
+stack state 3, lookahead number -> shift 4
+stack state 4, lookahead EOF    -> reduce R2
+
+    pop three grammar values
+    predecessor state is 0
+    goto[0, expression] = 1
+
+stack state 1, lookahead EOF    -> accept
+```
+
+Notice that reduction consults the table twice in different ways. The current
+state and terminal lookahead select the reduction. After popping, the exposed
+predecessor state and the reduced non-terminal select the goto state.
+
+An ordinary deterministic LR table expects one action in each terminal cell.
+A conflicting cell might instead look like:
+
+```text
+shift 3 / reduce R2
+```
+
+A parser generator can resolve that conflict using precedence, or a GLR table
+can preserve both actions. Tree-sitter stores the cell as a list of actions and
+lets the runtime follow the alternatives.
+
+The deep dive shows how this logical table becomes Tree-sitter's
+[dense `u16` rows, compressed groups, and action arrays](./5-implementation-deep-dive.md#concrete-dense-representation).
+
 ### What “subtree” means in an LR parser
 
 A subtree is not a separate part of LR theory. The essential LR algorithm

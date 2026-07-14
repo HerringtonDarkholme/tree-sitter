@@ -138,6 +138,110 @@ group count
 Symbols with the same table value share one group. This saves generated binary
 size for sparse states at the cost of a short linear scan.
 
+#### Concrete dense representation
+
+Use the same grammar as the introductory chapter:
+
+```text
+R1: expression -> number
+R2: expression -> expression "+" number
+```
+
+Assume the generator assigns these symbol ids:
+
+| Symbol id | Symbol | Kind |
+| ---: | --- | --- |
+| 0 | EOF | terminal |
+| 1 | `number` | terminal |
+| 2 | `+` | terminal |
+| 3 | `expression` | non-terminal |
+
+Then `token_count = 3` and `symbol_count = 4`. Also assume states 1 through 5
+correspond to the five rows in the general example; Tree-sitter reserves state
+0 as `ERROR_STATE`.
+
+The logical table is:
+
+| State | EOF | `number` | `+` | `expression` |
+| ---: | --- | --- | --- | --- |
+| 1 | error | actions at 1 | error | state 2 |
+| 2 | actions at 5 | error | actions at 3 | error |
+| 3 | actions at 7 | error | actions at 7 | error |
+| 4 | error | actions at 9 | error | error |
+| 5 | actions at 11 | error | actions at 11 | error |
+
+Its dense generated array is just row-major `u16` values:
+
+```text
+// symbol order:       EOF  number  +   expression
+parse_table = [
+    /* state 0 */       0,    0,    0,      0, // reserved error row here
+    /* state 1 */       0,    1,    0,      2,
+    /* state 2 */       5,    0,    3,      0,
+    /* state 3 */       7,    0,    7,      0,
+    /* state 4 */       0,    9,    0,      0,
+    /* state 5 */      11,    0,   11,      0,
+]
+```
+
+The generated C normally writes `ACTIONS(1)` or `STATE(2)` to document intent,
+but both macros evaluate to the numeric id. The array itself contains no tag.
+The runtime knows how to interpret a value from the symbol id:
+
+```text
+symbol < token_count     -> value is a parse_actions index
+symbol >= token_count    -> value is a goto state
+```
+
+For example:
+
+```text
+language_lookup(state 1, number id 1)
+    = parse_table[1 * 4 + 1]
+    = 1
+    = parse_actions header index 1
+
+language_lookup(state 1, expression id 3)
+    = parse_table[1 * 4 + 3]
+    = 2
+    = goto state 2
+```
+
+The values in state 0 depend on the generated language; it is shown empty only
+to keep this example focused. The indexing and mixed action/goto interpretation
+are the real implementation.
+
+#### Concrete compressed representation
+
+Sparse rows omit zero-valued error cells. If the generator places logical state
+5 above in the small-state region, its equal value, 11, for EOF and `+` is
+encoded as:
+
+```text
+small_parse_table_map[state 5 - large_state_count] = offset
+
+small_parse_table[offset..] = [
+    1,          // one value group
+    11,         // table value
+    2,          // two symbols use it
+    0, 2,       // EOF and "+"
+]
+```
+
+A compressed row with state 1's two nonzero values would have two groups:
+
+```text
+[
+    2,          // two value groups
+    1, 1, 1,    // value 1 applies to one symbol: number
+    2, 1, 3,    // value 2 applies to one symbol: expression
+]
+```
+
+`language_lookup` linearly scans the groups and returns zero when the requested
+symbol is absent. The same routine serves terminal actions and non-terminal
+gotos because it returns the untagged `u16` value.
+
 ### Action lists
 
 For a terminal table cell, `language_table_entry` follows the table value into
@@ -164,6 +268,68 @@ copy the generated data.
 A cell with several actions is the concrete representation of a GLR conflict.
 The runtime does not have a separate “ambiguous grammar” mode; it discovers the
 need to branch by seeing several actions in this list.
+
+#### Concrete `parse_actions` representation
+
+The dense example's action indexes can refer to this conceptual generated
+array:
+
+| Index | Entry kind | Contents |
+| ---: | --- | --- |
+| 0 | header | `count = 0` |
+| 1 | header | `count = 1`, `reusable = true` |
+| 2 | action | shift state 3 |
+| 3 | header | `count = 1`, `reusable = true` |
+| 4 | action | shift state 4 |
+| 5 | header | `count = 1`, `reusable = false` |
+| 6 | action | accept |
+| 7 | header | `count = 1`, `reusable = true` |
+| 8 | action | reduce R1: symbol 3, child count 1, production 0 |
+| 9 | header | `count = 1`, `reusable = true` |
+| 10 | action | shift state 5 |
+| 11 | header | `count = 1`, `reusable = true` |
+| 12 | action | reduce R2: symbol 3, child count 3, production 1 |
+
+Each slot is a `TSParseActionEntry` union. A header uses its `entry` arm; the
+following `count` slots use their `action` arms. `language_table_entry` does:
+
+```text
+action_index = language_lookup(state, terminal_symbol)
+header       = parse_actions[action_index].entry
+actions      = &parse_actions[action_index + 1].action
+
+TableEntry {
+    actions,
+    action_count: header.count,
+    is_reusable: header.reusable,
+}
+```
+
+Action lists can be reused by several cells. Both EOF and `+` in state 3 point
+to header 7, so the reduce-R1 action is stored once.
+
+The `reusable` values above are illustrative; the generator computes them from
+lexical conflicts. The header/action indexing scheme is exact.
+
+#### A GLR conflict in the array
+
+Suppose one table cell must preserve both reduce R2 and shift state 4. The
+generator can append:
+
+```text
+index 13: header { count: 2, reusable: false }
+index 14: reduce { symbol: expression, child_count: 3, ... }
+index 15: shift  { state: 4, ... }
+```
+
+The terminal table cell stores `ACTIONS(13)`, which is the number 13. At
+runtime `TableEntry::action_count` is 2, and `parser_apply_parse_actions` visits
+both union values. Reduction can create another stack version; the shift keeps
+the alternative that consumes the token.
+
+This indirection is what lets a dense or compressed `u16` cell represent zero,
+one, or several parse actions without making every table cell large enough to
+hold the actions themselves.
 
 ### Lex modes and tree metadata
 
