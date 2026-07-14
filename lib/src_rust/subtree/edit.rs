@@ -84,7 +84,7 @@ unsafe fn subtree_apply_edit_size(
                     result.data.is_missing(),
                     result.data.is_keyword(),
                 ),
-                data: SubtreeHeapDataContent { lookahead_char: 0 },
+                data: SubtreeHeapDataContent::LookaheadChar(0),
             };
             result.ptr = data;
         }

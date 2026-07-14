@@ -88,7 +88,7 @@ fn node_is_null(self_: TSNode) -> bool {
 const unsafe fn node_child_count(self_: TSNode) -> u32 {
     let tree = node_subtree(self_);
     if subtree_child_count(tree) > 0 {
-        (*tree.ptr).data.children.visible_child_count
+        (*tree.ptr).children().visible_child_count
     } else {
         0
     }
@@ -98,7 +98,7 @@ const unsafe fn node_child_count(self_: TSNode) -> u32 {
 const unsafe fn node_named_child_count(self_: TSNode) -> u32 {
     let tree = node_subtree(self_);
     if subtree_child_count(tree) > 0 {
-        (*tree.ptr).data.children.named_child_count
+        (*tree.ptr).children().named_child_count
     } else {
         0
     }
@@ -167,7 +167,7 @@ unsafe fn node_iterate_children(node: &TSNode) -> NodeChildIterator {
     }
     let alias_sequence = language_alias_sequence(
         node_language(*node),
-        u32::from((*subtree.ptr).data.children.production_id),
+        u32::from((*subtree.ptr).children().production_id),
     );
     NodeChildIterator {
         parent: subtree,
@@ -239,9 +239,9 @@ const unsafe fn node_relevant_child_count(self_: TSNode, include_anonymous: bool
     let tree = node_subtree(self_);
     if subtree_child_count(tree) > 0 {
         if include_anonymous {
-            (*tree.ptr).data.children.visible_child_count
+            (*tree.ptr).children().visible_child_count
         } else {
-            (*tree.ptr).data.children.named_child_count
+            (*tree.ptr).children().named_child_count
         }
     } else {
         0
@@ -511,7 +511,7 @@ pub unsafe extern "C" fn ts_node_child_by_field_id(
         let mut field_map_end: *const TSFieldMapEntry = ptr::null();
         language_field_map(
             node_language(self_),
-            u32::from((*node_subtree(self_).ptr).data.children.production_id),
+            u32::from((*node_subtree(self_).ptr).children().production_id),
             &mut field_map,
             &mut field_map_end,
         );

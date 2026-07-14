@@ -39,8 +39,8 @@ use super::stack::{
     StackPopBuilder, StackSliceSpan, StackVersion, STACK_VERSION_NONE,
 };
 use super::subtree::{
-    external_scanner_state_eq, external_scanner_state_init, subtree_array_clear,
-    subtree_array_delete, subtree_array_remove_trailing_extras, subtree_child, subtree_child_count,
+    external_scanner_state_eq, subtree_array_clear, subtree_array_delete,
+    subtree_array_remove_trailing_extras, subtree_child, subtree_child_count,
     subtree_children_slice, subtree_compare, subtree_compress, subtree_dynamic_precedence,
     subtree_error_cost, subtree_external_scanner_state_eq, subtree_extra, subtree_from_mut,
     subtree_has_external_scanner_state_change, subtree_has_external_tokens, subtree_is_eof,
@@ -48,8 +48,8 @@ use super::subtree::{
     subtree_make_mut, subtree_new_error, subtree_new_error_node, subtree_new_leaf,
     subtree_new_missing_leaf, subtree_new_node, subtree_parse_state, subtree_pool_delete,
     subtree_pool_new, subtree_print_dot_graph, subtree_release, subtree_repeat_depth,
-    subtree_retain, subtree_set_extra, subtree_set_symbol, subtree_size, subtree_symbol,
-    subtree_to_mut_unsafe, subtree_total_bytes, subtree_total_size, ExternalScannerState,
+    subtree_retain, subtree_set_external_scanner_state, subtree_set_extra, subtree_set_symbol,
+    subtree_size, subtree_symbol, subtree_to_mut_unsafe, subtree_total_bytes, subtree_total_size,
     MutableSubtree, Subtree, SubtreeArray, SubtreePool, NULL_SUBTREE, TS_BUILTIN_SYM_END,
     TS_BUILTIN_SYM_ERROR, TS_BUILTIN_SYM_ERROR_REPEAT, TS_TREE_STATE_NONE,
 };
@@ -576,7 +576,7 @@ unsafe fn parser_finish_reduction(
         (*parent.ptr).set_extra(true);
     }
     (*parent.ptr).parse_state = parse_state;
-    (*parent.ptr).data.children.dynamic_precedence += action.dynamic_precedence;
+    (*parent.ptr).children_mut().dynamic_precedence += action.dynamic_precedence;
 
     let stack = ptr_mut(self_.stack);
     stack_push(stack, version, subtree_from_mut(parent), next_state);
@@ -752,7 +752,7 @@ unsafe fn parser_accept(self_: &mut TSParser, version: StackVersion, lookahead: 
                     self_,
                     subtree_symbol(tree),
                     &mut trees,
-                    u32::from((*tree.ptr).data.children.production_id),
+                    u32::from((*tree.ptr).children().production_id),
                 ));
                 subtree_release(&mut self_.tree_pool, tree);
                 break;
@@ -1217,7 +1217,7 @@ unsafe fn parser_balance_subtree(self_: &mut TSParser) -> bool {
 
         let tree = *array_back_ref(&self_.tree_pool.tree_stack);
 
-        if (*tree.ptr).data.children.repeat_depth > 0 {
+        if (*tree.ptr).children().repeat_depth > 0 {
             let tree_subtree = subtree_from_mut(tree);
             let children = subtree_children_slice(tree_subtree);
             let child1 = *children.get_unchecked(0);

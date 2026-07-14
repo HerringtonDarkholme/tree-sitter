@@ -1,17 +1,17 @@
 use super::super::subtree::subtree_external_scanner_state;
 use super::{
-    external_scanner_state_eq, external_scanner_state_init, language_full, language_has_actions,
-    language_is_reserved_word, language_lex_mode_for_state, language_table_entry, length_sub,
-    length_zero, lexer_advance, lexer_finish, lexer_is_eof, lexer_reset, lexer_start,
-    parser_call_keyword_lex_fn, parser_call_main_lex_fn, parser_external_scanner_deserialize,
-    parser_external_scanner_scan, parser_external_scanner_serialize, parser_log,
-    parser_log_lookahead, parser_symbol_name, ptr, ptr_ref, stack_has_advanced_since_error,
-    stack_last_external_token, stack_position, subtree_child_count,
-    subtree_external_scanner_state_eq, subtree_is_keyword, subtree_new_error, subtree_new_leaf,
-    subtree_parse_state, subtree_release, subtree_retain, subtree_size, subtree_symbol,
-    subtree_to_mut_unsafe, subtree_total_size, ts_language_next_state, DisplayCStr,
-    ExternalScannerState, Length, StackVersion, Subtree, TSParser, TSStateId, TSSymbol, TableEntry,
-    Write, ERROR_STATE, NULL_SUBTREE, TS_BUILTIN_SYM_END, TS_BUILTIN_SYM_ERROR,
+    external_scanner_state_eq, language_full, language_has_actions, language_is_reserved_word,
+    language_lex_mode_for_state, language_table_entry, length_sub, length_zero, lexer_advance,
+    lexer_finish, lexer_is_eof, lexer_reset, lexer_start, parser_call_keyword_lex_fn,
+    parser_call_main_lex_fn, parser_external_scanner_deserialize, parser_external_scanner_scan,
+    parser_external_scanner_serialize, parser_log, parser_log_lookahead, parser_symbol_name,
+    ptr_ref, stack_has_advanced_since_error, stack_last_external_token, stack_position,
+    subtree_child_count, subtree_external_scanner_state_eq, subtree_is_keyword, subtree_new_error,
+    subtree_new_leaf, subtree_parse_state, subtree_release, subtree_retain,
+    subtree_set_external_scanner_state, subtree_size, subtree_symbol, subtree_to_mut_unsafe,
+    subtree_total_size, ts_language_next_state, DisplayCStr, Length, StackVersion, Subtree,
+    TSParser, TSStateId, TSSymbol, TableEntry, Write, ERROR_STATE, NULL_SUBTREE,
+    TS_BUILTIN_SYM_END, TS_BUILTIN_SYM_ERROR,
 };
 
 // ---------------------------------------------------------------------------
@@ -162,13 +162,8 @@ unsafe fn parser_new_leaf_lookahead(
 
     if found_external_token {
         let mut_result = subtree_to_mut_unsafe(result);
-        let external_scanner_state =
-            ptr::addr_of_mut!((*mut_result.ptr).data.external_scanner_state)
-                .cast::<ExternalScannerState>()
-                .as_mut()
-                .unwrap_unchecked();
-        external_scanner_state_init(
-            external_scanner_state,
+        subtree_set_external_scanner_state(
+            mut_result,
             self_.lexer.debug_buffer.as_ptr(),
             external_scanner_state_len,
         );

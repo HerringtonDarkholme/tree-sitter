@@ -227,7 +227,7 @@ unsafe fn tree_cursor_is_entry_visible(self_: &TreeCursor, index: u32) -> bool {
         let parent_entry = entries.get_unchecked((index - 1) as usize);
         return language_alias_at(
             (*self_.tree).language,
-            u32::from((*(*parent_entry.subtree).ptr).data.children.production_id),
+            u32::from((*(*parent_entry.subtree).ptr).children().production_id),
             entry.structural_child_index,
         ) != 0;
     }
@@ -251,7 +251,7 @@ unsafe fn tree_cursor_iterate_children(self_: &TreeCursor) -> CursorChildIterato
     }
     let alias_sequence = language_alias_sequence(
         (*self_.tree).language,
-        u32::from((*(*last_entry.subtree).ptr).data.children.production_id),
+        u32::from((*(*last_entry.subtree).ptr).children().production_id),
     );
 
     let mut descendant_index = last_entry.descendant_index;
@@ -789,7 +789,7 @@ pub unsafe extern "C" fn ts_tree_cursor_parent_node(self_: *const TSTreeCursor) 
             let parent_entry = entries.get_unchecked(i as usize - 1);
             alias_symbol = language_alias_at(
                 (*cursor.tree).language,
-                u32::from((*(*parent_entry.subtree).ptr).data.children.production_id),
+                u32::from((*(*parent_entry.subtree).ptr).children().production_id),
                 entry.structural_child_index,
             );
             is_visible = alias_symbol != 0 || subtree_visible(*entry.subtree);

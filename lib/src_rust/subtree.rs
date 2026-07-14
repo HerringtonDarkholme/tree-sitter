@@ -238,7 +238,7 @@ pub struct SubtreeHeapData {
     /// bit 9: `is_missing`, bit 10: `is_keyword`
     pub flags: u16,
 
-    // Anonymous union: children-info / external_scanner_state / lookahead_char
+    /// Payload selected explicitly by node kind.
     pub data: SubtreeHeapDataContent,
 }
 
@@ -361,13 +361,10 @@ impl SubtreeHeapData {
     }
 }
 
-pub union SubtreeHeapDataContent {
-    /// Aggregate child metadata for internal nodes.
-    pub children: SubtreeChildrenData,
-    /// Serialized scanner state for external-token leaves.
-    pub external_scanner_state: core::mem::ManuallyDrop<ExternalScannerState>,
-    /// First skipped character for error leaves.
-    pub lookahead_char: i32,
+pub enum SubtreeHeapDataContent {
+    Children(SubtreeChildrenData),
+    ExternalScannerState(ExternalScannerState),
+    LookaheadChar(i32),
 }
 
 #[derive(Clone, Copy)]
@@ -384,6 +381,43 @@ pub struct SubtreeChildrenData {
     pub repeat_depth: u16,
     /// Production id used for fields and aliases.
     pub production_id: u16,
+}
+
+impl SubtreeHeapData {
+    pub const fn children(&self) -> &SubtreeChildrenData {
+        let SubtreeHeapDataContent::Children(children) = &self.data else {
+            panic!("internal subtree must contain child metadata")
+        };
+        children
+    }
+
+    pub fn children_mut(&mut self) -> &mut SubtreeChildrenData {
+        let SubtreeHeapDataContent::Children(children) = &mut self.data else {
+            panic!("internal subtree must contain child metadata")
+        };
+        children
+    }
+
+    pub const fn external_scanner_state(&self) -> &ExternalScannerState {
+        let SubtreeHeapDataContent::ExternalScannerState(state) = &self.data else {
+            panic!("external-token leaf must contain scanner state")
+        };
+        state
+    }
+
+    pub fn external_scanner_state_mut(&mut self) -> &mut ExternalScannerState {
+        let SubtreeHeapDataContent::ExternalScannerState(state) = &mut self.data else {
+            panic!("external-token leaf must contain scanner state")
+        };
+        state
+    }
+
+    pub const fn lookahead_char(&self) -> i32 {
+        let SubtreeHeapDataContent::LookaheadChar(character) = &self.data else {
+            panic!("error leaf must contain its lookahead character")
+        };
+        *character
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -466,11 +500,7 @@ static EMPTY_EXTERNAL_SCANNER_STATE: ExternalScannerState = ExternalScannerState
 
 // External scanner state
 
-pub unsafe fn external_scanner_state_init(
-    self_: &mut ExternalScannerState,
-    data: *const u8,
-    length: u32,
-) {
+pub unsafe fn external_scanner_state_new(data: *const u8, length: u32) -> ExternalScannerState {
     let state = if length > EXTERNAL_SCANNER_STATE_INLINE_SIZE as u32 {
         let bytes = NonNull::new_unchecked(malloc(length as usize).cast::<u8>());
         ptr::copy_nonoverlapping(data, bytes.as_ptr(), length as usize);
@@ -480,13 +510,10 @@ pub unsafe fn external_scanner_state_init(
         ptr::copy_nonoverlapping(data, bytes.as_mut_ptr(), length as usize);
         ExternalScannerStateData::Inline(bytes)
     };
-    ptr::write(
-        self_,
-        ExternalScannerState {
-            data: state,
-            length,
-        },
-    );
+    ExternalScannerState {
+        data: state,
+        length,
+    }
 }
 
 pub unsafe fn external_scanner_state_copy(self_: &ExternalScannerState) -> ExternalScannerState {
@@ -849,7 +876,7 @@ pub unsafe fn subtree_repeat_depth(self_: Subtree) -> u32 {
     if self_.data.is_inline() {
         0
     } else {
-        u32::from((*self_.ptr).data.children.repeat_depth)
+        u32::from((*self_.ptr).children().repeat_depth)
     }
 }
 
@@ -869,14 +896,14 @@ pub const unsafe fn subtree_visible_descendant_count(self_: Subtree) -> u32 {
     if self_.data.is_inline() || (*self_.ptr).child_count == 0 {
         0
     } else {
-        (*self_.ptr).data.children.visible_descendant_count
+        (*self_.ptr).children().visible_descendant_count
     }
 }
 
 #[inline]
 pub const unsafe fn subtree_visible_child_count(self_: Subtree) -> u32 {
     if subtree_child_count(self_) > 0 {
-        (*self_.ptr).data.children.visible_child_count
+        (*self_.ptr).children().visible_child_count
     } else {
         0
     }
@@ -902,14 +929,14 @@ pub const unsafe fn subtree_dynamic_precedence(self_: Subtree) -> i32 {
     if self_.data.is_inline() || (*self_.ptr).child_count == 0 {
         0
     } else {
-        (*self_.ptr).data.children.dynamic_precedence
+        (*self_.ptr).children().dynamic_precedence
     }
 }
 
 #[inline]
 pub const unsafe fn subtree_production_id(self_: Subtree) -> u16 {
     if subtree_child_count(self_) > 0 {
-        (*self_.ptr).data.children.production_id
+        (*self_.ptr).children().production_id
     } else {
         0
     }
@@ -1064,15 +1091,13 @@ pub unsafe fn subtree_new_leaf(
                 false,
                 is_keyword,
             ),
-            data: SubtreeHeapDataContent {
-                children: SubtreeChildrenData {
-                    visible_child_count: 0,
-                    named_child_count: 0,
-                    visible_descendant_count: 0,
-                    dynamic_precedence: 0,
-                    repeat_depth: 0,
-                    production_id: 0,
-                },
+            data: if has_external_tokens {
+                SubtreeHeapDataContent::ExternalScannerState(ExternalScannerState {
+                    data: ExternalScannerStateData::Inline([0; EXTERNAL_SCANNER_STATE_INLINE_SIZE]),
+                    length: 0,
+                })
+            } else {
+                SubtreeHeapDataContent::LookaheadChar(0)
             },
         };
         Subtree { ptr: data }
@@ -1102,8 +1127,7 @@ pub unsafe fn subtree_new_error(
         false,
         language,
     );
-    let data = result.ptr.cast_mut();
-    (*data).data.lookahead_char = lookahead_char;
+    (*result.ptr.cast_mut()).data = SubtreeHeapDataContent::LookaheadChar(lookahead_char);
     result
 }
 
@@ -1112,11 +1136,7 @@ pub unsafe fn subtree_clone(self_: Subtree) -> MutableSubtree {
     let alloc_size = subtree_alloc_size(data.child_count);
     let new_children = malloc(alloc_size).cast::<Subtree>();
     let old_children = subtree_children(self_);
-    ptr::copy_nonoverlapping(
-        old_children.cast::<u8>(),
-        new_children.cast::<u8>(),
-        alloc_size,
-    );
+    ptr::copy_nonoverlapping(old_children, new_children, data.child_count as usize);
     let result = new_children
         .add(data.child_count as usize)
         .cast::<SubtreeHeapData>();
@@ -1124,12 +1144,31 @@ pub unsafe fn subtree_clone(self_: Subtree) -> MutableSubtree {
         for i in 0..data.child_count {
             subtree_retain(*new_children.add(i as usize));
         }
-    } else if data.has_external_tokens() {
-        (*result).data.external_scanner_state = core::mem::ManuallyDrop::new(
-            external_scanner_state_copy(&data.data.external_scanner_state),
-        );
     }
-    (*result).ref_count = 1;
+    let content = match &data.data {
+        SubtreeHeapDataContent::Children(children) => SubtreeHeapDataContent::Children(*children),
+        SubtreeHeapDataContent::ExternalScannerState(state) => {
+            SubtreeHeapDataContent::ExternalScannerState(external_scanner_state_copy(state))
+        }
+        SubtreeHeapDataContent::LookaheadChar(character) => {
+            SubtreeHeapDataContent::LookaheadChar(*character)
+        }
+    };
+    ptr::write(
+        result,
+        SubtreeHeapData {
+            ref_count: 1,
+            padding: data.padding,
+            size: data.size,
+            lookahead_bytes: data.lookahead_bytes,
+            error_cost: data.error_cost,
+            child_count: data.child_count,
+            symbol: data.symbol,
+            parse_state: data.parse_state,
+            flags: data.flags,
+            data: content,
+        },
+    );
     MutableSubtree { ptr: result }
 }
 
@@ -1161,16 +1200,14 @@ unsafe fn subtree_init_node_data(
             false,
             false,
         ),
-        data: SubtreeHeapDataContent {
-            children: SubtreeChildrenData {
-                visible_child_count: 0,
-                named_child_count: 0,
-                visible_descendant_count: 0,
-                dynamic_precedence: 0,
-                repeat_depth: 0,
-                production_id: production_id as u16,
-            },
-        },
+        data: SubtreeHeapDataContent::Children(SubtreeChildrenData {
+            visible_child_count: 0,
+            named_child_count: 0,
+            visible_descendant_count: 0,
+            dynamic_precedence: 0,
+            repeat_depth: 0,
+            production_id: production_id as u16,
+        }),
     };
     MutableSubtree { ptr: data }
 }
@@ -1313,10 +1350,7 @@ pub unsafe fn subtree_release(pool: &mut SubtreePool, self_: Subtree) {
             free(children.as_ptr().cast_mut().cast::<c_void>());
         } else {
             if (*tree.ptr).has_external_tokens() {
-                let external_scanner_state =
-                    ptr::addr_of_mut!((*tree.ptr).data.external_scanner_state)
-                        .cast::<ExternalScannerState>();
-                external_scanner_state_delete(ptr_mut(external_scanner_state));
+                external_scanner_state_delete((*tree.ptr).external_scanner_state_mut());
             }
             subtree_pool_free(pool, tree);
         }
@@ -1384,19 +1418,19 @@ pub unsafe fn subtree_summarize_children(self_: MutableSubtree, language: *const
     debug_assert!(!self_.data.is_inline());
 
     let data = mutable_subtree_data_mut(self_);
-    data.data.children.named_child_count = 0;
-    data.data.children.visible_child_count = 0;
+    data.children_mut().named_child_count = 0;
+    data.children_mut().visible_child_count = 0;
     data.error_cost = 0;
-    data.data.children.repeat_depth = 0;
-    data.data.children.visible_descendant_count = 0;
+    data.children_mut().repeat_depth = 0;
+    data.children_mut().visible_descendant_count = 0;
     data.set_has_external_tokens(false);
     data.set_depends_on_column(false);
     data.set_has_external_scanner_state_change(false);
-    data.data.children.dynamic_precedence = 0;
+    data.children_mut().dynamic_precedence = 0;
 
     let mut structural_index: u32 = 0;
     let alias_sequence =
-        language_alias_sequence(language, u32::from(data.data.children.production_id));
+        language_alias_sequence(language, u32::from(data.children().production_id));
     let mut lookahead_end_byte: u32 = 0;
 
     let children = subtree_children_slice(subtree_from_mut(self_));
@@ -1437,35 +1471,34 @@ pub unsafe fn subtree_summarize_children(self_: MutableSubtree, language: *const
                 data.error_cost += ERROR_COST_PER_SKIPPED_TREE;
             } else if grandchild_count > 0 {
                 data.error_cost +=
-                    ERROR_COST_PER_SKIPPED_TREE * (*child.ptr).data.children.visible_child_count;
+                    ERROR_COST_PER_SKIPPED_TREE * (*child.ptr).children().visible_child_count;
             }
         }
 
-        data.data.children.dynamic_precedence += subtree_dynamic_precedence(child);
-        data.data.children.visible_descendant_count += subtree_visible_descendant_count(child);
+        data.children_mut().dynamic_precedence += subtree_dynamic_precedence(child);
+        data.children_mut().visible_descendant_count += subtree_visible_descendant_count(child);
 
         if !subtree_extra(child)
             && subtree_symbol(child) != 0
             && !alias_sequence.is_null()
             && *alias_sequence.add(structural_index as usize) != 0
         {
-            data.data.children.visible_descendant_count += 1;
-            data.data.children.visible_child_count += 1;
+            data.children_mut().visible_descendant_count += 1;
+            data.children_mut().visible_child_count += 1;
             if ts_language_symbol_metadata(language, *alias_sequence.add(structural_index as usize))
                 .named
             {
-                data.data.children.named_child_count += 1;
+                data.children_mut().named_child_count += 1;
             }
         } else if subtree_visible(child) {
-            data.data.children.visible_descendant_count += 1;
-            data.data.children.visible_child_count += 1;
+            data.children_mut().visible_descendant_count += 1;
+            data.children_mut().visible_child_count += 1;
             if subtree_named(child) {
-                data.data.children.named_child_count += 1;
+                data.children_mut().named_child_count += 1;
             }
         } else if grandchild_count > 0 {
-            data.data.children.visible_child_count +=
-                (*child.ptr).data.children.visible_child_count;
-            data.data.children.named_child_count += (*child.ptr).data.children.named_child_count;
+            data.children_mut().visible_child_count += (*child.ptr).children().visible_child_count;
+            data.children_mut().named_child_count += (*child.ptr).children().named_child_count;
         }
 
         if subtree_has_external_tokens(child) {
@@ -1499,9 +1532,9 @@ pub unsafe fn subtree_summarize_children(self_: MutableSubtree, language: *const
             && subtree_symbol(first_child) == data.symbol
         {
             if subtree_repeat_depth(first_child) > subtree_repeat_depth(last_child) {
-                data.data.children.repeat_depth = (subtree_repeat_depth(first_child) + 1) as u16;
+                data.children_mut().repeat_depth = (subtree_repeat_depth(first_child) + 1) as u16;
             } else {
-                data.data.children.repeat_depth = (subtree_repeat_depth(last_child) + 1) as u16;
+                data.children_mut().repeat_depth = (subtree_repeat_depth(last_child) + 1) as u16;
             }
         }
     }
@@ -1585,10 +1618,22 @@ pub unsafe fn subtree_external_scanner_state(self_: &Subtree) -> &ExternalScanne
 
     let data = subtree_data_ref(*self_);
     if data.has_external_tokens() && data.child_count == 0 {
-        &data.data.external_scanner_state
+        data.external_scanner_state()
     } else {
         &EMPTY_EXTERNAL_SCANNER_STATE
     }
+}
+
+pub unsafe fn subtree_set_external_scanner_state(
+    self_: MutableSubtree,
+    bytes: *const u8,
+    length: u32,
+) {
+    let data = mutable_subtree_data_mut(self_);
+    debug_assert_eq!(data.child_count, 0);
+    debug_assert!(data.has_external_tokens());
+    data.data =
+        SubtreeHeapDataContent::ExternalScannerState(external_scanner_state_new(bytes, length));
 }
 
 pub unsafe fn subtree_external_scanner_state_eq(self_: &Subtree, other: &Subtree) -> bool {

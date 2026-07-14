@@ -221,7 +221,7 @@ impl DiffIterator {
             let parent = *parent_entry.subtree;
             return language_alias_at(
                 self.language,
-                u32::from((*parent.ptr).data.children.production_id),
+                u32::from((*parent.ptr).children().production_id),
                 entry.structural_child_index,
             ) != 0;
         }
@@ -252,7 +252,7 @@ impl DiffIterator {
                 let parent = entries.get_unchecked((i - 1) as usize).subtree;
                 result.alias_symbol = language_alias_at(
                     self.language,
-                    u32::from((*(*parent).ptr).data.children.production_id),
+                    u32::from((*(*parent).ptr).children().production_id),
                     entry.structural_child_index,
                 );
             }

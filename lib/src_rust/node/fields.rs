@@ -11,7 +11,7 @@ unsafe fn node_field_name_from_language(node: TSNode, structural_child_index: u3
     let mut field_map_end: *const TSFieldMapEntry = ptr::null();
     language_field_map(
         node_language(node),
-        u32::from((*node_subtree(node).ptr).data.children.production_id),
+        u32::from((*node_subtree(node).ptr).children().production_id),
         &mut field_map,
         &mut field_map_end,
     );
