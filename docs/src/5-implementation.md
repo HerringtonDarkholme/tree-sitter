@@ -100,6 +100,33 @@ The distinction is:
 - a **subtree** records the syntax already recognized on the way to that
   state.
 
+A textbook LR stack is often written as alternating states and grammar
+symbols:
+
+```text
+state 0, number, state 4, "+", state 7, number, state 4
+```
+
+For syntax-tree construction, each grammar symbol also needs a value. In
+Tree-sitter that value is its subtree, so the same stack is better read as:
+
+```text
+state 0,
+    (number subtree for "1", state 4),
+    ("+" subtree,             state 7),
+    (number subtree for "2", state 4)
+```
+
+Each pair says: “starting in the previous state, recognizing this subtree led
+to the next state.” The state does not contain the subtree. State 4 might be
+reached after many different numbers at many source positions; it only
+summarizes which actions are legal next.
+
+A useful analogy is a program counter and a runtime value. The LR state is like
+the program counter: it selects the next instruction. The subtree is like the
+value being carried through that execution. Reaching the same instruction
+does not imply that two executions carry the same value.
+
 A shifted token produces a leaf subtree. For example, after shifting the
 tokens in `1 + 2`, one parse path conceptually contains:
 
@@ -110,8 +137,16 @@ state 0 -- "1" --> state 4 -- "+" --> state 7 -- "2" --> state 4
 ```
 
 The real graph-structured stack stores states in stack nodes and subtrees on
-the links between them. A linear LR stack can be pictured the same way; it
-simply has one predecessor link at each node.
+the links between them. The pointer on a link faces backward, so the operation
+“state 0 recognizes `number "1"` and reaches state 4” is stored as:
+
+```text
+node(state 4) -- number subtree "1" --> node(state 0)
+```
+
+Reading the arrow backward reconstructs the parse history. A linear LR stack
+has one predecessor link at each node. GLR permits several links when several
+histories reach a compatible current state.
 
 When the parser reduces `expression + expression` to `expression`, it pops the
 three corresponding subtrees, makes a parent subtree containing them, and

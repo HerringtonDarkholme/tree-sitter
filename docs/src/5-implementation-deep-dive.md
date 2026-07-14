@@ -557,6 +557,72 @@ StackLink
   subtree                       syntax recognized along this edge
 ```
 
+### First translate a textbook LR stack
+
+A conventional LR stack alternates states with recognized grammar symbols:
+
+```text
+state 1, expression, state 6, "+", state 3, expression, state 8
+```
+
+An implementation that builds a syntax tree needs a semantic value for every
+recognized symbol. Tree-sitter uses a `Subtree` as that value:
+
+```text
+state 1,
+    (subtree expression("1"), state 6),
+    (subtree "+",             state 3),
+    (subtree expression("2"), state 8)
+```
+
+The repeated unit is therefore not just a state. It is:
+
+```text
+(recognized subtree, state reached after recognizing it)
+```
+
+The subtree already stores its grammar symbol, so `StackLink` does not need a
+separate symbol field. A token shift supplies a leaf subtree. A reduction
+supplies the newly constructed parent subtree. `stack_push` handles both in
+the same representation.
+
+Tree-sitter represents that pair with a new `StackNode` containing a
+`StackLink`. In simplified pseudocode, `stack_push` performs:
+
+```text
+previous = head.node
+current = StackNode {
+    state: next_state,
+    links: [StackLink {
+        node: previous,
+        subtree: recognized_subtree,
+    }],
+}
+head.node = current
+```
+
+The graph stores predecessor pointers, so its physical arrow points opposite
+the logical parse transition:
+
+```text
+logical LR transition:
+
+    state 3 -- recognize expression("2") --> state 8
+
+stored predecessor link:
+
+    node(state 8) -- expression("2") --> node(state 3)
+```
+
+The link answers both questions needed during a later reduction:
+
+1. Which earlier parser configuration preceded this one?
+2. Which syntax value was recognized between the two configurations?
+
+The state alone cannot answer the second question. State 8 is a generated
+automaton state; many source fragments and many different subtree allocations
+can reach it.
+
 Edges point backward, from a newer state to its predecessor:
 
 ```text
@@ -575,9 +641,56 @@ state 6
 state 1
 ```
 
-The subtree belongs to the transition, not to either state. This matches the
-LR idea that a semantic value is pushed together with the state reached after
-recognizing it.
+When this chapter says that a subtree “belongs to the transition,” it means
+that the subtree logically labels the step between two states and is stored in
+`StackLink`. It does not mean that the subtree's final lifetime owner is always
+the link. While parsing, the link owns a subtree handle; after reduction, a
+parent subtree owns child handles; after acceptance, `TSTree` owns the root.
+
+### Why GLR needs values on links
+
+In deterministic LR, every stack node has one predecessor, so a subtree could
+appear to fit beside the state. GLR exposes why that model is misleading.
+Two histories can reach the same state and input position with different
+recognized syntax:
+
+```text
+logical forward paths
+
+predecessor A -- subtree X --> current state S
+predecessor B -- subtree Y --> current state S
+```
+
+After `stack_merge`, one current node can preserve both histories as links:
+
+```text
+                         head
+                           |
+                           v
+                    StackNode(state S)
+                      /             \
+          subtree X  /               \  subtree Y
+                    v                 v
+          predecessor A         predecessor B
+```
+
+If `StackNode(state S)` had one subtree field, the merge would have to discard
+`X`, discard `Y`, or duplicate the current state node. Link labels allow the
+parser configuration to be shared while keeping both semantic histories.
+
+This becomes concrete during reduction. Popping one transition from the
+merged node returns two possible slices:
+
+```text
+pop one grammar child
+
+path through link X -> StackSlice { predecessor A, children: [X] }
+path through link Y -> StackSlice { predecessor B, children: [Y] }
+```
+
+Popping several children repeats this at every branch. Each resulting path
+contains exactly the edge-label subtrees needed to construct one candidate
+parent.
 
 ### Push is persistent
 
