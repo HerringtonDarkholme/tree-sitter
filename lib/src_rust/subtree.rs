@@ -141,6 +141,19 @@ fn set_u8_flag(flags: &mut u8, mask: u8, value: bool) {
 }
 
 impl SubtreeInlineData {
+    /// Whether these bytes represent the null subtree rather than an inline or
+    /// allocated subtree.
+    #[inline(always)]
+    pub const fn is_null(self) -> bool {
+        self.flags == 0
+            && self.symbol == 0
+            && self.parse_state == 0
+            && self.padding_columns == 0
+            && self.rows_and_lookahead == 0
+            && self.padding_bytes == 0
+            && self.size_bytes == 0
+    }
+
     #[inline(always)]
     pub const fn is_inline(self) -> bool {
         self.flags & INLINE_IS_INLINE != 0
@@ -449,18 +462,14 @@ impl Subtree {
         }
     }
 
-    const fn raw_heap_ptr(self) -> *const SubtreeHeapData {
-        unsafe { core::mem::transmute::<SubtreeInlineData, *const SubtreeHeapData>(self.data) }
-    }
-
     /// Recover the allocation address from a non-inline, non-null handle.
     const unsafe fn heap_ptr(self) -> NonNull<SubtreeHeapData> {
-        NonNull::new_unchecked(self.raw_heap_ptr().cast_mut())
+        core::mem::transmute::<SubtreeInlineData, NonNull<SubtreeHeapData>>(self.data)
     }
 
     /// Whether this handle is the null subtree sentinel.
-    pub fn is_null(self) -> bool {
-        self.raw_heap_ptr().is_null()
+    pub const fn is_null(self) -> bool {
+        self.data.is_null()
     }
 
     /// Borrow the heap node represented by this non-inline handle.
@@ -843,9 +852,7 @@ impl MutableSubtree {
     }
 
     const unsafe fn heap_ptr(self) -> NonNull<SubtreeHeapData> {
-        NonNull::new_unchecked(unsafe {
-            core::mem::transmute::<SubtreeInlineData, *mut SubtreeHeapData>(self.data)
-        })
+        core::mem::transmute::<SubtreeInlineData, NonNull<SubtreeHeapData>>(self.data)
     }
 
     /// Borrow the heap node represented by this mutable handle.
