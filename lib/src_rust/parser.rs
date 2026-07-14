@@ -755,74 +755,8 @@ unsafe fn parser_condense_stack(self_: &mut TSParser) -> u32 {
     min_error_cost
 }
 
-/// Incrementally rebalance the accepted tree, preserving work across cancellation.
-unsafe fn parser_balance_subtree(parser: &mut TSParser) -> bool {
-    let finished_tree = parser.finished_tree;
-
-    if !parser.canceled_balancing {
-        array_clear(&mut parser.tree_pool.tree_stack);
-        if subtree_child_count(finished_tree) > 0 && finished_tree.heap_data().ref_count() == 1 {
-            array_push(
-                &mut parser.tree_pool.tree_stack,
-                subtree_to_mut_unsafe(finished_tree),
-            );
-        }
-    }
-
-    while !parser.tree_pool.tree_stack.is_empty() {
-        if !parser_check_progress(parser, None, None, 1) {
-            return false;
-        }
-
-        let tree = *parser
-            .tree_pool
-            .tree_stack
-            .as_slice()
-            .last()
-            .unwrap_unchecked();
-
-        if tree.heap_data().children().repeat_depth > 0 {
-            let tree_subtree = subtree_from_mut(tree);
-            let children = subtree_children_slice(tree_subtree);
-            let child1 = *children.get_unchecked(0);
-            let child2 = *children.get_unchecked(tree.heap_data().child_count as usize - 1);
-            let repeat_delta =
-                i64::from(subtree_repeat_depth(child1)) - i64::from(subtree_repeat_depth(child2));
-            if repeat_delta > 0 {
-                let n = repeat_delta as u32;
-
-                let mut i = n / 2;
-                while i > 0 {
-                    subtree_compress(tree, i, parser.language, &mut parser.tree_pool.tree_stack);
-
-                    // We scale the operation count increment in `parser_check_progress` proportionately to the compression
-                    // size since larger values of i take longer to process. Shifting by 4 empirically provides good check
-                    // intervals (e.g. 193 operations when i=3100) to prevent blocking during large compressions.
-                    let operations = if i >> 4 > 0 { i >> 4 } else { 1 };
-                    if !parser_check_progress(parser, None, None, operations) {
-                        return false;
-                    }
-                    i /= 2;
-                }
-            }
-        }
-
-        array_pop(&mut parser.tree_pool.tree_stack);
-
-        for i in 0..tree.heap_data().child_count {
-            let tree_subtree = subtree_from_mut(tree);
-            let child = *subtree_child(tree_subtree, i);
-            if subtree_child_count(child) > 0 && child.heap_data().ref_count() == 1 {
-                array_push(
-                    &mut parser.tree_pool.tree_stack,
-                    subtree_to_mut_unsafe(child),
-                );
-            }
-        }
-    }
-
-    true
-}
+mod balancing;
+use balancing::parser_balance_subtree;
 
 unsafe fn parser_has_outstanding_parse(self_: &TSParser) -> bool {
     self_.canceled_balancing
