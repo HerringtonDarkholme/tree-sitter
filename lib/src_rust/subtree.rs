@@ -90,15 +90,16 @@ enum ExternalScannerStateData {
 // SubtreeInlineData — bitfield-packed inline node
 // ---------------------------------------------------------------------------
 
-/// Compact data stored by the `Subtree::Inline` variant.
+/// Compact inline representation of a subtree (fits in a pointer-sized word).
 ///
-/// Flags and the two four-bit counters are packed so an inline subtree's
-/// payload remains eight bytes. This layout is internal and is not part of the
-/// C ABI.
+/// The first bit overlaps the low bit of the union's pointer arm. Allocator
+/// alignment keeps that bit clear for heap subtrees, so it distinguishes an
+/// inline subtree without making the handle larger than a pointer.
+#[repr(C)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct SubtreeInlineData {
-    /// Packed `visible`, `named`, `extra`, `has_changes`, `is_missing`, and
-    /// `is_keyword` flags.
+    /// Packed `is_inline`, `visible`, `named`, `extra`, `has_changes`,
+    /// `is_missing`, and `is_keyword` flags.
     pub flags: u8,
     pub symbol: u8,
     pub parse_state: u16,
@@ -109,12 +110,13 @@ pub struct SubtreeInlineData {
     pub size_bytes: u8,
 }
 
-const INLINE_VISIBLE: u8 = 1 << 0;
-const INLINE_NAMED: u8 = 1 << 1;
-const INLINE_EXTRA: u8 = 1 << 2;
-const INLINE_HAS_CHANGES: u8 = 1 << 3;
-const INLINE_IS_MISSING: u8 = 1 << 4;
-const INLINE_IS_KEYWORD: u8 = 1 << 5;
+const INLINE_IS_INLINE: u8 = 1 << 0;
+const INLINE_VISIBLE: u8 = 1 << 1;
+const INLINE_NAMED: u8 = 1 << 2;
+const INLINE_EXTRA: u8 = 1 << 3;
+const INLINE_HAS_CHANGES: u8 = 1 << 4;
+const INLINE_IS_MISSING: u8 = 1 << 5;
+const INLINE_IS_KEYWORD: u8 = 1 << 6;
 
 #[inline(always)]
 fn set_u8_flag(flags: &mut u8, mask: u8, value: bool) {
@@ -126,6 +128,20 @@ fn set_u8_flag(flags: &mut u8, mask: u8, value: bool) {
 }
 
 impl SubtreeInlineData {
+    const fn is_zero(self) -> bool {
+        self.flags == 0
+            && self.symbol == 0
+            && self.parse_state == 0
+            && self.padding_columns == 0
+            && self.rows_and_lookahead == 0
+            && self.padding_bytes == 0
+            && self.size_bytes == 0
+    }
+
+    #[inline(always)]
+    pub const fn is_inline(self) -> bool {
+        self.flags & INLINE_IS_INLINE != 0
+    }
     #[inline(always)]
     pub const fn visible(self) -> bool {
         self.flags & INLINE_VISIBLE != 0
@@ -407,26 +423,49 @@ impl SubtreeHeapData {
 // Subtree / MutableSubtree
 // ---------------------------------------------------------------------------
 
-/// Internal syntax-tree handle.
+/// Compact syntax-tree handle matching the C runtime's representation.
 ///
-/// Public `TSNode` values contain only an opaque pointer to this handle, so its
-/// Rust layout is not part of the C ABI.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum Subtree {
-    /// Sentinel used when no subtree is present.
-    Null,
-    /// Small leaf stored directly in the handle.
-    Inline(SubtreeInlineData),
-    /// Shared, reference-counted subtree allocation.
-    Heap(NonNull<SubtreeHeapData>),
+/// The inline arm and pointer arm intentionally overlap. Call `is_inline`
+/// before reading either representation; all union access stays in this impl.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub union Subtree {
+    data: SubtreeInlineData,
+    ptr: *const SubtreeHeapData,
 }
 
 /// Handle used when subtree mutation may be required.
 ///
 /// The intrusive reference count means this wrapper does not itself prove
 /// uniqueness; callers establish uniqueness before invoking mutation methods.
+#[repr(C)]
 #[derive(Clone, Copy)]
-pub struct MutableSubtree(Subtree);
+pub union MutableSubtree {
+    data: SubtreeInlineData,
+    ptr: *mut SubtreeHeapData,
+}
+
+const EMPTY_SUBTREE_DATA: SubtreeInlineData = SubtreeInlineData {
+    flags: 0,
+    symbol: 0,
+    parse_state: 0,
+    padding_columns: 0,
+    rows_and_lookahead: 0,
+    padding_bytes: 0,
+    size_bytes: 0,
+};
+
+impl PartialEq for Subtree {
+    fn eq(&self, other: &Self) -> bool {
+        match (self.is_inline(), other.is_inline()) {
+            (true, true) => unsafe { self.data == other.data },
+            (false, false) => unsafe { self.ptr == other.ptr },
+            _ => false,
+        }
+    }
+}
+
+impl Eq for Subtree {}
 
 // SAFETY: Heap subtrees are immutable while shared. Their only shared mutation
 // is the atomic reference count. Mutable access is used only after callers have
@@ -436,32 +475,57 @@ unsafe impl Sync for Subtree {}
 unsafe impl Send for MutableSubtree {}
 
 impl Subtree {
-    const fn from_heap(ptr: NonNull<SubtreeHeapData>) -> Self {
-        Self::Heap(ptr)
+    const fn from_inline(data: SubtreeInlineData) -> Self {
+        debug_assert!(data.is_inline());
+        Self { data }
     }
 
-    const fn heap_ptr(self) -> NonNull<SubtreeHeapData> {
-        let Self::Heap(ptr) = self else {
-            panic!("expected heap subtree")
+    const fn from_heap(ptr: NonNull<SubtreeHeapData>) -> Self {
+        Self::from_ptr(ptr.as_ptr())
+    }
+
+    const fn from_ptr(ptr: *const SubtreeHeapData) -> Self {
+        // Initialize the full eight-byte storage before writing the pointer.
+        // This matters on 32-bit targets, where the pointer arm is smaller.
+        let mut result = Self {
+            data: EMPTY_SUBTREE_DATA,
         };
-        ptr
+        result.ptr = ptr;
+        result
+    }
+
+    const unsafe fn heap_ptr(self) -> NonNull<SubtreeHeapData> {
+        debug_assert!(!self.is_inline());
+        NonNull::new_unchecked(self.ptr.cast_mut())
     }
 
     /// Whether this handle is the null subtree sentinel.
     pub const fn is_null(self) -> bool {
-        matches!(self, Self::Null)
+        !self.is_inline() && unsafe { self.data.is_zero() }
     }
 
     /// Whether this leaf is stored directly in the handle.
     pub const fn is_inline(self) -> bool {
-        matches!(self, Self::Inline(_))
+        // SAFETY: All bit patterns are valid for the byte-only inline arm.
+        unsafe { self.data.is_inline() }
+    }
+
+    const fn inline_data(self) -> Option<SubtreeInlineData> {
+        if self.is_inline() {
+            // SAFETY: The tag identifies the active inline representation.
+            Some(unsafe { self.data })
+        } else {
+            None
+        }
     }
 
     fn inline_data_mut(&mut self) -> Option<&mut SubtreeInlineData> {
-        let Self::Inline(data) = self else {
-            return None;
-        };
-        Some(data)
+        if self.is_inline() {
+            // SAFETY: The tag identifies the active inline representation.
+            Some(unsafe { &mut self.data })
+        } else {
+            None
+        }
     }
 
     /// Borrow the heap node represented by this non-inline handle.
@@ -471,88 +535,104 @@ impl Subtree {
 
     #[inline]
     pub unsafe fn symbol(self) -> TSSymbol {
-        match self {
-            Self::Inline(data) => TSSymbol::from(data.symbol),
-            Self::Heap(_) => self.heap_data().symbol,
-            Self::Null => panic!("null subtree has no symbol"),
+        if let Some(data) = self.inline_data() {
+            TSSymbol::from(data.symbol)
+        } else {
+            self.heap_data().symbol
         }
     }
 
     #[inline]
     pub const unsafe fn visible(self) -> bool {
-        match self {
-            Self::Inline(data) => data.visible(),
-            Self::Heap(_) => self.heap_data().visible(),
-            Self::Null => false,
+        if let Some(data) = self.inline_data() {
+            data.visible()
+        } else if self.is_null() {
+            false
+        } else {
+            self.heap_data().visible()
         }
     }
 
     #[inline]
     pub const unsafe fn named(self) -> bool {
-        match self {
-            Self::Inline(data) => data.named(),
-            Self::Heap(_) => self.heap_data().named(),
-            Self::Null => false,
+        if let Some(data) = self.inline_data() {
+            data.named()
+        } else if self.is_null() {
+            false
+        } else {
+            self.heap_data().named()
         }
     }
 
     #[inline]
     pub const unsafe fn extra(self) -> bool {
-        match self {
-            Self::Inline(data) => data.extra(),
-            Self::Heap(_) => self.heap_data().extra(),
-            Self::Null => false,
+        if let Some(data) = self.inline_data() {
+            data.extra()
+        } else if self.is_null() {
+            false
+        } else {
+            self.heap_data().extra()
         }
     }
 
     #[inline]
     pub const unsafe fn has_changes(self) -> bool {
-        match self {
-            Self::Inline(data) => data.has_changes(),
-            Self::Heap(_) => self.heap_data().has_changes(),
-            Self::Null => false,
+        if let Some(data) = self.inline_data() {
+            data.has_changes()
+        } else if self.is_null() {
+            false
+        } else {
+            self.heap_data().has_changes()
         }
     }
 
     #[inline]
     pub const unsafe fn missing(self) -> bool {
-        match self {
-            Self::Inline(data) => data.is_missing(),
-            Self::Heap(_) => self.heap_data().is_missing(),
-            Self::Null => false,
+        if let Some(data) = self.inline_data() {
+            data.is_missing()
+        } else if self.is_null() {
+            false
+        } else {
+            self.heap_data().is_missing()
         }
     }
 
     #[inline]
     pub const unsafe fn is_keyword(self) -> bool {
-        match self {
-            Self::Inline(data) => data.is_keyword(),
-            Self::Heap(_) => self.heap_data().is_keyword(),
-            Self::Null => false,
+        if let Some(data) = self.inline_data() {
+            data.is_keyword()
+        } else if self.is_null() {
+            false
+        } else {
+            self.heap_data().is_keyword()
         }
     }
 
     #[inline]
     pub const unsafe fn parse_state(self) -> TSStateId {
-        match self {
-            Self::Inline(data) => data.parse_state,
-            Self::Heap(_) => self.heap_data().parse_state,
-            Self::Null => TS_TREE_STATE_NONE,
+        if let Some(data) = self.inline_data() {
+            data.parse_state
+        } else if self.is_null() {
+            TS_TREE_STATE_NONE
+        } else {
+            self.heap_data().parse_state
         }
     }
 
     #[inline]
     pub unsafe fn lookahead_bytes(self) -> u32 {
-        match self {
-            Self::Inline(data) => u32::from(data.lookahead_bytes()),
-            Self::Heap(_) => self.heap_data().lookahead_bytes,
-            Self::Null => 0,
+        if let Some(data) = self.inline_data() {
+            u32::from(data.lookahead_bytes())
+        } else if self.is_null() {
+            0
+        } else {
+            self.heap_data().lookahead_bytes
         }
     }
 
     #[inline]
     const unsafe fn children_ptr(self) -> NonNull<Self> {
-        debug_assert!(matches!(self, Self::Heap(_)));
+        debug_assert!(!self.is_inline() && !self.is_null());
         debug_assert!(self.heap_data().child_count > 0);
         NonNull::new_unchecked(
             self.heap_ptr()
@@ -578,7 +658,7 @@ impl Subtree {
 
     #[inline]
     pub unsafe fn padding(self) -> Length {
-        if let Self::Inline(data) = self {
+        if let Some(data) = self.inline_data() {
             Length {
                 bytes: u32::from(data.padding_bytes),
                 extent: TSPoint {
@@ -595,7 +675,7 @@ impl Subtree {
 
     #[inline]
     pub unsafe fn size(self) -> Length {
-        if let Self::Inline(data) = self {
+        if let Some(data) = self.inline_data() {
             Length {
                 bytes: u32::from(data.size_bytes),
                 extent: TSPoint {
@@ -622,15 +702,16 @@ impl Subtree {
 
     #[inline]
     pub const unsafe fn child_count(self) -> u32 {
-        match self {
-            Self::Heap(_) => self.heap_data().child_count,
-            Self::Inline(_) | Self::Null => 0,
+        if self.is_inline() || self.is_null() {
+            0
+        } else {
+            self.heap_data().child_count
         }
     }
 
     #[inline]
     pub unsafe fn repeat_depth(self) -> u32 {
-        if !matches!(self, Self::Heap(_)) || self.heap_data().child_count == 0 {
+        if self.is_inline() || self.is_null() || self.heap_data().child_count == 0 {
             0
         } else {
             u32::from(self.heap_data().children().repeat_depth)
@@ -639,7 +720,7 @@ impl Subtree {
 
     #[inline]
     pub const unsafe fn visible_descendant_count(self) -> u32 {
-        if !matches!(self, Self::Heap(_)) || self.heap_data().child_count == 0 {
+        if self.is_inline() || self.is_null() || self.heap_data().child_count == 0 {
             0
         } else {
             self.heap_data().children().visible_descendant_count
@@ -659,7 +740,7 @@ impl Subtree {
     pub const unsafe fn error_cost(self) -> u32 {
         if self.missing() {
             ERROR_COST_PER_MISSING_TREE + ERROR_COST_PER_RECOVERY
-        } else if !matches!(self, Self::Heap(_)) {
+        } else if self.is_inline() || self.is_null() {
             0
         } else {
             self.heap_data().error_cost
@@ -668,7 +749,7 @@ impl Subtree {
 
     #[inline]
     pub const unsafe fn dynamic_precedence(self) -> i32 {
-        if !matches!(self, Self::Heap(_)) || self.heap_data().child_count == 0 {
+        if self.is_inline() || self.is_null() || self.heap_data().child_count == 0 {
             0
         } else {
             self.heap_data().children().dynamic_precedence
@@ -686,17 +767,17 @@ impl Subtree {
 
     #[inline]
     pub const unsafe fn has_external_tokens(self) -> bool {
-        matches!(self, Self::Heap(_)) && self.heap_data().has_external_tokens()
+        !self.is_inline() && !self.is_null() && self.heap_data().has_external_tokens()
     }
 
     #[inline]
     pub const unsafe fn has_external_scanner_state_change(self) -> bool {
-        matches!(self, Self::Heap(_)) && self.heap_data().has_external_scanner_state_change()
+        !self.is_inline() && !self.is_null() && self.heap_data().has_external_scanner_state_change()
     }
 
     #[inline]
     pub const unsafe fn depends_on_column(self) -> bool {
-        matches!(self, Self::Heap(_)) && self.heap_data().depends_on_column()
+        !self.is_inline() && !self.is_null() && self.heap_data().depends_on_column()
     }
 
     #[inline]
@@ -711,7 +792,13 @@ impl Subtree {
 
     #[inline]
     pub const fn into_mut(self) -> MutableSubtree {
-        MutableSubtree(self)
+        if self.is_inline() {
+            MutableSubtree {
+                data: unsafe { self.data },
+            }
+        } else {
+            MutableSubtree::from_ptr(unsafe { self.ptr.cast_mut() })
+        }
     }
 
     pub unsafe fn clone_mut(self) -> MutableSubtree {
@@ -744,7 +831,7 @@ impl Subtree {
     }
 
     pub unsafe fn make_mut(self, pool: &mut SubtreePool) -> MutableSubtree {
-        if !matches!(self, Self::Heap(_)) {
+        if self.is_inline() || self.is_null() {
             return self.into_mut();
         }
         if self.heap_data().ref_count() == 1 {
@@ -756,7 +843,7 @@ impl Subtree {
     }
 
     pub unsafe fn retain(self) {
-        if !matches!(self, Self::Heap(_)) {
+        if self.is_inline() || self.is_null() {
             return;
         }
         let ref_count = &self.heap_data().ref_count;
@@ -766,7 +853,7 @@ impl Subtree {
     }
 
     pub unsafe fn release(self, pool: &mut SubtreePool) {
-        if !matches!(self, Self::Heap(_)) {
+        if self.is_inline() || self.is_null() {
             return;
         }
         pool.tree_stack.clear();
@@ -839,29 +926,43 @@ impl Subtree {
 
 impl MutableSubtree {
     const fn from_heap(ptr: NonNull<SubtreeHeapData>) -> Self {
-        Self(Subtree::Heap(ptr))
+        Self::from_ptr(ptr.as_ptr())
     }
 
-    const fn heap_ptr(self) -> NonNull<SubtreeHeapData> {
-        self.0.heap_ptr()
+    const fn from_ptr(ptr: *mut SubtreeHeapData) -> Self {
+        let mut result = Self {
+            data: EMPTY_SUBTREE_DATA,
+        };
+        result.ptr = ptr;
+        result
+    }
+
+    const unsafe fn heap_ptr(self) -> NonNull<SubtreeHeapData> {
+        debug_assert!(!self.is_inline());
+        NonNull::new_unchecked(self.ptr)
     }
 
     pub const fn is_inline(self) -> bool {
-        self.0.is_inline()
+        // SAFETY: All bit patterns are valid for the byte-only inline arm.
+        unsafe { self.data.is_inline() }
     }
 
     const fn inline_data(self) -> Option<SubtreeInlineData> {
-        let Subtree::Inline(data) = self.0 else {
-            return None;
-        };
-        Some(data)
+        if self.is_inline() {
+            // SAFETY: The tag identifies the active inline representation.
+            Some(unsafe { self.data })
+        } else {
+            None
+        }
     }
 
     fn inline_data_mut(&mut self) -> Option<&mut SubtreeInlineData> {
-        let Subtree::Inline(data) = &mut self.0 else {
-            return None;
-        };
-        Some(data)
+        if self.is_inline() {
+            // SAFETY: The tag identifies the active inline representation.
+            Some(unsafe { &mut self.data })
+        } else {
+            None
+        }
     }
 
     /// Borrow the heap node represented by this mutable handle.
@@ -896,34 +997,36 @@ impl MutableSubtree {
 
     #[inline]
     pub unsafe fn set_extra(&mut self, is_extra: bool) {
-        match &mut self.0 {
-            Subtree::Inline(data) => data.set_extra(is_extra),
-            Subtree::Heap(ptr) => ptr.as_mut().set_extra(is_extra),
-            Subtree::Null => panic!("cannot mutate null subtree"),
+        if let Some(data) = self.inline_data_mut() {
+            data.set_extra(is_extra);
+        } else {
+            self.heap_data_mut().set_extra(is_extra);
         }
     }
 
     #[inline]
     pub const fn into_immutable(self) -> Subtree {
-        self.0
+        if self.is_inline() {
+            Subtree {
+                data: unsafe { self.data },
+            }
+        } else {
+            Subtree::from_ptr(unsafe { self.ptr.cast_const() })
+        }
     }
 
     pub unsafe fn set_symbol(&mut self, symbol: TSSymbol, language: *const TSLanguage) {
         let metadata = ts_language_symbol_metadata(language, symbol);
-        match &mut self.0 {
-            Subtree::Inline(data) => {
-                debug_assert!(symbol < TSSymbol::from(u8::MAX));
-                data.symbol = symbol as u8;
-                data.set_named(metadata.named);
-                data.set_visible(metadata.visible);
-            }
-            Subtree::Heap(ptr) => {
-                let data = ptr.as_mut();
-                data.symbol = symbol;
-                data.set_named(metadata.named);
-                data.set_visible(metadata.visible);
-            }
-            Subtree::Null => panic!("cannot mutate null subtree"),
+        if let Some(data) = self.inline_data_mut() {
+            debug_assert!(symbol < TSSymbol::from(u8::MAX));
+            data.symbol = symbol as u8;
+            data.set_named(metadata.named);
+            data.set_visible(metadata.visible);
+        } else {
+            let data = self.heap_data_mut();
+            data.symbol = symbol;
+            data.set_named(metadata.named);
+            data.set_visible(metadata.visible);
         }
     }
 
@@ -936,10 +1039,20 @@ impl MutableSubtree {
     }
 }
 
-pub const NULL_SUBTREE: Subtree = Subtree::Null;
+pub const NULL_SUBTREE: Subtree = Subtree::from_ptr(core::ptr::null());
 
-// Keep the inline payload compact. Its field offsets are not an ABI contract.
+// Keep both union arms pointer-sized and preserve the C-compatible byte layout
+// that makes the low-bit inline tag observable through either arm.
 const _: () = assert!(core::mem::size_of::<SubtreeInlineData>() == 8);
+const _: () = assert!(core::mem::offset_of!(SubtreeInlineData, flags) == 0);
+const _: () = assert!(core::mem::offset_of!(SubtreeInlineData, symbol) == 1);
+const _: () = assert!(core::mem::offset_of!(SubtreeInlineData, parse_state) == 2);
+const _: () = assert!(core::mem::offset_of!(SubtreeInlineData, padding_columns) == 4);
+const _: () = assert!(core::mem::offset_of!(SubtreeInlineData, rows_and_lookahead) == 5);
+const _: () = assert!(core::mem::offset_of!(SubtreeInlineData, padding_bytes) == 6);
+const _: () = assert!(core::mem::offset_of!(SubtreeInlineData, size_bytes) == 7);
+const _: () = assert!(core::mem::size_of::<Subtree>() == 8);
+const _: () = assert!(core::mem::size_of::<MutableSubtree>() == 8);
 
 pub type SubtreeArray = Array<Subtree>;
 pub type MutableSubtreeArray = Array<MutableSubtree>;
@@ -1009,13 +1122,14 @@ pub const fn subtree_alloc_size(child_count: u32) -> usize {
 
 #[inline]
 pub unsafe fn subtree_is_repetition(self_: Subtree) -> u32 {
-    match self_ {
-        Subtree::Heap(_) => u32::from(
+    if self_.is_inline() || self_.is_null() {
+        0
+    } else {
+        u32::from(
             !self_.heap_data().named()
                 && !self_.heap_data().visible()
                 && self_.heap_data().child_count != 0,
-        ),
-        Subtree::Inline(_) | Subtree::Null => 0,
+        )
     }
 }
 
@@ -1069,8 +1183,9 @@ pub unsafe fn subtree_new_leaf(
         && subtree_can_inline(padding, size, lookahead_bytes);
 
     if is_inline {
-        Subtree::Inline(SubtreeInlineData {
-            flags: if metadata.visible { INLINE_VISIBLE } else { 0 }
+        Subtree::from_inline(SubtreeInlineData {
+            flags: INLINE_IS_INLINE
+                | if metadata.visible { INLINE_VISIBLE } else { 0 }
                 | if metadata.named { INLINE_NAMED } else { 0 }
                 | if extra { INLINE_EXTRA } else { 0 }
                 | if is_keyword { INLINE_IS_KEYWORD } else { 0 },
@@ -1486,8 +1601,8 @@ mod tests {
     use super::*;
 
     fn inline_leaf(size: u8) -> Subtree {
-        Subtree::Inline(SubtreeInlineData {
-            flags: INLINE_VISIBLE | INLINE_NAMED,
+        Subtree::from_inline(SubtreeInlineData {
+            flags: INLINE_IS_INLINE | INLINE_VISIBLE | INLINE_NAMED,
             symbol: 1,
             parse_state: 1,
             padding_columns: 0,
