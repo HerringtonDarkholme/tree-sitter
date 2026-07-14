@@ -6,8 +6,9 @@
 
 use crate::ffi::{TSInputEdit, TSRange};
 
+use super::super::length::Length;
 use super::super::point::{point_add, point_sub, POINT_MAX};
-use super::{Length, TSRangeArray};
+use super::TSRangeArray;
 
 pub fn range_edit_ref(range: &mut TSRange, edit: &TSInputEdit) {
     if range.end_byte >= edit.old_end_byte {

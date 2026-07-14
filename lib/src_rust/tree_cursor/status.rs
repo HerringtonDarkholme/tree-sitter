@@ -8,12 +8,13 @@ use core::ptr;
 
 use crate::ffi::{TSFieldId, TSLanguage, TSNode, TSSymbol, TSTreeCursor};
 
-use super::super::language::{language_field_map_slice, language_full};
-use super::navigation::tree_cursor_is_entry_visible;
-use super::{
-    cursor_ref, language_alias_at, node_new, out_param_mut, ts_language_symbol_metadata, Subtree,
-    TreeCursorEntry,
+use super::super::language::{
+    language_alias_at, language_field_map_slice, language_full, ts_language_symbol_metadata,
 };
+use super::super::node::node_new;
+use super::super::subtree::Subtree;
+use super::navigation::tree_cursor_is_entry_visible;
+use super::{cursor_ref, out_param_mut, TreeCursorEntry};
 
 // ---------------------------------------------------------------------------
 // Node info & copy

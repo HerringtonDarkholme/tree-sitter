@@ -6,11 +6,14 @@
 //! Named-child operations use the same traversal with anonymous symbols
 //! filtered out.
 
+use crate::ffi::{TSNode, TSPoint};
+
+use super::super::point::{point_eq, point_gt, point_lt, point_lte};
+use super::super::subtree::Subtree;
 use super::{
     node_child_count, node_child_iterator_next, node_end_byte, node_is_null, node_is_relevant,
     node_iterate_children, node_null, node_relevant_child_count, node_start_byte, node_start_point,
-    node_subtree, point_eq, point_gt, point_lt, point_lte, ts_node_parent, NodeChildIterator,
-    Subtree, TSNode, TSPoint,
+    node_subtree, ts_node_parent, NodeChildIterator,
 };
 
 pub(super) unsafe fn node_child(

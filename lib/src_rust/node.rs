@@ -17,12 +17,12 @@ use core::ptr;
 use crate::ffi::{TSFieldId, TSInputEdit, TSLanguage, TSNode, TSPoint, TSStateId, TSSymbol};
 
 use super::language::{
-    language_alias_sequence_slice, language_field_map_slice, language_full, language_public_symbol,
+    language_alias_sequence_slice, language_field_map_slice, language_public_symbol,
     ts_language_field_id_for_name, ts_language_next_state, ts_language_symbol_metadata,
     ts_language_symbol_name,
 };
 use super::length::{length_add, length_zero, Length};
-use super::point::{point_add, point_edit, point_eq, point_gt, point_lt, point_lte};
+use super::point::{point_add, point_edit};
 use super::subtree::{
     subtree_string, Subtree, NULL_SUBTREE, TS_BUILTIN_SYM_ERROR, TS_TREE_STATE_NONE,
 };

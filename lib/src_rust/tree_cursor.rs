@@ -15,9 +15,8 @@ use core::ptr;
 
 use crate::ffi::{TSNode, TSPoint, TSSymbol, TSTreeCursor};
 
-use super::language::{language_alias_at, ts_language_symbol_metadata};
 use super::length::{length_zero, Length};
-use super::node::{node_new, ts_node_start_byte, ts_node_start_point};
+use super::node::{ts_node_start_byte, ts_node_start_point};
 use super::subtree::Subtree;
 use super::tree::TSTree;
 use super::utils::Array;

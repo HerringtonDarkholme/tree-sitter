@@ -11,7 +11,8 @@ use crate::ffi::{TSLanguage, TSStateId, TSSymbol};
 
 use super::super::alloc::{free, malloc};
 use super::super::utils::ptr_mut;
-use super::{lang, parse_action_at, parse_action_entry, ts_language_symbol_name, TSParseAction};
+use super::generated::TSParseAction;
+use super::{lang, parse_action_at, parse_action_entry, ts_language_symbol_name};
 
 /// Iterator over valid lookahead symbols for a given parse state.
 ///

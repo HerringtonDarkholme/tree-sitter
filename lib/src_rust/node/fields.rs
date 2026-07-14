@@ -5,10 +5,14 @@
 //! helpers walk the two index spaces together and carry inherited field names
 //! through hidden productions.
 
+use core::ptr;
+
+use crate::ffi::TSNode;
+
+use super::super::language::{language_field_map_slice, language_full};
 use super::{
-    language_field_map_slice, language_full, node_child_iterator_next, node_is_relevant,
-    node_iterate_children, node_language, node_null, node_relevant_child_count, node_subtree, ptr,
-    TSNode,
+    node_child_iterator_next, node_is_relevant, node_iterate_children, node_language, node_null,
+    node_relevant_child_count, node_subtree,
 };
 
 /// Look up the direct field attached to a structural child.
