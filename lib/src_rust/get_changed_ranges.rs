@@ -14,7 +14,7 @@ use super::subtree::{
     subtree_visible, Subtree, NULL_SUBTREE, TS_BUILTIN_SYM_ERROR, TS_TREE_STATE_NONE,
 };
 use super::tree_cursor::{tree_cursor_entry_slice, TreeCursor, TreeCursorEntry};
-use super::utils::{array_clear, array_new, array_pop, array_push, Array};
+use super::utils::{array_new, array_push, Array};
 use super::utils::{ptr_mut, ptr_ref};
 
 // ---------------------------------------------------------------------------
@@ -165,17 +165,14 @@ unsafe fn range_array_add(arr: &mut TSRangeArray, start: Length, end: Length) {
 impl DiffIterator {
     /// Create a diff iterator rooted at a subtree.
     unsafe fn new(cursor: &mut TreeCursor, tree: &Subtree, language: *const TSLanguage) -> Self {
-        array_clear(&mut cursor.stack);
-        array_push(
-            &mut cursor.stack,
-            TreeCursorEntry {
-                subtree: tree,
-                position: length_zero(),
-                child_index: 0,
-                structural_child_index: 0,
-                descendant_index: 0,
-            },
-        );
+        cursor.stack.clear();
+        cursor.stack.push(TreeCursorEntry {
+            subtree: tree,
+            position: length_zero(),
+            child_index: 0,
+            structural_child_index: 0,
+            descendant_index: 0,
+        });
         Self {
             cursor: ptr::read(cursor),
             language,
@@ -327,16 +324,13 @@ impl DiffIterator {
                 let child_right = length_add(child_left, subtree_size(*child));
 
                 if child_right.bytes > goal_position {
-                    array_push(
-                        &mut self.cursor.stack,
-                        TreeCursorEntry {
-                            subtree: core::ptr::from_ref::<Subtree>(child),
-                            position,
-                            child_index: i,
-                            structural_child_index,
-                            descendant_index: 0,
-                        },
-                    );
+                    self.cursor.stack.push(TreeCursorEntry {
+                        subtree: core::ptr::from_ref::<Subtree>(child),
+                        position,
+                        child_index: i,
+                        structural_child_index,
+                        descendant_index: 0,
+                    });
 
                     if self.tree_is_visible() {
                         if child_left.bytes > goal_position {
@@ -384,7 +378,7 @@ impl DiffIterator {
             if self.tree_is_visible() {
                 self.visible_depth -= 1;
             }
-            let entry = array_pop(&mut self.cursor.stack);
+            let entry = self.cursor.stack.pop();
             if self.done() {
                 return;
             }
@@ -406,16 +400,13 @@ impl DiffIterator {
                 }
                 let next_child = subtree_child(*parent, child_index);
 
-                array_push(
-                    &mut self.cursor.stack,
-                    TreeCursorEntry {
-                        subtree: core::ptr::from_ref::<Subtree>(next_child),
-                        position,
-                        child_index,
-                        structural_child_index,
-                        descendant_index: 0,
-                    },
-                );
+                self.cursor.stack.push(TreeCursorEntry {
+                    subtree: core::ptr::from_ref::<Subtree>(next_child),
+                    position,
+                    child_index,
+                    structural_child_index,
+                    descendant_index: 0,
+                });
 
                 if self.tree_is_visible() {
                     if subtree_padding(*next_child).bytes > 0 {

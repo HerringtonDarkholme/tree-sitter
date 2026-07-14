@@ -151,7 +151,7 @@ unsafe fn tree_included_ranges_ref(tree: &TSTree, length: &mut u32) -> *mut TSRa
 const fn tree_cursor_empty() -> TreeCursor {
     TreeCursor {
         tree: core::ptr::null(),
-        stack: array_new(),
+        stack: super::tree_cursor::TreeCursorStack::new(),
         root_alias_symbol: 0,
     }
 }
