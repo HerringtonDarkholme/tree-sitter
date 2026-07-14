@@ -299,6 +299,50 @@ more complicated than the operational rule: a push follows one edge forward;
 a pop walks edges backward; if a pop encounters two predecessor paths, it
 returns both results.
 
+### How one node gets multiple predecessors
+
+A conflict first creates separate versions. Each newly pushed node still has
+one predecessor:
+
+```text
+version A                         version B
+
+node(state S)                     node(state S)
+     |                                 |
+     | subtree X                       | subtree Y
+     v                                 v
+predecessor A                     predecessor B
+```
+
+After more parsing, the versions can arrive at the same current LR state and
+input position. If their error and external-scanner states are also
+compatible, future table lookups will be identical. Tree-sitter keeps one
+current node and moves both histories onto it:
+
+```text
+                         shared head
+                              |
+                              v
+                        node(state S)
+                         /          \
+              subtree X/            \subtree Y
+                       v              v
+                predecessor A   predecessor B
+```
+
+The current node now has two predecessor links. This does not mean the pasts
+were equal. It means they have equivalent futures, so forward parsing can be
+shared while the different pasts remain available to later reductions.
+
+If a reduction pops one grammar child from this node, it gets two results:
+
+```text
+predecessor A with children [X]
+predecessor B with children [Y]
+```
+
+This is how versions can merge without losing their alternative syntax trees.
+
 ### Reduction in the graph-structured stack
 
 In a linear stack, reducing a three-symbol production has one result: pop

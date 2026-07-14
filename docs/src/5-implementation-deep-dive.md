@@ -858,6 +858,75 @@ Popping several children repeats this at every branch. Each resulting path
 contains exactly the edge-label subtrees needed to construct one candidate
 parent.
 
+### The exact operation that creates multiple predecessors
+
+Branching alone does not make a node multi-predecessor. Immediately after a
+conflict, each stack version normally has its own head node with one link:
+
+```text
+head of version 0                head of version 1
+        |                                |
+        v                                v
+node S0 { state: S }             node S1 { state: S }
+        | link(P0, X)                    | link(P1, Y)
+        v                                v
+       P0                               P1
+```
+
+`parser_condense_stack` and `parser_reduce` call `stack_merge` when two active
+versions satisfy `stack_can_merge`. The current implementation requires equal:
+
+- LR state;
+- byte position;
+- accumulated error cost; and
+- serialized external-scanner state.
+
+`stack_merge(stack, version0, version1)` does not add an edge from `S0` to
+`S1`. Those nodes represent the same current configuration. Instead it copies
+each predecessor link stored in `S1` into `S0`:
+
+```text
+for link in S1.links:
+    stack_node_add_link(S0, link)
+
+remove version 1 and release S1
+```
+
+Afterward the surviving representation is:
+
+```text
+head of version 0
+        |
+        v
+node S0 { state: S }
+        |\
+        | \ link(P1, Y)
+        |  v
+        |  P1
+        |
+        | link(P0, X)
+        v
+        P0
+```
+
+`StackNode::links` is therefore the set of alternative *ways into* the same
+current parser configuration. Although the pointers are stored backward, each
+link represents the logical forward step:
+
+```text
+predecessor -- subtree --> current state S
+```
+
+`stack_node_add_link` also tries to keep the graph shallow. If an incoming link
+has an equivalent subtree and its predecessor matches an existing
+predecessor's state, position, and error cost, their predecessor links can be
+combined recursively instead of adding another redundant level.
+
+Finally, `stack_remove_version` deletes the second head. Reference counts keep
+`P1`, `Y`, and any shared older nodes alive because the new link in `S0` owns
+them. This ownership transfer is why the alternative path remains valid after
+the temporary node `S1` disappears.
+
 ### Push is persistent
 
 `stack_push` allocates one `StackNode` whose first link points at the version's
