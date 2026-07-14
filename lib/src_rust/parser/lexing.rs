@@ -167,7 +167,8 @@ unsafe fn parser_new_leaf_lookahead(
             self_.lexer.debug_buffer.as_ptr(),
             external_scanner_state_len,
         );
-        (*mut_result.ptr).set_has_external_scanner_state_change(external_scanner_state_changed);
+        (*mut_result.heap_ptr())
+            .set_has_external_scanner_state_change(external_scanner_state_changed);
     }
 
     result
@@ -354,7 +355,7 @@ unsafe fn parser_get_cached_token(
     last_external_token: Subtree,
 ) -> Option<(Subtree, TableEntry)> {
     let cache = &self_.token_cache;
-    if !cache.token.ptr.is_null()
+    if !cache.token.heap_ptr().is_null()
         && cache.byte_index == position as u32
         && subtree_external_scanner_state_eq(&cache.last_external_token, &last_external_token)
     {
@@ -380,16 +381,16 @@ pub(super) unsafe fn parser_set_cached_token(
     token: Subtree,
 ) {
     let cache = &mut self_.token_cache;
-    if !token.ptr.is_null() {
+    if !token.heap_ptr().is_null() {
         subtree_retain(token);
     }
-    if !last_external_token.ptr.is_null() {
+    if !last_external_token.heap_ptr().is_null() {
         subtree_retain(last_external_token);
     }
-    if !cache.token.ptr.is_null() {
+    if !cache.token.heap_ptr().is_null() {
         subtree_release(&mut self_.tree_pool, cache.token);
     }
-    if !cache.last_external_token.ptr.is_null() {
+    if !cache.last_external_token.heap_ptr().is_null() {
         subtree_release(&mut self_.tree_pool, cache.last_external_token);
     }
     cache.token = token;
@@ -416,7 +417,7 @@ pub(super) unsafe fn parser_get_initial_lookahead(
         parser_get_cached_token(self_, state, position as usize, last_external_token)
             .unwrap_or((NULL_SUBTREE, TableEntry::empty()));
 
-    let needs_lex = lookahead.ptr.is_null();
+    let needs_lex = lookahead.heap_ptr().is_null();
     (lookahead, table_entry, needs_lex)
 }
 
@@ -436,7 +437,7 @@ pub(super) unsafe fn parser_lex_lookahead(
 ) {
     *lookahead = parser_lex(self_, version, state);
 
-    if !lookahead.ptr.is_null() {
+    if !lookahead.heap_ptr().is_null() {
         parser_set_cached_token(self_, position, last_external_token, *lookahead);
         language_table_entry(
             self_.language,

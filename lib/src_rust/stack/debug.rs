@@ -67,7 +67,7 @@ pub unsafe fn stack_print_dot_graph(
             }
         }
 
-        if !head.last_external_token.ptr.is_null() {
+        if !head.last_external_token.heap_ptr().is_null() {
             let state = subtree_external_scanner_state(&head.last_external_token);
             let data = external_scanner_state_data(state);
             fprintf(f, c"\nexternal_scanner_state:".as_ptr().cast::<i8>());
@@ -114,7 +114,7 @@ pub unsafe fn stack_print_dot_graph(
             if node_ref.state == ERROR_STATE {
                 fprintf(f, c"label=\"?\"".as_ptr().cast::<i8>());
             } else if node_ref.link_count == 1
-                && !node_ref.links[0].subtree.ptr.is_null()
+                && !node_ref.links[0].subtree.heap_ptr().is_null()
                 && subtree_extra(node_ref.links[0].subtree)
             {
                 fprintf(f, c"shape=point margin=0 label=\"\"".as_ptr().cast::<i8>());
@@ -145,11 +145,11 @@ pub unsafe fn stack_print_dot_graph(
                     link.node as *const c_void,
                 );
                 let subtree = link.subtree;
-                if !subtree.ptr.is_null() && subtree_extra(subtree) {
+                if !subtree.heap_ptr().is_null() && subtree_extra(subtree) {
                     fprintf(f, c"fontcolor=gray ".as_ptr().cast::<i8>());
                 }
 
-                if subtree.ptr.is_null() {
+                if subtree.heap_ptr().is_null() {
                     fprintf(f, c"color=red".as_ptr().cast::<i8>());
                 } else {
                     fprintf(f, c"label=\"".as_ptr().cast::<i8>());

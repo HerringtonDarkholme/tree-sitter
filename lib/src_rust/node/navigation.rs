@@ -60,7 +60,9 @@ unsafe fn subtree_has_trailing_empty_descendant(self_: Subtree, other: Subtree) 
         if subtree_total_bytes(child) > 0 {
             break;
         }
-        if child.ptr == other.ptr || subtree_has_trailing_empty_descendant(child, other) {
+        if child.heap_ptr() == other.heap_ptr()
+            || subtree_has_trailing_empty_descendant(child, other)
+        {
             return true;
         }
         if i == 0 {
@@ -173,7 +175,7 @@ pub(super) unsafe fn node_next_sibling(self_: TSNode, include_anonymous: bool) -
             };
 
             if contains_target {
-                if node_subtree(child).ptr != node_subtree(self_).ptr {
+                if node_subtree(child).heap_ptr() != node_subtree(self_).heap_ptr() {
                     child_containing_target = child;
                 }
             } else if node_is_relevant(child, include_anonymous) {

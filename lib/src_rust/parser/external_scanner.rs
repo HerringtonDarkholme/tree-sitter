@@ -49,7 +49,7 @@ pub(super) unsafe fn parser_external_scanner_deserialize(
     parser: &mut TSParser,
     external_token: Subtree,
 ) {
-    let (data, length) = if !external_token.ptr.is_null() {
+    let (data, length) = if !external_token.heap_ptr().is_null() {
         let state = subtree_external_scanner_state(&external_token);
         (external_scanner_state_data(state), state.length)
     } else {

@@ -285,7 +285,8 @@ unsafe fn parser_better_version_exists(
     is_in_error: bool,
     cost: u32,
 ) -> bool {
-    if !self_.finished_tree.ptr.is_null() && subtree_error_cost(self_.finished_tree) <= cost {
+    if !self_.finished_tree.heap_ptr().is_null() && subtree_error_cost(self_.finished_tree) <= cost
+    {
         return true;
     }
 
@@ -344,10 +345,10 @@ use lexing::{parser_get_initial_lookahead, parser_lex_lookahead, parser_set_cach
 // ---------------------------------------------------------------------------
 
 unsafe fn parser_select_tree(self_: &mut TSParser, left: Subtree, right: Subtree) -> bool {
-    if left.ptr.is_null() {
+    if left.heap_ptr().is_null() {
         return true;
     }
-    if right.ptr.is_null() {
+    if right.heap_ptr().is_null() {
         return false;
     }
 
@@ -573,10 +574,10 @@ unsafe fn parser_finish_reduction(
     };
 
     if end_of_non_terminal_extra && next_state == state {
-        (*parent.ptr).set_extra(true);
+        (*parent.heap_ptr()).set_extra(true);
     }
-    (*parent.ptr).parse_state = parse_state;
-    (*parent.ptr).children_mut().dynamic_precedence += action.dynamic_precedence;
+    (*parent.heap_ptr()).parse_state = parse_state;
+    (*parent.heap_ptr()).children_mut().dynamic_precedence += action.dynamic_precedence;
 
     let stack = ptr_mut(self_.stack);
     stack_push(stack, version, subtree_from_mut(parent), next_state);
@@ -752,7 +753,7 @@ unsafe fn parser_accept(self_: &mut TSParser, version: StackVersion, lookahead: 
                     self_,
                     subtree_symbol(tree),
                     &mut trees,
-                    u32::from((*tree.ptr).children().production_id),
+                    u32::from((*tree.heap_ptr()).children().production_id),
                 ));
                 subtree_release(&mut self_.tree_pool, tree);
                 break;
@@ -760,10 +761,10 @@ unsafe fn parser_accept(self_: &mut TSParser, version: StackVersion, lookahead: 
             j -= 1;
         }
 
-        debug_assert!(!root.ptr.is_null());
+        debug_assert!(!root.heap_ptr().is_null());
         self_.accept_count += 1;
 
-        if !self_.finished_tree.ptr.is_null() {
+        if !self_.finished_tree.heap_ptr().is_null() {
             if parser_select_tree(self_, self_.finished_tree, root) {
                 subtree_release(&mut self_.tree_pool, self_.finished_tree);
                 self_.finished_tree = root;
@@ -813,7 +814,7 @@ unsafe fn parser_check_progress(
         && self_.parse_options.progress_callback.unwrap()(&mut self_.parse_state)
     {
         if let Some(lookahead) = lookahead {
-            if !lookahead.ptr.is_null() {
+            if !lookahead.heap_ptr().is_null() {
                 subtree_release(&mut self_.tree_pool, *lookahead);
             }
         }
@@ -874,7 +875,7 @@ unsafe fn parser_apply_parse_actions(
                     production_id: reduce.production_id,
                 };
                 let invalidate_parse_state = table_entry.action_count > 1;
-                let end_of_non_terminal_extra = lookahead.ptr.is_null();
+                let end_of_non_terminal_extra = lookahead.heap_ptr().is_null();
                 parser_log(self_, |context, log| {
                     write!(
                         log,
@@ -933,7 +934,7 @@ unsafe fn parser_continue_after_reduction(
     // subtree, because the parser needs to perform a fixed reduction regardless
     // of the lookahead node. After that reduction, run the lexer again from the
     // current parse state.
-    if lookahead.ptr.is_null() {
+    if lookahead.heap_ptr().is_null() {
         true
     } else {
         language_table_entry(
@@ -951,7 +952,7 @@ unsafe fn parser_halt_after_merged_reduction(
     version: StackVersion,
     lookahead: Subtree,
 ) {
-    if !lookahead.ptr.is_null() {
+    if !lookahead.heap_ptr().is_null() {
         subtree_release(&mut self_.tree_pool, lookahead);
     }
     stack_halt(ptr_mut(self_.stack), version);
@@ -1202,7 +1203,7 @@ unsafe fn parser_balance_subtree(self_: &mut TSParser) -> bool {
     // cancellation, we don't want to clear the tree stack.
     if !self_.canceled_balancing {
         array_clear(&mut self_.tree_pool.tree_stack);
-        if subtree_child_count(finished_tree) > 0 && (*finished_tree.ptr).ref_count == 1 {
+        if subtree_child_count(finished_tree) > 0 && (*finished_tree.heap_ptr()).ref_count == 1 {
             array_push(
                 &mut self_.tree_pool.tree_stack,
                 subtree_to_mut_unsafe(finished_tree),
@@ -1217,11 +1218,11 @@ unsafe fn parser_balance_subtree(self_: &mut TSParser) -> bool {
 
         let tree = *array_back_ref(&self_.tree_pool.tree_stack);
 
-        if (*tree.ptr).children().repeat_depth > 0 {
+        if (*tree.heap_ptr()).children().repeat_depth > 0 {
             let tree_subtree = subtree_from_mut(tree);
             let children = subtree_children_slice(tree_subtree);
             let child1 = *children.get_unchecked(0);
-            let child2 = *children.get_unchecked((*tree.ptr).child_count as usize - 1);
+            let child2 = *children.get_unchecked((*tree.heap_ptr()).child_count as usize - 1);
             let repeat_delta =
                 i64::from(subtree_repeat_depth(child1)) - i64::from(subtree_repeat_depth(child2));
             if repeat_delta > 0 {
@@ -1245,10 +1246,10 @@ unsafe fn parser_balance_subtree(self_: &mut TSParser) -> bool {
 
         array_pop(&mut self_.tree_pool.tree_stack);
 
-        for i in 0..(*tree.ptr).child_count {
+        for i in 0..(*tree.heap_ptr()).child_count {
             let tree_subtree = subtree_from_mut(tree);
             let child = *subtree_child(tree_subtree, i);
-            if subtree_child_count(child) > 0 && (*child.ptr).ref_count == 1 {
+            if subtree_child_count(child) > 0 && (*child.heap_ptr()).ref_count == 1 {
                 array_push(
                     &mut self_.tree_pool.tree_stack,
                     subtree_to_mut_unsafe(child),
@@ -1435,7 +1436,7 @@ pub unsafe extern "C" fn ts_parser_reset(self_: *mut TSParser) {
     lexer_reset(&mut parser.lexer, length_zero());
     stack_clear(ptr_mut(parser.stack));
     parser_set_cached_token(parser, 0, NULL_SUBTREE, NULL_SUBTREE);
-    if !parser.finished_tree.ptr.is_null() {
+    if !parser.finished_tree.heap_ptr().is_null() {
         subtree_release(&mut parser.tree_pool, parser.finished_tree);
         parser.finished_tree = NULL_SUBTREE;
     }
@@ -1480,7 +1481,7 @@ pub unsafe extern "C-unwind" fn ts_parser_parse(
         parser_log(parser, |_, log| log.write_str("resume_parsing"));
         if parser.canceled_balancing {
             // goto balance
-            debug_assert!(!parser.finished_tree.ptr.is_null());
+            debug_assert!(!parser.finished_tree.heap_ptr().is_null());
             if !parser_balance_subtree(parser) {
                 parser.canceled_balancing = true;
                 return ptr::null_mut();
@@ -1547,7 +1548,7 @@ pub unsafe extern "C-unwind" fn ts_parser_parse(
         // then terminate parsing. Clear the parse stack to remove any extra references to subtrees
         // within the finished tree, ensuring that these subtrees can be safely mutated in-place
         // for rebalancing.
-        if !parser.finished_tree.ptr.is_null()
+        if !parser.finished_tree.heap_ptr().is_null()
             && subtree_error_cost(parser.finished_tree) < min_error_cost
         {
             stack_clear(ptr_mut(parser.stack));
@@ -1560,7 +1561,7 @@ pub unsafe extern "C-unwind" fn ts_parser_parse(
     }
 
     // balance:
-    debug_assert!(!parser.finished_tree.ptr.is_null());
+    debug_assert!(!parser.finished_tree.heap_ptr().is_null());
     if !parser_balance_subtree(parser) {
         parser.canceled_balancing = true;
         return ptr::null_mut();

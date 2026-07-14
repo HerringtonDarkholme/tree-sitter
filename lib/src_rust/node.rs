@@ -88,7 +88,7 @@ fn node_is_null(self_: TSNode) -> bool {
 const unsafe fn node_child_count(self_: TSNode) -> u32 {
     let tree = node_subtree(self_);
     if subtree_child_count(tree) > 0 {
-        (*tree.ptr).children().visible_child_count
+        (*tree.heap_ptr()).children().visible_child_count
     } else {
         0
     }
@@ -98,7 +98,7 @@ const unsafe fn node_child_count(self_: TSNode) -> u32 {
 const unsafe fn node_named_child_count(self_: TSNode) -> u32 {
     let tree = node_subtree(self_);
     if subtree_child_count(tree) > 0 {
-        (*tree.ptr).children().named_child_count
+        (*tree.heap_ptr()).children().named_child_count
     } else {
         0
     }
@@ -167,7 +167,7 @@ unsafe fn node_iterate_children(node: &TSNode) -> NodeChildIterator {
     }
     let alias_sequence = language_alias_sequence(
         node_language(*node),
-        u32::from((*subtree.ptr).children().production_id),
+        u32::from((*subtree.heap_ptr()).children().production_id),
     );
     NodeChildIterator {
         parent: subtree,
@@ -188,7 +188,9 @@ unsafe fn node_iterate_children(node: &TSNode) -> NodeChildIterator {
 /// from the production's alias sequence, and leaves `position` at the child's
 /// end after returning.
 unsafe fn node_child_iterator_next(self_: &mut NodeChildIterator, result: &mut TSNode) -> bool {
-    if self_.parent.ptr.is_null() || self_.child_index == (*self_.parent.ptr).child_count {
+    if self_.parent.heap_ptr().is_null()
+        || self_.child_index == (*self_.parent.heap_ptr()).child_count
+    {
         return false;
     }
     let child = subtree_child(self_.parent, self_.child_index);
@@ -239,9 +241,9 @@ const unsafe fn node_relevant_child_count(self_: TSNode, include_anonymous: bool
     let tree = node_subtree(self_);
     if subtree_child_count(tree) > 0 {
         if include_anonymous {
-            (*tree.ptr).children().visible_child_count
+            (*tree.heap_ptr()).children().visible_child_count
         } else {
-            (*tree.ptr).children().named_child_count
+            (*tree.heap_ptr()).children().named_child_count
         }
     } else {
         0
@@ -511,7 +513,7 @@ pub unsafe extern "C" fn ts_node_child_by_field_id(
         let mut field_map_end: *const TSFieldMapEntry = ptr::null();
         language_field_map(
             node_language(self_),
-            u32::from((*node_subtree(self_).ptr).children().production_id),
+            u32::from((*node_subtree(self_).heap_ptr()).children().production_id),
             &mut field_map,
             &mut field_map_end,
         );

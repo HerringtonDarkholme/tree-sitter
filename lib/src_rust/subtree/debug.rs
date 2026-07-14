@@ -46,7 +46,7 @@ unsafe fn subtree_write_to_string(
     alias_is_named: bool,
     field_name: *const i8,
 ) -> usize {
-    if self_.ptr.is_null() {
+    if self_.heap_ptr().is_null() {
         return snprintf(string, limit, c"(NULL)".as_ptr().cast::<i8>()) as usize;
     }
 
@@ -78,14 +78,16 @@ unsafe fn subtree_write_to_string(
             }
         }
 
-        if subtree_is_error(self_) && subtree_child_count(self_) == 0 && (*self_.ptr).size.bytes > 0
+        if subtree_is_error(self_)
+            && subtree_child_count(self_) == 0
+            && (*self_.heap_ptr()).size.bytes > 0
         {
             cursor = cursor
                 .add(snprintf(*writer, limit, c"(UNEXPECTED ".as_ptr().cast::<i8>()) as usize);
             cursor = cursor.add(subtree_write_char_to_string(
                 *writer,
                 limit,
-                (*self_.ptr).lookahead_char(),
+                (*self_.heap_ptr()).lookahead_char(),
             ));
         } else {
             let symbol = if alias_symbol != 0 {
@@ -144,13 +146,15 @@ unsafe fn subtree_write_to_string(
     }
 
     if subtree_child_count(self_) > 0 {
-        let alias_sequence =
-            language_alias_sequence(language, u32::from((*self_.ptr).children().production_id));
+        let alias_sequence = language_alias_sequence(
+            language,
+            u32::from((*self_.heap_ptr()).children().production_id),
+        );
         let mut field_map: *const TSFieldMapEntry = ptr::null();
         let mut field_map_end: *const TSFieldMapEntry = ptr::null();
         language_field_map(
             language,
-            u32::from((*self_.ptr).children().production_id),
+            u32::from((*self_.heap_ptr()).children().production_id),
             &mut field_map,
             &mut field_map_end,
         );
@@ -294,12 +298,14 @@ unsafe fn subtree_print_dot_graph_recursive(
         subtree_lookahead_bytes(tree),
     );
 
-    if subtree_is_error(tree) && subtree_child_count(tree) == 0 && (*tree.ptr).lookahead_char() != 0
+    if subtree_is_error(tree)
+        && subtree_child_count(tree) == 0
+        && (*tree.heap_ptr()).lookahead_char() != 0
     {
         fprintf(
             f,
             c"\ncharacter: '%c'".as_ptr().cast::<i8>(),
-            (*tree.ptr).lookahead_char(),
+            (*tree.heap_ptr()).lookahead_char(),
         );
     }
 

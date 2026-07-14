@@ -6,8 +6,8 @@ use super::{
     length_add, length_saturating_sub, length_sub, length_zero, subtree_can_inline,
     subtree_children_slice, subtree_depends_on_column, subtree_from_mut, subtree_lookahead_bytes,
     subtree_make_mut, subtree_padding, subtree_pool_allocate, subtree_set_has_changes,
-    subtree_size, subtree_total_size, Edit, EditEntry, Length, Subtree, SubtreeHeapData,
-    SubtreeHeapDataContent, SubtreePool, TSInputEdit, TSSymbol,
+    subtree_size, subtree_total_size, Edit, EditEntry, Length, MutableSubtree, Subtree,
+    SubtreeHeapData, SubtreeHeapDataContent, SubtreePool, TSInputEdit, TSSymbol,
 };
 
 /// Calculate the edited padding and content size for one subtree.
@@ -86,11 +86,11 @@ unsafe fn subtree_apply_edit_size(
                 ),
                 data: SubtreeHeapDataContent::LookaheadChar(0),
             };
-            result.ptr = data;
+            result = MutableSubtree::from_heap(data);
         }
     } else {
-        (*result.ptr).padding = padding;
-        (*result.ptr).size = size;
+        (*result.heap_ptr()).padding = padding;
+        (*result.heap_ptr()).size = size;
     }
 
     subtree_set_has_changes(&mut result);
