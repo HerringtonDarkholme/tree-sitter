@@ -7,13 +7,16 @@
 //! callbacks and language display metadata.
 
 use core::ffi::c_void;
+use core::ptr;
+
+use crate::ffi::{TSLanguage, TSSymbol};
 
 use super::super::alloc::malloc;
-use super::{
+use super::super::language::{
     language_alias_sequence_slice, language_field_map_slice, language_full,
-    language_write_symbol_as_dot_string, ptr, ts_language_symbol_metadata, ts_language_symbol_name,
-    Subtree, TSLanguage, TSSymbol,
+    language_write_symbol_as_dot_string, ts_language_symbol_metadata, ts_language_symbol_name,
 };
+use super::handle::Subtree;
 
 // Subtree string and debug output
 

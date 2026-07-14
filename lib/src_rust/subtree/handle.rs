@@ -23,10 +23,9 @@ use super::data::{
     ExternalScannerState, SubtreeHeapData, SubtreeHeapDataContent, SubtreeInlineData,
 };
 use super::storage::{subtree_clone_allocation, subtree_free_internal_node, subtree_pool_free};
-use super::{
-    SubtreePool, EMPTY_EXTERNAL_SCANNER_STATE, TS_BUILTIN_SYM_END, TS_BUILTIN_SYM_ERROR,
-    TS_TREE_STATE_NONE,
-};
+use super::SubtreePool;
+use super::TS_TREE_STATE_NONE;
+use super::{EMPTY_EXTERNAL_SCANNER_STATE, TS_BUILTIN_SYM_END, TS_BUILTIN_SYM_ERROR};
 
 // Subtree / MutableSubtree
 // ---------------------------------------------------------------------------

@@ -15,11 +15,13 @@ use core::ffi::c_void;
 use core::ptr::{self, NonNull};
 
 use super::super::alloc::{calloc, free, malloc, realloc};
-use super::{
-    subtree_alloc_size, Array, ExternalScannerState, ExternalScannerStateData, MutableSubtree,
-    Subtree, SubtreeArray, SubtreeHeapData, SubtreePool, EXTERNAL_SCANNER_STATE_INLINE_SIZE,
-    TS_MAX_TREE_POOL_SIZE,
+use super::super::utils::Array;
+use super::data::{
+    ExternalScannerState, ExternalScannerStateData, SubtreeHeapData,
+    EXTERNAL_SCANNER_STATE_INLINE_SIZE,
 };
+use super::handle::{MutableSubtree, Subtree};
+use super::{subtree_alloc_size, SubtreeArray, SubtreePool, TS_MAX_TREE_POOL_SIZE};
 
 impl ExternalScannerState {
     pub unsafe fn from_bytes(bytes: &[u8]) -> Self {

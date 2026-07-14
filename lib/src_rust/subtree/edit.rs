@@ -10,11 +10,13 @@
 use alloc::vec::Vec;
 use core::{ptr::NonNull, sync::atomic::AtomicU32};
 
-use super::{
-    length_add, length_saturating_sub, length_sub, length_zero, subtree_can_inline,
-    subtree_pool_allocate, subtree_set_has_changes, Edit, EditEntry, Length, MutableSubtree,
-    Subtree, SubtreeHeapData, SubtreeHeapDataContent, SubtreePool, TSInputEdit, TSSymbol,
-};
+use crate::ffi::{TSInputEdit, TSSymbol};
+
+use super::super::length::{length_add, length_saturating_sub, length_sub, length_zero, Length};
+use super::data::{SubtreeHeapData, SubtreeHeapDataContent};
+use super::handle::{MutableSubtree, Subtree};
+use super::storage::subtree_pool_allocate;
+use super::{subtree_can_inline, subtree_set_has_changes, Edit, EditEntry, SubtreePool};
 
 /// Calculate the edited padding and content size for one subtree.
 ///

@@ -18,19 +18,16 @@
 //! Shared heap subtrees are immutable. Mutation first obtains a uniquely owned
 //! [`MutableSubtree`], cloning the allocation when necessary.
 
-use core::{ptr, ptr::NonNull, sync::atomic::AtomicU32};
+use core::{ptr::NonNull, sync::atomic::AtomicU32};
 
-use crate::ffi::{TSInputEdit, TSLanguage, TSStateId, TSSymbol};
+use crate::ffi::{TSLanguage, TSStateId, TSSymbol};
 
 use super::error_costs::{
     ERROR_COST_PER_RECOVERY, ERROR_COST_PER_SKIPPED_CHAR, ERROR_COST_PER_SKIPPED_LINE,
     ERROR_COST_PER_SKIPPED_TREE,
 };
-use super::language::{
-    language_alias_sequence_slice, language_field_map_slice, language_full,
-    language_write_symbol_as_dot_string, ts_language_symbol_metadata, ts_language_symbol_name,
-};
-use super::length::{length_add, length_saturating_sub, length_sub, length_zero, Length};
+use super::language::{language_alias_sequence_slice, ts_language_symbol_metadata};
+use super::length::{length_add, length_zero, Length};
 use super::utils::Array;
 
 mod data;
@@ -639,8 +636,10 @@ pub use debug::{subtree_print_dot_graph, subtree_string};
 
 #[cfg(test)]
 mod tests {
+    use core::ptr;
+
     use super::*;
-    use crate::ffi::TSPoint;
+    use crate::ffi::{TSInputEdit, TSPoint};
 
     fn inline_leaf(size: u8) -> Subtree {
         Subtree::from_inline(SubtreeInlineData {
