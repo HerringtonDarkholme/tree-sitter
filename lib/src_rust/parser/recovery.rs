@@ -95,8 +95,8 @@ unsafe fn parser_do_all_potential_reductions(
 
         let mut reduction_version = STACK_VERSION_NONE;
         for j in 0..self_.reduce_actions.size {
-            let action = array_get_ref(&self_.reduce_actions, j);
-            reduction_version = parser_reduce(self_, version, *action, true, false);
+            let action = self_.reduce_actions.as_slice()[j as usize];
+            reduction_version = parser_reduce(self_, version, action, true, false);
         }
 
         if has_shift_action {
@@ -148,9 +148,8 @@ unsafe fn parser_recover_to_state(
         }
 
         let mut error_trees = stack_pop_error(stack, slice.version);
-        if error_trees.size > 0 {
-            debug_assert_eq!(error_trees.size, 1);
-            let error_tree = *error_trees.contents;
+        if let Some(&error_tree) = error_trees.as_slice().first() {
+            debug_assert_eq!(error_trees.len(), 1);
             let error_child_count = subtree_child_count(error_tree);
             if error_child_count > 0 {
                 let error_children = subtree_children_slice(error_tree);
@@ -170,15 +169,14 @@ unsafe fn parser_recover_to_state(
 
         subtree_array_remove_trailing_extras(&mut slice.subtrees, &mut self_.trailing_extras);
 
-        if slice.subtrees.size > 0 {
+        if !slice.subtrees.is_empty() {
             let error = subtree_new_error_node(&mut slice.subtrees, true, self_.language);
             stack_push(stack, slice.version, error, goal_state);
         } else {
             array_delete(&mut slice.subtrees);
         }
 
-        for j in 0..self_.trailing_extras.size {
-            let tree = *array_get_ref(&self_.trailing_extras, j);
+        for &tree in self_.trailing_extras.as_slice() {
             stack_push(stack, slice.version, tree, goal_state);
         }
 
@@ -209,9 +207,7 @@ pub(super) unsafe fn parser_recover(
 
     // Strategy 1: Find a previous state where the lookahead is valid.
     if let Some(summary) = summary.filter(|_| !subtree_is_error(lookahead)) {
-        for i in 0..summary.size {
-            let entry = *array_get_ref(summary, i);
-
+        for &entry in summary.as_slice() {
             if entry.state == ERROR_STATE {
                 continue;
             }

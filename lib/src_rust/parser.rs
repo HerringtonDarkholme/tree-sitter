@@ -529,13 +529,8 @@ unsafe fn parser_finish_reduction(
 
     let stack = ptr_mut(self_.stack);
     stack_push(stack, version, subtree_from_mut(parent), next_state);
-    for i in 0..self_.trailing_extras.size {
-        stack_push(
-            stack,
-            version,
-            *array_get_ref(&self_.trailing_extras, i),
-            next_state,
-        );
+    for &extra in self_.trailing_extras.as_slice() {
+        stack_push(stack, version, extra, next_state);
     }
 }
 
