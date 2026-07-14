@@ -1,3 +1,16 @@
+//! Allocation, pooling, and owned-array operations for subtrees.
+//!
+//! Heap subtree allocations use Tree-sitter's configurable allocator and an
+//! internal free list. This module centralizes allocation cloning and final
+//! destruction, including recursive child release and external-scanner bytes.
+//! It also provides the explicit copy/clear/delete operations for
+//! [`SubtreeArray`], whose elements are intrusive reference-counted handles.
+//!
+//! Parser scratch nodes may borrow a reusable child buffer; ordinary internal
+//! nodes instead take ownership of their child allocation. The separate helper
+//! functions here keep that lifetime distinction visible at construction
+//! sites.
+
 use core::ffi::c_void;
 use core::ptr::{self, NonNull};
 

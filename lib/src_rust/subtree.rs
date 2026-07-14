@@ -1,3 +1,23 @@
+//! Internal syntax-tree representation and subtree construction.
+//!
+//! A [`Subtree`] is the value carried by lexer results and parse-stack edges.
+//! Leaves represent tokens; internal subtrees represent completed grammar
+//! productions. This module builds those values and computes the cached sizes,
+//! child counts, error costs, precedence, scanner state, and visibility data
+//! needed by parsing and public tree navigation.
+//!
+//! The implementation is split along ownership boundaries:
+//!
+//! - `data` defines the inline and heap layouts;
+//! - `handle` contains the compact immutable and mutable handles and all union
+//!   access;
+//! - `storage` allocates, retains, releases, and pools subtree memory;
+//! - `edit` updates geometry and change flags after an input edit; and
+//! - `debug` renders S-expressions and DOT graphs.
+//!
+//! Shared heap subtrees are immutable. Mutation first obtains a uniquely owned
+//! [`MutableSubtree`], cloning the allocation when necessary.
+
 use core::{ptr, ptr::NonNull, sync::atomic::AtomicU32};
 
 use crate::ffi::{TSInputEdit, TSLanguage, TSStateId, TSSymbol};

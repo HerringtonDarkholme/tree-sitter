@@ -1,3 +1,15 @@
+//! Memory layouts stored behind compact subtree handles.
+//!
+//! Small leaves use [`SubtreeInlineData`] and fit entirely inside one
+//! pointer-sized handle. Larger leaves and all internal nodes use
+//! [`SubtreeHeapData`], whose content is either leaf metadata or an owned child
+//! allocation. This module also defines the inline-or-heap storage for
+//! serialized external-scanner state.
+//!
+//! These types describe representation only. Handle discrimination and
+//! ref-count operations belong to `handle`, while allocation belongs to
+//! `storage`.
+
 use core::{
     ptr::NonNull,
     sync::atomic::{AtomicU32, Ordering},

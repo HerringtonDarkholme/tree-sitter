@@ -1,3 +1,14 @@
+//! Compact subtree handles and their ownership operations.
+//!
+//! [`Subtree`] and [`MutableSubtree`] match the C runtime's pointer-sized union:
+//! the same word stores either packed inline data or a pointer to heap data.
+//! This module is the boundary around that representation. It discriminates
+//! union arms, exposes typed accessors, maintains intrusive reference counts,
+//! and performs copy-on-write conversion to a mutable handle.
+//!
+//! A copied handle is not automatically retained. Callers use `retain` when a
+//! new owner is created and `release` when that owner is removed.
+
 use core::{
     ptr::NonNull,
     sync::atomic::{AtomicU32, Ordering},

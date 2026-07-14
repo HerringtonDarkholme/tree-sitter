@@ -1,3 +1,11 @@
+//! Human-readable and DOT rendering for subtree hierarchies.
+//!
+//! The S-expression writer applies language visibility, alias, and field
+//! metadata so its output resembles the public syntax tree. The DOT writer
+//! exposes the full internal hierarchy for parser diagnostics. Both are kept
+//! separate from storage and mutation because they depend on C-style output
+//! callbacks and language display metadata.
+
 use core::ffi::c_void;
 
 use super::super::alloc::malloc;

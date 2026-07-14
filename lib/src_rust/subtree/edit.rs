@@ -1,3 +1,11 @@
+//! Apply an input edit to an existing subtree hierarchy.
+//!
+//! Editing updates byte and point geometry, marks affected ancestors as
+//! changed, and descends only into children whose ranges overlap the edit.
+//! Inline leaves are promoted to heap nodes if their edited measurements no
+//! longer fit the packed representation. Shared nodes use the same copy-on-
+//! write ownership rules as other subtree mutation.
+
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 use core::{ptr::NonNull, sync::atomic::AtomicU32};
