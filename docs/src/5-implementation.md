@@ -3,6 +3,10 @@
 This chapter builds a mental model of Tree-sitter from the smallest useful
 idea to the full runtime. It assumes no knowledge of parser implementation.
 
+For concrete Rust types, memory layouts, function-by-function control flow,
+and the complete recovery algorithm, continue afterward with the
+[Runtime Implementation Deep Dive](./5-implementation-deep-dive.md).
+
 Tree-sitter has two main jobs:
 
 1. Turn a grammar into tables and lexer functions. This happens once, when
@@ -242,15 +246,45 @@ At a high level:
 
 1. A version that cannot handle its lookahead is paused.
 2. Other versions get a chance to advance normally.
-3. If no good version remains, the best paused version enters recovery.
-4. Recovery explores actions such as inserting a missing token or skipping
-   input into an `ERROR` node.
-5. The resulting cost is recorded so that a later error-free interpretation
-   wins when possible.
+3. If no good version remains, the best paused version tries reductions that
+   do not depend on the invalid lookahead.
+4. The parser tries inserting one plausible missing token.
+5. It records earlier stack states and tries returning to one that accepts the
+   current lookahead.
+6. If those repairs fail, it skips the lookahead into an `ERROR` node.
+7. Every repair receives a cost so that a later error-free interpretation wins
+   when possible.
+
+For example, in `1 + * 2`, a state expecting an expression has no action for
+`*`. The parser first pauses that stack version. Depending on the generated
+table, it may insert a zero-width missing operand, or it may skip `*` and
+continue at `2`:
+
+```text
+source:  1 + * 2
+             ^ unexpected token
+
+possible repair A               possible repair B
+
+expression                      expression
+|-- number "1"                  |-- number "1"
+|-- "+"                         |-- "+"
+`-- number MISSING              |-- ERROR "*"
+                                `-- number "2"
+```
+
+Missing nodes mean that the grammar expected absent syntax. `ERROR` nodes own
+source text that could not be used. Internally, Tree-sitter can also push a
+zero-width recovery discontinuity on the parse stack; unlike missing and error
+nodes, that marker never appears in the public tree.
 
 The syntax tree exposes the result rather than hiding it: unexpected input is
 represented by `ERROR` nodes and inferred omissions by missing nodes. Tools can
 therefore keep navigating the parts of the file that are valid.
+
+The deep dive's [recovery section](./5-implementation-deep-dive.md#recovery-is-a-search-over-stack-versions)
+explains stack summaries, missing-token validation, error costs, and skipped
+token grouping in implementation order.
 
 ## Lexing is guided by the parse state
 

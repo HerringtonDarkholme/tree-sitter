@@ -9,6 +9,12 @@ The goal here is different: connect those ideas to concrete types, functions,
 data layouts, and ownership rules. Function and type names are written exactly
 as they appear in the Rust runtime so that they can be searched directly.
 
+The chapter follows the parse in execution order through the worked
+`1 + 2` example, then examines the stack and subtree memory representations.
+Readers investigating invalid syntax can jump directly to
+[Recovery is a search over stack versions](#recovery-is-a-search-over-stack-versions)
+and its `1 + * 2` trace.
+
 ## Scope of this chapter
 
 The active parsing engine in this repository is Rust:
@@ -205,9 +211,11 @@ before storing a language. `ts_parser_reset` destroys scanner state, clears the
 stack back to its base version, releases cached and finished subtrees, and
 resets progress state.
 
-The parser can preserve work only when cancellation occurs during final tree
-balancing. `canceled_balancing` tells the next `ts_parser_parse` call to resume
-that stage.
+When the progress callback cancels parsing, the driver returns null without
+resetting the live stack and scanner. The next `ts_parser_parse` call detects
+that outstanding state and resumes it. `canceled_balancing` handles the more
+specific case where parsing has accepted a root and cancellation occurred
+during final balancing.
 
 ## The outer parse loop
 
@@ -954,9 +962,10 @@ explicit:
 - inline and null handles need neither operation; and
 - `make_mut` reuses a uniquely owned heap allocation or clones a shared one.
 
-Released headers are stored in `SubtreePool::free_trees` for reuse. Recursive
-release uses `SubtreePool::tree_stack` as an explicit work stack, avoiding a
-call-stack overflow on deep trees.
+Released heap-leaf allocations are stored in `SubtreePool::free_trees` for
+reuse. Combined internal-node child/header allocations are freed as a unit.
+Recursive release uses `SubtreePool::tree_stack` as an explicit work stack,
+avoiding a call-stack overflow on deep trees.
 
 `MutableSubtree` is a capability used after uniqueness has been established;
 the type alone does not prove unique ownership. Mutation sites must still obey
@@ -1160,7 +1169,7 @@ state that expects the beginning of another expression. The lexer returns `*`:
 
 ```text
 source:  1 + * 2
-               ^ lookahead
+             ^ lookahead
 
 table[ExpectExpression, "*"] = no action
 ```
