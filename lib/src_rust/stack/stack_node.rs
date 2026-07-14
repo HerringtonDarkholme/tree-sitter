@@ -2,13 +2,12 @@ use core::ffi::c_void;
 use core::ptr::{self, NonNull};
 
 use super::{
-    array_delete, array_pop, array_push, free, length_add, length_zero, malloc,
-    subtree_child_count, subtree_dynamic_precedence, subtree_error_cost,
-    subtree_external_scanner_state_eq, subtree_extra, subtree_padding, subtree_release,
-    subtree_retain, subtree_size, subtree_symbol, subtree_total_size, subtree_visible,
-    subtree_visible_descendant_count, Length, StackHead, StackLink, StackNodeArray, Subtree,
-    SubtreePool, TSStateId, MAX_LINK_COUNT, MAX_NODE_POOL_SIZE, NULL_SUBTREE,
-    TS_BUILTIN_SYM_ERROR_REPEAT,
+    free, length_add, length_zero, malloc, subtree_child_count, subtree_dynamic_precedence,
+    subtree_error_cost, subtree_external_scanner_state_eq, subtree_extra, subtree_padding,
+    subtree_release, subtree_retain, subtree_size, subtree_symbol, subtree_total_size,
+    subtree_visible, subtree_visible_descendant_count, Length, StackHead, StackLink,
+    StackNodeArray, Subtree, SubtreePool, TSStateId, MAX_LINK_COUNT, MAX_NODE_POOL_SIZE,
+    NULL_SUBTREE, TS_BUILTIN_SYM_ERROR_REPEAT,
 };
 
 /// Node in the persistent GLR stack graph.
@@ -67,7 +66,7 @@ pub(super) unsafe fn stack_node_release(
         };
 
         if pool.size < MAX_NODE_POOL_SIZE {
-            array_push(pool, node_ptr);
+            pool.push(node_ptr);
         } else {
             free(node_ptr.as_ptr().cast::<c_void>());
         }
@@ -99,7 +98,7 @@ pub(super) unsafe fn stack_node_new(
     pool: &mut StackNodeArray,
 ) -> NonNull<StackNode> {
     let mut node = if pool.size > 0 {
-        array_pop(pool)
+        pool.pop()
     } else {
         NonNull::new_unchecked(malloc(core::mem::size_of::<StackNode>()).cast::<StackNode>())
     };
@@ -265,7 +264,7 @@ pub(super) unsafe fn stack_head_delete(
         subtree_release(subtree_pool, head.lookahead_when_paused);
     }
     if let Some(mut summary) = head.summary.take() {
-        array_delete(summary.as_mut());
+        summary.as_mut().delete();
         free(summary.as_ptr().cast::<c_void>());
     }
     stack_node_release(head.node, pool, subtree_pool);

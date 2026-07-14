@@ -30,7 +30,7 @@ use super::subtree::{subtree_array_copy, subtree_array_delete, subtree_array_rev
 use super::utils::ptr_mut;
 use super::utils::{
     array_back_mut, array_back_ref, array_clear, array_delete, array_erase, array_get_mut,
-    array_get_ref, array_insert, array_new, array_pop, array_push, array_reserve, Array,
+    array_get_ref, array_insert, array_new, array_push, array_reserve, Array,
 };
 
 // ---------------------------------------------------------------------------
