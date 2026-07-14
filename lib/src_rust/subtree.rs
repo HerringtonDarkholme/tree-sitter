@@ -457,16 +457,16 @@ pub struct TreeArena {
     /// Shared ownership count across copied trees.
     ref_count: AtomicU32,
     /// Singly linked list of allocated pages.
-    pages: *mut TreeArenaPage,
+    pages: Option<NonNull<TreeArenaPage>>,
     /// Page currently used for bump allocation.
-    current_page: *mut TreeArenaPage,
+    current_page: Option<NonNull<TreeArenaPage>>,
 }
 
 struct TreeArenaPage {
     /// Next older page in the arena list.
-    next: *mut Self,
+    next: Option<NonNull<Self>>,
     /// Bump allocation buffer.
-    contents: *mut u8,
+    contents: NonNull<u8>,
     /// Bytes currently used in `contents`.
     size: usize,
     /// Allocated byte capacity.
@@ -646,8 +646,8 @@ pub unsafe fn tree_arena_new() -> NonNull<TreeArena> {
         arena.as_ptr(),
         TreeArena {
             ref_count: AtomicU32::new(1),
-            pages: ptr::null_mut(),
-            current_page: ptr::null_mut(),
+            pages: None,
+            current_page: None,
         },
     );
     arena
@@ -664,10 +664,10 @@ pub unsafe fn tree_arena_release(arena: NonNull<TreeArena>) {
     }
 
     let mut page = (*arena.as_ptr()).pages;
-    while !page.is_null() {
-        let next = (*page).next;
-        free((*page).contents.cast::<c_void>());
-        free(page.cast::<c_void>());
+    while let Some(current) = page {
+        let next = (*current.as_ptr()).next;
+        free((*current.as_ptr()).contents.as_ptr().cast::<c_void>());
+        free(current.as_ptr().cast::<c_void>());
         page = next;
     }
     free(arena.as_ptr().cast::<c_void>());
@@ -679,12 +679,12 @@ unsafe fn tree_arena_try_current_page(
     size: usize,
     alignment: usize,
 ) -> *mut c_void {
-    if !arena.current_page.is_null() {
-        let page = ptr_mut(arena.current_page);
+    if let Some(mut current_page) = arena.current_page {
+        let page = current_page.as_mut();
         let offset = align_up(page.size, alignment);
         if offset + size <= page.capacity {
             page.size = offset + size;
-            return page.contents.add(offset).cast::<c_void>();
+            return page.contents.as_ptr().add(offset).cast::<c_void>();
         }
     }
     ptr::null_mut()
@@ -697,10 +697,10 @@ unsafe fn tree_arena_alloc_new_page(
     alignment: usize,
 ) -> *mut c_void {
     let capacity = TREE_ARENA_PAGE_SIZE.max(size + alignment);
-    let page = malloc(core::mem::size_of::<TreeArenaPage>()).cast::<TreeArenaPage>();
-    let contents = malloc(capacity).cast::<u8>();
+    let page = NonNull::new_unchecked(malloc(core::mem::size_of::<TreeArenaPage>()).cast());
+    let contents = NonNull::new_unchecked(malloc(capacity).cast::<u8>());
     ptr::write(
-        page,
+        page.as_ptr(),
         TreeArenaPage {
             next: arena.pages,
             contents,
@@ -708,9 +708,9 @@ unsafe fn tree_arena_alloc_new_page(
             capacity,
         },
     );
-    arena.pages = page;
-    arena.current_page = page;
-    contents.cast::<c_void>()
+    arena.pages = Some(page);
+    arena.current_page = Some(page);
+    contents.as_ptr().cast::<c_void>()
 }
 
 /// Allocate bytes from the tree arena.
