@@ -1,4 +1,3 @@
-use core::ffi::c_void;
 use core::{
     ptr,
     ptr::NonNull,
@@ -7,7 +6,6 @@ use core::{
 
 use crate::ffi::{TSInputEdit, TSLanguage, TSPoint, TSStateId, TSSymbol};
 
-use super::alloc::{calloc, free, malloc, realloc};
 use super::error_costs::{
     ERROR_COST_PER_MISSING_TREE, ERROR_COST_PER_RECOVERY, ERROR_COST_PER_SKIPPED_CHAR,
     ERROR_COST_PER_SKIPPED_LINE, ERROR_COST_PER_SKIPPED_TREE,
@@ -714,25 +712,7 @@ impl Subtree {
 
     pub unsafe fn clone_mut(self) -> MutableSubtree {
         let data = self.heap_data();
-        let alloc_size = subtree_alloc_size(data.child_count);
-        let new_children = NonNull::new_unchecked(malloc(alloc_size).cast::<Self>());
-        if data.child_count > 0 {
-            ptr::copy_nonoverlapping(
-                self.children_ptr().as_ptr(),
-                new_children.as_ptr(),
-                data.child_count as usize,
-            );
-        }
-        let result = NonNull::new_unchecked(
-            new_children
-                .as_ptr()
-                .add(data.child_count as usize)
-                .cast::<SubtreeHeapData>(),
-        );
-        for &child in core::slice::from_raw_parts(new_children.as_ptr(), data.child_count as usize)
-        {
-            child.retain();
-        }
+        let result = subtree_clone_allocation(self);
         let content = match &data.data {
             SubtreeHeapDataContent::Children(children) => {
                 SubtreeHeapDataContent::Children(*children)
@@ -807,7 +787,7 @@ impl Subtree {
                         pool.tree_stack.push(child.into_mut());
                     }
                 }
-                free(children.as_ptr().cast_mut().cast::<c_void>());
+                subtree_free_internal_node(tree.into_immutable());
             } else {
                 if tree.heap_data().has_external_tokens() {
                     tree.heap_data_mut().external_scanner_state_mut().delete();
@@ -1010,7 +990,10 @@ pub use storage::{
     subtree_array_remove_trailing_extras, subtree_array_reverse, subtree_pool_delete,
     subtree_pool_new,
 };
-use storage::{subtree_pool_allocate, subtree_pool_free};
+use storage::{
+    subtree_clone_allocation, subtree_free_internal_node, subtree_pool_allocate, subtree_pool_free,
+    subtree_take_children,
+};
 
 // Compatibility accessors still used by the legacy query implementation.
 
@@ -1225,18 +1208,7 @@ pub unsafe fn subtree_new_node(
     production_id: u32,
     language: *const TSLanguage,
 ) -> MutableSubtree {
-    // Allocate the node's data at the end of the array of children.
-    let new_byte_size = subtree_alloc_size(children.size);
-    if (children.capacity as usize) * core::mem::size_of::<Subtree>() < new_byte_size {
-        children.contents =
-            realloc(children.contents.cast::<c_void>(), new_byte_size).cast::<Subtree>();
-        children.capacity = (new_byte_size / core::mem::size_of::<Subtree>()) as u32;
-    }
-    let data = children
-        .contents
-        .add(children.size as usize)
-        .cast::<SubtreeHeapData>();
-    let data = NonNull::new_unchecked(data);
+    let data = subtree_take_children(children);
 
     let result = subtree_init_node_data(data, symbol, children.size, production_id, language);
     subtree_summarize_children(result, language);

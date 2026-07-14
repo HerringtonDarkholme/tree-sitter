@@ -1,8 +1,9 @@
 use core::ffi::c_void;
 use core::ptr::{self, NonNull};
 
+use super::super::alloc::{calloc, free, malloc, realloc};
 use super::{
-    calloc, free, malloc, Array, ExternalScannerState, ExternalScannerStateData, MutableSubtree,
+    subtree_alloc_size, Array, ExternalScannerState, ExternalScannerStateData, MutableSubtree,
     Subtree, SubtreeArray, SubtreeHeapData, SubtreePool, EXTERNAL_SCANNER_STATE_INLINE_SIZE,
     TS_MAX_TREE_POOL_SIZE,
 };
@@ -128,6 +129,48 @@ pub(super) unsafe fn subtree_pool_allocate(pool: &mut SubtreePool) -> NonNull<Su
     } else {
         NonNull::new_unchecked(malloc(core::mem::size_of::<SubtreeHeapData>()).cast())
     }
+}
+
+/// Allocate a node header after a copy of `tree`'s children.
+pub(super) unsafe fn subtree_clone_allocation(tree: Subtree) -> NonNull<SubtreeHeapData> {
+    let child_count = tree.child_count();
+    let children =
+        NonNull::new_unchecked(malloc(subtree_alloc_size(child_count)).cast::<Subtree>());
+    let copied_children = core::slice::from_raw_parts_mut(children.as_ptr(), child_count as usize);
+    copied_children.copy_from_slice(tree.children());
+    for child in copied_children {
+        child.retain();
+    }
+    NonNull::new_unchecked(
+        children
+            .as_ptr()
+            .add(child_count as usize)
+            .cast::<SubtreeHeapData>(),
+    )
+}
+
+/// Place a node header after an array's initialized children.
+pub(super) unsafe fn subtree_take_children(
+    children: &mut SubtreeArray,
+) -> NonNull<SubtreeHeapData> {
+    let byte_size = subtree_alloc_size(children.size);
+    if (children.capacity as usize) * core::mem::size_of::<Subtree>() < byte_size {
+        children.contents =
+            realloc(children.contents.cast::<c_void>(), byte_size).cast::<Subtree>();
+        children.capacity = (byte_size / core::mem::size_of::<Subtree>()) as u32;
+    }
+    NonNull::new_unchecked(
+        children
+            .contents
+            .add(children.size as usize)
+            .cast::<SubtreeHeapData>(),
+    )
+}
+
+/// Free the combined child-and-header allocation of an internal node.
+pub(super) unsafe fn subtree_free_internal_node(tree: Subtree) {
+    debug_assert!(tree.child_count() > 0);
+    free(tree.children().as_ptr().cast_mut().cast::<c_void>());
 }
 
 pub(super) unsafe fn subtree_pool_free(pool: &mut SubtreePool, tree: MutableSubtree) {

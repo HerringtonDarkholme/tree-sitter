@@ -1,7 +1,10 @@
+use core::ffi::c_void;
+
+use super::super::alloc::malloc;
 use super::{
-    c_void, language_alias_sequence_slice, language_field_map_slice, language_full,
-    language_write_symbol_as_dot_string, malloc, ptr, ts_language_symbol_metadata,
-    ts_language_symbol_name, Subtree, TSLanguage, TSSymbol,
+    language_alias_sequence_slice, language_field_map_slice, language_full,
+    language_write_symbol_as_dot_string, ptr, ts_language_symbol_metadata, ts_language_symbol_name,
+    Subtree, TSLanguage, TSSymbol,
 };
 
 // Subtree string and debug output
