@@ -163,6 +163,99 @@ broader baseline replaces it.
 
 ## Checkpoints
 
+### 2026-07-14 EDT - explicit Rust `Subtree` enum regression
+
+- Trial head: `dc891062` (`Clarify mutable subtree ownership`).
+- Baseline: `0fcd5e4a` (`Avoid raw pointers in subtree handles`), immediately
+  before `Subtree` changed representation.
+- Change under test: replace the compact one-word tagged subtree handle with
+  the explicit Rust representation below. `MutableSubtree` became a wrapper
+  around the same enum.
+
+```rust
+pub enum Subtree {
+    Null,
+    Inline(SubtreeInlineData),
+    Heap(NonNull<SubtreeHeapData>),
+}
+```
+
+- `Subtree` is internal rather than C ABI: public `TSNode.id` contains only an
+  opaque pointer to it. The motivation was therefore readability, not ABI
+  compatibility.
+- On this 64-bit build, the enum increases a `Subtree` handle from 8 to 16
+  bytes. This also doubles the element width of subtree arrays and the child
+  region preceding each `SubtreeHeapData` allocation.
+- Platform: Apple Silicon, macOS 26.5.1.
+- Both revisions were built with the optimized benchmark profile:
+
+```sh
+cargo bench -p tree-sitter-cli --bench benchmark --no-run
+```
+
+- The benchmark binary was run for C++, Go, Java, JavaScript, Python, Rust,
+  and TypeScript with `TREE_SITTER_BENCHMARK_KIND_FILTER=normal` and
+  `TREE_SITTER_BENCHMARK_REPETITION_COUNT=50`. Each revision ran in a separate
+  worktree and cache. Three rounds alternated revision order for each language.
+  Results below use the median duration of each case, then aggregate as total
+  bytes divided by the sum of case medians.
+
+```sh
+TREE_SITTER_BENCHMARK_LANGUAGE_FILTER="$language" \
+TREE_SITTER_BENCHMARK_KIND_FILTER=normal \
+TREE_SITTER_BENCHMARK_REPETITION_COUNT=50 \
+TREE_SITTER_BENCHMARK_TYPESCRIPT_PATH=/Users/hd/code/test/typescript \
+target/release/deps/benchmark-cbf7a217e4c2dbe8
+```
+
+- Workload: 35 matched cases, 1,275,673 source bytes, 50 parses per case per
+  round, three rounds (210 measurements).
+
+| Language | Cases | Compact bytes/ms | Enum bytes/ms | Enum parse-time increase |
+| --- | ---: | ---: | ---: | ---: |
+| C++ | 2 | 10908.3 | 9217.1 | +18.35% |
+| Go | 4 | 14730.1 | 12023.3 | +22.51% |
+| Java | 2 | 12816.2 | 10397.0 | +23.27% |
+| JavaScript | 2 | 16567.2 | 13842.2 | +19.69% |
+| Python | 12 | 11172.2 | 9479.2 | +17.86% |
+| Rust | 2 | 17065.7 | 14361.2 | +18.83% |
+| TypeScript | 11 | 25182.4 | 21066.3 | +19.54% |
+| **Overall** | **35** | **16850.7** | **14073.3** | **+19.74%** |
+
+Overall throughput fell by 16.48%; the equivalent parse-time increase is
+19.74%. Every language aggregate regressed, so this is not a noisy isolated
+fixture result. The largest representative case regressions were
+`multiple-newlines.py` at 30.21%, `types.ts` at 28.11%, `LargeService.java` at
+24.10%, `value.go` at 23.40%, and `codeFixProvider.ts` at 22.79%.
+
+Five-second `sample` profiles used the TypeScript `parser.ts` workload with
+5000 requested repetitions:
+
+```sh
+sample $PID 5 1 -mayDie -file /private/tmp/tree-sitter-subtree.sample.txt
+```
+
+Both profiles collected about 4160 main-thread samples. The enum build showed
+more allocator and copying activity in the collapsed top-of-stack view:
+
+| Area | Compact samples | Enum samples |
+| --- | ---: | ---: |
+| `_xzm_free` | 101 | 142 |
+| `_xzm_xzone_malloc` | 46 | 63 |
+| `xzm_realloc` | below 5 | 77 |
+| `_platform_memmove` | below 5 | 66 |
+
+The sampled physical footprint increased from 8,880 KiB to approximately
+9.9 MiB. The optimized benchmark executable grew by only 784 bytes, so binary
+size is not material. The broader allocator/reallocation/memory-copy profile is
+consistent with the doubled subtree-array element width.
+
+Conclusion: reject the ordinary Rust enum as a parser representation despite
+its readability. `Subtree` is not required to be a C union for ABI reasons,
+but it must remain a compact 8-byte handle for performance. A follow-up design
+should isolate the compact tagged representation and its unsafe operations
+behind a small private API instead of expanding the hot-path value.
+
 ### 2026-07-13 EDT - remove one-pass dead subtree bookkeeping
 
 - Repo base: `2f2077c6`.
