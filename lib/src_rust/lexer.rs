@@ -14,8 +14,8 @@ use core::ffi::c_char;
 use core::ptr;
 
 use crate::ffi::{
-    TSInput, TSInputEncodingUTF16BE, TSInputEncodingUTF16LE, TSInputEncodingUTF8, TSLogTypeLex,
-    TSLogger, TSPoint, TSRange,
+    TSInput, TSInputEncodingUTF16BE, TSInputEncodingUTF16LE, TSInputEncodingUTF8, TSLogger,
+    TSPoint, TSRange,
 };
 
 use super::language::TSLexer;
@@ -572,19 +572,6 @@ unsafe extern "C" fn ts_lexer__is_at_included_range_start(lexer: *const TSLexer)
 extern "C-unwind" {
     #[allow(non_snake_case)]
     fn ts_lexer__log_shim(_self: *const TSLexer, fmt: *const i8, ...);
-}
-
-/// Forward a formatted lexer message from the variadic C shim.
-///
-/// The shim deliberately knows only about the public `TSLexer` prefix. Keeping
-/// the outer `Lexer` field access here prevents its Rust-only layout from
-/// leaking into C.
-#[no_mangle]
-unsafe extern "C-unwind" fn ts_lexer__emit_log(lexer: *const TSLexer, message: *const c_char) {
-    let lexer = lexer_ref(lexer);
-    if let Some(log) = lexer.logger.log {
-        log(lexer.logger.payload, TSLogTypeLex, message);
-    }
 }
 
 // ===========================================================================
