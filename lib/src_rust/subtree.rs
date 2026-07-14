@@ -432,7 +432,7 @@ impl Subtree {
         Self::Heap(ptr)
     }
 
-    const unsafe fn heap_ptr(self) -> NonNull<SubtreeHeapData> {
+    const fn heap_ptr(self) -> NonNull<SubtreeHeapData> {
         let Self::Heap(ptr) = self else {
             panic!("expected heap subtree")
         };
@@ -544,7 +544,7 @@ impl Subtree {
 
     #[inline]
     const unsafe fn children_ptr(self) -> NonNull<Self> {
-        debug_assert!(!self.is_inline());
+        debug_assert!(matches!(self, Self::Heap(_)));
         debug_assert!(self.heap_data().child_count > 0);
         NonNull::new_unchecked(
             self.heap_ptr()
@@ -736,7 +736,7 @@ impl Subtree {
     }
 
     pub unsafe fn make_mut(self, pool: &mut SubtreePool) -> MutableSubtree {
-        if self.is_inline() {
+        if !matches!(self, Self::Heap(_)) {
             return self.into_mut();
         }
         if self.heap_data().ref_count() == 1 {
@@ -748,7 +748,7 @@ impl Subtree {
     }
 
     pub unsafe fn retain(self) {
-        if self.is_inline() {
+        if !matches!(self, Self::Heap(_)) {
             return;
         }
         let ref_count = &self.heap_data().ref_count;
@@ -758,7 +758,7 @@ impl Subtree {
     }
 
     pub unsafe fn release(self, pool: &mut SubtreePool) {
-        if self.is_inline() {
+        if !matches!(self, Self::Heap(_)) {
             return;
         }
         pool.tree_stack.clear();
@@ -834,7 +834,7 @@ impl MutableSubtree {
         Self(Subtree::Heap(ptr))
     }
 
-    const unsafe fn heap_ptr(self) -> NonNull<SubtreeHeapData> {
+    const fn heap_ptr(self) -> NonNull<SubtreeHeapData> {
         self.0.heap_ptr()
     }
 
