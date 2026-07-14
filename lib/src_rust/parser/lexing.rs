@@ -1,9 +1,9 @@
 use super::super::subtree::subtree_external_scanner_state;
 use super::{
-    external_scanner_state_eq, language_full, language_has_actions, language_is_reserved_word,
-    language_lex_mode_for_state, language_table_entry, length_sub, length_zero, lexer_advance,
-    lexer_finish, lexer_is_eof, lexer_reset, lexer_start, parser_call_keyword_lex_fn,
-    parser_call_main_lex_fn, parser_external_scanner_deserialize, parser_external_scanner_scan,
+    language_full, language_has_actions, language_is_reserved_word, language_lex_mode_for_state,
+    language_table_entry, length_sub, length_zero, lexer_advance, lexer_finish, lexer_is_eof,
+    lexer_reset, lexer_start, parser_call_keyword_lex_fn, parser_call_main_lex_fn,
+    parser_external_scanner_deserialize, parser_external_scanner_scan,
     parser_external_scanner_serialize, parser_log, parser_log_lookahead, parser_symbol_name,
     ptr_ref, subtree_child_count, subtree_external_scanner_state_eq, subtree_is_keyword,
     subtree_new_error, subtree_new_leaf, subtree_parse_state, subtree_release, subtree_retain,
@@ -163,8 +163,7 @@ unsafe fn parser_new_leaf_lookahead(
         let mut_result = subtree_to_mut_unsafe(result);
         subtree_set_external_scanner_state(
             mut_result,
-            self_.lexer.debug_buffer.as_ptr(),
-            external_scanner_state_len,
+            &self_.lexer.debug_buffer[..external_scanner_state_len as usize],
         );
         mut_result
             .heap_data_mut()
@@ -233,11 +232,8 @@ unsafe fn parser_lex(
             if found_token {
                 external_scanner_state_len = parser_external_scanner_serialize(self_);
                 let external_scanner_state = subtree_external_scanner_state(&external_token);
-                external_scanner_state_changed = !external_scanner_state_eq(
-                    external_scanner_state,
-                    self_.lexer.debug_buffer.as_ptr(),
-                    external_scanner_state_len,
-                );
+                external_scanner_state_changed = external_scanner_state.as_bytes()
+                    != &self_.lexer.debug_buffer[..external_scanner_state_len as usize];
 
                 if self_.lexer.token_end_position.bytes <= current_position.bytes
                     && !external_scanner_state_changed
@@ -357,7 +353,7 @@ unsafe fn parser_get_cached_token(
     let cache = &self_.token_cache;
     if !cache.token.is_null()
         && cache.byte_index == position as u32
-        && subtree_external_scanner_state_eq(&cache.last_external_token, &last_external_token)
+        && subtree_external_scanner_state_eq(cache.last_external_token, last_external_token)
     {
         let mut table_entry = TableEntry::empty();
         language_table_entry(

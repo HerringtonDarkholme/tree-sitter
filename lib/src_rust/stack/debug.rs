@@ -1,10 +1,10 @@
 use core::ptr::NonNull;
 
 use super::{
-    c_void, external_scanner_state_data, fprintf, language_write_symbol_as_dot_string, ptr,
-    stack_head, stderr_file, subtree_dynamic_precedence, subtree_error_cost,
-    subtree_external_scanner_state, subtree_extra, subtree_named, subtree_symbol, subtree_visible,
-    Array, Stack, StackIterator, StackNode, StackStatus, TSLanguage, ERROR_STATE,
+    c_void, fprintf, language_write_symbol_as_dot_string, ptr, stack_head, stderr_file,
+    subtree_dynamic_precedence, subtree_error_cost, subtree_external_scanner_state, subtree_extra,
+    subtree_named, subtree_symbol, subtree_visible, Array, Stack, StackIterator, StackNode,
+    StackStatus, TSLanguage, ERROR_STATE,
 };
 
 /// Print the stack as a DOT graph for debugging.
@@ -68,14 +68,9 @@ pub unsafe fn stack_print_dot_graph(
 
         if !head.last_external_token.is_null() {
             let state = subtree_external_scanner_state(&head.last_external_token);
-            let data = external_scanner_state_data(state);
             fprintf(f, c"\nexternal_scanner_state:".as_ptr().cast::<i8>());
-            for j in 0..state.length {
-                fprintf(
-                    f,
-                    c" %2X".as_ptr().cast::<i8>(),
-                    u32::from(*data.add(j as usize)),
-                );
+            for &byte in state.as_bytes() {
+                fprintf(f, c" %2X".as_ptr().cast::<i8>(), u32::from(byte));
             }
         }
 

@@ -546,10 +546,9 @@ static EMPTY_EXTERNAL_SCANNER_STATE: ExternalScannerState = ExternalScannerState
 
 mod storage;
 pub use storage::{
-    external_scanner_state_copy, external_scanner_state_data, external_scanner_state_delete,
-    external_scanner_state_eq, external_scanner_state_new, subtree_array_clear, subtree_array_copy,
-    subtree_array_delete, subtree_array_remove_trailing_extras, subtree_array_reverse,
-    subtree_pool_delete, subtree_pool_new,
+    subtree_array_clear, subtree_array_copy, subtree_array_delete,
+    subtree_array_remove_trailing_extras, subtree_array_reverse, subtree_pool_delete,
+    subtree_pool_new,
 };
 use storage::{subtree_pool_allocate, subtree_pool_free};
 
@@ -1038,7 +1037,7 @@ pub unsafe fn subtree_clone(self_: Subtree) -> MutableSubtree {
     let content = match &data.data {
         SubtreeHeapDataContent::Children(children) => SubtreeHeapDataContent::Children(*children),
         SubtreeHeapDataContent::ExternalScannerState(state) => {
-            SubtreeHeapDataContent::ExternalScannerState(external_scanner_state_copy(state))
+            SubtreeHeapDataContent::ExternalScannerState(state.copy())
         }
         SubtreeHeapDataContent::LookaheadChar(character) => {
             SubtreeHeapDataContent::LookaheadChar(*character)
@@ -1242,7 +1241,7 @@ pub unsafe fn subtree_release(pool: &mut SubtreePool, self_: Subtree) {
             free(children.as_ptr().cast_mut().cast::<c_void>());
         } else {
             if tree.heap_data().has_external_tokens() {
-                external_scanner_state_delete(tree.heap_data_mut().external_scanner_state_mut());
+                tree.heap_data_mut().external_scanner_state_mut().delete();
             }
             subtree_pool_free(pool, tree);
         }
@@ -1515,26 +1514,18 @@ pub unsafe fn subtree_external_scanner_state(self_: &Subtree) -> &ExternalScanne
     }
 }
 
-pub unsafe fn subtree_set_external_scanner_state(
-    self_: MutableSubtree,
-    bytes: *const u8,
-    length: u32,
-) {
+pub unsafe fn subtree_set_external_scanner_state(self_: MutableSubtree, bytes: &[u8]) {
     let data = mutable_subtree_data_mut(self_);
     debug_assert_eq!(data.child_count, 0);
     debug_assert!(data.has_external_tokens());
     data.data =
-        SubtreeHeapDataContent::ExternalScannerState(external_scanner_state_new(bytes, length));
+        SubtreeHeapDataContent::ExternalScannerState(ExternalScannerState::from_bytes(bytes));
 }
 
-pub unsafe fn subtree_external_scanner_state_eq(self_: &Subtree, other: &Subtree) -> bool {
-    let state_self = subtree_external_scanner_state(self_);
-    let state_other = subtree_external_scanner_state(other);
-    external_scanner_state_eq(
-        state_self,
-        external_scanner_state_data(state_other),
-        state_other.length,
-    )
+pub unsafe fn subtree_external_scanner_state_eq(self_: Subtree, other: Subtree) -> bool {
+    let state_self = subtree_external_scanner_state(&self_);
+    let state_other = subtree_external_scanner_state(&other);
+    state_self.as_bytes() == state_other.as_bytes()
 }
 
 mod debug;

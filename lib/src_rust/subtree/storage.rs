@@ -7,64 +7,43 @@ use super::{
     SubtreeHeapData, SubtreePool, EXTERNAL_SCANNER_STATE_INLINE_SIZE, TS_MAX_TREE_POOL_SIZE,
 };
 
-pub unsafe fn external_scanner_state_new(data: *const u8, length: u32) -> ExternalScannerState {
-    let state = if length > EXTERNAL_SCANNER_STATE_INLINE_SIZE as u32 {
-        let bytes = NonNull::new_unchecked(malloc(length as usize).cast::<u8>());
-        ptr::copy_nonoverlapping(data, bytes.as_ptr(), length as usize);
-        ExternalScannerStateData::Heap(bytes)
-    } else {
-        let mut bytes = [0; EXTERNAL_SCANNER_STATE_INLINE_SIZE];
-        ptr::copy_nonoverlapping(data, bytes.as_mut_ptr(), length as usize);
-        ExternalScannerStateData::Inline(bytes)
-    };
-    ExternalScannerState {
-        data: state,
-        length,
-    }
-}
-
-pub unsafe fn external_scanner_state_copy(state: &ExternalScannerState) -> ExternalScannerState {
-    let data = match &state.data {
-        ExternalScannerStateData::Inline(bytes) => ExternalScannerStateData::Inline(*bytes),
-        ExternalScannerStateData::Heap(bytes) => {
-            let copy = NonNull::new_unchecked(malloc(state.length as usize).cast::<u8>());
-            ptr::copy_nonoverlapping(bytes.as_ptr(), copy.as_ptr(), state.length as usize);
+impl ExternalScannerState {
+    pub unsafe fn from_bytes(bytes: &[u8]) -> Self {
+        let length = u32::try_from(bytes.len()).unwrap();
+        let data = if bytes.len() > EXTERNAL_SCANNER_STATE_INLINE_SIZE {
+            let copy = NonNull::new_unchecked(malloc(bytes.len()).cast::<u8>());
+            copy.as_ptr()
+                .copy_from_nonoverlapping(bytes.as_ptr(), bytes.len());
             ExternalScannerStateData::Heap(copy)
+        } else {
+            let mut copy = [0; EXTERNAL_SCANNER_STATE_INLINE_SIZE];
+            copy[..bytes.len()].copy_from_slice(bytes);
+            ExternalScannerStateData::Inline(copy)
+        };
+        Self { data, length }
+    }
+
+    pub unsafe fn copy(&self) -> Self {
+        Self::from_bytes(self.as_bytes())
+    }
+
+    pub unsafe fn delete(&mut self) {
+        if let ExternalScannerStateData::Heap(bytes) = self.data {
+            free(bytes.as_ptr().cast::<c_void>());
         }
-    };
-    ExternalScannerState {
-        data,
-        length: state.length,
+        self.data = ExternalScannerStateData::Inline([0; EXTERNAL_SCANNER_STATE_INLINE_SIZE]);
+        self.length = 0;
     }
-}
 
-pub unsafe fn external_scanner_state_delete(state: &mut ExternalScannerState) {
-    if let ExternalScannerStateData::Heap(bytes) = state.data {
-        free(bytes.as_ptr().cast::<c_void>());
+    pub fn as_bytes(&self) -> &[u8] {
+        let length = self.length as usize;
+        match &self.data {
+            ExternalScannerStateData::Inline(bytes) => &bytes[..length],
+            ExternalScannerStateData::Heap(bytes) => unsafe {
+                core::slice::from_raw_parts(bytes.as_ptr(), length)
+            },
+        }
     }
-}
-
-pub const fn external_scanner_state_data(state: &ExternalScannerState) -> *const u8 {
-    match &state.data {
-        ExternalScannerStateData::Inline(bytes) => bytes.as_ptr(),
-        ExternalScannerStateData::Heap(bytes) => bytes.as_ptr(),
-    }
-}
-
-pub unsafe fn external_scanner_state_eq(
-    state: &ExternalScannerState,
-    buffer: *const u8,
-    length: u32,
-) -> bool {
-    if state.length != length {
-        return false;
-    }
-    if length == 0 {
-        return true;
-    }
-    let length = length as usize;
-    core::slice::from_raw_parts(external_scanner_state_data(state), length)
-        == core::slice::from_raw_parts(buffer, length)
 }
 
 pub unsafe fn subtree_array_copy(source: &SubtreeArray, destination: &mut SubtreeArray) {

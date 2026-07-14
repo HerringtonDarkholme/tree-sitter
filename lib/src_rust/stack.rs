@@ -19,12 +19,12 @@ use super::error_costs::{ERROR_COST_PER_RECOVERY, ERROR_STATE};
 use super::language::language_write_symbol_as_dot_string;
 use super::length::{length_add, length_zero, Length};
 use super::subtree::{
-    external_scanner_state_data, subtree_alloc_size, subtree_child_count,
-    subtree_dynamic_precedence, subtree_error_cost, subtree_external_scanner_state,
-    subtree_external_scanner_state_eq, subtree_extra, subtree_is_error, subtree_named,
-    subtree_padding, subtree_release, subtree_retain, subtree_size, subtree_symbol,
-    subtree_total_bytes, subtree_total_size, subtree_visible, subtree_visible_descendant_count,
-    Subtree, SubtreeArray, SubtreePool, NULL_SUBTREE, TS_BUILTIN_SYM_ERROR_REPEAT,
+    subtree_alloc_size, subtree_child_count, subtree_dynamic_precedence, subtree_error_cost,
+    subtree_external_scanner_state, subtree_external_scanner_state_eq, subtree_extra,
+    subtree_is_error, subtree_named, subtree_padding, subtree_release, subtree_retain,
+    subtree_size, subtree_symbol, subtree_total_bytes, subtree_total_size, subtree_visible,
+    subtree_visible_descendant_count, Subtree, SubtreeArray, SubtreePool, NULL_SUBTREE,
+    TS_BUILTIN_SYM_ERROR_REPEAT,
 };
 use super::subtree::{subtree_array_copy, subtree_array_delete, subtree_array_reverse};
 use super::utils::ptr_mut;
@@ -578,7 +578,7 @@ pub unsafe fn stack_can_merge(
         && node1.state == node2.state
         && node1.position.bytes == node2.position.bytes
         && node1.error_cost == node2.error_cost
-        && subtree_external_scanner_state_eq(&head1.last_external_token, &head2.last_external_token)
+        && subtree_external_scanner_state_eq(head1.last_external_token, head2.last_external_token)
 }
 
 /// Clear all versions, resetting to initial state.

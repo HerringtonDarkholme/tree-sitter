@@ -171,7 +171,7 @@ unsafe fn stack_subtree_is_equivalent(left: Subtree, right: Subtree) -> bool {
         && subtree_size(left).bytes == subtree_size(right).bytes
         && left_child_count == right_child_count
         && subtree_extra(left) == subtree_extra(right)
-        && subtree_external_scanner_state_eq(&left, &right)
+        && subtree_external_scanner_state_eq(left, right)
 }
 
 /// Add a predecessor edge, merging equivalent paths to keep the graph shallow.

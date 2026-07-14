@@ -369,8 +369,8 @@ impl DiffIterator {
             || subtree_has_changes(old_tree)
             || (old_has_external_tokens
                 && !subtree_external_scanner_state_eq(
-                    &self.prev_external_token,
-                    &new_iter.prev_external_token,
+                    self.prev_external_token,
+                    new_iter.prev_external_token,
                 ))
         {
             return IteratorComparison::MayDiffer;

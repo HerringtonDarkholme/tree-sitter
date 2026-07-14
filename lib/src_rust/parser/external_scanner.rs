@@ -4,7 +4,7 @@ use crate::ffi::TSStateId;
 
 use super::super::language::{language_enabled_external_tokens, language_full};
 use super::super::lexer::TREE_SITTER_SERIALIZATION_BUFFER_SIZE;
-use super::super::subtree::{external_scanner_state_data, subtree_external_scanner_state, Subtree};
+use super::super::subtree::{subtree_external_scanner_state, Subtree};
 use super::TSParser;
 
 pub(super) unsafe fn parser_external_scanner_create(parser: &mut TSParser) {
@@ -51,7 +51,7 @@ pub(super) unsafe fn parser_external_scanner_deserialize(
 ) {
     let (data, length) = if !external_token.is_null() {
         let state = subtree_external_scanner_state(&external_token);
-        (external_scanner_state_data(state), state.length)
+        (state.as_bytes().as_ptr(), state.length)
     } else {
         (ptr::null(), 0)
     };

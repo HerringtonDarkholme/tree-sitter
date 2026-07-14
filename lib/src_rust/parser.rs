@@ -34,19 +34,19 @@ use super::stack::{
     StackVersion, STACK_VERSION_NONE,
 };
 use super::subtree::{
-    external_scanner_state_eq, subtree_array_clear, subtree_array_delete,
-    subtree_array_remove_trailing_extras, subtree_child, subtree_child_count,
-    subtree_children_slice, subtree_compare, subtree_compress, subtree_dynamic_precedence,
-    subtree_error_cost, subtree_external_scanner_state_eq, subtree_extra, subtree_from_mut,
-    subtree_has_external_scanner_state_change, subtree_has_external_tokens, subtree_is_eof,
-    subtree_is_error, subtree_is_keyword, subtree_last_external_token, subtree_lookahead_bytes,
-    subtree_make_mut, subtree_new_error, subtree_new_error_node, subtree_new_leaf,
-    subtree_new_missing_leaf, subtree_new_node, subtree_parse_state, subtree_pool_delete,
-    subtree_pool_new, subtree_print_dot_graph, subtree_release, subtree_repeat_depth,
-    subtree_retain, subtree_set_external_scanner_state, subtree_set_extra, subtree_set_symbol,
-    subtree_size, subtree_symbol, subtree_to_mut_unsafe, subtree_total_bytes, subtree_total_size,
-    MutableSubtree, Subtree, SubtreeArray, SubtreePool, NULL_SUBTREE, TS_BUILTIN_SYM_END,
-    TS_BUILTIN_SYM_ERROR, TS_BUILTIN_SYM_ERROR_REPEAT, TS_TREE_STATE_NONE,
+    subtree_array_clear, subtree_array_delete, subtree_array_remove_trailing_extras, subtree_child,
+    subtree_child_count, subtree_children_slice, subtree_compare, subtree_compress,
+    subtree_dynamic_precedence, subtree_error_cost, subtree_external_scanner_state_eq,
+    subtree_extra, subtree_from_mut, subtree_has_external_scanner_state_change,
+    subtree_has_external_tokens, subtree_is_eof, subtree_is_error, subtree_is_keyword,
+    subtree_last_external_token, subtree_lookahead_bytes, subtree_make_mut, subtree_new_error,
+    subtree_new_error_node, subtree_new_leaf, subtree_new_missing_leaf, subtree_new_node,
+    subtree_parse_state, subtree_pool_delete, subtree_pool_new, subtree_print_dot_graph,
+    subtree_release, subtree_repeat_depth, subtree_retain, subtree_set_external_scanner_state,
+    subtree_set_extra, subtree_set_symbol, subtree_size, subtree_symbol, subtree_to_mut_unsafe,
+    subtree_total_bytes, subtree_total_size, MutableSubtree, Subtree, SubtreeArray, SubtreePool,
+    NULL_SUBTREE, TS_BUILTIN_SYM_END, TS_BUILTIN_SYM_ERROR, TS_BUILTIN_SYM_ERROR_REPEAT,
+    TS_TREE_STATE_NONE,
 };
 use super::tree::{tree_new, TSTree};
 use super::utils::{array_swap, Array};
