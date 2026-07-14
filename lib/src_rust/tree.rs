@@ -16,7 +16,7 @@ use super::subtree::{
 #[cfg(not(target_family = "wasm"))]
 use super::subtree::subtree_print_dot_graph;
 use super::tree_cursor::{tree_cursor_init_ref, TreeCursor};
-use super::utils::{array_delete, array_new, array_reserve, Array};
+use super::utils::Array;
 use super::utils::{ptr_mut, ptr_ref};
 
 // ---------------------------------------------------------------------------
@@ -58,9 +58,9 @@ pub struct TSTree {
 }
 
 unsafe fn copy_ranges(included_ranges: &[TSRange]) -> Array<TSRange> {
-    let mut result = array_new();
+    let mut result = Array::new();
     let count = u32::try_from(included_ranges.len()).unwrap();
-    array_reserve(&mut result, count);
+    result.reserve(count);
     if !included_ranges.is_empty() {
         core::ptr::copy_nonoverlapping(
             included_ranges.as_ptr(),
@@ -73,25 +73,11 @@ unsafe fn copy_ranges(included_ranges: &[TSRange]) -> Array<TSRange> {
 }
 
 const unsafe fn tree_included_ranges_slice(tree: &TSTree) -> &[TSRange] {
-    if tree.included_ranges.size == 0 {
-        &[]
-    } else {
-        core::slice::from_raw_parts(
-            tree.included_ranges.contents,
-            tree.included_ranges.size as usize,
-        )
-    }
+    tree.included_ranges.as_slice()
 }
 
 unsafe fn tree_included_ranges_slice_mut(tree: &mut TSTree) -> &mut [TSRange] {
-    if tree.included_ranges.size == 0 {
-        &mut []
-    } else {
-        core::slice::from_raw_parts_mut(
-            tree.included_ranges.contents,
-            tree.included_ranges.size as usize,
-        )
-    }
+    tree.included_ranges.as_mut_slice()
 }
 
 /// Copy a tree by retaining shared immutable storage.
@@ -108,7 +94,7 @@ unsafe fn tree_delete_ref(tree: &mut TSTree) {
     let mut pool = subtree_pool_new(0);
     subtree_release(&mut pool, tree.root);
     subtree_pool_delete(&mut pool);
-    array_delete(&mut tree.included_ranges);
+    tree.included_ranges.delete();
 }
 
 pub unsafe fn tree_root_node_ref(tree_ptr: *const TSTree, tree: &TSTree) -> TSNode {
@@ -277,7 +263,7 @@ pub unsafe extern "C" fn ts_tree_get_changed_ranges(
     tree_cursor_init_ref(&mut cursor1, tree_root_node_ref(old_tree, old_tree_ref));
     tree_cursor_init_ref(&mut cursor2, tree_root_node_ref(new_tree, new_tree_ref));
 
-    let mut included_range_differences = array_new();
+    let mut included_range_differences = Array::new();
     let old_included_ranges = tree_included_ranges_slice(old_tree_ref);
     let new_included_ranges = tree_included_ranges_slice(new_tree_ref);
     range_array_get_changed_ranges_ref(
@@ -297,17 +283,9 @@ pub unsafe extern "C" fn ts_tree_get_changed_ranges(
         &mut result,
     );
 
-    // array_delete for included_range_differences
-    if !included_range_differences.contents.is_null() {
-        free(included_range_differences.contents.cast::<c_void>());
-    }
-    // array_delete for cursor stacks
-    if !cursor1.stack.contents.is_null() {
-        free(cursor1.stack.contents.cast::<c_void>());
-    }
-    if !cursor2.stack.contents.is_null() {
-        free(cursor2.stack.contents.cast::<c_void>());
-    }
+    included_range_differences.delete();
+    cursor1.stack.delete();
+    cursor2.stack.delete();
 
     result
 }
@@ -389,7 +367,6 @@ mod tests {
         subtree_child_count, subtree_from_mut, subtree_new_error, subtree_new_node,
         TS_BUILTIN_SYM_ERROR_REPEAT,
     };
-    use crate::core_impl::utils::{array_new, array_push};
 
     #[test]
     fn copied_tree_retains_its_root() {
@@ -413,9 +390,9 @@ mod tests {
                 0,
                 ptr::null(),
             );
-            let mut children = array_new();
-            array_push(&mut children, child1);
-            array_push(&mut children, child2);
+            let mut children = Array::new();
+            children.push(child1);
+            children.push(child2);
             let root = subtree_from_mut(subtree_new_node(
                 TS_BUILTIN_SYM_ERROR_REPEAT,
                 &mut children,

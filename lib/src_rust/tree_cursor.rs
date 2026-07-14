@@ -14,7 +14,7 @@ use super::subtree::{
     subtree_visible_descendant_count, Subtree, NULL_SUBTREE,
 };
 use super::tree::TSTree;
-use super::utils::{array_assign, array_delete, array_push, Array};
+use super::utils::Array;
 use super::utils::{ptr_mut, ptr_ref};
 
 mod status;
@@ -96,7 +96,7 @@ impl TreeCursorStack {
 
     pub(super) unsafe fn push(&mut self, entry: TreeCursorEntry) {
         let mut array = self.as_array();
-        array_push(&mut array, entry);
+        array.push(entry);
         self.update_from_array(&array);
     }
 
@@ -109,16 +109,16 @@ impl TreeCursorStack {
         self.size = 0;
     }
 
-    unsafe fn delete(&mut self) {
+    pub(super) unsafe fn delete(&mut self) {
         let mut array = self.as_array();
-        array_delete(&mut array);
+        array.delete();
         self.update_from_array(&array);
     }
 
     unsafe fn assign(&mut self, other: &Self) {
         let mut destination = self.as_array();
         let source = other.as_array();
-        array_assign(&mut destination, &source);
+        destination.assign(&source);
         self.update_from_array(&destination);
     }
 }
