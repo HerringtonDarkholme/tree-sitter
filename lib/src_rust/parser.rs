@@ -20,50 +20,33 @@
 //! Generated languages and the public API enter through C-compatible types,
 //! but parser-owned state is internal and uses Rust layout.
 
-use core::ffi::{c_char, c_void, CStr};
-use core::fmt::{self, Write};
+use core::ffi::{c_char, c_void};
+use core::fmt::Write;
 use core::ptr;
 
 use crate::ffi::{
-    TSInput, TSInputEncoding, TSInputEncodingUTF8, TSLanguage, TSLogTypeParse, TSLogger,
-    TSParseOptions, TSParseState, TSPoint, TSRange, TSStateId, TSSymbol,
+    TSInput, TSInputEncoding, TSInputEncodingUTF8, TSLanguage, TSLogger, TSParseOptions,
+    TSParseState, TSPoint, TSRange,
     TREE_SITTER_LANGUAGE_VERSION, TREE_SITTER_MIN_COMPATIBLE_LANGUAGE_VERSION,
 };
 
 use super::alloc::{free, malloc};
-use super::error_costs::{
-    ERROR_COST_PER_SKIPPED_CHAR, ERROR_COST_PER_SKIPPED_LINE, ERROR_COST_PER_SKIPPED_TREE,
-    ERROR_STATE,
-};
-use super::language::{
-    language_actions, language_full, language_has_actions, language_has_reduce_action,
-    language_is_reserved_word, language_lex_mode_for_state, language_lookup, language_table_entry,
-    ts_language_next_state, ts_language_symbol_name, TableEntry, TSPARSE_ACTION_TYPE_RECOVER,
-    TSPARSE_ACTION_TYPE_REDUCE, TSPARSE_ACTION_TYPE_SHIFT,
-};
-use super::length::{length_sub, length_zero, Length};
+use super::error_costs::ERROR_COST_PER_SKIPPED_TREE;
+use super::language::language_full;
+use super::length::length_zero;
 use super::lexer::{
-    lexer_advance, lexer_delete, lexer_finish, lexer_included_ranges, lexer_included_ranges_slice,
-    lexer_is_eof, lexer_mark_end, lexer_new, lexer_reset, lexer_set_included_ranges,
-    lexer_set_input, lexer_start, Lexer,
+    lexer_delete, lexer_included_ranges, lexer_included_ranges_slice, lexer_new, lexer_reset,
+    lexer_set_included_ranges, lexer_set_input, Lexer,
 };
-use super::reduce_action::{ReduceAction, ReduceActionSet};
+use super::reduce_action::ReduceActionSet;
 use super::stack::{
-    stack_clear, stack_copy_version, stack_delete, stack_get_summary, stack_merge, stack_new,
-    stack_pop_all, stack_pop_count, stack_pop_error, stack_print_dot_graph, stack_push,
-    stack_record_summary, stack_remove_version, stack_renumber_version, Stack, StackVersion,
-    STACK_VERSION_NONE,
+    stack_clear, stack_delete, stack_new, Stack, StackVersion,
 };
 use super::subtree::{
-    subtree_array_clear, subtree_array_delete, subtree_array_remove_trailing_extras,
-    subtree_compare, subtree_compress, subtree_new_error, subtree_new_error_node, subtree_new_leaf,
-    subtree_new_missing_leaf, subtree_new_node, subtree_new_scratch_node, subtree_pool_delete,
-    subtree_pool_new, subtree_print_dot_graph, MutableSubtree, Subtree, SubtreeArray, SubtreePool,
-    NULL_SUBTREE, TS_BUILTIN_SYM_END, TS_BUILTIN_SYM_ERROR, TS_BUILTIN_SYM_ERROR_REPEAT,
-    TS_TREE_STATE_NONE,
+    subtree_pool_delete, subtree_pool_new, Subtree, SubtreeArray, SubtreePool, NULL_SUBTREE,
 };
 use super::tree::TSTree;
-use super::utils::{array_swap, Array};
+use super::utils::Array;
 use super::utils::{ptr_mut, ptr_ref};
 
 // ---------------------------------------------------------------------------
@@ -223,29 +206,21 @@ unsafe extern "C" fn ts_string_input_read(
 
 mod logging;
 use logging::{
-    parser_log, parser_log_lookahead, parser_log_stack, parser_log_tree, parser_symbol_name,
-    parser_tree_name, DisplayCStr,
+    parser_log, parser_log_stack, parser_log_tree,
 };
 
 mod advance;
-use advance::{
-    parser_advance, parser_better_version_exists, parser_call_keyword_lex_fn,
-    parser_call_main_lex_fn, parser_check_progress, parser_condense_stack, parser_version_status,
-};
+use advance::{parser_advance, parser_condense_stack};
 
 mod external_scanner;
 use external_scanner::{
-    parser_external_scanner_create, parser_external_scanner_deserialize,
-    parser_external_scanner_destroy, parser_external_scanner_scan,
-    parser_external_scanner_serialize,
+    parser_external_scanner_create, parser_external_scanner_destroy,
 };
 mod lexing;
-use lexing::{parser_get_initial_lookahead, parser_lex_lookahead, parser_set_cached_token};
+use lexing::parser_set_cached_token;
 
 mod actions;
-use actions::{parser_accept, parser_new_node, parser_reduce, parser_shift};
 mod recovery;
-use recovery::{parser_handle_error, parser_recover};
 
 mod balancing;
 use balancing::parser_balance_subtree;

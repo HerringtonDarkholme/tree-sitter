@@ -6,20 +6,36 @@
 //! input into error nodes, or resume from a summarized earlier state. The
 //! accumulated cost lets ordinary, error-free versions win whenever possible.
 
-use super::{
-    language_actions, language_full, language_has_actions, language_has_reduce_action,
-    language_table_entry, length_sub, lexer_mark_end, lexer_reset, parser_accept,
-    parser_better_version_exists, parser_log, parser_log_stack, parser_new_node, parser_reduce,
-    parser_symbol_name, parser_version_status, ptr, ptr_mut, ptr_ref, stack_copy_version,
-    stack_get_summary, stack_merge, stack_pop_count, stack_pop_error, stack_push,
-    stack_record_summary, stack_remove_version, stack_renumber_version, subtree_array_delete,
-    subtree_array_remove_trailing_extras, subtree_new_error_node, subtree_new_missing_leaf,
-    ts_language_next_state, DisplayCStr, Length, ReduceAction, StackVersion, Subtree, SubtreeArray,
-    TSParser, TSStateId, TSSymbol, TableEntry, Write, ERROR_COST_PER_SKIPPED_CHAR,
-    ERROR_COST_PER_SKIPPED_LINE, ERROR_COST_PER_SKIPPED_TREE, ERROR_STATE, MAX_SUMMARY_DEPTH,
-    MAX_VERSION_COUNT, NULL_SUBTREE, STACK_VERSION_NONE, TSPARSE_ACTION_TYPE_RECOVER,
-    TSPARSE_ACTION_TYPE_REDUCE, TSPARSE_ACTION_TYPE_SHIFT, TS_BUILTIN_SYM_ERROR_REPEAT,
+use core::{fmt::Write, ptr};
+
+use crate::ffi::{TSStateId, TSSymbol};
+
+use super::super::error_costs::{
+    ERROR_COST_PER_SKIPPED_CHAR, ERROR_COST_PER_SKIPPED_LINE, ERROR_COST_PER_SKIPPED_TREE,
+    ERROR_STATE,
 };
+use super::super::language::{
+    language_actions, language_full, language_has_actions, language_has_reduce_action,
+    language_table_entry, ts_language_next_state, TableEntry, TSPARSE_ACTION_TYPE_RECOVER,
+    TSPARSE_ACTION_TYPE_REDUCE, TSPARSE_ACTION_TYPE_SHIFT,
+};
+use super::super::length::{length_sub, Length};
+use super::super::lexer::{lexer_mark_end, lexer_reset};
+use super::super::reduce_action::ReduceAction;
+use super::super::stack::{
+    stack_copy_version, stack_get_summary, stack_merge, stack_pop_count, stack_pop_error,
+    stack_push, stack_record_summary, stack_remove_version, stack_renumber_version, StackVersion,
+    STACK_VERSION_NONE,
+};
+use super::super::subtree::{
+    subtree_array_delete, subtree_array_remove_trailing_extras, subtree_new_error_node,
+    subtree_new_missing_leaf, Subtree, SubtreeArray, NULL_SUBTREE, TS_BUILTIN_SYM_ERROR_REPEAT,
+};
+use super::super::utils::{ptr_mut, ptr_ref};
+use super::actions::{parser_accept, parser_new_node, parser_reduce};
+use super::advance::{parser_better_version_exists, parser_version_status};
+use super::logging::{parser_log, parser_log_stack, parser_symbol_name, DisplayCStr};
+use super::{TSParser, MAX_SUMMARY_DEPTH, MAX_VERSION_COUNT};
 
 // ---------------------------------------------------------------------------
 // Internal helpers — error recovery

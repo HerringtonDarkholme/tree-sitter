@@ -6,11 +6,16 @@
 //! Formatting stays allocation-free so diagnostics do not change parser
 //! ownership or allocator behavior.
 
-use super::{
-    c_char, fmt, fprintf, fputc, fputs, ptr_mut, stack_print_dot_graph, subtree_print_dot_graph,
-    ts_language_symbol_name, CStr, Stack, Subtree, TSLanguage, TSLogTypeParse, TSParser, TSSymbol,
-    Write,
-};
+use core::ffi::{c_char, CStr};
+use core::fmt::{self, Write};
+
+use crate::ffi::{TSLanguage, TSLogTypeParse, TSSymbol};
+
+use super::super::language::ts_language_symbol_name;
+use super::super::stack::{stack_print_dot_graph, Stack};
+use super::super::subtree::{subtree_print_dot_graph, Subtree};
+use super::super::utils::ptr_mut;
+use super::{fprintf, fputc, fputs, TSParser};
 
 // ---------------------------------------------------------------------------
 // Internal helpers — logging & breakdown

@@ -6,16 +6,30 @@
 //! current parse state selects the lexical mode, and serialized external
 //! scanner state is restored before scanning an alternative GLR path.
 
-use super::{
+use core::fmt::Write;
+
+use crate::ffi::{TSStateId, TSSymbol};
+
+use super::super::error_costs::ERROR_STATE;
+use super::super::language::{
     language_full, language_has_actions, language_is_reserved_word, language_lex_mode_for_state,
-    language_table_entry, length_sub, length_zero, lexer_advance, lexer_finish, lexer_is_eof,
-    lexer_reset, lexer_start, parser_call_keyword_lex_fn, parser_call_main_lex_fn,
-    parser_external_scanner_deserialize, parser_external_scanner_scan,
-    parser_external_scanner_serialize, parser_log, parser_log_lookahead, parser_symbol_name,
-    ptr_ref, subtree_new_error, subtree_new_leaf, ts_language_next_state, DisplayCStr, Length,
-    StackVersion, Subtree, TSParser, TSStateId, TSSymbol, TableEntry, Write, ERROR_STATE,
-    NULL_SUBTREE, TS_BUILTIN_SYM_END, TS_BUILTIN_SYM_ERROR,
+    language_table_entry, ts_language_next_state, TableEntry,
 };
+use super::super::length::{length_sub, length_zero, Length};
+use super::super::lexer::{lexer_advance, lexer_finish, lexer_is_eof, lexer_reset, lexer_start};
+use super::super::stack::StackVersion;
+use super::super::subtree::{
+    subtree_new_error, subtree_new_leaf, Subtree, NULL_SUBTREE, TS_BUILTIN_SYM_END,
+    TS_BUILTIN_SYM_ERROR,
+};
+use super::super::utils::ptr_ref;
+use super::advance::{parser_call_keyword_lex_fn, parser_call_main_lex_fn};
+use super::external_scanner::{
+    parser_external_scanner_deserialize, parser_external_scanner_scan,
+    parser_external_scanner_serialize,
+};
+use super::logging::{parser_log, parser_log_lookahead, parser_symbol_name, DisplayCStr};
+use super::TSParser;
 
 // ---------------------------------------------------------------------------
 // Internal helpers — token reuse & lexing

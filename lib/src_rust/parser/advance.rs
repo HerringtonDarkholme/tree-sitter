@@ -25,11 +25,15 @@ use super::super::stack::{
 };
 use super::super::subtree::Subtree;
 use super::super::utils::{ptr_mut, ptr_ref};
+use super::actions::{parser_accept, parser_reduce, parser_shift};
+use super::lexing::{parser_get_initial_lookahead, parser_lex_lookahead};
+use super::logging::{
+    parser_log, parser_log_stack, parser_symbol_name, parser_tree_name, DisplayCStr,
+};
+use super::recovery::{parser_handle_error, parser_recover};
 use super::{
-    parser_accept, parser_get_initial_lookahead, parser_handle_error, parser_lex_lookahead,
-    parser_log, parser_log_stack, parser_recover, parser_reduce, parser_shift, parser_symbol_name,
-    parser_tree_name, DisplayCStr, ErrorComparison, ErrorStatus, TSParser, MAX_COST_DIFFERENCE,
-    MAX_VERSION_COUNT, OP_COUNT_PER_PARSER_CALLBACK_CHECK,
+    ErrorComparison, ErrorStatus, TSParser, MAX_COST_DIFFERENCE, MAX_VERSION_COUNT,
+    OP_COUNT_PER_PARSER_CALLBACK_CHECK,
 };
 
 // ---------------------------------------------------------------------------

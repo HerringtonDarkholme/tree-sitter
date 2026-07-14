@@ -6,7 +6,9 @@
 //! callback can cancel a long balancing pass without discarding completed
 //! work.
 
-use super::{parser_check_progress, subtree_compress, TSParser};
+use super::super::subtree::subtree_compress;
+use super::advance::parser_check_progress;
+use super::TSParser;
 
 /// Incrementally rebalance the accepted tree, preserving work across cancellation.
 pub(super) unsafe fn parser_balance_subtree(parser: &mut TSParser) -> bool {
