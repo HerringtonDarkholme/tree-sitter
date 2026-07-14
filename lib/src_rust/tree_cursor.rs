@@ -1,24 +1,24 @@
 use core::ptr;
 
-use crate::ffi::{TSFieldId, TSNode, TSPoint, TSSymbol, TSTreeCursor};
+use crate::ffi::{TSNode, TSPoint, TSSymbol, TSTreeCursor};
 
-use super::language::{
-    language_alias_at, language_alias_sequence, language_field_map, language_full,
-    ts_language_symbol_metadata,
-};
+use super::language::{language_alias_at, language_alias_sequence, ts_language_symbol_metadata};
 use super::length::{length_add, length_is_undefined, length_zero, Length, LENGTH_UNDEFINED};
 use super::node::{node_new, ts_node_start_byte, ts_node_start_point};
 use super::point::point_gt;
 use super::subtree::{
     subtree_child, subtree_child_count, subtree_children_slice, subtree_extra, subtree_padding,
     subtree_size, subtree_symbol, subtree_total_size, subtree_visible, subtree_visible_child_count,
-    subtree_visible_descendant_count, Subtree, TSFieldMapEntry, NULL_SUBTREE,
+    subtree_visible_descendant_count, Subtree, NULL_SUBTREE,
 };
 use super::tree::TSTree;
 use super::utils::{
     array_assign, array_clear, array_delete, array_init, array_pop, array_push, Array,
 };
 use super::utils::{ptr_mut, ptr_ref};
+
+mod status;
+pub use status::{ts_tree_cursor_current_node, ts_tree_cursor_current_status};
 
 use crate::ffi::TSPoint as POINT_ZERO_TYPE;
 const POINT_ZERO: POINT_ZERO_TYPE = POINT_ZERO_TYPE { row: 0, column: 0 };
@@ -32,7 +32,6 @@ const POINT_ZERO: POINT_ZERO_TYPE = POINT_ZERO_TYPE { row: 0, column: 0 };
 /// A cursor stores the path from the root node to the current node. Each frame
 /// keeps enough sibling/position bookkeeping to move sideways or back upward
 /// without parent pointers in subtrees.
-#[repr(C)]
 #[derive(Clone, Copy)]
 pub struct TreeCursorEntry {
     /// Current subtree pointer for this depth.
@@ -73,6 +72,12 @@ pub struct TreeCursor {
     pub root_alias_symbol: TSSymbol,
 }
 
+// `TreeCursor` is stored directly in the public `TSTreeCursor` value. Keep the
+// outer layout fixed while allowing heap-allocated cursor entries to use Rust
+// layout.
+const _: () = assert!(core::mem::size_of::<TreeCursor>() == core::mem::size_of::<TSTreeCursor>());
+const _: () = assert!(core::mem::align_of::<TreeCursor>() == core::mem::align_of::<TSTreeCursor>());
+
 #[inline]
 unsafe fn cursor_ref<'a>(cursor: *const TSTreeCursor) -> &'a TreeCursor {
     ptr_ref(cursor.cast::<TreeCursor>())
@@ -89,6 +94,10 @@ unsafe fn out_param_mut<'a, T>(ptr: *mut T) -> &'a mut T {
 }
 
 /// Result of internal navigation.
+/// Result returned by the two exported internal cursor navigation functions.
+///
+/// These symbols are consumed by the C query implementation, so the enum's
+/// integer representation is part of that internal C boundary.
 #[repr(C)]
 #[derive(PartialEq, Eq, Clone, Copy)]
 pub enum TreeCursorStep {
@@ -683,180 +692,6 @@ pub unsafe extern "C" fn ts_tree_cursor_current_descendant_index(
     last_entry.descendant_index
 }
 
-// ---------------------------------------------------------------------------
-// Node info & copy
-// ---------------------------------------------------------------------------
-
-#[no_mangle]
-pub unsafe extern "C" fn ts_tree_cursor_current_node(self_: *const TSTreeCursor) -> TSNode {
-    let cursor = cursor_ref(self_);
-    let entries = tree_cursor_entry_slice(&cursor.stack);
-    let last_entry = entries.last().unwrap_unchecked();
-    let is_extra = subtree_extra(*last_entry.subtree);
-    let alias_symbol = if is_extra {
-        0
-    } else if cursor.stack.size > 1 {
-        let parent_entry = entries.get_unchecked(cursor.stack.size as usize - 2);
-        language_alias_at(
-            (*cursor.tree).language,
-            u32::from((*(*parent_entry.subtree).ptr).data.children.production_id),
-            last_entry.structural_child_index,
-        )
-    } else {
-        cursor.root_alias_symbol
-    };
-    node_new(
-        cursor.tree,
-        last_entry.subtree,
-        last_entry.position,
-        alias_symbol,
-    )
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn ts_tree_cursor_current_status(
-    self_: *const TSTreeCursor,
-    field_id: *mut TSFieldId,
-    has_later_siblings: *mut bool,
-    has_later_named_siblings: *mut bool,
-    can_have_later_siblings_with_this_field: *mut bool,
-    supertypes: *mut TSSymbol,
-    supertype_count: *mut u32,
-) {
-    let cursor = cursor_ref(self_);
-    let language = (*cursor.tree).language;
-    let field_id = out_param_mut(field_id);
-    let has_later_siblings = out_param_mut(has_later_siblings);
-    let has_later_named_siblings = out_param_mut(has_later_named_siblings);
-    let can_have_later_siblings_with_this_field =
-        out_param_mut(can_have_later_siblings_with_this_field);
-    let supertype_count = out_param_mut(supertype_count);
-    let max_supertypes = *supertype_count;
-    *field_id = 0;
-    *supertype_count = 0;
-    *has_later_siblings = false;
-    *has_later_named_siblings = false;
-    *can_have_later_siblings_with_this_field = false;
-
-    // Walk up the tree, visiting the current node and its invisible ancestors
-    let entries = tree_cursor_entry_slice(&cursor.stack);
-    let mut i = cursor.stack.size - 1;
-    while i > 0 {
-        let entry = entries.get_unchecked(i as usize);
-        let parent_entry = entries.get_unchecked((i - 1) as usize);
-
-        let alias_sequence = language_alias_sequence(
-            language,
-            u32::from((*(*parent_entry.subtree).ptr).data.children.production_id),
-        );
-
-        // Inline subtree_symbol macro
-        let subtree_symbol_fn = |subtree: Subtree, structural_child_index: u32| -> TSSymbol {
-            if !subtree_extra(subtree)
-                && !alias_sequence.is_null()
-                && *alias_sequence.add(structural_child_index as usize) != 0
-            {
-                *alias_sequence.add(structural_child_index as usize)
-            } else {
-                subtree_symbol(subtree)
-            }
-        };
-
-        // Stop walking up when a visible ancestor is found.
-        let entry_symbol = subtree_symbol_fn(*entry.subtree, entry.structural_child_index);
-        let entry_metadata = ts_language_symbol_metadata(language, entry_symbol);
-        if i != cursor.stack.size - 1 && entry_metadata.visible {
-            break;
-        }
-
-        // Record any supertypes
-        if entry_metadata.supertype && *supertype_count < max_supertypes {
-            *supertypes.add(*supertype_count as usize) = entry_symbol;
-            *supertype_count += 1;
-        }
-
-        // Determine if the current node has later siblings.
-        if !*has_later_siblings {
-            let sibling_count = (*(*parent_entry.subtree).ptr).child_count;
-            let mut structural_child_index = entry.structural_child_index;
-            if !subtree_extra(*entry.subtree) {
-                structural_child_index += 1;
-            }
-            let mut j = entry.child_index + 1;
-            while j < sibling_count {
-                let sibling = *subtree_child(*parent_entry.subtree, j);
-                let sibling_metadata = ts_language_symbol_metadata(
-                    language,
-                    subtree_symbol_fn(sibling, structural_child_index),
-                );
-                if sibling_metadata.visible {
-                    *has_later_siblings = true;
-                    if *has_later_named_siblings {
-                        break;
-                    }
-                    if sibling_metadata.named {
-                        *has_later_named_siblings = true;
-                        break;
-                    }
-                } else if subtree_visible_child_count(sibling) > 0 {
-                    *has_later_siblings = true;
-                    if *has_later_named_siblings {
-                        break;
-                    }
-                    if (*sibling.ptr).data.children.named_child_count > 0 {
-                        *has_later_named_siblings = true;
-                        break;
-                    }
-                }
-                if !subtree_extra(sibling) {
-                    structural_child_index += 1;
-                }
-                j += 1;
-            }
-        }
-
-        if !subtree_extra(*entry.subtree) {
-            let mut field_map: *const TSFieldMapEntry = ptr::null();
-            let mut field_map_end: *const TSFieldMapEntry = ptr::null();
-            language_field_map(
-                language,
-                u32::from((*(*parent_entry.subtree).ptr).data.children.production_id),
-                &mut field_map,
-                &mut field_map_end,
-            );
-
-            // Look for a field name associated with the current node.
-            if *field_id == 0 {
-                let mut map = field_map;
-                while map < field_map_end {
-                    if !(*map).inherited && (*map).child_index == entry.structural_child_index as u8
-                    {
-                        *field_id = (*map).field_id;
-                        break;
-                    }
-                    map = map.add(1);
-                }
-            }
-
-            // Determine if the current node can have later siblings with the same field name.
-            if *field_id != 0 {
-                let mut map = field_map;
-                while map < field_map_end {
-                    if (*map).field_id == *field_id
-                        && u32::from((*map).child_index) > entry.structural_child_index
-                    {
-                        *can_have_later_siblings_with_this_field = true;
-                        break;
-                    }
-                    map = map.add(1);
-                }
-            }
-        }
-
-        i -= 1;
-    }
-}
-
 #[no_mangle]
 pub unsafe extern "C" fn ts_tree_cursor_current_depth(self_: *const TSTreeCursor) -> u32 {
     let cursor = cursor_ref(self_);
@@ -893,60 +728,6 @@ pub unsafe extern "C" fn ts_tree_cursor_parent_node(self_: *const TSTreeCursor) 
         i -= 1;
     }
     node_new(ptr::null(), ptr::null(), length_zero(), 0)
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn ts_tree_cursor_current_field_id(self_: *const TSTreeCursor) -> TSFieldId {
-    let cursor = cursor_ref(self_);
-
-    // Walk up the tree, visiting the current node and its invisible ancestors.
-    let entries = tree_cursor_entry_slice(&cursor.stack);
-    let mut i = cursor.stack.size - 1;
-    while i > 0 {
-        let entry = entries.get_unchecked(i as usize);
-        let parent_entry = entries.get_unchecked((i - 1) as usize);
-
-        // Stop walking up when another visible node is found.
-        if i != cursor.stack.size - 1 && tree_cursor_is_entry_visible(cursor, i) {
-            break;
-        }
-
-        if subtree_extra(*entry.subtree) {
-            break;
-        }
-
-        let mut field_map: *const TSFieldMapEntry = ptr::null();
-        let mut field_map_end: *const TSFieldMapEntry = ptr::null();
-        language_field_map(
-            (*cursor.tree).language,
-            u32::from((*(*parent_entry.subtree).ptr).data.children.production_id),
-            &mut field_map,
-            &mut field_map_end,
-        );
-        let mut map = field_map;
-        while map < field_map_end {
-            if !(*map).inherited && (*map).child_index == entry.structural_child_index as u8 {
-                return (*map).field_id;
-            }
-            map = map.add(1);
-        }
-
-        i -= 1;
-    }
-    0
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn ts_tree_cursor_current_field_name(
-    self_: *const TSTreeCursor,
-) -> *const i8 {
-    let id = ts_tree_cursor_current_field_id(self_);
-    if id != 0 {
-        let cursor = cursor_ref(self_);
-        let lang = language_full((*cursor.tree).language);
-        return *lang.field_names.add(id as usize);
-    }
-    ptr::null()
 }
 
 #[no_mangle]
