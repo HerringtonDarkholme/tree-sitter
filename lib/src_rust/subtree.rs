@@ -74,20 +74,19 @@ pub struct TSMapSlice {
 const EXTERNAL_SCANNER_STATE_INLINE_SIZE: usize = 24;
 
 pub struct ExternalScannerState {
-    /// Inline or heap state bytes, selected by `length`.
+    /// Owned serialized scanner bytes.
     data: ExternalScannerStateData,
     /// Serialized byte count.
     pub length: u32,
 }
 
-// SAFETY: Only used in a read-only static (EMPTY_EXTERNAL_SCANNER_STATE).
+// SAFETY: Scanner state is immutable after it is stored in a subtree. The heap
+// variant owns its allocation and exposes it only as read-only bytes.
 unsafe impl Sync for ExternalScannerState {}
 
-pub union ExternalScannerStateData {
-    /// Heap storage when serialized state exceeds inline capacity.
-    pub long_data: *mut u8,
-    /// Inline storage for the common small scanner-state case.
-    pub short_data: [u8; EXTERNAL_SCANNER_STATE_INLINE_SIZE],
+enum ExternalScannerStateData {
+    Inline([u8; EXTERNAL_SCANNER_STATE_INLINE_SIZE]),
+    Heap(NonNull<u8>),
 }
 
 // ---------------------------------------------------------------------------
@@ -461,9 +460,7 @@ struct EditEntry {
 // ---------------------------------------------------------------------------
 
 static EMPTY_EXTERNAL_SCANNER_STATE: ExternalScannerState = ExternalScannerState {
-    data: ExternalScannerStateData {
-        short_data: [0; EXTERNAL_SCANNER_STATE_INLINE_SIZE],
-    },
+    data: ExternalScannerStateData::Inline([0; EXTERNAL_SCANNER_STATE_INLINE_SIZE]),
     length: 0,
 };
 
@@ -474,44 +471,49 @@ pub unsafe fn external_scanner_state_init(
     data: *const u8,
     length: u32,
 ) {
-    self_.length = length;
-    if length > EXTERNAL_SCANNER_STATE_INLINE_SIZE as u32 {
-        self_.data.long_data = malloc(length as usize).cast::<u8>();
-        ptr::copy_nonoverlapping(data, self_.data.long_data, length as usize);
+    let state = if length > EXTERNAL_SCANNER_STATE_INLINE_SIZE as u32 {
+        let bytes = NonNull::new_unchecked(malloc(length as usize).cast::<u8>());
+        ptr::copy_nonoverlapping(data, bytes.as_ptr(), length as usize);
+        ExternalScannerStateData::Heap(bytes)
     } else {
-        ptr::copy_nonoverlapping(data, self_.data.short_data.as_mut_ptr(), length as usize);
-    }
+        let mut bytes = [0; EXTERNAL_SCANNER_STATE_INLINE_SIZE];
+        ptr::copy_nonoverlapping(data, bytes.as_mut_ptr(), length as usize);
+        ExternalScannerStateData::Inline(bytes)
+    };
+    ptr::write(
+        self_,
+        ExternalScannerState {
+            data: state,
+            length,
+        },
+    );
 }
 
 pub unsafe fn external_scanner_state_copy(self_: &ExternalScannerState) -> ExternalScannerState {
-    let mut result = ExternalScannerState {
-        data: ExternalScannerStateData {
-            short_data: self_.data.short_data,
-        },
-        length: self_.length,
+    let data = match &self_.data {
+        ExternalScannerStateData::Inline(bytes) => ExternalScannerStateData::Inline(*bytes),
+        ExternalScannerStateData::Heap(bytes) => {
+            let copy = NonNull::new_unchecked(malloc(self_.length as usize).cast::<u8>());
+            ptr::copy_nonoverlapping(bytes.as_ptr(), copy.as_ptr(), self_.length as usize);
+            ExternalScannerStateData::Heap(copy)
+        }
     };
-    if self_.length > EXTERNAL_SCANNER_STATE_INLINE_SIZE as u32 {
-        result.data.long_data = malloc(self_.length as usize).cast::<u8>();
-        ptr::copy_nonoverlapping(
-            self_.data.long_data,
-            result.data.long_data,
-            self_.length as usize,
-        );
+    ExternalScannerState {
+        data,
+        length: self_.length,
     }
-    result
 }
 
 pub unsafe fn external_scanner_state_delete(self_: &mut ExternalScannerState) {
-    if self_.length > EXTERNAL_SCANNER_STATE_INLINE_SIZE as u32 {
-        free(self_.data.long_data.cast::<c_void>());
+    if let ExternalScannerStateData::Heap(bytes) = self_.data {
+        free(bytes.as_ptr().cast::<c_void>());
     }
 }
 
-pub const unsafe fn external_scanner_state_data(self_: &ExternalScannerState) -> *const u8 {
-    if self_.length > EXTERNAL_SCANNER_STATE_INLINE_SIZE as u32 {
-        self_.data.long_data
-    } else {
-        self_.data.short_data.as_ptr()
+pub const fn external_scanner_state_data(self_: &ExternalScannerState) -> *const u8 {
+    match &self_.data {
+        ExternalScannerStateData::Inline(bytes) => bytes.as_ptr(),
+        ExternalScannerStateData::Heap(bytes) => bytes.as_ptr(),
     }
 }
 
