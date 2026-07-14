@@ -239,14 +239,14 @@ pub unsafe fn array_splice<T>(
     arr.size = new_size;
 }
 
-pub fn array_swap<T>(self_: &mut Array<T>, other: &mut Array<T>) {
-    core::mem::swap(self_, other);
+pub fn array_swap<T>(left: &mut Array<T>, right: &mut Array<T>) {
+    core::mem::swap(left, right);
 }
 
-pub unsafe fn array_assign<T>(self_: &mut Array<T>, other: &Array<T>) {
-    array_reserve(self_, other.size);
-    self_.size = other.size;
-    if other.size > 0 {
-        ptr::copy(other.contents, self_.contents, other.size as usize);
+pub unsafe fn array_assign<T>(destination: &mut Array<T>, source: &Array<T>) {
+    array_reserve(destination, source.size);
+    destination.size = source.size;
+    if !source.is_empty() {
+        ptr::copy(source.contents, destination.contents, source.len());
     }
 }
