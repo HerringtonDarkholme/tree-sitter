@@ -1,3 +1,9 @@
+//! Primitive range editing and collection helpers.
+//!
+//! These operations update a [`TSRange`] after an input edit, test sorted
+//! ranges for intersection, and append changed spans while coalescing adjacent
+//! results. Tree traversal remains in the parent module.
+
 use crate::ffi::{TSInputEdit, TSRange};
 
 use super::super::point::{point_add, point_sub, POINT_MAX};

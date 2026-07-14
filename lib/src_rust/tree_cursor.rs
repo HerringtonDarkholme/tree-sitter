@@ -1,3 +1,16 @@
+//! Stateful navigation through the public visible syntax tree.
+//!
+//! Unlike a [`TSNode`] search, a [`TreeCursor`] retains the path from its root
+//! to its current subtree. Each path entry caches position and child indexes,
+//! making repeated parent, sibling, and child moves efficient even though
+//! subtrees have no parent pointers.
+//!
+//! `navigation` mutates this path while flattening hidden nodes. `status`
+//! derives the current public node, field, depth, and descendant information.
+//! [`TreeCursor`] is stored directly inside the public [`TSTreeCursor`], so the
+//! root module owns and asserts that ABI layout; heap path entries remain an
+//! internal Rust-layout array.
+
 use core::ptr;
 
 use crate::ffi::{TSNode, TSPoint, TSSymbol, TSTreeCursor};

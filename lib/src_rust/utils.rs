@@ -1,3 +1,11 @@
+//! Small ownership and collection utilities shared by the runtime.
+//!
+//! [`Array`] is the runtime's allocator-aware growable buffer. It is used where
+//! `Vec` would bypass Tree-sitter's configurable allocation functions. The
+//! module also contains narrow pointer-to-reference adapters for already
+//! validated C API pointers and mechanical array operations used by several
+//! runtime components.
+
 use core::ffi::c_void;
 use core::ptr;
 

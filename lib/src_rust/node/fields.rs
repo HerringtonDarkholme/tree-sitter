@@ -1,3 +1,10 @@
+//! Field lookup for public child indexes and field names.
+//!
+//! Generated field maps index structural children, while callers observe a
+//! tree with hidden nodes flattened and extras omitted from fields. These
+//! helpers walk the two index spaces together and carry inherited field names
+//! through hidden productions.
+
 use super::{
     language_field_map_slice, language_full, node_child_iterator_next, node_is_relevant,
     node_iterate_children, node_language, node_null, node_relevant_child_count, node_subtree, ptr,

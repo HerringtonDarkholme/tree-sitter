@@ -1,3 +1,11 @@
+//! Child, sibling, and descendant searches for [`TSNode`].
+//!
+//! Navigation presents the public visible tree rather than the raw subtree
+//! hierarchy. Searches descend through hidden nodes, maintain absolute byte
+//! and point positions, and account for empty nodes that share boundaries.
+//! Named-child operations use the same traversal with anonymous symbols
+//! filtered out.
+
 use super::{
     node_child_count, node_child_iterator_next, node_end_byte, node_is_null, node_is_relevant,
     node_iterate_children, node_null, node_relevant_child_count, node_start_byte, node_start_point,

@@ -1,12 +1,19 @@
 //! Language metadata and parse-table access.
 //!
-//! This module provides:
-//! - Parse-table lookup and generated-language layout types
-//! - Exported functions that access `TSLanguage` fields
-//! - Internal helpers for generated language tables
+//! A generated parser exports one [`TSLanguage`] containing symbol metadata,
+//! lexer callbacks and modes, parse actions, goto states, fields, aliases, and
+//! external-scanner tables. The parser runtime treats it as immutable and asks
+//! this module questions such as “what actions apply to `(state, symbol)`?” or
+//! “what state follows this reduction?”.
 //!
-//! `TSLanguage` itself is defined in parser.h and created by generated parsers.
-//! We access it as an opaque `repr(C)` struct via raw pointers.
+//! `generated` defines the exact C layouts emitted into `parser.c`.
+//! `lookahead` scans the dense and compressed parse-table forms for the public
+//! lookahead-iterator API. The root module contains table lookup, metadata
+//! access, and exported language functions.
+//!
+//! [`TSLanguage`] itself is defined in `parser.h` and created by generated
+//! parsers. It is accessed through raw pointers because its representation is a
+//! compatibility boundary shared with generated C code.
 
 use core::ffi::c_void;
 use core::ptr;

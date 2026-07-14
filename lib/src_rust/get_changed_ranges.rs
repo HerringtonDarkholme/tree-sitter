@@ -1,3 +1,16 @@
+//! Structural comparison of an old and a new syntax tree.
+//!
+//! Changed ranges are not a text diff. Two [`DiffIterator`]s walk the visible
+//! structure of both trees in source order. Definitely matching subtrees are
+//! skipped as units, potentially changed subtrees are descended into, and
+//! incompatible spans are added to the result. Differences in included ranges
+//! and serialized external-scanner state prevent an otherwise equal-looking
+//! subtree from being skipped.
+//!
+//! The iterator keeps its own tree cursor because public visibility can flatten
+//! hidden grammar nodes and apply aliases. The `range` child module contains
+//! the smaller range-editing, intersection, and coalescing operations.
+
 use core::cmp::Ordering;
 use core::ptr;
 

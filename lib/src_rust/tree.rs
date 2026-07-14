@@ -1,3 +1,15 @@
+//! Ownership and public operations for a complete syntax tree.
+//!
+//! [`TSTree`] owns one retained root [`Subtree`], the generated language that
+//! interprets its symbols, and the included ranges used to parse it. Deleting a
+//! tree releases the root hierarchy; lightweight [`TSNode`] and tree-cursor
+//! values borrow that storage and must not outlive it.
+//!
+//! This module implements tree lifecycle, copying, editing, root-node access,
+//! changed-range entry points, included-range access, and diagnostic DOT
+//! output. Tree navigation itself lives in `node` and `tree_cursor`, while the
+//! structural comparison algorithm lives in `get_changed_ranges`.
+
 use core::ffi::c_void;
 
 use crate::ffi::{TSLanguage, TSNode, TSPoint, TSRange};

@@ -1,3 +1,17 @@
+//! Stateless inspection and navigation for public syntax nodes.
+//!
+//! A [`TSNode`] is a small borrowed view: it identifies one internal subtree,
+//! its owning [`TSTree`], its start position, and any alias applied by the
+//! parent production. It does not own or reference-count the subtree, so it is
+//! valid only while its tree remains alive.
+//!
+//! Public children do not map one-to-one to stored children. Hidden grammar
+//! nodes are flattened, extras may be handled specially, and aliases and field
+//! names come from generated language metadata. The `navigation` child module
+//! performs that flattening for child, sibling, and descendant searches;
+//! `fields` resolves fields through hidden nodes. This module contains the
+//! common representation helpers and exported query functions.
+
 use core::ptr;
 
 use crate::ffi::{TSFieldId, TSInputEdit, TSLanguage, TSNode, TSPoint, TSStateId, TSSymbol};

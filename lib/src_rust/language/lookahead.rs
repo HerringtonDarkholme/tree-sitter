@@ -1,3 +1,10 @@
+//! Iteration over symbols valid in one parse state.
+//!
+//! Generated languages store common states in a dense table and less common
+//! states in a grouped, compressed table. [`LookaheadIterator`] hides that
+//! distinction and yields each symbol whose table entry contains a shift or
+//! reduce action, together with the corresponding next state where applicable.
+
 use core::{ffi::c_void, ptr};
 
 use crate::ffi::{TSLanguage, TSStateId, TSSymbol};

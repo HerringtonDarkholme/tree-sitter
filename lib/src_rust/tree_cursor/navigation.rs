@@ -1,3 +1,11 @@
+//! Movement algorithms for a path-based tree cursor.
+//!
+//! Cursor movement operates on raw stored children but reports steps in the
+//! public tree. Hidden nodes may add path frames without becoming visible
+//! results, extras do not advance structural indexes, and aliases come from
+//! the parent production. [`CursorChildIterator`] centralizes that bookkeeping
+//! for child, sibling, descendant, and byte-position navigation.
+
 use core::ptr;
 
 use crate::ffi::{TSNode, TSPoint, TSSymbol};

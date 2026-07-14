@@ -1,3 +1,9 @@
+//! Public information derived from a cursor's current path.
+//!
+//! These functions turn the last path entry into an alias-aware [`TSNode`] and
+//! report its field, symbol, depth, and descendant indexes. Keeping status
+//! calculation separate lets `navigation` focus on changing the path.
+
 use core::ptr;
 
 use crate::ffi::{TSFieldId, TSLanguage, TSNode, TSSymbol, TSTreeCursor};
