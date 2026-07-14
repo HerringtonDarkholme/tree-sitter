@@ -32,11 +32,10 @@ use super::stack::{
     stack_error_cost, stack_get_summary, stack_halt, stack_halted_version_count,
     stack_has_advanced_since_error, stack_is_active, stack_is_halted, stack_is_paused,
     stack_last_external_token, stack_merge, stack_new, stack_node_count_since_error, stack_pause,
-    stack_pop_all, stack_pop_builder_delete, stack_pop_builder_new, stack_pop_count,
-    stack_pop_count_into, stack_pop_error, stack_position, stack_print_dot_graph, stack_push,
-    stack_record_summary, stack_remove_version, stack_renumber_version, stack_resume,
+    stack_pop_all, stack_pop_count, stack_pop_error, stack_position, stack_print_dot_graph,
+    stack_push, stack_record_summary, stack_remove_version, stack_renumber_version, stack_resume,
     stack_set_last_external_token, stack_state, stack_swap_versions, stack_version_count, Stack,
-    StackPopBuilder, StackSliceSpan, StackVersion, STACK_VERSION_NONE,
+    StackVersion, STACK_VERSION_NONE,
 };
 use super::subtree::{
     external_scanner_state_eq, subtree_array_clear, subtree_array_delete,
@@ -153,8 +152,6 @@ pub struct TSParser {
     reduce_actions: ReduceActionSet,
     /// Best accepted root found so far.
     finished_tree: Subtree,
-    /// Reusable pop-result builder for reductions.
-    reduce_builder: StackPopBuilder,
     /// Scratch arrays for stripping and comparing trailing extras.
     trailing_extras: SubtreeArray,
     trailing_extras2: SubtreeArray,
@@ -472,54 +469,6 @@ unsafe fn parser_new_node(
     subtree_new_node(symbol, children, production_id, self_.language)
 }
 
-const unsafe fn parser_builder_span_subtrees(
-    builder: &StackPopBuilder,
-    span: StackSliceSpan,
-) -> SubtreeArray {
-    SubtreeArray {
-        contents: if span.size > 0 {
-            builder.subtrees.contents.add(span.start as usize)
-        } else {
-            ptr::null_mut()
-        },
-        size: span.size,
-        capacity: span.size,
-    }
-}
-
-unsafe fn parser_new_node_from_builder_span(
-    self_: &mut TSParser,
-    symbol: TSSymbol,
-    children: &SubtreeArray,
-    production_id: u32,
-) -> MutableSubtree {
-    let mut owned_children = array_new();
-    array_reserve(&mut owned_children, children.size);
-    if children.size > 0 {
-        ptr::copy_nonoverlapping(
-            children.contents,
-            owned_children.contents,
-            children.size as usize,
-        );
-    }
-    owned_children.size = children.size;
-    subtree_new_node(symbol, &mut owned_children, production_id, self_.language)
-}
-
-unsafe fn parser_release_builder_span(self_: &mut TSParser, span: StackSliceSpan) {
-    if span.size == 0 {
-        return;
-    }
-    let contents = self_
-        .reduce_builder
-        .subtrees
-        .contents
-        .add(span.start as usize);
-    for i in 0..span.size {
-        subtree_release(&mut self_.tree_pool, *contents.add(i as usize));
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Internal helpers — shift/reduce/accept
 // ---------------------------------------------------------------------------
@@ -600,9 +549,6 @@ unsafe fn parser_finish_reduction(
 /// - Build the parent subtree, compute the goto state, push the parent and any
 ///   stripped trailing extras.
 /// - Try to merge the resulting stack version back into earlier versions.
-///
-/// Pop results are written into `reduce_builder`, avoiding a temporary
-/// `StackSliceArray` allocation on each reduction.
 unsafe fn parser_reduce(
     self_: &mut TSParser,
     version: StackVersion,
@@ -612,35 +558,30 @@ unsafe fn parser_reduce(
 ) -> StackVersion {
     let initial_version_count = stack_version_count(ptr_ref(self_.stack));
 
-    stack_pop_count_into(
-        ptr_mut(self_.stack),
-        version,
-        action.count,
-        &mut self_.reduce_builder,
-    );
+    let pop = stack_pop_count(ptr_mut(self_.stack), version, action.count);
     let mut removed_version_count: u32 = 0;
     let stack = ptr_mut(self_.stack);
     let halted_version_count = stack_halted_version_count(stack);
     let mut i: u32 = 0;
-    let pop_size = self_.reduce_builder.slices.size;
+    let pop_size = pop.size;
     while i < pop_size {
-        let span = *array_get_ref(&self_.reduce_builder.slices, i);
-        let slice_version = span.version - removed_version_count;
+        let mut slice = ptr::read(array_get_ref(&pop, i));
+        let slice_version = slice.version - removed_version_count;
 
         // Limit max versions
         if slice_version > MAX_VERSION_COUNT + MAX_VERSION_COUNT_OVERFLOW + halted_version_count {
             stack_remove_version(stack, slice_version);
-            parser_release_builder_span(self_, span);
+            subtree_array_delete(&mut self_.tree_pool, &mut slice.subtrees);
             removed_version_count += 1;
             while i + 1 < pop_size {
                 parser_log(self_, |_, log| {
                     log.write_str("aborting reduce with too many versions")
                 });
-                let next_span = *array_get_ref(&self_.reduce_builder.slices, i + 1);
-                if next_span.version != span.version {
+                let mut next_slice = ptr::read(array_get_ref(&pop, i + 1));
+                if next_slice.version != slice.version {
                     break;
                 }
-                parser_release_builder_span(self_, next_span);
+                subtree_array_delete(&mut self_.tree_pool, &mut next_slice.subtrees);
                 i += 1;
             }
             i += 1;
@@ -648,26 +589,25 @@ unsafe fn parser_reduce(
         }
 
         // Remove trailing extras from children
-        let mut children = parser_builder_span_subtrees(&self_.reduce_builder, span);
+        let mut children = slice.subtrees;
         subtree_array_remove_trailing_extras(&mut children, &mut self_.trailing_extras);
 
-        let mut parent = parser_new_node_from_builder_span(
+        let mut parent = parser_new_node(
             self_,
             action.symbol,
-            &children,
+            &mut children,
             u32::from(action.production_id),
         );
 
         // Handle merged stack versions
         while i + 1 < pop_size {
-            let next_span = *array_get_ref(&self_.reduce_builder.slices, i + 1);
-            if next_span.version != span.version {
+            let next_slice = ptr::read(array_get_ref(&pop, i + 1));
+            if next_slice.version != slice.version {
                 break;
             }
             i += 1;
 
-            let mut next_slice_children =
-                parser_builder_span_subtrees(&self_.reduce_builder, next_span);
+            let mut next_slice_children = next_slice.subtrees;
             subtree_array_remove_trailing_extras(
                 &mut next_slice_children,
                 &mut self_.trailing_extras2,
@@ -677,15 +617,15 @@ unsafe fn parser_reduce(
                 subtree_array_clear(&mut self_.tree_pool, &mut self_.trailing_extras);
                 subtree_release(&mut self_.tree_pool, subtree_from_mut(parent));
                 array_swap(&mut self_.trailing_extras, &mut self_.trailing_extras2);
-                parent = parser_new_node_from_builder_span(
+                parent = parser_new_node(
                     self_,
                     action.symbol,
-                    &next_slice_children,
+                    &mut next_slice_children,
                     u32::from(action.production_id),
                 );
             } else {
-                array_clear(&mut self_.trailing_extras2);
-                parser_release_builder_span(self_, next_span);
+                subtree_array_clear(&mut self_.tree_pool, &mut self_.trailing_extras2);
+                subtree_array_delete(&mut self_.tree_pool, &mut next_slice_children);
             }
         }
 
@@ -717,9 +657,6 @@ unsafe fn parser_reduce(
 
         i += 1;
     }
-    self_.reduce_builder.slices.size = 0;
-    self_.reduce_builder.subtrees.size = 0;
-
     if stack_version_count(stack) > initial_version_count {
         initial_version_count
     } else {
@@ -1293,7 +1230,6 @@ pub unsafe extern "C" fn ts_parser_new() -> *mut TSParser {
             language: ptr::null(),
             reduce_actions: array_new(),
             finished_tree: NULL_SUBTREE,
-            reduce_builder: stack_pop_builder_new(),
             trailing_extras: array_new(),
             trailing_extras2: array_new(),
             scratch_trees: array_new(),
@@ -1334,7 +1270,6 @@ pub unsafe extern "C" fn ts_parser_delete(self_: *mut TSParser) {
     lexer_delete(&mut parser.lexer);
     parser_set_cached_token(parser, 0, NULL_SUBTREE, NULL_SUBTREE);
     subtree_pool_delete(&mut parser.tree_pool);
-    stack_pop_builder_delete(&mut parser.reduce_builder);
     array_delete(&mut parser.trailing_extras);
     array_delete(&mut parser.trailing_extras2);
     array_delete(&mut parser.scratch_trees);

@@ -3,9 +3,9 @@ use super::{
     array_insert, array_new, array_push, array_reserve, ptr, ptr_mut, ptr_ref, stack_head,
     stack_node_retain, subtree_alloc_size, subtree_array_copy, subtree_array_delete,
     subtree_array_reverse, subtree_extra, subtree_is_error, subtree_retain, Stack, StackHead,
-    StackIterationAction, StackIterator, StackLink, StackNode, StackPopBuilder, StackSlice,
-    StackSliceArray, StackSliceSpan, StackStatus, StackSummary, StackSummaryEntry, StackVersion,
-    Subtree, SubtreeArray, MAX_ITERATOR_COUNT, NULL_SUBTREE, STACK_VERSION_NONE,
+    StackIterationAction, StackIterator, StackLink, StackNode, StackSlice, StackSliceArray,
+    StackStatus, StackSummary, StackSummaryEntry, StackVersion, Subtree, SubtreeArray,
+    MAX_ITERATOR_COUNT, NULL_SUBTREE,
 };
 
 /// Add a new version to the stack, cloning metadata from an existing version.
@@ -59,28 +59,6 @@ unsafe fn stack_add_slice(
         version,
     };
     array_push(&mut self_.slices, slice);
-}
-
-pub(super) unsafe fn stack_pop_builder_append_subtrees(
-    builder: &mut StackPopBuilder,
-    subtrees: &SubtreeArray,
-) -> StackSliceSpan {
-    let start = builder.subtrees.size;
-    let dest = &mut builder.subtrees;
-    array_reserve(dest, start + subtrees.size);
-    if subtrees.size > 0 {
-        ptr::copy_nonoverlapping(
-            subtrees.contents,
-            dest.contents.add(start as usize),
-            subtrees.size as usize,
-        );
-    }
-    dest.size = start + subtrees.size;
-    StackSliceSpan {
-        start,
-        size: subtrees.size,
-        version: STACK_VERSION_NONE,
-    }
 }
 
 /// Core iteration function for walking the stack graph.

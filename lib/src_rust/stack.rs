@@ -111,20 +111,6 @@ pub struct StackSlice {
 pub type StackSliceArray = Array<StackSlice>;
 
 #[derive(Clone, Copy)]
-pub struct StackSliceSpan {
-    pub(super) start: u32,
-    pub(super) size: u32,
-    pub(super) version: StackVersion,
-}
-
-pub type StackSliceSpanArray = Array<StackSliceSpan>;
-
-pub struct StackPopBuilder {
-    pub(super) slices: StackSliceSpanArray,
-    pub(super) subtrees: SubtreeArray,
-}
-
-#[derive(Clone, Copy)]
 pub struct StackSummaryEntry {
     pub(super) position: Length,
     pub(super) depth: u32,
@@ -203,27 +189,6 @@ unsafe fn stderr_file() -> *mut c_void {
 #[cfg(not(target_os = "windows"))]
 unsafe fn stderr_file() -> *mut c_void {
     stderr
-}
-
-pub const fn stack_pop_builder_new() -> StackPopBuilder {
-    StackPopBuilder {
-        slices: array_new(),
-        subtrees: array_new(),
-    }
-}
-
-pub unsafe fn stack_pop_builder_delete(self_: &mut StackPopBuilder) {
-    if !self_.slices.contents.is_null() {
-        array_delete(&mut self_.slices);
-    }
-    if !self_.subtrees.contents.is_null() {
-        array_delete(&mut self_.subtrees);
-    }
-}
-
-fn stack_pop_builder_clear(self_: &mut StackPopBuilder) {
-    self_.slices.size = 0;
-    self_.subtrees.size = 0;
 }
 
 #[inline]
@@ -520,10 +485,7 @@ unsafe fn stack_head_delete(
 }
 
 mod pop;
-use pop::{
-    pop_all_action, pop_count_action, pop_error_action, stack_iter,
-    stack_pop_builder_append_subtrees, summarize_stack_action,
-};
+use pop::{pop_all_action, pop_count_action, pop_error_action, stack_iter, summarize_stack_action};
 
 // ===========================================================================
 // Internal stack helpers used by the Rust parser.
@@ -678,29 +640,6 @@ pub unsafe fn stack_pop_count(
         |iterator| pop_count_action(iterator, count),
         Some(count),
     )
-}
-
-/// Pop a given number of entries from a version into a caller-owned builder.
-pub unsafe fn stack_pop_count_into(
-    self_: &mut Stack,
-    version: StackVersion,
-    count: u32,
-    builder: &mut StackPopBuilder,
-) {
-    stack_pop_builder_clear(builder);
-    let pop = stack_iter(
-        self_,
-        version,
-        |iterator| pop_count_action(iterator, count),
-        Some(count),
-    );
-    for i in 0..pop.size {
-        let mut slice = ptr::read(array_get_ref(&pop, i));
-        let mut span = stack_pop_builder_append_subtrees(builder, &slice.subtrees);
-        span.version = slice.version;
-        array_push(&mut builder.slices, span);
-        array_delete(&mut slice.subtrees);
-    }
 }
 
 /// Pop an error from the top of a version.
