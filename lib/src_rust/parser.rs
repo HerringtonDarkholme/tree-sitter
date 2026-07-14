@@ -34,19 +34,14 @@ use super::stack::{
     StackVersion, STACK_VERSION_NONE,
 };
 use super::subtree::{
-    subtree_array_clear, subtree_array_delete, subtree_array_remove_trailing_extras, subtree_child,
-    subtree_child_count, subtree_children_slice, subtree_compare, subtree_compress,
-    subtree_dynamic_precedence, subtree_error_cost, subtree_external_scanner_state_eq,
-    subtree_extra, subtree_from_mut, subtree_has_external_scanner_state_change,
-    subtree_has_external_tokens, subtree_is_eof, subtree_is_error, subtree_is_keyword,
-    subtree_last_external_token, subtree_lookahead_bytes, subtree_make_mut, subtree_new_error,
-    subtree_new_error_node, subtree_new_leaf, subtree_new_missing_leaf, subtree_new_node,
-    subtree_parse_state, subtree_pool_delete, subtree_pool_new, subtree_print_dot_graph,
-    subtree_release, subtree_repeat_depth, subtree_retain, subtree_set_external_scanner_state,
-    subtree_set_extra, subtree_set_symbol, subtree_size, subtree_symbol, subtree_to_mut_unsafe,
-    subtree_total_bytes, subtree_total_size, MutableSubtree, Subtree, SubtreeArray, SubtreePool,
-    NULL_SUBTREE, TS_BUILTIN_SYM_END, TS_BUILTIN_SYM_ERROR, TS_BUILTIN_SYM_ERROR_REPEAT,
-    TS_TREE_STATE_NONE,
+    subtree_array_clear, subtree_array_delete, subtree_array_remove_trailing_extras,
+    subtree_compare, subtree_compress, subtree_external_scanner_state_eq, subtree_from_mut,
+    subtree_last_external_token, subtree_make_mut, subtree_new_error, subtree_new_error_node,
+    subtree_new_leaf, subtree_new_missing_leaf, subtree_new_node, subtree_pool_delete,
+    subtree_pool_new, subtree_print_dot_graph, subtree_release, subtree_retain,
+    subtree_set_external_scanner_state, subtree_set_extra, subtree_set_symbol,
+    subtree_to_mut_unsafe, MutableSubtree, Subtree, SubtreeArray, SubtreePool, NULL_SUBTREE,
+    TS_BUILTIN_SYM_END, TS_BUILTIN_SYM_ERROR, TS_BUILTIN_SYM_ERROR_REPEAT, TS_TREE_STATE_NONE,
 };
 use super::tree::TSTree;
 use super::utils::{array_swap, Array};
@@ -275,7 +270,7 @@ unsafe fn parser_better_version_exists(
     is_in_error: bool,
     cost: u32,
 ) -> bool {
-    if !self_.finished_tree.is_null() && subtree_error_cost(self_.finished_tree) <= cost {
+    if !self_.finished_tree.is_null() && self_.finished_tree.error_cost() <= cost {
         return true;
     }
 
@@ -487,12 +482,7 @@ unsafe fn parser_continue_after_reduction(
     if lookahead.is_null() {
         true
     } else {
-        language_table_entry(
-            self_.language,
-            *state,
-            subtree_symbol(lookahead),
-            table_entry,
-        );
+        language_table_entry(self_.language, *state, lookahead.symbol(), table_entry);
         false
     }
 }
@@ -515,9 +505,9 @@ unsafe fn parser_try_keyword_fallback(
     table_entry: &mut TableEntry,
 ) -> bool {
     let keyword_capture_token = language_full(self_.language).keyword_capture_token;
-    if !subtree_is_keyword(*lookahead)
-        || subtree_symbol(*lookahead) == keyword_capture_token
-        || language_is_reserved_word(self_.language, state, subtree_symbol(*lookahead))
+    if !(*lookahead).is_keyword()
+        || (*lookahead).symbol() == keyword_capture_token
+        || language_is_reserved_word(self_.language, state, (*lookahead).symbol())
     {
         return false;
     }
@@ -1029,9 +1019,7 @@ pub unsafe extern "C-unwind" fn ts_parser_parse(
         // then terminate parsing. Clear the parse stack to remove any extra references to subtrees
         // within the finished tree, ensuring that these subtrees can be safely mutated in-place
         // for rebalancing.
-        if !parser.finished_tree.is_null()
-            && subtree_error_cost(parser.finished_tree) < min_error_cost
-        {
+        if !parser.finished_tree.is_null() && parser.finished_tree.error_cost() < min_error_cost {
             stack_clear(ptr_mut(parser.stack));
             break;
         }

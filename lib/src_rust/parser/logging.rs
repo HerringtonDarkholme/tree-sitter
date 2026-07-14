@@ -1,7 +1,7 @@
 use super::{
     c_char, fmt, fprintf, fputc, fputs, ptr_mut, stack_print_dot_graph, subtree_print_dot_graph,
-    subtree_symbol, ts_language_symbol_name, CStr, Stack, Subtree, TSLanguage, TSLogTypeParse,
-    TSParser, TSSymbol, Write,
+    ts_language_symbol_name, CStr, Stack, Subtree, TSLanguage, TSLogTypeParse, TSParser, TSSymbol,
+    Write,
 };
 
 // ---------------------------------------------------------------------------
@@ -102,7 +102,7 @@ pub(super) unsafe fn parser_symbol_name(
 }
 
 pub(super) unsafe fn parser_tree_name(language: *const TSLanguage, tree: Subtree) -> *const c_char {
-    parser_symbol_name(language, subtree_symbol(tree))
+    parser_symbol_name(language, tree.symbol())
 }
 
 pub(super) unsafe fn parser_log_lookahead(self_: &mut TSParser, symbol: *const c_char, size: u32) {

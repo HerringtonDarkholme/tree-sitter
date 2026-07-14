@@ -2,10 +2,8 @@ use super::{
     array_swap, language_full, language_lookup, parser_log, parser_symbol_name, ptr, ptr_mut,
     ptr_ref, stack_merge, stack_pop_all, stack_pop_count, stack_push, stack_remove_version,
     subtree_array_clear, subtree_array_delete, subtree_array_remove_trailing_extras,
-    subtree_child_count, subtree_children_slice, subtree_compare, subtree_dynamic_precedence,
-    subtree_error_cost, subtree_extra, subtree_from_mut, subtree_has_external_tokens,
-    subtree_is_eof, subtree_last_external_token, subtree_make_mut, subtree_new_node,
-    subtree_release, subtree_retain, subtree_set_extra, subtree_symbol, ts_language_next_state,
+    subtree_compare, subtree_from_mut, subtree_last_external_token, subtree_make_mut,
+    subtree_new_node, subtree_release, subtree_retain, subtree_set_extra, ts_language_next_state,
     DisplayCStr, MutableSubtree, ReduceAction, StackVersion, Subtree, SubtreeArray, TSParser,
     TSStateId, TSSymbol, Write, MAX_VERSION_COUNT, MAX_VERSION_COUNT_OVERFLOW, NULL_SUBTREE,
     STACK_VERSION_NONE, TS_BUILTIN_SYM_ERROR, TS_BUILTIN_SYM_ERROR_REPEAT, TS_TREE_STATE_NONE,
@@ -23,15 +21,15 @@ pub(super) unsafe fn parser_select_tree(
         return false;
     }
 
-    let left_error_cost = subtree_error_cost(left);
-    let right_error_cost = subtree_error_cost(right);
+    let left_error_cost = left.error_cost();
+    let right_error_cost = right.error_cost();
     if right_error_cost < left_error_cost {
         parser_log(parser, |context, log| {
             write!(
                 log,
                 "select_smaller_error symbol:{}, over_symbol:{}",
-                DisplayCStr(parser_symbol_name(context.language, subtree_symbol(right))),
-                DisplayCStr(parser_symbol_name(context.language, subtree_symbol(left)))
+                DisplayCStr(parser_symbol_name(context.language, right.symbol())),
+                DisplayCStr(parser_symbol_name(context.language, left.symbol()))
             )
         });
         return true;
@@ -41,15 +39,15 @@ pub(super) unsafe fn parser_select_tree(
             write!(
                 log,
                 "select_smaller_error symbol:{}, over_symbol:{}",
-                DisplayCStr(parser_symbol_name(context.language, subtree_symbol(left))),
-                DisplayCStr(parser_symbol_name(context.language, subtree_symbol(right)))
+                DisplayCStr(parser_symbol_name(context.language, left.symbol())),
+                DisplayCStr(parser_symbol_name(context.language, right.symbol()))
             )
         });
         return false;
     }
 
-    let left_precedence = subtree_dynamic_precedence(left);
-    let right_precedence = subtree_dynamic_precedence(right);
+    let left_precedence = left.dynamic_precedence();
+    let right_precedence = right.dynamic_precedence();
     if right_precedence != left_precedence {
         let select_right = right_precedence > left_precedence;
         let (selected, rejected, precedence, other_precedence) = if select_right {
@@ -61,8 +59,8 @@ pub(super) unsafe fn parser_select_tree(
             write!(
                 log,
                 "select_higher_precedence symbol:{}, prec:{precedence}, over_symbol:{}, other_prec:{other_precedence}",
-                DisplayCStr(parser_symbol_name(context.language, subtree_symbol(selected))),
-                DisplayCStr(parser_symbol_name(context.language, subtree_symbol(rejected)))
+                DisplayCStr(parser_symbol_name(context.language, selected.symbol())),
+                DisplayCStr(parser_symbol_name(context.language, rejected.symbol()))
             )
         });
         return select_right;
@@ -78,8 +76,8 @@ pub(super) unsafe fn parser_select_tree(
                 write!(
                     log,
                     "select_earlier symbol:{}, over_symbol:{}",
-                    DisplayCStr(parser_symbol_name(context.language, subtree_symbol(left))),
-                    DisplayCStr(parser_symbol_name(context.language, subtree_symbol(right)))
+                    DisplayCStr(parser_symbol_name(context.language, left.symbol())),
+                    DisplayCStr(parser_symbol_name(context.language, right.symbol()))
                 )
             });
             false
@@ -89,8 +87,8 @@ pub(super) unsafe fn parser_select_tree(
                 write!(
                     log,
                     "select_earlier symbol:{}, over_symbol:{}",
-                    DisplayCStr(parser_symbol_name(context.language, subtree_symbol(right))),
-                    DisplayCStr(parser_symbol_name(context.language, subtree_symbol(left)))
+                    DisplayCStr(parser_symbol_name(context.language, right.symbol())),
+                    DisplayCStr(parser_symbol_name(context.language, left.symbol()))
                 )
             });
             true
@@ -100,8 +98,8 @@ pub(super) unsafe fn parser_select_tree(
                 write!(
                     log,
                     "select_existing symbol:{}, over_symbol:{}",
-                    DisplayCStr(parser_symbol_name(context.language, subtree_symbol(left))),
-                    DisplayCStr(parser_symbol_name(context.language, subtree_symbol(right)))
+                    DisplayCStr(parser_symbol_name(context.language, left.symbol())),
+                    DisplayCStr(parser_symbol_name(context.language, right.symbol()))
                 )
             });
             false
@@ -115,12 +113,8 @@ unsafe fn parser_select_children(
     children: &SubtreeArray,
 ) -> bool {
     parser.scratch_trees.assign(children);
-    let scratch_tree = subtree_new_node(
-        subtree_symbol(left),
-        &mut parser.scratch_trees,
-        0,
-        parser.language,
-    );
+    let scratch_tree =
+        subtree_new_node(left.symbol(), &mut parser.scratch_trees, 0, parser.language);
     parser_select_tree(parser, left, subtree_from_mut(scratch_tree))
 }
 
@@ -140,8 +134,8 @@ pub(super) unsafe fn parser_shift(
     lookahead: Subtree,
     extra: bool,
 ) {
-    let is_leaf = subtree_child_count(lookahead) == 0;
-    let subtree_to_push = if extra != subtree_extra(lookahead) && is_leaf {
+    let is_leaf = lookahead.child_count() == 0;
+    let subtree_to_push = if extra != lookahead.extra() && is_leaf {
         let mut result = subtree_make_mut(&mut parser.tree_pool, lookahead);
         subtree_set_extra(&mut result, extra);
         subtree_from_mut(result)
@@ -151,7 +145,7 @@ pub(super) unsafe fn parser_shift(
 
     let stack = ptr_mut(parser.stack);
     stack_push(stack, version, subtree_to_push, state);
-    if subtree_has_external_tokens(subtree_to_push) {
+    if subtree_to_push.has_external_tokens() {
         stack.set_last_external_token(version, subtree_last_external_token(subtree_to_push));
     }
 }
@@ -299,7 +293,7 @@ pub(super) unsafe fn parser_accept(
     version: StackVersion,
     lookahead: Subtree,
 ) {
-    debug_assert!(subtree_is_eof(lookahead));
+    debug_assert!(lookahead.is_eof());
     let stack = ptr_mut(parser.stack);
     stack_push(stack, version, lookahead, 1);
 
@@ -311,16 +305,16 @@ pub(super) unsafe fn parser_accept(
         while index > 0 {
             index -= 1;
             let tree = trees.as_slice()[index];
-            if !subtree_extra(tree) {
+            if !tree.extra() {
                 debug_assert!(!tree.data.is_inline());
-                let children = subtree_children_slice(tree);
+                let children = tree.children();
                 for &child in children {
                     subtree_retain(child);
                 }
                 trees.splice(index as u32, 1, children.len() as u32, children.as_ptr());
                 root = subtree_from_mut(parser_new_node(
                     parser,
-                    subtree_symbol(tree),
+                    tree.symbol(),
                     &mut trees,
                     u32::from(tree.heap_data().children().production_id),
                 ));

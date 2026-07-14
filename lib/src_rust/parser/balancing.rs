@@ -1,6 +1,5 @@
 use super::{
-    parser_check_progress, subtree_child, subtree_child_count, subtree_children_slice,
-    subtree_compress, subtree_from_mut, subtree_repeat_depth, subtree_to_mut_unsafe, TSParser,
+    parser_check_progress, subtree_compress, subtree_from_mut, subtree_to_mut_unsafe, TSParser,
 };
 
 /// Incrementally rebalance the accepted tree, preserving work across cancellation.
@@ -9,7 +8,7 @@ pub(super) unsafe fn parser_balance_subtree(parser: &mut TSParser) -> bool {
 
     if !parser.canceled_balancing {
         parser.tree_pool.tree_stack.clear();
-        if subtree_child_count(finished_tree) > 0 && finished_tree.heap_data().ref_count() == 1 {
+        if finished_tree.child_count() > 0 && finished_tree.heap_data().ref_count() == 1 {
             parser
                 .tree_pool
                 .tree_stack
@@ -31,11 +30,11 @@ pub(super) unsafe fn parser_balance_subtree(parser: &mut TSParser) -> bool {
 
         if tree.heap_data().children().repeat_depth > 0 {
             let tree_subtree = subtree_from_mut(tree);
-            let children = subtree_children_slice(tree_subtree);
-            let first_depth = subtree_repeat_depth(*children.get_unchecked(0));
-            let last_depth = subtree_repeat_depth(
-                *children.get_unchecked(tree.heap_data().child_count as usize - 1),
-            );
+            let children = tree_subtree.children();
+            let first_depth = children.get_unchecked(0).repeat_depth();
+            let last_depth = children
+                .get_unchecked(tree.heap_data().child_count as usize - 1)
+                .repeat_depth();
             let repeat_delta = i64::from(first_depth) - i64::from(last_depth);
             if repeat_delta > 0 {
                 let mut compression = repeat_delta as u32 / 2;
@@ -61,8 +60,8 @@ pub(super) unsafe fn parser_balance_subtree(parser: &mut TSParser) -> bool {
         parser.tree_pool.tree_stack.pop();
 
         for child_index in 0..tree.heap_data().child_count {
-            let child = *subtree_child(subtree_from_mut(tree), child_index);
-            if subtree_child_count(child) > 0 && child.heap_data().ref_count() == 1 {
+            let child = *(subtree_from_mut(tree)).child(child_index);
+            if child.child_count() > 0 && child.heap_data().ref_count() == 1 {
                 parser
                     .tree_pool
                     .tree_stack

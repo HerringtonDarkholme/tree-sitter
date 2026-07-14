@@ -5,12 +5,11 @@ use super::{
     lexer_reset, lexer_start, parser_call_keyword_lex_fn, parser_call_main_lex_fn,
     parser_external_scanner_deserialize, parser_external_scanner_scan,
     parser_external_scanner_serialize, parser_log, parser_log_lookahead, parser_symbol_name,
-    ptr_ref, subtree_child_count, subtree_external_scanner_state_eq, subtree_is_keyword,
-    subtree_new_error, subtree_new_leaf, subtree_parse_state, subtree_release, subtree_retain,
-    subtree_set_external_scanner_state, subtree_size, subtree_symbol, subtree_to_mut_unsafe,
-    subtree_total_size, ts_language_next_state, DisplayCStr, Length, StackVersion, Subtree,
-    TSParser, TSStateId, TSSymbol, TableEntry, Write, ERROR_STATE, NULL_SUBTREE,
-    TS_BUILTIN_SYM_END, TS_BUILTIN_SYM_ERROR,
+    ptr_ref, subtree_external_scanner_state_eq, subtree_new_error, subtree_new_leaf,
+    subtree_release, subtree_retain, subtree_set_external_scanner_state, subtree_to_mut_unsafe,
+    ts_language_next_state, DisplayCStr, Length, StackVersion, Subtree, TSParser, TSStateId,
+    TSSymbol, TableEntry, Write, ERROR_STATE, NULL_SUBTREE, TS_BUILTIN_SYM_END,
+    TS_BUILTIN_SYM_ERROR,
 };
 
 // ---------------------------------------------------------------------------
@@ -23,8 +22,8 @@ unsafe fn parser_can_reuse_token(
     token: Subtree,
     table_entry: &TableEntry,
 ) -> bool {
-    debug_assert_eq!(subtree_child_count(token), 0);
-    let token_symbol = subtree_symbol(token);
+    debug_assert_eq!(token.child_count(), 0);
+    let token_symbol = token.symbol();
     let current_lex_mode = language_lex_mode_for_state(self_.language, state);
 
     // At the end of a non-terminal extra node, the lexer normally returns
@@ -36,7 +35,7 @@ unsafe fn parser_can_reuse_token(
 
     // If the token was created in a state with the same set of lookaheads, it is reusable.
     if table_entry.action_count > 0 {
-        let token_state = subtree_parse_state(token);
+        let token_state = token.parse_state();
         let token_lex_mode = language_lex_mode_for_state(self_.language, token_state);
         if token_lex_mode.lex_state == current_lex_mode.lex_state
             && token_lex_mode.external_lex_state == current_lex_mode.external_lex_state
@@ -44,7 +43,7 @@ unsafe fn parser_can_reuse_token(
         {
             let lang = language_full(self_.language);
             if token_symbol != lang.keyword_capture_token
-                || (!subtree_is_keyword(token) && subtree_parse_state(token) == state)
+                || (!token.is_keyword() && token.parse_state() == state)
             {
                 return true;
             }
@@ -52,7 +51,7 @@ unsafe fn parser_can_reuse_token(
     }
 
     // Empty tokens are not reusable in states with different lookaheads.
-    if subtree_size(token).bytes == 0 && token_symbol != TS_BUILTIN_SYM_END {
+    if token.size().bytes == 0 && token_symbol != TS_BUILTIN_SYM_END {
         return false;
     }
 
@@ -338,8 +337,8 @@ unsafe fn parser_lex(
 
     parser_log_lookahead(
         self_,
-        parser_symbol_name(self_.language, subtree_symbol(result)),
-        subtree_total_size(result).bytes,
+        parser_symbol_name(self_.language, result.symbol()),
+        result.total_size().bytes,
     );
     result
 }
@@ -359,7 +358,7 @@ unsafe fn parser_get_cached_token(
         language_table_entry(
             self_.language,
             state,
-            subtree_symbol(cache.token),
+            cache.token.symbol(),
             &mut table_entry,
         );
         if parser_can_reuse_token(self_, state, cache.token, &table_entry) {
@@ -435,12 +434,7 @@ pub(super) unsafe fn parser_lex_lookahead(
 
     if !lookahead.is_null() {
         parser_set_cached_token(self_, position, last_external_token, *lookahead);
-        language_table_entry(
-            self_.language,
-            state,
-            subtree_symbol(*lookahead),
-            table_entry,
-        );
+        language_table_entry(self_.language, state, (*lookahead).symbol(), table_entry);
     } else {
         language_table_entry(self_.language, state, TS_BUILTIN_SYM_END, table_entry);
     }

@@ -821,16 +821,6 @@ pub const unsafe fn subtree_extra(self_: Subtree) -> bool {
 }
 
 #[inline]
-pub const unsafe fn subtree_is_keyword(self_: Subtree) -> bool {
-    self_.is_keyword()
-}
-
-#[inline]
-pub const unsafe fn subtree_parse_state(self_: Subtree) -> TSStateId {
-    self_.parse_state()
-}
-
-#[inline]
 pub unsafe fn subtree_lookahead_bytes(self_: Subtree) -> u32 {
     self_.lookahead_bytes()
 }
@@ -843,11 +833,6 @@ pub const fn subtree_alloc_size(child_count: u32) -> usize {
 #[inline]
 pub const unsafe fn subtree_children(self_: Subtree) -> *mut Subtree {
     self_.children_ptr()
-}
-
-#[inline]
-pub unsafe fn subtree_child<'a>(self_: Subtree, index: u32) -> &'a Subtree {
-    self_.child(index)
 }
 
 pub const unsafe fn subtree_children_slice<'a>(self_: Subtree) -> &'a [Subtree] {
@@ -904,11 +889,6 @@ pub unsafe fn subtree_size(self_: Subtree) -> Length {
 #[inline]
 pub unsafe fn subtree_total_size(self_: Subtree) -> Length {
     self_.total_size()
-}
-
-#[inline]
-pub unsafe fn subtree_total_bytes(self_: Subtree) -> u32 {
-    self_.total_bytes()
 }
 
 // Child and repetition metadata
@@ -975,11 +955,6 @@ pub const unsafe fn subtree_depends_on_column(self_: Subtree) -> bool {
 #[inline]
 pub unsafe fn subtree_is_error(self_: Subtree) -> bool {
     self_.is_error()
-}
-
-#[inline]
-pub unsafe fn subtree_is_eof(self_: Subtree) -> bool {
-    self_.is_eof()
 }
 
 // Mutable/immutable representation conversion

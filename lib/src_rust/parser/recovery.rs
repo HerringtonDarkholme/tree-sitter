@@ -5,16 +5,14 @@ use super::{
     parser_symbol_name, parser_version_status, ptr, ptr_mut, ptr_ref, stack_copy_version,
     stack_get_summary, stack_merge, stack_pop_count, stack_pop_error, stack_push,
     stack_record_summary, stack_remove_version, stack_renumber_version, subtree_array_delete,
-    subtree_array_remove_trailing_extras, subtree_child_count, subtree_children_slice,
-    subtree_from_mut, subtree_has_external_scanner_state_change, subtree_has_external_tokens,
-    subtree_is_eof, subtree_is_error, subtree_last_external_token, subtree_lookahead_bytes,
+    subtree_array_remove_trailing_extras, subtree_from_mut, subtree_last_external_token,
     subtree_make_mut, subtree_new_error_node, subtree_new_missing_leaf, subtree_release,
-    subtree_retain, subtree_set_extra, subtree_symbol, subtree_total_bytes, subtree_total_size,
-    ts_language_next_state, DisplayCStr, Length, ReduceAction, StackVersion, Subtree, SubtreeArray,
-    TSParser, TSStateId, TSSymbol, TableEntry, Write, ERROR_COST_PER_SKIPPED_CHAR,
-    ERROR_COST_PER_SKIPPED_LINE, ERROR_COST_PER_SKIPPED_TREE, ERROR_STATE, MAX_SUMMARY_DEPTH,
-    MAX_VERSION_COUNT, NULL_SUBTREE, STACK_VERSION_NONE, TSPARSE_ACTION_TYPE_RECOVER,
-    TSPARSE_ACTION_TYPE_REDUCE, TSPARSE_ACTION_TYPE_SHIFT, TS_BUILTIN_SYM_ERROR_REPEAT,
+    subtree_retain, subtree_set_extra, ts_language_next_state, DisplayCStr, Length, ReduceAction,
+    StackVersion, Subtree, SubtreeArray, TSParser, TSStateId, TSSymbol, TableEntry, Write,
+    ERROR_COST_PER_SKIPPED_CHAR, ERROR_COST_PER_SKIPPED_LINE, ERROR_COST_PER_SKIPPED_TREE,
+    ERROR_STATE, MAX_SUMMARY_DEPTH, MAX_VERSION_COUNT, NULL_SUBTREE, STACK_VERSION_NONE,
+    TSPARSE_ACTION_TYPE_RECOVER, TSPARSE_ACTION_TYPE_REDUCE, TSPARSE_ACTION_TYPE_SHIFT,
+    TS_BUILTIN_SYM_ERROR_REPEAT,
 };
 
 // ---------------------------------------------------------------------------
@@ -144,9 +142,9 @@ unsafe fn parser_recover_to_state(
         let mut error_trees = stack_pop_error(stack, slice.version);
         if let Some(&error_tree) = error_trees.as_slice().first() {
             debug_assert_eq!(error_trees.len(), 1);
-            let error_child_count = subtree_child_count(error_tree);
+            let error_child_count = error_tree.child_count();
             if error_child_count > 0 {
-                let error_children = subtree_children_slice(error_tree);
+                let error_children = error_tree.children();
                 slice
                     .subtrees
                     .splice(0, 0, error_child_count, error_children.as_ptr());
@@ -196,7 +194,7 @@ pub(super) unsafe fn parser_recover(
     let summary = stack_get_summary(stack, version);
 
     // Strategy 1: Find a previous state where the lookahead is valid.
-    if let Some(summary) = summary.filter(|_| !subtree_is_error(lookahead)) {
+    if let Some(summary) = summary.filter(|_| !lookahead.is_error()) {
         for &entry in summary.as_slice() {
             if entry.state == ERROR_STATE {
                 continue;
@@ -230,7 +228,7 @@ pub(super) unsafe fn parser_recover(
                 break;
             }
 
-            if language_has_actions(self_.language, entry.state, subtree_symbol(lookahead))
+            if language_has_actions(self_.language, entry.state, lookahead.symbol())
                 && parser_recover_to_state(self_, version, depth, entry.state)
             {
                 did_recover = true;
@@ -260,7 +258,7 @@ pub(super) unsafe fn parser_recover(
     }
 
     // EOF: wrap everything and terminate
-    if subtree_is_eof(lookahead) {
+    if lookahead.is_eof() {
         parser_log(self_, |_, log| log.write_str("recover_eof"));
         let mut children = SubtreeArray::new();
         let parent = subtree_new_error_node(&mut children, false, self_.language);
@@ -272,11 +270,11 @@ pub(super) unsafe fn parser_recover(
     // Strategy 2: skip the current token
     let new_cost = current_error_cost
         + ERROR_COST_PER_SKIPPED_TREE
-        + subtree_total_bytes(lookahead) * ERROR_COST_PER_SKIPPED_CHAR
-        + subtree_total_size(lookahead).extent.row * ERROR_COST_PER_SKIPPED_LINE;
+        + lookahead.total_bytes() * ERROR_COST_PER_SKIPPED_CHAR
+        + lookahead.total_size().extent.row * ERROR_COST_PER_SKIPPED_LINE;
     let cannot_skip_after_recovery = did_recover
         && (stack.version_count() > MAX_VERSION_COUNT
-            || subtree_has_external_scanner_state_change(lookahead));
+            || lookahead.has_external_scanner_state_change());
     if cannot_skip_after_recovery || parser_better_version_exists(self_, version, false, new_cost) {
         stack.halt(version);
         subtree_release(&mut self_.tree_pool, lookahead);
@@ -285,7 +283,7 @@ pub(super) unsafe fn parser_recover(
 
     // Mark extra tokens
     let mut n: u32 = 0;
-    let actions = language_actions(self_.language, 1, subtree_symbol(lookahead), &mut n);
+    let actions = language_actions(self_.language, 1, lookahead.symbol(), &mut n);
     let marks_extra = if n == 0 {
         false
     } else {
@@ -303,10 +301,7 @@ pub(super) unsafe fn parser_recover(
         write!(
             log,
             "skip_token symbol:{}",
-            DisplayCStr(parser_symbol_name(
-                context.language,
-                subtree_symbol(lookahead)
-            ))
+            DisplayCStr(parser_symbol_name(context.language, lookahead.symbol()))
         )
     });
     let mut children = SubtreeArray::new();
@@ -338,7 +333,7 @@ pub(super) unsafe fn parser_recover(
 
     // Push the ERROR
     stack_push(stack, version, subtree_from_mut(error_repeat), ERROR_STATE);
-    if subtree_has_external_tokens(lookahead) {
+    if lookahead.has_external_tokens() {
         stack.set_last_external_token(version, subtree_last_external_token(lookahead));
     }
 
@@ -373,7 +368,7 @@ unsafe fn parser_try_insert_missing_token(
         if !language_has_reduce_action(
             self_.language,
             state_after_missing_symbol,
-            subtree_symbol(lookahead),
+            lookahead.symbol(),
         ) {
             missing_symbol += 1;
             continue;
@@ -384,7 +379,7 @@ unsafe fn parser_try_insert_missing_token(
         lexer_reset(&mut self_.lexer, position);
         lexer_mark_end(&mut self_.lexer);
         let padding = length_sub(self_.lexer.token_end_position, position);
-        let lookahead_bytes = subtree_total_bytes(lookahead) + subtree_lookahead_bytes(lookahead);
+        let lookahead_bytes = lookahead.total_bytes() + lookahead.lookahead_bytes();
         let candidate = stack_copy_version(ptr_mut(self_.stack), version);
         let missing_tree = subtree_new_missing_leaf(
             &mut self_.tree_pool,
@@ -400,7 +395,7 @@ unsafe fn parser_try_insert_missing_token(
             state_after_missing_symbol,
         );
 
-        if parser_do_all_potential_reductions(self_, candidate, subtree_symbol(lookahead)) {
+        if parser_do_all_potential_reductions(self_, candidate, lookahead.symbol()) {
             parser_log(self_, |context, log| {
                 write!(
                     log,
