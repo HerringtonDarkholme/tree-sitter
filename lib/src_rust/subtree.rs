@@ -462,6 +462,243 @@ impl Subtree {
     pub const unsafe fn heap_data<'a>(self) -> &'a SubtreeHeapData {
         &*self.heap_ptr()
     }
+
+    #[inline]
+    pub unsafe fn symbol(self) -> TSSymbol {
+        if self.data.is_inline() {
+            TSSymbol::from(self.data.symbol)
+        } else {
+            self.heap_data().symbol
+        }
+    }
+
+    #[inline]
+    pub const unsafe fn visible(self) -> bool {
+        if self.data.is_inline() {
+            self.data.visible()
+        } else {
+            self.heap_data().visible()
+        }
+    }
+
+    #[inline]
+    pub const unsafe fn named(self) -> bool {
+        if self.data.is_inline() {
+            self.data.named()
+        } else {
+            self.heap_data().named()
+        }
+    }
+
+    #[inline]
+    pub const unsafe fn extra(self) -> bool {
+        if self.data.is_inline() {
+            self.data.extra()
+        } else {
+            self.heap_data().extra()
+        }
+    }
+
+    #[inline]
+    pub const unsafe fn has_changes(self) -> bool {
+        if self.data.is_inline() {
+            self.data.has_changes()
+        } else {
+            self.heap_data().has_changes()
+        }
+    }
+
+    #[inline]
+    pub const unsafe fn missing(self) -> bool {
+        if self.data.is_inline() {
+            self.data.is_missing()
+        } else {
+            self.heap_data().is_missing()
+        }
+    }
+
+    #[inline]
+    pub const unsafe fn is_keyword(self) -> bool {
+        if self.data.is_inline() {
+            self.data.is_keyword()
+        } else {
+            self.heap_data().is_keyword()
+        }
+    }
+
+    #[inline]
+    pub const unsafe fn parse_state(self) -> TSStateId {
+        if self.data.is_inline() {
+            self.data.parse_state
+        } else {
+            self.heap_data().parse_state
+        }
+    }
+
+    #[inline]
+    pub unsafe fn lookahead_bytes(self) -> u32 {
+        if self.data.is_inline() {
+            u32::from(self.data.lookahead_bytes())
+        } else {
+            self.heap_data().lookahead_bytes
+        }
+    }
+
+    #[inline]
+    const unsafe fn children_ptr(self) -> *mut Self {
+        if self.data.is_inline() {
+            ptr::null_mut()
+        } else {
+            self.heap_ptr()
+                .cast_mut()
+                .cast::<Self>()
+                .sub(self.heap_data().child_count as usize)
+        }
+    }
+
+    #[inline]
+    pub unsafe fn child<'a>(self, index: u32) -> &'a Self {
+        self.children().get_unchecked(index as usize)
+    }
+
+    pub const unsafe fn children<'a>(self) -> &'a [Self] {
+        let count = self.child_count() as usize;
+        if count == 0 {
+            &[]
+        } else {
+            core::slice::from_raw_parts(self.children_ptr(), count)
+        }
+    }
+
+    #[inline]
+    pub unsafe fn padding(self) -> Length {
+        if self.data.is_inline() {
+            Length {
+                bytes: u32::from(self.data.padding_bytes),
+                extent: TSPoint {
+                    row: u32::from(self.data.padding_rows()),
+                    column: u32::from(self.data.padding_columns),
+                },
+            }
+        } else {
+            self.heap_data().padding
+        }
+    }
+
+    #[inline]
+    pub unsafe fn size(self) -> Length {
+        if self.data.is_inline() {
+            Length {
+                bytes: u32::from(self.data.size_bytes),
+                extent: TSPoint {
+                    row: 0,
+                    column: u32::from(self.data.size_bytes),
+                },
+            }
+        } else {
+            self.heap_data().size
+        }
+    }
+
+    #[inline]
+    pub unsafe fn total_size(self) -> Length {
+        length_add(self.padding(), self.size())
+    }
+
+    #[inline]
+    pub unsafe fn total_bytes(self) -> u32 {
+        self.total_size().bytes
+    }
+
+    #[inline]
+    pub const unsafe fn child_count(self) -> u32 {
+        if self.data.is_inline() {
+            0
+        } else {
+            self.heap_data().child_count
+        }
+    }
+
+    #[inline]
+    pub unsafe fn repeat_depth(self) -> u32 {
+        if self.data.is_inline() || self.heap_data().child_count == 0 {
+            0
+        } else {
+            u32::from(self.heap_data().children().repeat_depth)
+        }
+    }
+
+    #[inline]
+    pub const unsafe fn visible_descendant_count(self) -> u32 {
+        if self.data.is_inline() || self.heap_data().child_count == 0 {
+            0
+        } else {
+            self.heap_data().children().visible_descendant_count
+        }
+    }
+
+    #[inline]
+    pub const unsafe fn visible_child_count(self) -> u32 {
+        if self.child_count() > 0 {
+            self.heap_data().children().visible_child_count
+        } else {
+            0
+        }
+    }
+
+    #[inline]
+    pub const unsafe fn error_cost(self) -> u32 {
+        if self.missing() {
+            ERROR_COST_PER_MISSING_TREE + ERROR_COST_PER_RECOVERY
+        } else if self.data.is_inline() {
+            0
+        } else {
+            self.heap_data().error_cost
+        }
+    }
+
+    #[inline]
+    pub const unsafe fn dynamic_precedence(self) -> i32 {
+        if self.data.is_inline() || self.heap_data().child_count == 0 {
+            0
+        } else {
+            self.heap_data().children().dynamic_precedence
+        }
+    }
+
+    #[inline]
+    pub const unsafe fn production_id(self) -> u16 {
+        if self.child_count() > 0 {
+            self.heap_data().children().production_id
+        } else {
+            0
+        }
+    }
+
+    #[inline]
+    pub const unsafe fn has_external_tokens(self) -> bool {
+        !self.data.is_inline() && self.heap_data().has_external_tokens()
+    }
+
+    #[inline]
+    pub const unsafe fn has_external_scanner_state_change(self) -> bool {
+        !self.data.is_inline() && self.heap_data().has_external_scanner_state_change()
+    }
+
+    #[inline]
+    pub const unsafe fn depends_on_column(self) -> bool {
+        !self.data.is_inline() && self.heap_data().depends_on_column()
+    }
+
+    #[inline]
+    pub unsafe fn is_error(self) -> bool {
+        self.symbol() == TS_BUILTIN_SYM_ERROR
+    }
+
+    #[inline]
+    pub unsafe fn is_eof(self) -> bool {
+        self.symbol() == TS_BUILTIN_SYM_END
+    }
 }
 
 impl MutableSubtree {
@@ -483,6 +720,15 @@ impl MutableSubtree {
     /// Mutably borrow the heap node represented by this handle.
     pub const unsafe fn heap_data_mut<'a>(self) -> &'a mut SubtreeHeapData {
         &mut *self.heap_ptr()
+    }
+
+    #[inline]
+    pub unsafe fn set_extra(&mut self, is_extra: bool) {
+        if self.data.is_inline() {
+            self.data.set_extra(is_extra);
+        } else {
+            self.heap_data_mut().set_extra(is_extra);
+        }
     }
 }
 
@@ -556,83 +802,47 @@ use storage::{subtree_pool_allocate, subtree_pool_free};
 
 #[inline]
 pub unsafe fn subtree_symbol(self_: Subtree) -> TSSymbol {
-    if self_.data.is_inline() {
-        TSSymbol::from(self_.data.symbol)
-    } else {
-        self_.heap_data().symbol
-    }
+    self_.symbol()
 }
 
 #[inline]
 pub const unsafe fn subtree_visible(self_: Subtree) -> bool {
-    if self_.data.is_inline() {
-        self_.data.visible()
-    } else {
-        self_.heap_data().visible()
-    }
+    self_.visible()
 }
 
 #[inline]
 pub const unsafe fn subtree_named(self_: Subtree) -> bool {
-    if self_.data.is_inline() {
-        self_.data.named()
-    } else {
-        self_.heap_data().named()
-    }
+    self_.named()
 }
 
 #[inline]
 pub const unsafe fn subtree_extra(self_: Subtree) -> bool {
-    if self_.data.is_inline() {
-        self_.data.extra()
-    } else {
-        self_.heap_data().extra()
-    }
+    self_.extra()
 }
 
 #[inline]
 pub const unsafe fn subtree_has_changes(self_: Subtree) -> bool {
-    if self_.data.is_inline() {
-        self_.data.has_changes()
-    } else {
-        self_.heap_data().has_changes()
-    }
+    self_.has_changes()
 }
 
 #[inline]
 pub const unsafe fn subtree_missing(self_: Subtree) -> bool {
-    if self_.data.is_inline() {
-        self_.data.is_missing()
-    } else {
-        self_.heap_data().is_missing()
-    }
+    self_.missing()
 }
 
 #[inline]
 pub const unsafe fn subtree_is_keyword(self_: Subtree) -> bool {
-    if self_.data.is_inline() {
-        self_.data.is_keyword()
-    } else {
-        self_.heap_data().is_keyword()
-    }
+    self_.is_keyword()
 }
 
 #[inline]
 pub const unsafe fn subtree_parse_state(self_: Subtree) -> TSStateId {
-    if self_.data.is_inline() {
-        self_.data.parse_state
-    } else {
-        self_.heap_data().parse_state
-    }
+    self_.parse_state()
 }
 
 #[inline]
 pub unsafe fn subtree_lookahead_bytes(self_: Subtree) -> u32 {
-    if self_.data.is_inline() {
-        u32::from(self_.data.lookahead_bytes())
-    } else {
-        self_.heap_data().lookahead_bytes
-    }
+    self_.lookahead_bytes()
 }
 
 #[inline]
@@ -642,29 +852,16 @@ pub const fn subtree_alloc_size(child_count: u32) -> usize {
 
 #[inline]
 pub const unsafe fn subtree_children(self_: Subtree) -> *mut Subtree {
-    if self_.data.is_inline() {
-        ptr::null_mut()
-    } else {
-        self_
-            .heap_ptr()
-            .cast_mut()
-            .cast::<Subtree>()
-            .sub(self_.heap_data().child_count as usize)
-    }
+    self_.children_ptr()
 }
 
 #[inline]
 pub unsafe fn subtree_child<'a>(self_: Subtree, index: u32) -> &'a Subtree {
-    subtree_children_slice(self_).get_unchecked(index as usize)
+    self_.child(index)
 }
 
 pub const unsafe fn subtree_children_slice<'a>(self_: Subtree) -> &'a [Subtree] {
-    let count = subtree_child_count(self_) as usize;
-    if count == 0 {
-        &[]
-    } else {
-        core::slice::from_raw_parts(subtree_children(self_), count)
-    }
+    self_.children()
 }
 
 #[inline]
@@ -699,73 +896,41 @@ unsafe fn mutable_subtree_child_mut<'a>(self_: MutableSubtree, index: usize) -> 
 
 #[inline]
 pub unsafe fn subtree_set_extra(self_: &mut MutableSubtree, is_extra: bool) {
-    if self_.data.is_inline() {
-        self_.data.set_extra(is_extra);
-    } else {
-        self_.heap_data_mut().set_extra(is_extra);
-    }
+    self_.set_extra(is_extra);
 }
 
 // Source spans
 
 #[inline]
 pub unsafe fn subtree_padding(self_: Subtree) -> Length {
-    if self_.data.is_inline() {
-        Length {
-            bytes: u32::from(self_.data.padding_bytes),
-            extent: TSPoint {
-                row: u32::from(self_.data.padding_rows()),
-                column: u32::from(self_.data.padding_columns),
-            },
-        }
-    } else {
-        self_.heap_data().padding
-    }
+    self_.padding()
 }
 
 #[inline]
 pub unsafe fn subtree_size(self_: Subtree) -> Length {
-    if self_.data.is_inline() {
-        Length {
-            bytes: u32::from(self_.data.size_bytes),
-            extent: TSPoint {
-                row: 0,
-                column: u32::from(self_.data.size_bytes),
-            },
-        }
-    } else {
-        self_.heap_data().size
-    }
+    self_.size()
 }
 
 #[inline]
 pub unsafe fn subtree_total_size(self_: Subtree) -> Length {
-    length_add(subtree_padding(self_), subtree_size(self_))
+    self_.total_size()
 }
 
 #[inline]
 pub unsafe fn subtree_total_bytes(self_: Subtree) -> u32 {
-    subtree_total_size(self_).bytes
+    self_.total_bytes()
 }
 
 // Child and repetition metadata
 
 #[inline]
 pub const unsafe fn subtree_child_count(self_: Subtree) -> u32 {
-    if self_.data.is_inline() {
-        0
-    } else {
-        self_.heap_data().child_count
-    }
+    self_.child_count()
 }
 
 #[inline]
 pub unsafe fn subtree_repeat_depth(self_: Subtree) -> u32 {
-    if self_.data.is_inline() || self_.heap_data().child_count == 0 {
-        0
-    } else {
-        u32::from(self_.heap_data().children().repeat_depth)
-    }
+    self_.repeat_depth()
 }
 
 #[inline]
@@ -785,90 +950,56 @@ pub unsafe fn subtree_is_repetition(self_: Subtree) -> u32 {
 
 #[inline]
 pub const unsafe fn subtree_visible_descendant_count(self_: Subtree) -> u32 {
-    if self_.data.is_inline() || self_.heap_data().child_count == 0 {
-        0
-    } else {
-        self_.heap_data().children().visible_descendant_count
-    }
+    self_.visible_descendant_count()
 }
 
 #[inline]
 pub const unsafe fn subtree_visible_child_count(self_: Subtree) -> u32 {
-    if subtree_child_count(self_) > 0 {
-        self_.heap_data().children().visible_child_count
-    } else {
-        0
-    }
+    self_.visible_child_count()
 }
 
 // Error cost
 
 #[inline]
 pub const unsafe fn subtree_error_cost(self_: Subtree) -> u32 {
-    if subtree_missing(self_) {
-        ERROR_COST_PER_MISSING_TREE + ERROR_COST_PER_RECOVERY
-    } else if self_.data.is_inline() {
-        0
-    } else {
-        self_.heap_data().error_cost
-    }
+    self_.error_cost()
 }
 
 // Parse metadata
 
 #[inline]
 pub const unsafe fn subtree_dynamic_precedence(self_: Subtree) -> i32 {
-    if self_.data.is_inline() || self_.heap_data().child_count == 0 {
-        0
-    } else {
-        self_.heap_data().children().dynamic_precedence
-    }
+    self_.dynamic_precedence()
 }
 
 #[inline]
 pub const unsafe fn subtree_production_id(self_: Subtree) -> u16 {
-    if subtree_child_count(self_) > 0 {
-        self_.heap_data().children().production_id
-    } else {
-        0
-    }
+    self_.production_id()
 }
 
 #[inline]
 pub const unsafe fn subtree_has_external_tokens(self_: Subtree) -> bool {
-    if self_.data.is_inline() {
-        false
-    } else {
-        self_.heap_data().has_external_tokens()
-    }
+    self_.has_external_tokens()
 }
 
 #[inline]
 pub const unsafe fn subtree_has_external_scanner_state_change(self_: Subtree) -> bool {
-    if self_.data.is_inline() {
-        false
-    } else {
-        self_.heap_data().has_external_scanner_state_change()
-    }
+    self_.has_external_scanner_state_change()
 }
 
 #[inline]
 pub const unsafe fn subtree_depends_on_column(self_: Subtree) -> bool {
-    if self_.data.is_inline() {
-        false
-    } else {
-        self_.heap_data().depends_on_column()
-    }
+    self_.depends_on_column()
 }
 
 #[inline]
 pub unsafe fn subtree_is_error(self_: Subtree) -> bool {
-    subtree_symbol(self_) == TS_BUILTIN_SYM_ERROR
+    self_.is_error()
 }
 
 #[inline]
 pub unsafe fn subtree_is_eof(self_: Subtree) -> bool {
-    subtree_symbol(self_) == TS_BUILTIN_SYM_END
+    self_.is_eof()
 }
 
 // Mutable/immutable representation conversion
