@@ -1,3 +1,25 @@
+//! GLR parser state, lifecycle, and top-level parse loop.
+//!
+//! [`TSParser`] owns the mutable objects used during a parse: the lexer, the
+//! graph-structured [`Stack`], subtree allocation pools, external-scanner
+//! state, and the best accepted tree. [`ts_parser_parse`] is the outer driver.
+//! It advances every active stack version, condenses compatible or inferior
+//! versions, invokes recovery when all useful versions are paused, and finally
+//! balances and returns the accepted tree.
+//!
+//! The action-level work is divided by purpose:
+//!
+//! - `lexing` obtains or reuses a lookahead token;
+//! - `advance` interprets parse-table entries and manages versions;
+//! - `reduction` pops GLR paths and builds parent subtrees;
+//! - `recovery` searches for a useful continuation after invalid input;
+//! - `external_scanner` preserves scanner state across alternatives;
+//! - `balancing` prepares the accepted subtree for long-lived navigation; and
+//! - `logging` renders parser, stack, and tree diagnostics.
+//!
+//! Generated languages and the public API enter through C-compatible types,
+//! but parser-owned state is internal and uses Rust layout.
+
 use core::ffi::{c_char, c_void, CStr};
 use core::fmt::{self, Write};
 use core::ptr;

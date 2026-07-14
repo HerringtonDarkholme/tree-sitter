@@ -1,3 +1,11 @@
+//! Error recovery for stack versions that cannot handle their lookahead.
+//!
+//! Normal parsing pauses a version when its parse-table entry has no usable
+//! action. If no better version advances, this module explores low-cost ways
+//! to continue: perform available reductions, insert missing symbols, skip
+//! input into error nodes, or resume from a summarized earlier state. The
+//! accumulated cost lets ordinary, error-free versions win whenever possible.
+
 use super::{
     language_actions, language_full, language_has_actions, language_has_reduce_action,
     language_table_entry, length_sub, lexer_mark_end, lexer_reset, parser_accept,

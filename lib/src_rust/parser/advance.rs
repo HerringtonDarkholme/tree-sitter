@@ -1,3 +1,13 @@
+//! Parse-table action interpreter and GLR version selection.
+//!
+//! [`parser_advance`] advances one stack version until it shifts a token,
+//! accepts a tree, pauses at an error, or is merged into another version.
+//! Reductions keep the same lookahead and return to the table in a new state;
+//! conflicts can therefore create several versions before any input is
+//! consumed. After all active versions have had a chance to move,
+//! [`parser_condense_stack`] merges compatible versions and prunes the ones
+//! that are clearly worse.
+
 use core::fmt::Write;
 
 use crate::ffi::TSStateId;

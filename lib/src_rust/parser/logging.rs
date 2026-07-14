@@ -1,3 +1,11 @@
+//! Parser diagnostics and DOT graph output.
+//!
+//! Text events are formatted into the lexer's fixed debug buffer and sent to
+//! the user-supplied logger. When graph logging is enabled, the same parser
+//! events are accompanied by snapshots of the GLR stack and syntax tree.
+//! Formatting stays allocation-free so diagnostics do not change parser
+//! ownership or allocator behavior.
+
 use super::{
     c_char, fmt, fprintf, fputc, fputs, ptr_mut, stack_print_dot_graph, subtree_print_dot_graph,
     ts_language_symbol_name, CStr, Stack, Subtree, TSLanguage, TSLogTypeParse, TSParser, TSSymbol,

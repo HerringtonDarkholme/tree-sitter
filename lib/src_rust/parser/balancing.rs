@@ -1,3 +1,11 @@
+//! Final balancing of the accepted subtree.
+//!
+//! Repeated grammar rules can initially produce deeply nested child arrays.
+//! Before exposing the finished tree, this module compresses those nodes into
+//! a shallower shape. Work is iterative and resumable so the parser's progress
+//! callback can cancel a long balancing pass without discarding completed
+//! work.
+
 use super::{parser_check_progress, subtree_compress, TSParser};
 
 /// Incrementally rebalance the accepted tree, preserving work across cancellation.

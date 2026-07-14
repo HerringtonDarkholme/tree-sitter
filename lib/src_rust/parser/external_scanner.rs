@@ -1,3 +1,11 @@
+//! Lifecycle and calls for a language's external scanner.
+//!
+//! External scanners own language-specific mutable state outside the generated
+//! lexer. Before scanning a GLR version, the parser restores the state stored
+//! on that version's last external token. After a successful scan, the caller
+//! serializes the new state into the produced subtree so another version can
+//! reproduce the same lexical context.
+
 use core::ptr;
 
 use crate::ffi::TSStateId;

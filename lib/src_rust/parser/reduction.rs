@@ -1,3 +1,12 @@
+//! Shift, reduce, and accept operations that build the syntax tree.
+//!
+//! A shift pushes one token subtree. A reduction asks the graph-structured
+//! stack for every path matching the production's child count, builds one
+//! parent for each path, and pushes the parents onto their resulting versions.
+//! Compatible results are merged where possible. Accept compares complete
+//! roots by error cost, dynamic precedence, and structural preference so the
+//! parser retains one best tree.
+
 use super::{
     array_swap, language_full, language_lookup, parser_log, parser_symbol_name, ptr, ptr_mut,
     ptr_ref, stack_merge, stack_pop_all, stack_pop_count, stack_push, stack_remove_version,

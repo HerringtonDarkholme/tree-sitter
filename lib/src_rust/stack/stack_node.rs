@@ -1,3 +1,11 @@
+//! Nodes and ownership rules for the persistent stack graph.
+//!
+//! Each [`StackNode`] records a parse state and edges to predecessor nodes.
+//! The edge carries the subtree that was pushed between the two states.
+//! Reference counts allow several stack heads and successor nodes to share a
+//! history; adding compatible predecessor edges merges GLR paths without
+//! copying their common prefix.
+
 use core::ffi::c_void;
 use core::ptr::{self, NonNull};
 

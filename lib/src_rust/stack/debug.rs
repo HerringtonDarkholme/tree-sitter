@@ -1,3 +1,9 @@
+//! DOT rendering for the graph-structured parse stack.
+//!
+//! The graph shows every live stack head, shared node, predecessor link, parse
+//! state, error cost, and external-scanner state. It is diagnostic-only and is
+//! kept separate from stack mutation and traversal.
+
 use core::ptr::NonNull;
 
 use super::{

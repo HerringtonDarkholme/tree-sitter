@@ -1,3 +1,11 @@
+//! Lookahead reuse and context-aware lexing.
+//!
+//! The parser asks this module for the next subtree at a stack version's input
+//! position. It first tries parser-owned cached tokens, then calls the
+//! generated main or keyword lexer and the language's external scanner. The
+//! current parse state selects the lexical mode, and serialized external
+//! scanner state is restored before scanning an alternative GLR path.
+
 use super::{
     language_full, language_has_actions, language_is_reserved_word, language_lex_mode_for_state,
     language_table_entry, length_sub, length_zero, lexer_advance, lexer_finish, lexer_is_eof,

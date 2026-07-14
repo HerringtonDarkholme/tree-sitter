@@ -1,3 +1,11 @@
+//! Backward traversal and popping of the graph-structured stack.
+//!
+//! A linear stack pop has one result, but a GLR node can have several
+//! predecessors. [`stack_iter`] walks every relevant backward path and creates
+//! a stack version for each distinct result. The public helpers specialize
+//! that traversal for reducing a fixed child count, removing an error, popping
+//! the whole stack, and recording state summaries for recovery.
+
 use core::ptr::NonNull;
 
 use super::{
