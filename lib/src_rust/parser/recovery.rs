@@ -1,12 +1,11 @@
 use super::{
-    array_clear, array_delete, array_erase, array_get_mut, array_get_ref, array_new, array_push,
-    array_reserve, array_splice, language_actions, language_full, language_has_actions,
-    language_has_reduce_action, language_table_entry, length_sub, lexer_mark_end, lexer_reset,
-    parser_accept, parser_better_version_exists, parser_log, parser_log_stack, parser_new_node,
-    parser_reduce, parser_symbol_name, parser_version_status, ptr, ptr_mut, ptr_ref,
-    reduce_action_set_add, stack_copy_version, stack_error_cost, stack_get_summary, stack_halt,
-    stack_is_active, stack_merge, stack_node_count_since_error, stack_pop_count, stack_pop_error,
-    stack_position, stack_push, stack_record_summary, stack_remove_version, stack_renumber_version,
+    language_actions, language_full, language_has_actions, language_has_reduce_action,
+    language_table_entry, length_sub, lexer_mark_end, lexer_reset, parser_accept,
+    parser_better_version_exists, parser_log, parser_log_stack, parser_new_node, parser_reduce,
+    parser_symbol_name, parser_version_status, ptr, ptr_mut, ptr_ref, reduce_action_set_add,
+    stack_copy_version, stack_error_cost, stack_get_summary, stack_halt, stack_is_active,
+    stack_merge, stack_node_count_since_error, stack_pop_count, stack_pop_error, stack_position,
+    stack_push, stack_record_summary, stack_remove_version, stack_renumber_version,
     stack_set_last_external_token, stack_state, stack_version_count, subtree_array_delete,
     subtree_array_remove_trailing_extras, subtree_child_count, subtree_children_slice,
     subtree_from_mut, subtree_has_external_scanner_state_change, subtree_has_external_tokens,
@@ -56,7 +55,7 @@ unsafe fn parser_do_all_potential_reductions(
 
         let state = stack_state(ptr_ref(self_.stack), version);
         let mut has_shift_action = false;
-        array_clear(&mut self_.reduce_actions);
+        self_.reduce_actions.clear();
 
         let (first_symbol, end_symbol): (TSSymbol, TSSymbol) = if lookahead_symbol != 0 {
             (lookahead_symbol, lookahead_symbol + 1)
@@ -132,18 +131,18 @@ unsafe fn parser_recover_to_state(
 
     let mut i: u32 = 0;
     while i < pop.size {
-        let mut slice = ptr::read(array_get_ref(&pop, i));
+        let mut slice = ptr::read(pop.get_unchecked(i));
 
         if slice.version == previous_version {
             subtree_array_delete(&mut self_.tree_pool, &mut slice.subtrees);
-            array_erase(&mut pop, i);
+            pop.erase(i);
             continue;
         }
 
         if stack_state(stack, slice.version) != goal_state {
             stack_halt(stack, slice.version);
             subtree_array_delete(&mut self_.tree_pool, &mut slice.subtrees);
-            array_erase(&mut pop, i);
+            pop.erase(i);
             continue;
         }
 
@@ -153,13 +152,9 @@ unsafe fn parser_recover_to_state(
             let error_child_count = subtree_child_count(error_tree);
             if error_child_count > 0 {
                 let error_children = subtree_children_slice(error_tree);
-                array_splice(
-                    &mut slice.subtrees,
-                    0,
-                    0,
-                    error_child_count,
-                    error_children.as_ptr(),
-                );
+                slice
+                    .subtrees
+                    .splice(0, 0, error_child_count, error_children.as_ptr());
                 for child in error_children {
                     subtree_retain(*child);
                 }
@@ -173,7 +168,7 @@ unsafe fn parser_recover_to_state(
             let error = subtree_new_error_node(&mut slice.subtrees, true, self_.language);
             stack_push(stack, slice.version, error, goal_state);
         } else {
-            array_delete(&mut slice.subtrees);
+            slice.subtrees.delete();
         }
 
         for &tree in self_.trailing_extras.as_slice() {
@@ -274,7 +269,7 @@ pub(super) unsafe fn parser_recover(
     // EOF: wrap everything and terminate
     if subtree_is_eof(lookahead) {
         parser_log(self_, |_, log| log.write_str("recover_eof"));
-        let mut children: SubtreeArray = array_new();
+        let mut children = SubtreeArray::new();
         let parent = subtree_new_error_node(&mut children, false, self_.language);
         stack_push(stack, version, parent, 1);
         parser_accept(self_, version, lookahead);
@@ -321,9 +316,9 @@ pub(super) unsafe fn parser_recover(
             ))
         )
     });
-    let mut children: SubtreeArray = array_new();
-    array_reserve(&mut children, 1);
-    array_push(&mut children, lookahead);
+    let mut children = SubtreeArray::new();
+    children.reserve(1);
+    children.push(lookahead);
     let mut error_repeat = parser_new_node(self_, TS_BUILTIN_SYM_ERROR_REPEAT, &mut children, 0);
 
     // Merge with existing error on top of stack
@@ -334,17 +329,17 @@ pub(super) unsafe fn parser_recover(
             for pi in 1..pop.size {
                 subtree_array_delete(
                     &mut self_.tree_pool,
-                    &mut array_get_mut(&mut pop, pi).subtrees,
+                    &mut pop.get_unchecked_mut(pi).subtrees,
                 );
             }
-            while stack_version_count(stack) > array_get_ref(&pop, 0).version + 1 {
-                stack_remove_version(stack, array_get_ref(&pop, 0).version + 1);
+            while stack_version_count(stack) > pop.get_unchecked(0).version + 1 {
+                stack_remove_version(stack, pop.get_unchecked(0).version + 1);
             }
         }
 
-        stack_renumber_version(stack, array_get_ref(&pop, 0).version, version);
-        let slot = &mut array_get_mut(&mut pop, 0).subtrees;
-        array_push(slot, subtree_from_mut(error_repeat));
+        stack_renumber_version(stack, pop.get_unchecked(0).version, version);
+        let slot = &mut pop.get_unchecked_mut(0).subtrees;
+        slot.push(subtree_from_mut(error_repeat));
         error_repeat = parser_new_node(self_, TS_BUILTIN_SYM_ERROR_REPEAT, slot, 0);
     }
 

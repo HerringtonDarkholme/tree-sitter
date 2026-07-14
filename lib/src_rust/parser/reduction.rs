@@ -1,16 +1,16 @@
 use super::{
-    array_assign, array_get_ref, array_splice, array_swap, language_full, language_lookup,
-    parser_log, parser_symbol_name, ptr, ptr_mut, ptr_ref, stack_halt, stack_halted_version_count,
-    stack_merge, stack_pop_all, stack_pop_count, stack_push, stack_remove_version,
-    stack_set_last_external_token, stack_state, stack_version_count, subtree_array_clear,
-    subtree_array_delete, subtree_array_remove_trailing_extras, subtree_child_count,
-    subtree_children_slice, subtree_compare, subtree_dynamic_precedence, subtree_error_cost,
-    subtree_extra, subtree_from_mut, subtree_has_external_tokens, subtree_is_eof,
-    subtree_last_external_token, subtree_make_mut, subtree_new_node, subtree_release,
-    subtree_retain, subtree_set_extra, subtree_symbol, ts_language_next_state, DisplayCStr,
-    MutableSubtree, ReduceAction, StackVersion, Subtree, SubtreeArray, TSParser, TSStateId,
-    TSSymbol, Write, MAX_VERSION_COUNT, MAX_VERSION_COUNT_OVERFLOW, NULL_SUBTREE,
-    STACK_VERSION_NONE, TS_BUILTIN_SYM_ERROR, TS_BUILTIN_SYM_ERROR_REPEAT, TS_TREE_STATE_NONE,
+    array_swap, language_full, language_lookup, parser_log, parser_symbol_name, ptr, ptr_mut,
+    ptr_ref, stack_halt, stack_halted_version_count, stack_merge, stack_pop_all, stack_pop_count,
+    stack_push, stack_remove_version, stack_set_last_external_token, stack_state,
+    stack_version_count, subtree_array_clear, subtree_array_delete,
+    subtree_array_remove_trailing_extras, subtree_child_count, subtree_children_slice,
+    subtree_compare, subtree_dynamic_precedence, subtree_error_cost, subtree_extra,
+    subtree_from_mut, subtree_has_external_tokens, subtree_is_eof, subtree_last_external_token,
+    subtree_make_mut, subtree_new_node, subtree_release, subtree_retain, subtree_set_extra,
+    subtree_symbol, ts_language_next_state, DisplayCStr, MutableSubtree, ReduceAction,
+    StackVersion, Subtree, SubtreeArray, TSParser, TSStateId, TSSymbol, Write, MAX_VERSION_COUNT,
+    MAX_VERSION_COUNT_OVERFLOW, NULL_SUBTREE, STACK_VERSION_NONE, TS_BUILTIN_SYM_ERROR,
+    TS_BUILTIN_SYM_ERROR_REPEAT, TS_TREE_STATE_NONE,
 };
 
 pub(super) unsafe fn parser_select_tree(
@@ -116,7 +116,7 @@ unsafe fn parser_select_children(
     left: Subtree,
     children: &SubtreeArray,
 ) -> bool {
-    array_assign(&mut parser.scratch_trees, children);
+    parser.scratch_trees.assign(children);
     let scratch_tree = subtree_new_node(
         subtree_symbol(left),
         &mut parser.scratch_trees,
@@ -207,7 +207,7 @@ pub(super) unsafe fn parser_reduce(
     let mut removed_version_count = 0;
     let mut i = 0;
     while i < pop.size {
-        let mut slice = ptr::read(array_get_ref(&pop, i));
+        let mut slice = ptr::read(pop.get_unchecked(i));
         let slice_version = slice.version - removed_version_count;
 
         if slice_version > MAX_VERSION_COUNT + MAX_VERSION_COUNT_OVERFLOW + halted_version_count {
@@ -218,7 +218,7 @@ pub(super) unsafe fn parser_reduce(
                 parser_log(parser, |_, log| {
                     log.write_str("aborting reduce with too many versions")
                 });
-                let mut next_slice = ptr::read(array_get_ref(&pop, i + 1));
+                let mut next_slice = ptr::read(pop.get_unchecked(i + 1));
                 if next_slice.version != slice.version {
                     break;
                 }
@@ -239,7 +239,7 @@ pub(super) unsafe fn parser_reduce(
         );
 
         while i + 1 < pop.size {
-            let next_slice = ptr::read(array_get_ref(&pop, i + 1));
+            let next_slice = ptr::read(pop.get_unchecked(i + 1));
             if next_slice.version != slice.version {
                 break;
             }
@@ -319,13 +319,7 @@ pub(super) unsafe fn parser_accept(
                 for &child in children {
                     subtree_retain(child);
                 }
-                array_splice(
-                    &mut trees,
-                    index as u32,
-                    1,
-                    children.len() as u32,
-                    children.as_ptr(),
-                );
+                trees.splice(index as u32, 1, children.len() as u32, children.as_ptr());
                 root = subtree_from_mut(parser_new_node(
                     parser,
                     subtree_symbol(tree),

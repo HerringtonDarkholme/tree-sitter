@@ -53,10 +53,7 @@ use super::subtree::{
     TS_BUILTIN_SYM_ERROR, TS_BUILTIN_SYM_ERROR_REPEAT, TS_TREE_STATE_NONE,
 };
 use super::tree::{tree_new, TSTree};
-use super::utils::{
-    array_assign, array_clear, array_delete, array_erase, array_get_mut, array_get_ref, array_new,
-    array_push, array_reserve, array_splice, array_swap,
-};
+use super::utils::{array_swap, Array};
 use super::utils::{ptr_mut, ptr_ref};
 
 // ---------------------------------------------------------------------------
@@ -789,11 +786,11 @@ pub unsafe extern "C" fn ts_parser_new() -> *mut TSParser {
             stack: ptr::null_mut(),
             tree_pool: subtree_pool_new(32),
             language: ptr::null(),
-            reduce_actions: array_new(),
+            reduce_actions: Array::new(),
             finished_tree: NULL_SUBTREE,
-            trailing_extras: array_new(),
-            trailing_extras2: array_new(),
-            scratch_trees: array_new(),
+            trailing_extras: Array::new(),
+            trailing_extras2: Array::new(),
+            scratch_trees: Array::new(),
             token_cache: TokenCache {
                 token: NULL_SUBTREE,
                 last_external_token: NULL_SUBTREE,
@@ -810,7 +807,7 @@ pub unsafe extern "C" fn ts_parser_new() -> *mut TSParser {
         },
     );
     let parser = ptr_mut(self_);
-    array_reserve(&mut parser.reduce_actions, 4);
+    parser.reduce_actions.reserve(4);
     parser.stack = stack_new(&mut parser.tree_pool);
     parser_set_cached_token(parser, 0, NULL_SUBTREE, NULL_SUBTREE);
     self_
@@ -826,14 +823,14 @@ pub unsafe extern "C" fn ts_parser_delete(self_: *mut TSParser) {
     let parser = ptr_mut(self_);
     stack_delete(ptr_mut(parser.stack));
     if !parser.reduce_actions.contents.is_null() {
-        array_delete(&mut parser.reduce_actions);
+        parser.reduce_actions.delete();
     }
     lexer_delete(&mut parser.lexer);
     parser_set_cached_token(parser, 0, NULL_SUBTREE, NULL_SUBTREE);
     subtree_pool_delete(&mut parser.tree_pool);
-    array_delete(&mut parser.trailing_extras);
-    array_delete(&mut parser.trailing_extras2);
-    array_delete(&mut parser.scratch_trees);
+    parser.trailing_extras.delete();
+    parser.trailing_extras2.delete();
+    parser.scratch_trees.delete();
     free(self_.cast::<c_void>());
 }
 
