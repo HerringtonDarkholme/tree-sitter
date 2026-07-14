@@ -615,9 +615,9 @@ pub unsafe fn subtree_array_copy(self_: &SubtreeArray, dest: &mut SubtreeArray) 
     if self_.capacity > 0 {
         dest.contents =
             calloc(self_.capacity as usize, core::mem::size_of::<Subtree>()).cast::<Subtree>();
-        if self_.size > 0 {
-            let source = core::slice::from_raw_parts(self_.contents, self_.size as usize);
-            let destination = core::slice::from_raw_parts_mut(dest.contents, self_.size as usize);
+        if !self_.is_empty() {
+            let source = self_.as_slice();
+            let destination = dest.as_mut_slice();
             destination.copy_from_slice(source);
             for tree in destination {
                 subtree_retain(*tree);
@@ -627,11 +627,8 @@ pub unsafe fn subtree_array_copy(self_: &SubtreeArray, dest: &mut SubtreeArray) 
 }
 
 pub unsafe fn subtree_array_clear(pool: &mut SubtreePool, self_: &mut SubtreeArray) {
-    if self_.size > 0 {
-        let trees = core::slice::from_raw_parts(self_.contents, self_.size as usize);
-        for tree in trees {
-            subtree_release(pool, *tree);
-        }
+    for &tree in self_.as_slice() {
+        subtree_release(pool, tree);
     }
     self_.size = 0;
 }
@@ -651,8 +648,7 @@ pub unsafe fn subtree_array_remove_trailing_extras(
     destination: &mut SubtreeArray,
 ) {
     destination.size = 0;
-    while self_.size > 0 {
-        let last = *self_.contents.add(self_.size as usize - 1);
+    while let Some(&last) = self_.as_slice().last() {
         if subtree_extra(last) {
             self_.size -= 1;
             array_push(destination, last);
@@ -664,10 +660,7 @@ pub unsafe fn subtree_array_remove_trailing_extras(
 }
 
 pub unsafe fn subtree_array_reverse(self_: &mut SubtreeArray) {
-    if self_.size > 0 {
-        let trees = core::slice::from_raw_parts_mut(self_.contents, self_.size as usize);
-        trees.reverse();
-    }
+    self_.as_mut_slice().reverse();
 }
 
 // Subtree pool
@@ -683,8 +676,7 @@ pub unsafe fn subtree_pool_new(capacity: u32) -> SubtreePool {
 
 pub unsafe fn subtree_pool_delete(self_: &mut SubtreePool) {
     if !self_.free_trees.contents.is_null() {
-        for i in 0..self_.free_trees.size {
-            let tree = *self_.free_trees.contents.add(i as usize);
+        for &tree in self_.free_trees.as_slice() {
             free(tree.heap_ptr().cast::<c_void>());
         }
         array_delete(&mut self_.free_trees);
