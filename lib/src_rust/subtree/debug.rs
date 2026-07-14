@@ -1,11 +1,11 @@
 use super::{
-    c_void, language_alias_sequence, language_field_map, language_full,
+    c_void, language_alias_sequence, language_field_map_slice, language_full,
     language_write_symbol_as_dot_string, malloc, ptr, subtree_child_count, subtree_children_slice,
     subtree_depends_on_column, subtree_error_cost, subtree_extra, subtree_has_changes,
     subtree_is_error, subtree_lookahead_bytes, subtree_missing, subtree_named, subtree_parse_state,
     subtree_production_id, subtree_repeat_depth, subtree_symbol, subtree_total_bytes,
     subtree_visible, subtree_visible_descendant_count, ts_language_symbol_metadata,
-    ts_language_symbol_name, Subtree, TSFieldMapEntry, TSLanguage, TSSymbol,
+    ts_language_symbol_name, Subtree, TSLanguage, TSSymbol,
 };
 
 // Subtree string and debug output
@@ -150,13 +150,9 @@ unsafe fn subtree_write_to_string(
             language,
             u32::from((*self_.heap_ptr()).children().production_id),
         );
-        let mut field_map: *const TSFieldMapEntry = ptr::null();
-        let mut field_map_end: *const TSFieldMapEntry = ptr::null();
-        language_field_map(
+        let field_map = language_field_map_slice(
             language,
             u32::from((*self_.heap_ptr()).children().production_id),
-            &mut field_map,
-            &mut field_map_end,
         );
 
         let mut structural_child_index: u32 = 0;
@@ -187,14 +183,12 @@ unsafe fn subtree_write_to_string(
 
                 let mut child_field_name: *const i8 =
                     if is_visible { ptr::null() } else { field_name };
-                let mut map = field_map;
-                while map < field_map_end {
-                    if !(*map).inherited && (*map).child_index == structural_child_index as u8 {
+                for map in field_map {
+                    if !map.inherited && map.child_index == structural_child_index as u8 {
                         let lang = language_full(language);
-                        child_field_name = *lang.field_names.add((*map).field_id as usize);
+                        child_field_name = *lang.field_names.add(map.field_id as usize);
                         break;
                     }
-                    map = map.add(1);
                 }
 
                 cursor = cursor.add(subtree_write_to_string(

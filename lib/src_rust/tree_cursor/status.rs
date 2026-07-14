@@ -2,8 +2,7 @@ use core::ptr;
 
 use crate::ffi::{TSFieldId, TSLanguage, TSNode, TSSymbol, TSTreeCursor};
 
-use super::super::language::{language_field_map, language_full};
-use super::super::subtree::TSFieldMapEntry;
+use super::super::language::{language_field_map_slice, language_full};
 use super::{
     cursor_ref, language_alias_at, node_new, out_param_mut, subtree_child, subtree_extra,
     subtree_symbol, subtree_visible_child_count, tree_cursor_entry_slice,
@@ -116,30 +115,22 @@ unsafe fn tree_cursor_update_field_status(
         return;
     }
 
-    let mut field_map: *const TSFieldMapEntry = ptr::null();
-    let mut field_map_end: *const TSFieldMapEntry = ptr::null();
-    language_field_map(
+    let field_map = language_field_map_slice(
         language,
         u32::from((*(*parent.subtree).heap_ptr()).children().production_id),
-        &mut field_map,
-        &mut field_map_end,
     );
 
-    let mut map = field_map;
-    while map < field_map_end {
-        if *field_id == 0
-            && !(*map).inherited
-            && (*map).child_index == entry.structural_child_index as u8
+    for map in field_map {
+        if *field_id == 0 && !map.inherited && map.child_index == entry.structural_child_index as u8
         {
-            *field_id = (*map).field_id;
+            *field_id = map.field_id;
         }
         if *field_id != 0
-            && (*map).field_id == *field_id
-            && u32::from((*map).child_index) > entry.structural_child_index
+            && map.field_id == *field_id
+            && u32::from(map.child_index) > entry.structural_child_index
         {
             *can_have_later_siblings_with_this_field = true;
         }
-        map = map.add(1);
     }
 }
 

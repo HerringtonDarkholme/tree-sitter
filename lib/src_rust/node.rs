@@ -3,7 +3,7 @@ use core::ptr;
 use crate::ffi::{TSFieldId, TSInputEdit, TSLanguage, TSNode, TSPoint, TSStateId, TSSymbol};
 
 use super::language::{
-    language_alias_sequence, language_field_map, language_full, language_public_symbol,
+    language_alias_sequence, language_field_map_slice, language_full, language_public_symbol,
     ts_language_field_id_for_name, ts_language_next_state, ts_language_symbol_metadata,
     ts_language_symbol_name,
 };
@@ -13,8 +13,8 @@ use super::subtree::subtree_parse_state;
 use super::subtree::{
     subtree_child, subtree_child_count, subtree_error_cost, subtree_extra, subtree_has_changes,
     subtree_missing, subtree_named, subtree_padding, subtree_size, subtree_string, subtree_symbol,
-    subtree_total_bytes, subtree_visible, subtree_visible_descendant_count, Subtree,
-    TSFieldMapEntry, NULL_SUBTREE, TS_BUILTIN_SYM_ERROR, TS_TREE_STATE_NONE,
+    subtree_total_bytes, subtree_visible, subtree_visible_descendant_count, Subtree, NULL_SUBTREE,
+    TS_BUILTIN_SYM_ERROR, TS_TREE_STATE_NONE,
 };
 use super::tree::{tree_root_node_ref, TSTree};
 use super::utils::{ptr_mut, ptr_ref};
@@ -509,30 +509,25 @@ pub unsafe extern "C" fn ts_node_child_by_field_id(
             return node_null();
         }
 
-        let mut field_map: *const TSFieldMapEntry = ptr::null();
-        let mut field_map_end: *const TSFieldMapEntry = ptr::null();
-        language_field_map(
+        let field_map = language_field_map_slice(
             node_language(self_),
             u32::from((*node_subtree(self_).heap_ptr()).children().production_id),
-            &mut field_map,
-            &mut field_map_end,
         );
-        if field_map == field_map_end {
+        if field_map.is_empty() {
             return node_null();
         }
 
         // Scan to find mappings for the given field id
-        while (*field_map).field_id < field_id {
-            field_map = field_map.add(1);
-            if field_map == field_map_end {
-                return node_null();
-            }
+        let mut field_map_start = 0;
+        while field_map_start < field_map.len() && field_map[field_map_start].field_id < field_id {
+            field_map_start += 1;
         }
-        while (*field_map_end.sub(1)).field_id > field_id {
-            field_map_end = field_map_end.sub(1);
-            if field_map == field_map_end {
-                return node_null();
-            }
+        let mut field_map_end = field_map.len();
+        while field_map_end > field_map_start && field_map[field_map_end - 1].field_id > field_id {
+            field_map_end -= 1;
+        }
+        if field_map_start == field_map_end {
+            return node_null();
         }
 
         let mut child = node_null();
@@ -540,14 +535,14 @@ pub unsafe extern "C" fn ts_node_child_by_field_id(
         while node_child_iterator_next(&mut iterator, &mut child) {
             if !subtree_extra(node_subtree(child)) {
                 let index = iterator.structural_child_index - 1;
-                if (index as u8) < (*field_map).child_index {
+                if (index as u8) < field_map[field_map_start].child_index {
                     continue;
                 }
 
-                if (*field_map).inherited {
+                if field_map[field_map_start].inherited {
                     // If this is the *last* possible child node for this field,
                     // then perform a tail call (loop iteration)
-                    if field_map.add(1) == field_map_end {
+                    if field_map_start + 1 == field_map_end {
                         self_ = child;
                         continue 'recur;
                     }
@@ -555,8 +550,8 @@ pub unsafe extern "C" fn ts_node_child_by_field_id(
                     if !result.id.is_null() {
                         return result;
                     }
-                    field_map = field_map.add(1);
-                    if field_map == field_map_end {
+                    field_map_start += 1;
+                    if field_map_start == field_map_end {
                         return node_null();
                     }
                 } else if node_is_relevant(child, true) {
@@ -564,8 +559,8 @@ pub unsafe extern "C" fn ts_node_child_by_field_id(
                 } else if node_child_count(child) > 0 {
                     return node_child(child, 0, true);
                 }
-                field_map = field_map.add(1);
-                if field_map == field_map_end {
+                field_map_start += 1;
+                if field_map_start == field_map_end {
                     return node_null();
                 }
             }

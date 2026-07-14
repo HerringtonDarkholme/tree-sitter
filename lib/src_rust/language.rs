@@ -480,7 +480,27 @@ pub const unsafe fn language_alias_at(
     }
 }
 
-/// Get the field map (start, end) for a production ID.
+/// Borrow the field mappings for a production.
+///
+/// Generated languages store these mappings in a shared table. This helper
+/// contains the raw table access so callers can use an ordinary Rust slice.
+#[inline]
+pub const unsafe fn language_field_map_slice<'a>(
+    self_: *const TSLanguage,
+    production_id: u32,
+) -> &'a [TSFieldMapEntry] {
+    let l = lang(self_);
+    if l.field_count == 0 {
+        return &[];
+    }
+    let slice = *l.field_map_slices.add(production_id as usize);
+    core::slice::from_raw_parts(
+        l.field_map_entries.add(slice.index as usize),
+        slice.length as usize,
+    )
+}
+
+/// Legacy pointer-range form used by the inactive C-port query implementation.
 #[inline]
 pub unsafe fn language_field_map(
     self_: *const TSLanguage,
@@ -488,17 +508,14 @@ pub unsafe fn language_field_map(
     start: *mut *const TSFieldMapEntry,
     end: *mut *const TSFieldMapEntry,
 ) {
-    let l = lang(self_);
-    if l.field_count == 0 {
+    let field_map = language_field_map_slice(self_, production_id);
+    if field_map.is_empty() {
         *start = ptr::null();
         *end = ptr::null();
-        return;
+    } else {
+        *start = field_map.as_ptr();
+        *end = field_map.as_ptr().add(field_map.len());
     }
-    let slice = *l.field_map_slices.add(production_id as usize);
-    *start = l.field_map_entries.add(slice.index as usize);
-    *end = l
-        .field_map_entries
-        .add(slice.index as usize + slice.length as usize);
 }
 
 /// Get all aliases for a symbol.

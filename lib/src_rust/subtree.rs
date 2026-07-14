@@ -13,7 +13,7 @@ use super::error_costs::{
     ERROR_COST_PER_SKIPPED_LINE, ERROR_COST_PER_SKIPPED_TREE,
 };
 use super::language::{
-    language_alias_sequence, language_field_map, language_full,
+    language_alias_sequence, language_field_map_slice, language_full,
     language_write_symbol_as_dot_string, ts_language_symbol_metadata, ts_language_symbol_name,
 };
 use super::length::{length_add, length_saturating_sub, length_sub, length_zero, Length};

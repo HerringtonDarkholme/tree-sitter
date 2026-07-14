@@ -1,26 +1,21 @@
 use super::{
-    language_field_map, language_full, node_child_iterator_next, node_is_relevant,
+    language_field_map_slice, language_full, node_child_iterator_next, node_is_relevant,
     node_iterate_children, node_language, node_null, node_relevant_child_count, node_subtree, ptr,
-    subtree_extra, TSFieldMapEntry, TSNode,
+    subtree_extra, TSNode,
 };
 
 /// Look up the direct field attached to a structural child.
 #[inline]
 unsafe fn node_field_name_from_language(node: TSNode, structural_child_index: u32) -> *const i8 {
-    let mut field_map: *const TSFieldMapEntry = ptr::null();
-    let mut field_map_end: *const TSFieldMapEntry = ptr::null();
-    language_field_map(
+    let field_map = language_field_map_slice(
         node_language(node),
         u32::from((*node_subtree(node).heap_ptr()).children().production_id),
-        &mut field_map,
-        &mut field_map_end,
     );
     let language = language_full(node_language(node));
-    while field_map != field_map_end {
-        if !(*field_map).inherited && (*field_map).child_index == structural_child_index as u8 {
-            return *language.field_names.add((*field_map).field_id as usize);
+    for entry in field_map {
+        if !entry.inherited && entry.child_index == structural_child_index as u8 {
+            return *language.field_names.add(entry.field_id as usize);
         }
-        field_map = field_map.add(1);
     }
     ptr::null()
 }
