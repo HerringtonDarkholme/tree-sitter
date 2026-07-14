@@ -2,10 +2,10 @@ use super::{
     language_actions, language_full, language_has_actions, language_has_reduce_action,
     language_table_entry, length_sub, lexer_mark_end, lexer_reset, parser_accept,
     parser_better_version_exists, parser_log, parser_log_stack, parser_new_node, parser_reduce,
-    parser_symbol_name, parser_version_status, ptr, ptr_mut, ptr_ref, reduce_action_set_add,
-    stack_copy_version, stack_error_cost, stack_get_summary, stack_halt, stack_is_active,
-    stack_merge, stack_node_count_since_error, stack_pop_count, stack_pop_error, stack_position,
-    stack_push, stack_record_summary, stack_remove_version, stack_renumber_version,
+    parser_symbol_name, parser_version_status, ptr, ptr_mut, ptr_ref, stack_copy_version,
+    stack_error_cost, stack_get_summary, stack_halt, stack_is_active, stack_merge,
+    stack_node_count_since_error, stack_pop_count, stack_pop_error, stack_position, stack_push,
+    stack_record_summary, stack_remove_version, stack_renumber_version,
     stack_set_last_external_token, stack_state, stack_version_count, subtree_array_delete,
     subtree_array_remove_trailing_extras, subtree_child_count, subtree_children_slice,
     subtree_from_mut, subtree_has_external_scanner_state_change, subtree_has_external_tokens,
@@ -76,15 +76,12 @@ unsafe fn parser_do_all_potential_reductions(
                         has_shift_action = true;
                     }
                     TSPARSE_ACTION_TYPE_REDUCE if action.reduce.child_count > 0 => {
-                        reduce_action_set_add(
-                            &mut self_.reduce_actions,
-                            ReduceAction {
-                                symbol: action.reduce.symbol,
-                                count: u32::from(action.reduce.child_count),
-                                dynamic_precedence: i32::from(action.reduce.dynamic_precedence),
-                                production_id: action.reduce.production_id,
-                            },
-                        );
+                        self_.reduce_actions.add(ReduceAction {
+                            symbol: action.reduce.symbol,
+                            count: u32::from(action.reduce.child_count),
+                            dynamic_precedence: i32::from(action.reduce.dynamic_precedence),
+                            production_id: action.reduce.production_id,
+                        });
                     }
                     _ => {}
                 }

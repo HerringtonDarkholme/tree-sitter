@@ -21,11 +21,13 @@ pub struct ReduceAction {
 /// `ReduceActionSet` — Array(ReduceAction)
 pub type ReduceActionSet = Array<ReduceAction>;
 
-pub unsafe fn reduce_action_set_add(actions: &mut ReduceActionSet, new_action: ReduceAction) {
-    for action in actions.as_slice() {
-        if action.symbol == new_action.symbol && action.count == new_action.count {
-            return;
+impl Array<ReduceAction> {
+    pub unsafe fn add(&mut self, new_action: ReduceAction) {
+        for action in self.as_slice() {
+            if action.symbol == new_action.symbol && action.count == new_action.count {
+                return;
+            }
         }
+        self.push(new_action);
     }
-    actions.push(new_action);
 }

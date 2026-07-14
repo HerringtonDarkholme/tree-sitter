@@ -26,7 +26,7 @@ use super::lexer::{
     lexer_is_eof, lexer_mark_end, lexer_new, lexer_reset, lexer_set_included_ranges,
     lexer_set_input, lexer_start, Lexer,
 };
-use super::reduce_action::{reduce_action_set_add, ReduceAction, ReduceActionSet};
+use super::reduce_action::{ReduceAction, ReduceActionSet};
 use super::stack::{
     stack_can_merge, stack_clear, stack_copy_version, stack_delete, stack_dynamic_precedence,
     stack_error_cost, stack_get_summary, stack_halt, stack_halted_version_count,
