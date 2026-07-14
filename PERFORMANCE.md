@@ -163,6 +163,28 @@ broader baseline replaces it.
 
 ## Checkpoints
 
+### 2026-07-14 EDT - restore compact `repr(C)` subtree unions
+
+- Trial head: `b6361bb3` (`Restore compact subtree unions`).
+- Change under test: replace the rejected 16-byte Rust `Subtree` enum with
+  pointer-sized `repr(C)` unions for immutable and mutable subtree handles.
+  Inline data retains the low-bit tag; heap data uses const and mutable pointer
+  arms respectively. Compile-time assertions keep both handles at eight bytes.
+- Command:
+
+```sh
+cargo xtask perf-gate --language typescript --repetitions 3 --error-limit 2 --report-only --offline
+```
+
+| Workload | Cases | Rust bytes/ms | C bytes/ms | Rust delta vs C |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript normal parses | 11 | 23397.9 | 24319.5 | -3.79% |
+
+This smoke result restores the same overall relationship to the C core as the
+earlier compact baseline (-3.47%). It does not reproduce the broad slowdown of
+the 16-byte enum. Three repetitions are sufficient to reject a regression of
+that magnitude, but not to support smaller optimization claims.
+
 ### 2026-07-14 EDT - explicit Rust `Subtree` enum regression
 
 - Trial head: `dc891062` (`Clarify mutable subtree ownership`).
