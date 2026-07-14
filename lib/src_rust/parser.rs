@@ -1202,7 +1202,7 @@ unsafe fn parser_balance_subtree(self_: &mut TSParser) -> bool {
     // cancellation, we don't want to clear the tree stack.
     if !self_.canceled_balancing {
         array_clear(&mut self_.tree_pool.tree_stack);
-        if subtree_child_count(finished_tree) > 0 && finished_tree.heap_data().ref_count == 1 {
+        if subtree_child_count(finished_tree) > 0 && finished_tree.heap_data().ref_count() == 1 {
             array_push(
                 &mut self_.tree_pool.tree_stack,
                 subtree_to_mut_unsafe(finished_tree),
@@ -1248,7 +1248,7 @@ unsafe fn parser_balance_subtree(self_: &mut TSParser) -> bool {
         for i in 0..tree.heap_data().child_count {
             let tree_subtree = subtree_from_mut(tree);
             let child = *subtree_child(tree_subtree, i);
-            if subtree_child_count(child) > 0 && child.heap_data().ref_count == 1 {
+            if subtree_child_count(child) > 0 && child.heap_data().ref_count() == 1 {
                 array_push(
                     &mut self_.tree_pool.tree_stack,
                     subtree_to_mut_unsafe(child),

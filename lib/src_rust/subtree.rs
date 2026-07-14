@@ -18,7 +18,6 @@ use super::language::{
 };
 use super::length::{length_add, length_saturating_sub, length_sub, length_zero, Length};
 use super::utils::{array_delete, array_new, array_pop, array_push, array_reserve, Array};
-use super::utils::{ptr_mut, ptr_ref};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -213,7 +212,7 @@ impl SubtreeInlineData {
 
 pub struct SubtreeHeapData {
     /// Intrusive reference count for heap-owned subtrees.
-    pub ref_count: u32, // volatile / atomic
+    pub ref_count: AtomicU32,
     /// Leading padding before this subtree's content.
     pub padding: Length,
     /// Content size excluding padding and lookahead bytes.
@@ -263,6 +262,11 @@ fn set_u16_flag(flags: &mut u16, mask: u16, value: bool) {
 }
 
 impl SubtreeHeapData {
+    #[inline(always)]
+    pub fn ref_count(&self) -> u32 {
+        self.ref_count.load(Ordering::Relaxed)
+    }
+
     #[inline(always)]
     pub const fn visible(&self) -> bool {
         self.flags & HEAP_VISIBLE != 0
@@ -713,7 +717,7 @@ pub unsafe fn subtree_symbol(self_: Subtree) -> TSSymbol {
     if self_.data.is_inline() {
         TSSymbol::from(self_.data.symbol)
     } else {
-        (*self_.heap_ptr()).symbol
+        self_.heap_data().symbol
     }
 }
 
@@ -722,7 +726,7 @@ pub const unsafe fn subtree_visible(self_: Subtree) -> bool {
     if self_.data.is_inline() {
         self_.data.visible()
     } else {
-        (*self_.heap_ptr()).visible()
+        self_.heap_data().visible()
     }
 }
 
@@ -731,7 +735,7 @@ pub const unsafe fn subtree_named(self_: Subtree) -> bool {
     if self_.data.is_inline() {
         self_.data.named()
     } else {
-        (*self_.heap_ptr()).named()
+        self_.heap_data().named()
     }
 }
 
@@ -740,7 +744,7 @@ pub const unsafe fn subtree_extra(self_: Subtree) -> bool {
     if self_.data.is_inline() {
         self_.data.extra()
     } else {
-        (*self_.heap_ptr()).extra()
+        self_.heap_data().extra()
     }
 }
 
@@ -749,7 +753,7 @@ pub const unsafe fn subtree_has_changes(self_: Subtree) -> bool {
     if self_.data.is_inline() {
         self_.data.has_changes()
     } else {
-        (*self_.heap_ptr()).has_changes()
+        self_.heap_data().has_changes()
     }
 }
 
@@ -758,7 +762,7 @@ pub const unsafe fn subtree_missing(self_: Subtree) -> bool {
     if self_.data.is_inline() {
         self_.data.is_missing()
     } else {
-        (*self_.heap_ptr()).is_missing()
+        self_.heap_data().is_missing()
     }
 }
 
@@ -767,7 +771,7 @@ pub const unsafe fn subtree_is_keyword(self_: Subtree) -> bool {
     if self_.data.is_inline() {
         self_.data.is_keyword()
     } else {
-        (*self_.heap_ptr()).is_keyword()
+        self_.heap_data().is_keyword()
     }
 }
 
@@ -776,7 +780,7 @@ pub const unsafe fn subtree_parse_state(self_: Subtree) -> TSStateId {
     if self_.data.is_inline() {
         self_.data.parse_state
     } else {
-        (*self_.heap_ptr()).parse_state
+        self_.heap_data().parse_state
     }
 }
 
@@ -785,7 +789,7 @@ pub unsafe fn subtree_lookahead_bytes(self_: Subtree) -> u32 {
     if self_.data.is_inline() {
         u32::from(self_.data.lookahead_bytes())
     } else {
-        (*self_.heap_ptr()).lookahead_bytes
+        self_.heap_data().lookahead_bytes
     }
 }
 
@@ -803,7 +807,7 @@ pub const unsafe fn subtree_children(self_: Subtree) -> *mut Subtree {
             .heap_ptr()
             .cast_mut()
             .cast::<Subtree>()
-            .sub((*self_.heap_ptr()).child_count as usize)
+            .sub(self_.heap_data().child_count as usize)
     }
 }
 
@@ -823,7 +827,7 @@ pub const unsafe fn subtree_children_slice<'a>(self_: Subtree) -> &'a [Subtree] 
 
 #[inline]
 unsafe fn mutable_subtree_children<'a>(self_: MutableSubtree) -> &'a mut [Subtree] {
-    let count = (*self_.heap_ptr()).child_count as usize;
+    let count = self_.heap_data().child_count as usize;
     if count == 0 {
         &mut []
     } else {
@@ -833,12 +837,12 @@ unsafe fn mutable_subtree_children<'a>(self_: MutableSubtree) -> &'a mut [Subtre
 
 #[inline]
 unsafe fn mutable_subtree_data_mut<'a>(self_: MutableSubtree) -> &'a mut SubtreeHeapData {
-    ptr_mut(self_.heap_ptr())
+    self_.heap_data_mut()
 }
 
 #[inline]
-unsafe fn subtree_data_ref<'a>(self_: Subtree) -> &'a SubtreeHeapData {
-    ptr_ref(self_.heap_ptr())
+const unsafe fn subtree_data_ref<'a>(self_: Subtree) -> &'a SubtreeHeapData {
+    self_.heap_data()
 }
 
 #[inline]
@@ -856,7 +860,7 @@ pub unsafe fn subtree_set_extra(self_: &mut MutableSubtree, is_extra: bool) {
     if self_.data.is_inline() {
         self_.data.set_extra(is_extra);
     } else {
-        (*self_.heap_ptr()).set_extra(is_extra);
+        self_.heap_data_mut().set_extra(is_extra);
     }
 }
 
@@ -873,7 +877,7 @@ pub unsafe fn subtree_padding(self_: Subtree) -> Length {
             },
         }
     } else {
-        (*self_.heap_ptr()).padding
+        self_.heap_data().padding
     }
 }
 
@@ -888,7 +892,7 @@ pub unsafe fn subtree_size(self_: Subtree) -> Length {
             },
         }
     } else {
-        (*self_.heap_ptr()).size
+        self_.heap_data().size
     }
 }
 
@@ -909,16 +913,16 @@ pub const unsafe fn subtree_child_count(self_: Subtree) -> u32 {
     if self_.data.is_inline() {
         0
     } else {
-        (*self_.heap_ptr()).child_count
+        self_.heap_data().child_count
     }
 }
 
 #[inline]
 pub unsafe fn subtree_repeat_depth(self_: Subtree) -> u32 {
-    if self_.data.is_inline() || (*self_.heap_ptr()).child_count == 0 {
+    if self_.data.is_inline() || self_.heap_data().child_count == 0 {
         0
     } else {
-        u32::from((*self_.heap_ptr()).children().repeat_depth)
+        u32::from(self_.heap_data().children().repeat_depth)
     }
 }
 
@@ -928,9 +932,9 @@ pub unsafe fn subtree_is_repetition(self_: Subtree) -> u32 {
         0
     } else {
         u32::from(
-            !(*self_.heap_ptr()).named()
-                && !(*self_.heap_ptr()).visible()
-                && (*self_.heap_ptr()).child_count != 0,
+            !self_.heap_data().named()
+                && !self_.heap_data().visible()
+                && self_.heap_data().child_count != 0,
         )
     }
 }
@@ -939,17 +943,17 @@ pub unsafe fn subtree_is_repetition(self_: Subtree) -> u32 {
 
 #[inline]
 pub const unsafe fn subtree_visible_descendant_count(self_: Subtree) -> u32 {
-    if self_.data.is_inline() || (*self_.heap_ptr()).child_count == 0 {
+    if self_.data.is_inline() || self_.heap_data().child_count == 0 {
         0
     } else {
-        (*self_.heap_ptr()).children().visible_descendant_count
+        self_.heap_data().children().visible_descendant_count
     }
 }
 
 #[inline]
 pub const unsafe fn subtree_visible_child_count(self_: Subtree) -> u32 {
     if subtree_child_count(self_) > 0 {
-        (*self_.heap_ptr()).children().visible_child_count
+        self_.heap_data().children().visible_child_count
     } else {
         0
     }
@@ -964,7 +968,7 @@ pub const unsafe fn subtree_error_cost(self_: Subtree) -> u32 {
     } else if self_.data.is_inline() {
         0
     } else {
-        (*self_.heap_ptr()).error_cost
+        self_.heap_data().error_cost
     }
 }
 
@@ -972,17 +976,17 @@ pub const unsafe fn subtree_error_cost(self_: Subtree) -> u32 {
 
 #[inline]
 pub const unsafe fn subtree_dynamic_precedence(self_: Subtree) -> i32 {
-    if self_.data.is_inline() || (*self_.heap_ptr()).child_count == 0 {
+    if self_.data.is_inline() || self_.heap_data().child_count == 0 {
         0
     } else {
-        (*self_.heap_ptr()).children().dynamic_precedence
+        self_.heap_data().children().dynamic_precedence
     }
 }
 
 #[inline]
 pub const unsafe fn subtree_production_id(self_: Subtree) -> u16 {
     if subtree_child_count(self_) > 0 {
-        (*self_.heap_ptr()).children().production_id
+        self_.heap_data().children().production_id
     } else {
         0
     }
@@ -993,7 +997,7 @@ pub const unsafe fn subtree_has_external_tokens(self_: Subtree) -> bool {
     if self_.data.is_inline() {
         false
     } else {
-        (*self_.heap_ptr()).has_external_tokens()
+        self_.heap_data().has_external_tokens()
     }
 }
 
@@ -1002,7 +1006,7 @@ pub const unsafe fn subtree_has_external_scanner_state_change(self_: Subtree) ->
     if self_.data.is_inline() {
         false
     } else {
-        (*self_.heap_ptr()).has_external_scanner_state_change()
+        self_.heap_data().has_external_scanner_state_change()
     }
 }
 
@@ -1011,7 +1015,7 @@ pub const unsafe fn subtree_depends_on_column(self_: Subtree) -> bool {
     if self_.data.is_inline() {
         false
     } else {
-        (*self_.heap_ptr()).depends_on_column()
+        self_.heap_data().depends_on_column()
     }
 }
 
@@ -1054,7 +1058,7 @@ unsafe fn subtree_set_has_changes(self_: &mut MutableSubtree) {
     if self_.data.is_inline() {
         self_.data.set_has_changes(true);
     } else {
-        (*self_.heap_ptr()).set_has_changes(true);
+        self_.heap_data_mut().set_has_changes(true);
     }
 }
 
@@ -1114,7 +1118,7 @@ pub unsafe fn subtree_new_leaf(
     } else {
         let data = subtree_pool_allocate(pool);
         *data = SubtreeHeapData {
-            ref_count: 1,
+            ref_count: AtomicU32::new(1),
             padding,
             size,
             lookahead_bytes,
@@ -1169,7 +1173,8 @@ pub unsafe fn subtree_new_error(
         false,
         language,
     );
-    (*result.heap_ptr().cast_mut()).data = SubtreeHeapDataContent::LookaheadChar(lookahead_char);
+    subtree_to_mut_unsafe(result).heap_data_mut().data =
+        SubtreeHeapDataContent::LookaheadChar(lookahead_char);
     result
 }
 
@@ -1199,7 +1204,7 @@ pub unsafe fn subtree_clone(self_: Subtree) -> MutableSubtree {
     ptr::write(
         result,
         SubtreeHeapData {
-            ref_count: 1,
+            ref_count: AtomicU32::new(1),
             padding: data.padding,
             size: data.size,
             lookahead_bytes: data.lookahead_bytes,
@@ -1223,7 +1228,7 @@ unsafe fn subtree_init_node_data(
 ) -> MutableSubtree {
     let metadata = ts_language_symbol_metadata(language, symbol);
     *data = SubtreeHeapData {
-        ref_count: 1,
+        ref_count: AtomicU32::new(1),
         padding: length_zero(),
         size: length_zero(),
         lookahead_bytes: 0,
@@ -1288,7 +1293,7 @@ pub unsafe fn subtree_new_error_node(
     language: *const TSLanguage,
 ) -> Subtree {
     let result = subtree_new_node(TS_BUILTIN_SYM_ERROR, children, 0, language);
-    (*result.heap_ptr()).set_extra(extra);
+    result.heap_data_mut().set_extra(extra);
     subtree_from_mut(result)
 }
 
@@ -1314,7 +1319,9 @@ pub unsafe fn subtree_new_missing_leaf(
     if result.data.is_inline() {
         result.data.set_is_missing(true);
     } else {
-        (*result.heap_ptr().cast_mut()).set_is_missing(true);
+        subtree_to_mut_unsafe(result)
+            .heap_data_mut()
+            .set_is_missing(true);
     }
     result
 }
@@ -1344,7 +1351,7 @@ pub unsafe fn subtree_make_mut(pool: &mut SubtreePool, self_: Subtree) -> Mutabl
     if self_.data.is_inline() {
         return MutableSubtree { data: self_.data };
     }
-    if (*self_.heap_ptr()).ref_count == 1 {
+    if self_.heap_data().ref_count() == 1 {
         return subtree_to_mut_unsafe(self_);
     }
     let result = subtree_clone(self_);
@@ -1356,9 +1363,9 @@ pub unsafe fn subtree_retain(self_: Subtree) {
     if self_.data.is_inline() {
         return;
     }
-    debug_assert!((*self_.heap_ptr()).ref_count > 0);
-    let ref_count = ptr::addr_of!((*self_.heap_ptr()).ref_count).cast::<AtomicU32>();
-    let prev = (*ref_count).fetch_add(1, Ordering::SeqCst);
+    let ref_count = &self_.heap_data().ref_count;
+    debug_assert!(ref_count.load(Ordering::Relaxed) > 0);
+    let prev = ref_count.fetch_add(1, Ordering::SeqCst);
     debug_assert!(prev.wrapping_add(1) != 0);
 }
 
@@ -1368,31 +1375,31 @@ pub unsafe fn subtree_release(pool: &mut SubtreePool, self_: Subtree) {
     }
     pool.tree_stack.size = 0;
 
-    debug_assert!((*self_.heap_ptr()).ref_count > 0);
-    let ref_count = ptr::addr_of!((*self_.heap_ptr()).ref_count).cast::<AtomicU32>();
-    if (*ref_count).fetch_sub(1, Ordering::SeqCst) == 1 {
+    let ref_count = &self_.heap_data().ref_count;
+    debug_assert!(ref_count.load(Ordering::Relaxed) > 0);
+    if ref_count.fetch_sub(1, Ordering::SeqCst) == 1 {
         array_push(&mut pool.tree_stack, subtree_to_mut_unsafe(self_));
     }
 
     while pool.tree_stack.size > 0 {
         let tree = array_pop(&mut pool.tree_stack);
-        if (*tree.heap_ptr()).child_count > 0 {
+        if tree.heap_data().child_count > 0 {
             let children = subtree_children_slice(subtree_from_mut(tree));
             for child in children {
                 let child = *child;
                 if child.data.is_inline() {
                     continue;
                 }
-                debug_assert!((*child.heap_ptr()).ref_count > 0);
-                let child_ref = ptr::addr_of!((*child.heap_ptr()).ref_count).cast::<AtomicU32>();
-                if (*child_ref).fetch_sub(1, Ordering::SeqCst) == 1 {
+                let child_ref = &child.heap_data().ref_count;
+                debug_assert!(child_ref.load(Ordering::Relaxed) > 0);
+                if child_ref.fetch_sub(1, Ordering::SeqCst) == 1 {
                     array_push(&mut pool.tree_stack, subtree_to_mut_unsafe(child));
                 }
             }
             free(children.as_ptr().cast_mut().cast::<c_void>());
         } else {
-            if (*tree.heap_ptr()).has_external_tokens() {
-                external_scanner_state_delete((*tree.heap_ptr()).external_scanner_state_mut());
+            if tree.heap_data().has_external_tokens() {
+                external_scanner_state_delete(tree.heap_data_mut().external_scanner_state_mut());
             }
             subtree_pool_free(pool, tree);
         }
@@ -1410,32 +1417,32 @@ pub unsafe fn subtree_compress(
     let initial_stack_size = stack.size;
 
     let mut tree = self_;
-    let symbol = (*tree.heap_ptr()).symbol;
+    let symbol = tree.heap_data().symbol;
     for _ in 0..count {
-        if (*tree.heap_ptr()).ref_count > 1 || (*tree.heap_ptr()).child_count < 2 {
+        if tree.heap_data().ref_count() > 1 || tree.heap_data().child_count < 2 {
             break;
         }
 
         let child = subtree_to_mut_unsafe(mutable_subtree_child(tree, 0));
         if child.data.is_inline()
-            || (*child.heap_ptr()).child_count < 2
-            || (*child.heap_ptr()).ref_count > 1
-            || (*child.heap_ptr()).symbol != symbol
+            || child.heap_data().child_count < 2
+            || child.heap_data().ref_count() > 1
+            || child.heap_data().symbol != symbol
         {
             break;
         }
 
         let grandchild = subtree_to_mut_unsafe(mutable_subtree_child(child, 0));
         if grandchild.data.is_inline()
-            || (*grandchild.heap_ptr()).child_count < 2
-            || (*grandchild.heap_ptr()).ref_count > 1
-            || (*grandchild.heap_ptr()).symbol != symbol
+            || grandchild.heap_data().child_count < 2
+            || grandchild.heap_data().ref_count() > 1
+            || grandchild.heap_data().symbol != symbol
         {
             break;
         }
 
         // Rotate: tree[0] = grandchild, child[0] = grandchild[last], grandchild[last] = child
-        let gc_last = (*grandchild.heap_ptr()).child_count as usize - 1;
+        let gc_last = grandchild.heap_data().child_count as usize - 1;
         *mutable_subtree_child_mut(tree, 0) = subtree_from_mut(grandchild);
         *mutable_subtree_child_mut(child, 0) = mutable_subtree_child(grandchild, gc_last);
         *mutable_subtree_child_mut(grandchild, gc_last) = subtree_from_mut(child);
@@ -1448,7 +1455,7 @@ pub unsafe fn subtree_compress(
         let child = subtree_to_mut_unsafe(mutable_subtree_child(tree, 0));
         let grandchild = subtree_to_mut_unsafe(mutable_subtree_child(
             child,
-            (*child.heap_ptr()).child_count as usize - 1,
+            child.heap_data().child_count as usize - 1,
         ));
         subtree_summarize_children(grandchild, language);
         subtree_summarize_children(child, language);
@@ -1512,8 +1519,8 @@ pub unsafe fn subtree_summarize_children(self_: MutableSubtree, language: *const
             if subtree_visible(child) {
                 data.error_cost += ERROR_COST_PER_SKIPPED_TREE;
             } else if grandchild_count > 0 {
-                data.error_cost += ERROR_COST_PER_SKIPPED_TREE
-                    * (*child.heap_ptr()).children().visible_child_count;
+                data.error_cost +=
+                    ERROR_COST_PER_SKIPPED_TREE * child.heap_data().children().visible_child_count;
             }
         }
 
@@ -1538,9 +1545,8 @@ pub unsafe fn subtree_summarize_children(self_: MutableSubtree, language: *const
             }
         } else if grandchild_count > 0 {
             data.children_mut().visible_child_count +=
-                (*child.heap_ptr()).children().visible_child_count;
-            data.children_mut().named_child_count +=
-                (*child.heap_ptr()).children().named_child_count;
+                child.heap_data().children().visible_child_count;
+            data.children_mut().named_child_count += child.heap_data().children().named_child_count;
         }
 
         if subtree_has_external_tokens(child) {
@@ -1654,7 +1660,7 @@ pub unsafe fn subtree_last_external_token(mut tree: Subtree) -> Subtree {
 }
 
 pub unsafe fn subtree_external_scanner_state(self_: &Subtree) -> &ExternalScannerState {
-    if self_.heap_ptr().is_null() || self_.data.is_inline() {
+    if self_.is_null() || self_.data.is_inline() {
         return &EMPTY_EXTERNAL_SCANNER_STATE;
     }
 

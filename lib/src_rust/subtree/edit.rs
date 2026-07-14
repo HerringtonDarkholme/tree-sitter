@@ -1,6 +1,6 @@
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
-use core::ptr::NonNull;
+use core::{ptr::NonNull, sync::atomic::AtomicU32};
 
 use super::{
     length_add, length_saturating_sub, length_sub, length_zero, subtree_can_inline,
@@ -65,7 +65,7 @@ unsafe fn subtree_apply_edit_size(
         } else {
             let data = subtree_pool_allocate(pool);
             *data = SubtreeHeapData {
-                ref_count: 1,
+                ref_count: AtomicU32::new(1),
                 padding,
                 size,
                 lookahead_bytes,
