@@ -1,9 +1,12 @@
-//! Rust replacement for stack.c/h — GLR parse stack with version management.
+//! GLR parse stack and version management.
 //!
 //! This module implements the branching parse stack used by the GLR parser.
 //! Multiple "versions" of the stack can exist simultaneously, representing
 //! different parse paths. Versions can be merged when they reach the same
 //! state, enabling efficient ambiguity handling.
+//!
+//! Stack values never cross the C ABI. Their structures intentionally use
+//! Rust layout; only exported parser and cursor handles need fixed layouts.
 
 use core::ffi::c_void;
 use core::ptr;
@@ -49,11 +52,10 @@ pub const STACK_VERSION_NONE: StackVersion = u32::MAX;
 /// The subtree is the syntax node that was shifted/reduced between the
 /// predecessor and the current node. Multiple links model GLR ambiguity: the
 /// same parse state/position can be reached through different child lists.
-#[repr(C)]
 #[derive(Clone, Copy)]
 pub struct StackLink {
-    pub node: *mut StackNode,
-    pub subtree: Subtree,
+    node: *mut StackNode,
+    subtree: Subtree,
 }
 
 /// Node in the persistent GLR stack graph.
@@ -62,135 +64,106 @@ pub struct StackLink {
 /// linked to the previous head; popping walks backward through links and may
 /// fork when a node has multiple predecessors. Cached aggregate fields describe
 /// the best path through the node and are used for pruning and merging.
-#[repr(C)]
 pub struct StackNode {
     /// Parse state at this stack depth.
-    pub state: TSStateId,
+    state: TSStateId,
     /// Source position reached by the best path to this node.
-    pub position: Length,
+    position: Length,
     /// Inline predecessor links. Ambiguous nodes can carry several links.
-    pub links: [StackLink; MAX_LINK_COUNT],
+    links: [StackLink; MAX_LINK_COUNT],
     /// Number of initialized entries in `links`.
-    pub link_count: u16,
+    link_count: u16,
     /// Intrusive reference count from stack heads and successor links.
-    pub ref_count: u32,
+    ref_count: u32,
     /// Accumulated parse error cost for pruning worse versions.
-    pub error_cost: u32,
+    error_cost: u32,
     /// Approximate visible node count since the last error.
-    pub node_count: u32,
+    node_count: u32,
     /// Accumulated dynamic precedence along the best path.
-    pub dynamic_precedence: i32,
+    dynamic_precedence: i32,
 }
 
 /// DFS cursor used by stack pop operations.
-#[repr(C)]
 pub struct StackIterator {
     /// Current graph node being visited.
-    pub node: *mut StackNode,
+    node: *mut StackNode,
     /// Child subtrees collected so far along this pop path.
-    pub subtrees: SubtreeArray,
+    subtrees: SubtreeArray,
     /// Number of non-extra stack entries traversed.
-    pub subtree_count: u32,
+    subtree_count: u32,
 }
 
 pub type StackNodeArray = Array<*mut StackNode>;
 
-#[repr(C)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum StackStatus {
-    Active = 0,
-    Paused = 1,
-    Halted = 2,
+    Active,
+    Paused,
+    Halted,
 }
 
-#[repr(C)]
 pub struct StackSlice {
-    pub subtrees: SubtreeArray,
-    pub version: StackVersion,
+    pub(super) subtrees: SubtreeArray,
+    pub(super) version: StackVersion,
 }
 
 pub type StackSliceArray = Array<StackSlice>;
 
-#[repr(C)]
 #[derive(Clone, Copy)]
 pub struct StackSliceSpan {
-    pub start: u32,
-    pub size: u32,
-    pub version: StackVersion,
+    pub(super) start: u32,
+    pub(super) size: u32,
+    pub(super) version: StackVersion,
 }
 
 pub type StackSliceSpanArray = Array<StackSliceSpan>;
 
-#[repr(C)]
 pub struct StackPopBuilder {
-    pub slices: StackSliceSpanArray,
-    pub subtrees: SubtreeArray,
+    pub(super) slices: StackSliceSpanArray,
+    pub(super) subtrees: SubtreeArray,
 }
 
-#[repr(C)]
 #[derive(Clone, Copy)]
 pub struct StackSummaryEntry {
-    pub position: Length,
-    pub depth: u32,
-    pub state: TSStateId,
+    pub(super) position: Length,
+    pub(super) depth: u32,
+    pub(super) state: TSStateId,
 }
 
 pub type StackSummary = Array<StackSummaryEntry>;
 
-#[repr(C)]
 pub struct StackHead {
     /// Current top node for this parser version.
-    pub node: *mut StackNode,
+    node: *mut StackNode,
     /// Optional recovery summary, recorded lazily.
-    pub summary: *mut StackSummary,
+    summary: *mut StackSummary,
     /// Node-count checkpoint used by recovery progress heuristics.
-    pub node_count_at_last_error: u32,
+    node_count_at_last_error: u32,
     /// Last token carrying external scanner state for this version.
-    pub last_external_token: Subtree,
+    last_external_token: Subtree,
     /// Lookahead saved when this version is paused for error recovery.
-    pub lookahead_when_paused: Subtree,
+    lookahead_when_paused: Subtree,
     /// Active versions parse normally; paused versions wait for recovery;
     /// halted versions are removed by stack condensation.
-    pub status: StackStatus,
+    status: StackStatus,
 }
 
-#[repr(C)]
 pub struct Stack {
     /// One head per active/paused/halted GLR version.
-    pub heads: Array<StackHead>,
+    heads: Array<StackHead>,
     /// Scratch pop results returned to the parser.
-    pub slices: StackSliceArray,
+    slices: StackSliceArray,
     /// Reusable DFS iterators for pop operations.
-    pub iterators: Array<StackIterator>,
+    iterators: Array<StackIterator>,
     /// Free list for recently released stack nodes.
-    pub node_pool: StackNodeArray,
+    node_pool: StackNodeArray,
     /// Number of heads whose status is `Halted`.
-    pub halted_version_count: u32,
+    halted_version_count: u32,
     /// Initial root node shared by all versions.
-    pub base_node: *mut StackNode,
+    base_node: *mut StackNode,
     /// Parser-owned subtree pool used when releasing link subtrees.
-    pub subtree_pool: *mut SubtreePool,
+    subtree_pool: *mut SubtreePool,
 }
-
-// ---------------------------------------------------------------------------
-// Compile-time layout assertions for hot internal structures
-// ---------------------------------------------------------------------------
-
-#[cfg(target_pointer_width = "64")]
-const _: () = assert!(core::mem::size_of::<StackLink>() == 16);
-#[cfg(target_pointer_width = "64")]
-const _: () = assert!(core::mem::size_of::<StackNode>() == 168);
-#[cfg(target_pointer_width = "64")]
-const _: () = assert!(core::mem::size_of::<StackIterator>() == 32);
-const _: () = assert!(core::mem::size_of::<StackStatus>() == 4);
-#[cfg(target_pointer_width = "64")]
-const _: () = assert!(core::mem::size_of::<StackSlice>() == 24);
-const _: () = assert!(core::mem::size_of::<StackSliceSpan>() == 12);
-const _: () = assert!(core::mem::size_of::<StackSummaryEntry>() == 20);
-#[cfg(target_pointer_width = "64")]
-const _: () = assert!(core::mem::size_of::<StackHead>() == 48);
-#[cfg(target_pointer_width = "64")]
-const _: () = assert!(core::mem::size_of::<Stack>() == 88);
 
 pub type StackAction = u32;
 pub const STACK_ACTION_NONE: StackAction = 0;
@@ -200,7 +173,6 @@ pub const STACK_ACTION_POP: StackAction = 2;
 pub type StackCallback = unsafe fn(payload: *mut c_void, iterator: &StackIterator) -> StackAction;
 
 /// Session state for the summarize callback.
-#[repr(C)]
 struct SummarizeStackSession {
     summary: *mut StackSummary,
     max_depth: u32,
@@ -551,432 +523,11 @@ unsafe fn stack_head_delete(
     }
 }
 
-/// Add a new version to the stack, cloning metadata from an existing version.
-unsafe fn stack_add_version(
-    self_: &mut Stack,
-    original_version: StackVersion,
-    node: &mut StackNode,
-) -> StackVersion {
-    let node_ptr = ptr::from_mut(node);
-    let original_head = stack_head(self_, original_version);
-    let head = StackHead {
-        node: node_ptr,
-        node_count_at_last_error: original_head.node_count_at_last_error,
-        last_external_token: original_head.last_external_token,
-        status: StackStatus::Active,
-        lookahead_when_paused: NULL_SUBTREE,
-        summary: ptr::null_mut(),
-    };
-    array_push(&mut self_.heads, head);
-    stack_node_retain(node);
-    let head = array_back_ref(&self_.heads);
-    if !head.last_external_token.ptr.is_null() {
-        subtree_retain(head.last_external_token);
-    }
-    self_.heads.size - 1
-}
-
-/// Add a slice to the stack's slice array, finding or creating a version.
-unsafe fn stack_add_slice(
-    self_: &mut Stack,
-    original_version: StackVersion,
-    node: &mut StackNode,
-    subtrees: &SubtreeArray,
-) {
-    let node_ptr = ptr::from_mut(node);
-    for i in (0..self_.slices.size).rev() {
-        let version = array_get_ref(&self_.slices, i).version;
-        if stack_head(self_, version).node == node_ptr {
-            let slice = StackSlice {
-                subtrees: ptr::read(subtrees),
-                version,
-            };
-            array_insert(&mut self_.slices, i + 1, slice);
-            return;
-        }
-    }
-
-    let version = stack_add_version(self_, original_version, node);
-    let slice = StackSlice {
-        subtrees: ptr::read(subtrees),
-        version,
-    };
-    array_push(&mut self_.slices, slice);
-}
-
-unsafe fn stack_pop_builder_reverse_subtrees(builder: &mut StackPopBuilder, start: u32, size: u32) {
-    let limit = size / 2;
-    for i in 0..limit {
-        let reverse_index = start as usize + size as usize - 1 - i as usize;
-        let a = builder.subtrees.contents.add(start as usize + i as usize);
-        let b = builder.subtrees.contents.add(reverse_index);
-        ptr::swap(a, b);
-    }
-}
-
-unsafe fn stack_pop_builder_append_subtrees(
-    builder: &mut StackPopBuilder,
-    subtrees: &SubtreeArray,
-) -> StackSliceSpan {
-    let start = builder.subtrees.size;
-    let dest = &mut builder.subtrees;
-    array_reserve(dest, start + subtrees.size);
-    if subtrees.size > 0 {
-        ptr::copy_nonoverlapping(
-            subtrees.contents,
-            dest.contents.add(start as usize),
-            subtrees.size as usize,
-        );
-    }
-    dest.size = start + subtrees.size;
-    StackSliceSpan {
-        start,
-        size: subtrees.size,
-        version: STACK_VERSION_NONE,
-    }
-}
-
-unsafe fn stack_pop_builder_add_slice(
-    self_: &mut Stack,
-    original_version: StackVersion,
-    node: &mut StackNode,
-    builder: &mut StackPopBuilder,
-    mut slice: StackSliceSpan,
-) {
-    let node_ptr = ptr::from_mut(node);
-    for i in (0..builder.slices.size).rev() {
-        let version = array_get_ref(&builder.slices, i).version;
-        if stack_head(self_, version).node == node_ptr {
-            slice.version = version;
-            array_insert(&mut builder.slices, i + 1, slice);
-            return;
-        }
-    }
-
-    slice.version = stack_add_version(self_, original_version, node);
-    array_push(&mut builder.slices, slice);
-}
-
-/// Fast pop path for an unbranched stack chain.
-///
-/// The parser asks for `count` non-extra subtrees. While every node has exactly
-/// one predecessor, this can walk a straight linked list, retain subtrees, then
-/// reverse the collected child array into left-to-right order. Encountering a
-/// branched node returns `None` so the caller can use the full DFS pop path.
-unsafe fn stack_pop_count_linear(
-    self_: &mut Stack,
-    version: StackVersion,
-    count: u32,
-) -> Option<StackSliceArray> {
-    array_clear(&mut self_.slices);
-
-    let mut node = stack_head(self_, version).node;
-    let mut subtree_count = 0;
-    let mut subtrees = array_new();
-    let reserve_count = subtree_alloc_size(count) / core::mem::size_of::<Subtree>();
-    array_reserve(&mut subtrees, u32::try_from(reserve_count).unwrap());
-
-    while subtree_count < count {
-        let current_node = ptr_ref(node);
-        if current_node.link_count != 1 {
-            subtree_array_delete(ptr_mut(self_.subtree_pool), &mut subtrees);
-            return None;
-        }
-
-        let link = current_node.links[0];
-        node = link.node;
-        let subtree = link.subtree;
-        if subtree.ptr.is_null() {
-            subtree_count += 1;
-        } else {
-            array_push(&mut subtrees, subtree);
-            subtree_retain(subtree);
-
-            if !subtree_extra(subtree) {
-                subtree_count += 1;
-            }
-        }
-    }
-
-    subtree_array_reverse(&mut subtrees);
-    stack_add_slice(self_, version, ptr_mut(node), &subtrees);
-    Some(ptr::read(&self_.slices))
-}
-
-/// Builder-writing variant of `stack_pop_count_linear`.
-///
-/// Fresh parses use parser-owned `StackPopBuilder` scratch storage to avoid
-/// allocating a temporary `StackSliceArray` for every reduce. The traversal and
-/// fallback condition are the same as `stack_pop_count_linear`.
-unsafe fn stack_pop_count_linear_into(
-    self_: &mut Stack,
-    version: StackVersion,
-    count: u32,
-    builder: &mut StackPopBuilder,
-) -> bool {
-    let mut node = stack_head(self_, version).node;
-    let mut subtree_count = 0;
-    let reserve_count = subtree_alloc_size(count) / core::mem::size_of::<Subtree>();
-    array_reserve(&mut builder.subtrees, u32::try_from(reserve_count).unwrap());
-
-    while subtree_count < count {
-        let current_node = ptr_ref(node);
-        if current_node.link_count != 1 {
-            let subtrees = &mut builder.subtrees;
-            for i in 0..subtrees.size {
-                subtree_release(ptr_mut(self_.subtree_pool), *array_get_ref(subtrees, i));
-            }
-            subtrees.size = 0;
-            return false;
-        }
-
-        let link = current_node.links[0];
-        node = link.node;
-        let subtree = link.subtree;
-        if subtree.ptr.is_null() {
-            subtree_count += 1;
-        } else {
-            array_push(&mut builder.subtrees, subtree);
-            subtree_retain(subtree);
-
-            if !subtree_extra(subtree) {
-                subtree_count += 1;
-            }
-        }
-    }
-
-    let size = builder.subtrees.size;
-    stack_pop_builder_reverse_subtrees(builder, 0, size);
-    let slice = StackSliceSpan {
-        start: 0,
-        size,
-        version: STACK_VERSION_NONE,
-    };
-    stack_pop_builder_add_slice(self_, version, ptr_mut(node), builder, slice);
-    true
-}
-
-pub unsafe fn stack_pop_count_linear_in_place(
-    self_: &mut Stack,
-    version: StackVersion,
-    count: u32,
-    builder: &mut StackPopBuilder,
-) -> bool {
-    stack_pop_builder_clear(builder);
-
-    let mut node = stack_head(self_, version).node;
-    let mut subtree_count = 0;
-    let reserve_count = subtree_alloc_size(count) / core::mem::size_of::<Subtree>();
-    array_reserve(&mut builder.subtrees, u32::try_from(reserve_count).unwrap());
-
-    while subtree_count < count {
-        let current_node = ptr_ref(node);
-        if current_node.link_count != 1 {
-            let subtrees = &mut builder.subtrees;
-            for i in 0..subtrees.size {
-                subtree_release(ptr_mut(self_.subtree_pool), *array_get_ref(subtrees, i));
-            }
-            subtrees.size = 0;
-            return false;
-        }
-
-        let link = current_node.links[0];
-        node = link.node;
-        let subtree = link.subtree;
-        if subtree.ptr.is_null() {
-            subtree_count += 1;
-        } else {
-            array_push(&mut builder.subtrees, subtree);
-            subtree_retain(subtree);
-
-            if !subtree_extra(subtree) {
-                subtree_count += 1;
-            }
-        }
-    }
-
-    let size = builder.subtrees.size;
-    stack_pop_builder_reverse_subtrees(builder, 0, size);
-
-    stack_node_retain(ptr_mut(node));
-    let old_head_node = {
-        let head = stack_head_mut(self_, version);
-        let old_head_node = head.node;
-        head.node = node;
-        old_head_node
-    };
-    stack_node_release(
-        ptr_mut(old_head_node),
-        &mut self_.node_pool,
-        ptr_mut(self_.subtree_pool),
-    );
-    true
-}
-
-/// Core iteration function for walking the stack graph.
-unsafe fn stack_iter(
-    stack: &mut Stack,
-    version: StackVersion,
-    callback: StackCallback,
-    payload: *mut c_void,
-    goal_subtree_count: Option<u32>,
-) -> StackSliceArray {
-    array_clear(&mut stack.slices);
-    array_clear(&mut stack.iterators);
-
-    let head = stack_head(stack, version);
-    let mut new_iterator = StackIterator {
-        node: head.node,
-        subtrees: array_new(),
-        subtree_count: 0,
-    };
-
-    if let Some(goal_subtree_count) = goal_subtree_count {
-        let reserve_count =
-            subtree_alloc_size(goal_subtree_count) / core::mem::size_of::<Subtree>();
-        let subtrees = &mut new_iterator.subtrees;
-        array_reserve(subtrees, u32::try_from(reserve_count).unwrap());
-    }
-    let include_subtrees = goal_subtree_count.is_some();
-
-    array_push(&mut stack.iterators, new_iterator);
-
-    while stack.iterators.size > 0 {
-        let mut i: u32 = 0;
-        let mut active_iterator_count = stack.iterators.size;
-        while i < active_iterator_count {
-            let iterator = array_get_ref(&stack.iterators, i);
-            let node = iterator.node;
-
-            let action = callback(payload, iterator);
-            let should_pop = (action & STACK_ACTION_POP) != 0;
-            let should_stop = (action & STACK_ACTION_STOP) != 0 || (*node).link_count == 0;
-
-            if should_pop {
-                let mut subtrees = ptr::read(&array_get_ref(&stack.iterators, i).subtrees);
-                if !should_stop {
-                    let source_subtrees = ptr::read(&subtrees);
-                    subtree_array_copy(&source_subtrees, &mut subtrees);
-                }
-                subtree_array_reverse(&mut subtrees);
-                stack_add_slice(stack, version, ptr_mut(node), &subtrees);
-            }
-
-            if should_stop {
-                if !should_pop {
-                    let iter = array_get_mut(&mut stack.iterators, i);
-                    subtree_array_delete(ptr_mut(stack.subtree_pool), &mut iter.subtrees);
-                }
-                array_erase(&mut stack.iterators, i);
-                active_iterator_count -= 1;
-                continue;
-            }
-
-            // Copy all alternate branches, then reuse the current iterator for
-            // link 0 so the common path avoids an extra subtree-array clone.
-            let link_count = u32::from((*node).link_count);
-            for branch_index in 1..=link_count {
-                let next_iterator: &mut StackIterator;
-                let link: StackLink;
-                if branch_index == link_count {
-                    link = (*node).links[0];
-                    next_iterator = array_get_mut(&mut stack.iterators, i);
-                } else {
-                    if stack.iterators.size >= MAX_ITERATOR_COUNT {
-                        continue;
-                    }
-                    link = (*node).links[branch_index as usize];
-                    let current_iterator = ptr::read(array_get_ref(&stack.iterators, i));
-                    array_push(&mut stack.iterators, current_iterator);
-                    next_iterator = array_back_mut(&mut stack.iterators);
-                    let source_subtrees = ptr::read(&next_iterator.subtrees);
-                    subtree_array_copy(&source_subtrees, &mut next_iterator.subtrees);
-                }
-
-                next_iterator.node = link.node;
-                let subtree = link.subtree;
-                if subtree.ptr.is_null() {
-                    next_iterator.subtree_count += 1;
-                } else {
-                    if include_subtrees {
-                        let subtrees = &mut next_iterator.subtrees;
-                        array_push(subtrees, subtree);
-                        subtree_retain(subtree);
-                    }
-
-                    if !subtree_extra(subtree) {
-                        next_iterator.subtree_count += 1;
-                    }
-                }
-            }
-            i = i.wrapping_add(1);
-        }
-    }
-
-    ptr::read(&stack.slices)
-}
-
-// Callbacks for stack_iter
-unsafe fn pop_count_callback(payload: *mut c_void, iterator: &StackIterator) -> StackAction {
-    let goal_subtree_count = *ptr_ref(payload.cast::<u32>());
-    if iterator.subtree_count == goal_subtree_count {
-        STACK_ACTION_POP | STACK_ACTION_STOP
-    } else {
-        STACK_ACTION_NONE
-    }
-}
-
-unsafe fn pop_error_callback(payload: *mut c_void, iterator: &StackIterator) -> StackAction {
-    if iterator.subtrees.size > 0 {
-        let found_error = ptr_mut(payload.cast::<bool>());
-        if !*found_error && subtree_is_error(*array_get_ref(&iterator.subtrees, 0)) {
-            *found_error = true;
-            STACK_ACTION_POP | STACK_ACTION_STOP
-        } else {
-            STACK_ACTION_STOP
-        }
-    } else {
-        STACK_ACTION_NONE
-    }
-}
-
-unsafe fn pop_all_callback(_payload: *mut c_void, iterator: &StackIterator) -> StackAction {
-    let node = ptr_ref(iterator.node);
-    if node.link_count == 0 {
-        STACK_ACTION_POP
-    } else {
-        STACK_ACTION_NONE
-    }
-}
-
-unsafe fn summarize_stack_callback(payload: *mut c_void, iterator: &StackIterator) -> StackAction {
-    let node = ptr_ref(iterator.node);
-    let session = ptr_mut(payload.cast::<SummarizeStackSession>());
-    let state = node.state;
-    let depth = iterator.subtree_count;
-    if depth > session.max_depth {
-        return STACK_ACTION_STOP;
-    }
-    let summary = ptr_ref(session.summary);
-    for i in (0..summary.size).rev() {
-        let entry = array_get_ref(summary, i);
-        if entry.depth < depth {
-            break;
-        }
-        if entry.depth == depth && entry.state == state {
-            return STACK_ACTION_NONE;
-        }
-    }
-    array_push(
-        ptr_mut(session.summary),
-        StackSummaryEntry {
-            position: node.position,
-            depth,
-            state,
-        },
-    );
-    STACK_ACTION_NONE
-}
+mod pop;
+use pop::{
+    pop_all_callback, pop_count_callback, pop_error_callback, stack_iter,
+    stack_pop_builder_append_subtrees, summarize_stack_callback,
+};
 
 // ===========================================================================
 // Internal stack helpers used by the Rust parser.
@@ -1125,10 +676,6 @@ pub unsafe fn stack_pop_count(
     version: StackVersion,
     count: u32,
 ) -> StackSliceArray {
-    if let Some(result) = stack_pop_count_linear(self_, version, count) {
-        return result;
-    }
-
     stack_iter(
         self_,
         version,
@@ -1146,10 +693,6 @@ pub unsafe fn stack_pop_count_into(
     builder: &mut StackPopBuilder,
 ) {
     stack_pop_builder_clear(builder);
-    if stack_pop_count_linear_into(self_, version, count, builder) {
-        return;
-    }
-
     let pop = stack_iter(
         self_,
         version,
@@ -1430,194 +973,8 @@ pub unsafe fn stack_clear(self_: &mut Stack) {
     );
 }
 
-/// Print the stack as a DOT graph for debugging.
-pub unsafe fn stack_print_dot_graph(
-    stack: &mut Stack,
-    language: *const TSLanguage,
-    mut f: *mut c_void,
-) -> bool {
-    array_reserve(&mut stack.iterators, 32);
-    if f.is_null() {
-        f = stderr_file();
-    }
-
-    fprintf(f, c"digraph stack {\n".as_ptr().cast::<i8>());
-    fprintf(f, c"rankdir=\"RL\";\n".as_ptr().cast::<i8>());
-    fprintf(f, c"edge [arrowhead=none]\n".as_ptr().cast::<i8>());
-
-    let mut visited_nodes: Array<*mut StackNode> = array_new();
-
-    array_clear(&mut stack.iterators);
-    for i in 0..stack.heads.size {
-        if stack_head(stack, i).status == StackStatus::Halted {
-            continue;
-        }
-        let node_count_since_error = stack_node_count_since_error(stack, i);
-        let error_cost = stack_error_cost(stack, i);
-        let head = stack_head(stack, i);
-
-        fprintf(
-            f,
-            c"node_head_%u [shape=none, label=\"\"]\n"
-                .as_ptr()
-                .cast::<i8>(),
-            i,
-        );
-        fprintf(
-            f,
-            c"node_head_%u -> node_%p [".as_ptr().cast::<i8>(),
-            i,
-            head.node as *const c_void,
-        );
-
-        if head.status == StackStatus::Paused {
-            fprintf(f, c"color=red ".as_ptr().cast::<i8>());
-        }
-        fprintf(
-            f,
-            c"label=%u, fontcolor=blue, weight=10000, labeltooltip=\"node_count: %u\nerror_cost: %u".as_ptr().cast::<i8>(),
-            i,
-            node_count_since_error,
-            error_cost,
-        );
-
-        if !head.summary.is_null() {
-            fprintf(f, c"\nsummary:".as_ptr().cast::<i8>());
-            let summary = ptr_ref(head.summary);
-            for j in 0..summary.size {
-                let entry = array_get_ref(summary, j);
-                fprintf(f, c" %u".as_ptr().cast::<i8>(), u32::from(entry.state));
-            }
-        }
-
-        if !head.last_external_token.ptr.is_null() {
-            let state = subtree_external_scanner_state(&head.last_external_token);
-            let data = external_scanner_state_data(state);
-            fprintf(f, c"\nexternal_scanner_state:".as_ptr().cast::<i8>());
-            for j in 0..state.length {
-                fprintf(
-                    f,
-                    c" %2X".as_ptr().cast::<i8>(),
-                    u32::from(*data.add(j as usize)),
-                );
-            }
-        }
-
-        fprintf(f, c"\"]\n".as_ptr().cast::<i8>());
-
-        let iter = StackIterator {
-            node: head.node,
-            subtrees: array_new(),
-            subtree_count: 0,
-        };
-        array_push(&mut stack.iterators, iter);
-    }
-
-    loop {
-        let mut all_iterators_done = true;
-
-        for i in 0..stack.iterators.size {
-            let iterator = ptr::read(array_get_ref(&stack.iterators, i));
-            let mut node = iterator.node;
-
-            for j in 0..visited_nodes.size {
-                if *array_get_ref(&visited_nodes, j) == node {
-                    node = ptr::null_mut();
-                    break;
-                }
-            }
-
-            if node.is_null() {
-                continue;
-            }
-            all_iterators_done = false;
-            let node_ref = ptr_ref(node);
-
-            fprintf(f, c"node_%p [".as_ptr().cast::<i8>(), node as *const c_void);
-            if node_ref.state == ERROR_STATE {
-                fprintf(f, c"label=\"?\"".as_ptr().cast::<i8>());
-            } else if node_ref.link_count == 1
-                && !node_ref.links[0].subtree.ptr.is_null()
-                && subtree_extra(node_ref.links[0].subtree)
-            {
-                fprintf(f, c"shape=point margin=0 label=\"\"".as_ptr().cast::<i8>());
-            } else {
-                fprintf(
-                    f,
-                    c"label=\"%d\"".as_ptr().cast::<i8>(),
-                    i32::from(node_ref.state),
-                );
-            }
-
-            fprintf(
-                f,
-                c" tooltip=\"position: %u,%u\nnode_count:%u\nerror_cost: %u\ndynamic_precedence: %d\"];\n".as_ptr().cast::<i8>(),
-                node_ref.position.extent.row + 1,
-                node_ref.position.extent.column,
-                node_ref.node_count,
-                node_ref.error_cost,
-                node_ref.dynamic_precedence,
-            );
-
-            for j in 0..node_ref.link_count as usize {
-                let link = node_ref.links[j];
-                fprintf(
-                    f,
-                    c"node_%p -> node_%p [".as_ptr().cast::<i8>(),
-                    node as *const c_void,
-                    link.node as *const c_void,
-                );
-                let subtree = link.subtree;
-                if !subtree.ptr.is_null() && subtree_extra(subtree) {
-                    fprintf(f, c"fontcolor=gray ".as_ptr().cast::<i8>());
-                }
-
-                if subtree.ptr.is_null() {
-                    fprintf(f, c"color=red".as_ptr().cast::<i8>());
-                } else {
-                    fprintf(f, c"label=\"".as_ptr().cast::<i8>());
-                    let quoted = subtree_visible(subtree) && !subtree_named(subtree);
-                    if quoted {
-                        fprintf(f, c"'".as_ptr().cast::<i8>());
-                    }
-                    language_write_symbol_as_dot_string(language, f, subtree_symbol(subtree));
-                    if quoted {
-                        fprintf(f, c"'".as_ptr().cast::<i8>());
-                    }
-                    fprintf(f, c"\"".as_ptr().cast::<i8>());
-                    fprintf(
-                        f,
-                        c"labeltooltip=\"error_cost: %u\ndynamic_precedence: %d\""
-                            .as_ptr()
-                            .cast::<i8>(),
-                        subtree_error_cost(subtree),
-                        subtree_dynamic_precedence(subtree),
-                    );
-                }
-
-                fprintf(f, c"];\n".as_ptr().cast::<i8>());
-
-                let next_iterator = if j == 0 {
-                    array_get_mut(&mut stack.iterators, i)
-                } else {
-                    array_push(&mut stack.iterators, ptr::read(&iterator));
-                    array_back_mut(&mut stack.iterators)
-                };
-                next_iterator.node = link.node;
-            }
-
-            array_push(&mut visited_nodes, node);
-        }
-        if all_iterators_done {
-            break;
-        }
-    }
-
-    fprintf(f, c"}\n".as_ptr().cast::<i8>());
-
-    array_delete(&mut visited_nodes);
-    true
-}
+mod debug;
+pub use debug::stack_print_dot_graph;
 
 #[cfg(test)]
 mod tests {
