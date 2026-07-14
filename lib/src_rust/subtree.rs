@@ -488,7 +488,7 @@ struct Edit {
 }
 
 struct EditEntry {
-    tree: *mut Subtree,
+    tree: NonNull<Subtree>,
     edit: Edit,
 }
 

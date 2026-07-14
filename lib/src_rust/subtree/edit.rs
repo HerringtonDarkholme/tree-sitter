@@ -1,8 +1,9 @@
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
+use core::ptr::NonNull;
 
 use super::{
-    length_add, length_saturating_sub, length_sub, length_zero, ptr, subtree_can_inline,
+    length_add, length_saturating_sub, length_sub, length_zero, subtree_can_inline,
     subtree_children_slice, subtree_depends_on_column, subtree_from_mut, subtree_lookahead_bytes,
     subtree_make_mut, subtree_padding, subtree_pool_allocate, subtree_set_has_changes,
     subtree_size, subtree_total_size, Edit, EditEntry, Length, Subtree, SubtreeHeapData,
@@ -98,10 +99,11 @@ unsafe fn subtree_apply_edit_size(
 
 /// Translate an edit into each affected child's coordinate space.
 unsafe fn subtree_schedule_edited_children(
-    tree: *mut Subtree,
+    tree: NonNull<Subtree>,
     mut edit: Edit,
     stack: &mut Vec<EditEntry>,
 ) {
+    let tree = tree.as_ptr();
     let is_pure_insertion = edit.old_end.bytes == edit.start.bytes;
     let parent_depends_on_column = subtree_depends_on_column(*tree);
     let column_shifted = edit.new_end.extent.column != edit.old_end.extent.column;
@@ -144,7 +146,7 @@ unsafe fn subtree_schedule_edited_children(
         }
 
         stack.push(EditEntry {
-            tree: ptr::from_ref(child).cast_mut(),
+            tree: NonNull::from(child),
             edit: child_edit,
         });
     }
@@ -157,7 +159,7 @@ pub unsafe fn subtree_edit(
 ) -> Subtree {
     let mut stack: Vec<EditEntry> = Vec::new();
     stack.push(EditEntry {
-        tree: core::ptr::addr_of_mut!(self_),
+        tree: NonNull::from(&mut self_),
         edit: Edit {
             start: Length {
                 bytes: input_edit.start_byte,
@@ -175,12 +177,12 @@ pub unsafe fn subtree_edit(
     });
 
     while let Some(entry) = stack.pop() {
-        let Some((padding, size, lookahead_bytes)) = subtree_edited_size(*entry.tree, entry.edit)
-        else {
+        let tree = entry.tree.as_ptr();
+        let Some((padding, size, lookahead_bytes)) = subtree_edited_size(*tree, entry.edit) else {
             continue;
         };
 
-        *entry.tree = subtree_apply_edit_size(pool, *entry.tree, padding, size, lookahead_bytes);
+        *tree = subtree_apply_edit_size(pool, *tree, padding, size, lookahead_bytes);
         subtree_schedule_edited_children(entry.tree, entry.edit, &mut stack);
     }
 
