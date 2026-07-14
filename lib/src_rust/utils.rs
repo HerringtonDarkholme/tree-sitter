@@ -39,6 +39,38 @@ pub struct Array<T> {
     pub capacity: u32,
 }
 
+impl<T> Array<T> {
+    #[inline]
+    pub const fn len(&self) -> usize {
+        self.size as usize
+    }
+
+    #[inline]
+    pub const fn is_empty(&self) -> bool {
+        self.size == 0
+    }
+
+    #[inline]
+    pub const fn as_slice(&self) -> &[T] {
+        if self.is_empty() {
+            &[]
+        } else {
+            // SAFETY: Array operations keep the first `size` elements initialized.
+            unsafe { core::slice::from_raw_parts(self.contents, self.len()) }
+        }
+    }
+
+    #[inline]
+    pub fn as_mut_slice(&mut self) -> &mut [T] {
+        if self.is_empty() {
+            &mut []
+        } else {
+            // SAFETY: A mutable Array borrow uniquely borrows its initialized elements.
+            unsafe { core::slice::from_raw_parts_mut(self.contents, self.len()) }
+        }
+    }
+}
+
 pub fn array_init<T>(arr: &mut Array<T>) {
     arr.size = 0;
     arr.capacity = 0;
@@ -121,26 +153,22 @@ pub unsafe fn array_pop<T>(arr: &mut Array<T>) -> T {
 
 #[inline]
 pub unsafe fn array_get_ref<T>(arr: &Array<T>, index: u32) -> &T {
-    debug_assert!(index < arr.size);
-    ptr_ref(arr.contents.add(index as usize))
+    arr.as_slice().get_unchecked(index as usize)
 }
 
 #[inline]
 pub unsafe fn array_get_mut<T>(arr: &mut Array<T>, index: u32) -> &mut T {
-    debug_assert!(index < arr.size);
-    ptr_mut(arr.contents.add(index as usize))
+    arr.as_mut_slice().get_unchecked_mut(index as usize)
 }
 
 #[inline]
 pub unsafe fn array_back_ref<T>(arr: &Array<T>) -> &T {
-    debug_assert!(arr.size > 0);
-    ptr_ref(arr.contents.add(arr.size as usize - 1))
+    arr.as_slice().last().unwrap_unchecked()
 }
 
 #[inline]
 pub unsafe fn array_back_mut<T>(arr: &mut Array<T>) -> &mut T {
-    debug_assert!(arr.size > 0);
-    ptr_mut(arr.contents.add(arr.size as usize - 1))
+    arr.as_mut_slice().last_mut().unwrap_unchecked()
 }
 
 pub unsafe fn array_erase<T>(arr: &mut Array<T>, index: u32) {
