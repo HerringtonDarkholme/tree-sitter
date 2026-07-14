@@ -68,55 +68,61 @@ pub unsafe fn language_lookaheads(self_: *const TSLanguage, state: TSStateId) ->
     }
 }
 
-/// Advance a lookahead iterator to the next valid symbol.
-#[inline]
-pub unsafe fn lookahead_iterator_next(self_: &mut LookaheadIterator) -> bool {
-    let l = lang(self_.language);
+impl LookaheadIterator {
+    /// Advance to the next symbol with a valid parse-table entry.
+    #[inline]
+    pub unsafe fn advance(&mut self) -> bool {
+        let language = lang(self.language);
 
-    if self_.is_small_state {
-        self_.data = self_.data.add(1);
-        if self_.data == self_.group_end {
-            if self_.group_count == 0 {
-                return false;
+        if self.is_small_state {
+            self.data = self.data.add(1);
+            if self.data == self.group_end {
+                if self.group_count == 0 {
+                    return false;
+                }
+                self.group_count -= 1;
+                self.table_value = *self.data;
+                self.data = self.data.add(1);
+                let symbol_count = *self.data;
+                self.data = self.data.add(1);
+                self.group_end = self.data.add(symbol_count as usize);
+                self.symbol = *self.data;
+            } else {
+                self.symbol = *self.data;
+                return true;
             }
-            self_.group_count -= 1;
-            self_.table_value = *self_.data;
-            self_.data = self_.data.add(1);
-            let symbol_count = *self_.data;
-            self_.data = self_.data.add(1);
-            self_.group_end = self_.data.add(symbol_count as usize);
-            self_.symbol = *self_.data;
         } else {
-            self_.symbol = *self_.data;
-            return true;
-        }
-    } else {
-        loop {
-            self_.data = self_.data.add(1);
-            self_.symbol = self_.symbol.wrapping_add(1);
-            if self_.symbol >= l.symbol_count as u16 {
-                return false;
-            }
-            self_.table_value = *self_.data;
-            if self_.table_value != 0 {
-                break;
+            loop {
+                self.data = self.data.add(1);
+                self.symbol = self.symbol.wrapping_add(1);
+                if self.symbol >= language.symbol_count as u16 {
+                    return false;
+                }
+                self.table_value = *self.data;
+                if self.table_value != 0 {
+                    break;
+                }
             }
         }
-    }
 
-    // Depending on if the symbol is terminal or non-terminal, the table value
-    // either represents a list of actions or a successor state.
-    let language = l;
-    if u32::from(self_.symbol) < language.token_count {
-        let entry = parse_action_entry(language, self_.table_value as usize);
-        self_.action_count = u16::from(entry.entry.count);
-        self_.actions = parse_action_at(language, self_.table_value as usize + 1);
-        self_.next_state = 0;
-    } else {
-        self_.action_count = 0;
-        self_.next_state = self_.table_value;
+        // Terminal table values address actions; non-terminal values are states.
+        if u32::from(self.symbol) < language.token_count {
+            let entry = parse_action_entry(language, self.table_value as usize);
+            self.action_count = u16::from(entry.entry.count);
+            self.actions = parse_action_at(language, self.table_value as usize + 1);
+            self.next_state = 0;
+        } else {
+            self.action_count = 0;
+            self.next_state = self.table_value;
+        }
+        true
     }
-    true
+}
+
+/// Compatibility adapter used by inactive query code.
+#[inline]
+pub unsafe fn lookahead_iterator_next(iterator: &mut LookaheadIterator) -> bool {
+    iterator.advance()
 }
 
 // ---------------------------------------------------------------------------
@@ -176,7 +182,7 @@ pub unsafe extern "C" fn ts_lookahead_iterator_reset(
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_lookahead_iterator_next(self_: *mut LookaheadIterator) -> bool {
-    lookahead_iterator_next(ptr_mut(self_))
+    ptr_mut(self_).advance()
 }
 
 #[no_mangle]
