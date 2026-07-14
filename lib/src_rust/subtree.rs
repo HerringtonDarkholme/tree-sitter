@@ -17,7 +17,7 @@ use super::language::{
     language_write_symbol_as_dot_string, ts_language_symbol_metadata, ts_language_symbol_name,
 };
 use super::length::{length_add, length_saturating_sub, length_sub, length_zero, Length};
-use super::utils::{array_pop, array_push, Array};
+use super::utils::Array;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -1221,11 +1221,11 @@ pub unsafe fn subtree_release(pool: &mut SubtreePool, self_: Subtree) {
     let ref_count = &self_.heap_data().ref_count;
     debug_assert!(ref_count.load(Ordering::Relaxed) > 0);
     if ref_count.fetch_sub(1, Ordering::SeqCst) == 1 {
-        array_push(&mut pool.tree_stack, subtree_to_mut_unsafe(self_));
+        pool.tree_stack.push(subtree_to_mut_unsafe(self_));
     }
 
     while pool.tree_stack.size > 0 {
-        let tree = array_pop(&mut pool.tree_stack);
+        let tree = pool.tree_stack.pop();
         if tree.heap_data().child_count > 0 {
             let children = subtree_children_slice(subtree_from_mut(tree));
             for child in children {
@@ -1236,7 +1236,7 @@ pub unsafe fn subtree_release(pool: &mut SubtreePool, self_: Subtree) {
                 let child_ref = &child.heap_data().ref_count;
                 debug_assert!(child_ref.load(Ordering::Relaxed) > 0);
                 if child_ref.fetch_sub(1, Ordering::SeqCst) == 1 {
-                    array_push(&mut pool.tree_stack, subtree_to_mut_unsafe(child));
+                    pool.tree_stack.push(subtree_to_mut_unsafe(child));
                 }
             }
             free(children.as_ptr().cast_mut().cast::<c_void>());
@@ -1289,12 +1289,12 @@ pub unsafe fn subtree_compress(
         *mutable_subtree_child_mut(tree, 0) = subtree_from_mut(grandchild);
         *mutable_subtree_child_mut(child, 0) = mutable_subtree_child(grandchild, gc_last);
         *mutable_subtree_child_mut(grandchild, gc_last) = subtree_from_mut(child);
-        array_push(stack, tree);
+        stack.push(tree);
         tree = grandchild;
     }
 
     while stack.size > initial_stack_size {
-        tree = array_pop(stack);
+        tree = stack.pop();
         let child = subtree_to_mut_unsafe(mutable_subtree_child(tree, 0));
         let grandchild = subtree_to_mut_unsafe(mutable_subtree_child(
             child,
@@ -1434,12 +1434,12 @@ pub unsafe fn subtree_summarize_children(self_: MutableSubtree, language: *const
 // Subtree comparison and editing
 
 pub unsafe fn subtree_compare(left: Subtree, right: Subtree, pool: &mut SubtreePool) -> i32 {
-    array_push(&mut pool.tree_stack, subtree_to_mut_unsafe(left));
-    array_push(&mut pool.tree_stack, subtree_to_mut_unsafe(right));
+    pool.tree_stack.push(subtree_to_mut_unsafe(left));
+    pool.tree_stack.push(subtree_to_mut_unsafe(right));
 
     while pool.tree_stack.size > 0 {
-        let right = subtree_from_mut(array_pop(&mut pool.tree_stack));
-        let left = subtree_from_mut(array_pop(&mut pool.tree_stack));
+        let right = subtree_from_mut(pool.tree_stack.pop());
+        let left = subtree_from_mut(pool.tree_stack.pop());
 
         let left_symbol = subtree_symbol(left);
         let right_symbol = subtree_symbol(right);
@@ -1468,8 +1468,8 @@ pub unsafe fn subtree_compare(left: Subtree, right: Subtree, pool: &mut SubtreeP
             i -= 1;
             let left_child = *left_children.get_unchecked(i as usize);
             let right_child = *right_children.get_unchecked(i as usize);
-            array_push(&mut pool.tree_stack, subtree_to_mut_unsafe(left_child));
-            array_push(&mut pool.tree_stack, subtree_to_mut_unsafe(right_child));
+            pool.tree_stack.push(subtree_to_mut_unsafe(left_child));
+            pool.tree_stack.push(subtree_to_mut_unsafe(right_child));
         }
     }
 
@@ -1606,8 +1606,8 @@ mod tests {
         unsafe {
             let mut pool = subtree_pool_new(4);
             let mut children = Array::new();
-            array_push(&mut children, inline_leaf(5));
-            array_push(&mut children, inline_leaf(5));
+            children.push(inline_leaf(5));
+            children.push(inline_leaf(5));
             let parent = subtree_from_mut(subtree_new_node(
                 TS_BUILTIN_SYM_ERROR,
                 &mut children,
@@ -1649,8 +1649,8 @@ mod tests {
             );
 
             let mut children = Array::new();
-            array_push(&mut children, child1);
-            array_push(&mut children, child2);
+            children.push(child1);
+            children.push(child2);
 
             let parent =
                 subtree_new_node(TS_BUILTIN_SYM_ERROR_REPEAT, &mut children, 0, ptr::null());
