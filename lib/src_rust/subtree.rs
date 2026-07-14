@@ -964,45 +964,17 @@ pub use storage::{
 };
 use storage::{subtree_pool_allocate, subtree_pool_free};
 
-// Subtree accessors
+// Compatibility accessors still used by the legacy query implementation.
 
 #[inline]
 pub unsafe fn subtree_symbol(self_: Subtree) -> TSSymbol {
     self_.symbol()
 }
 
-#[inline]
-pub const unsafe fn subtree_visible(self_: Subtree) -> bool {
-    self_.visible()
-}
-
-#[inline]
-pub const unsafe fn subtree_named(self_: Subtree) -> bool {
-    self_.named()
-}
-
-#[inline]
-pub const unsafe fn subtree_extra(self_: Subtree) -> bool {
-    self_.extra()
-}
-
-#[inline]
-pub unsafe fn subtree_lookahead_bytes(self_: Subtree) -> u32 {
-    self_.lookahead_bytes()
-}
-
+/// Allocation size for a heap subtree with `child_count` preceding children.
 #[inline]
 pub const fn subtree_alloc_size(child_count: u32) -> usize {
     child_count as usize * core::mem::size_of::<Subtree>() + core::mem::size_of::<SubtreeHeapData>()
-}
-
-#[inline]
-pub const unsafe fn subtree_children(self_: Subtree) -> *mut Subtree {
-    self_.children_ptr()
-}
-
-pub const unsafe fn subtree_children_slice<'a>(self_: Subtree) -> &'a [Subtree] {
-    self_.children()
 }
 
 #[inline]
@@ -1011,7 +983,7 @@ unsafe fn mutable_subtree_children<'a>(self_: MutableSubtree) -> &'a mut [Subtre
     if count == 0 {
         &mut []
     } else {
-        core::slice::from_raw_parts_mut(subtree_children(subtree_from_mut(self_)), count)
+        core::slice::from_raw_parts_mut(self_.into_immutable().children_ptr(), count)
     }
 }
 
@@ -1030,35 +1002,6 @@ unsafe fn mutable_subtree_child_mut<'a>(self_: MutableSubtree, index: usize) -> 
     mutable_subtree_children(self_).get_unchecked_mut(index)
 }
 
-// Source spans
-
-#[inline]
-pub unsafe fn subtree_padding(self_: Subtree) -> Length {
-    self_.padding()
-}
-
-#[inline]
-pub unsafe fn subtree_size(self_: Subtree) -> Length {
-    self_.size()
-}
-
-#[inline]
-pub unsafe fn subtree_total_size(self_: Subtree) -> Length {
-    self_.total_size()
-}
-
-// Child and repetition metadata
-
-#[inline]
-pub const unsafe fn subtree_child_count(self_: Subtree) -> u32 {
-    self_.child_count()
-}
-
-#[inline]
-pub unsafe fn subtree_repeat_depth(self_: Subtree) -> u32 {
-    self_.repeat_depth()
-}
-
 #[inline]
 pub unsafe fn subtree_is_repetition(self_: Subtree) -> u32 {
     if self_.data.is_inline() {
@@ -1070,59 +1013,6 @@ pub unsafe fn subtree_is_repetition(self_: Subtree) -> u32 {
                 && self_.heap_data().child_count != 0,
         )
     }
-}
-
-// Visible-child metadata
-
-#[inline]
-pub const unsafe fn subtree_visible_descendant_count(self_: Subtree) -> u32 {
-    self_.visible_descendant_count()
-}
-
-// Error cost
-
-#[inline]
-pub const unsafe fn subtree_error_cost(self_: Subtree) -> u32 {
-    self_.error_cost()
-}
-
-// Parse metadata
-
-#[inline]
-pub const unsafe fn subtree_dynamic_precedence(self_: Subtree) -> i32 {
-    self_.dynamic_precedence()
-}
-
-#[inline]
-pub const unsafe fn subtree_has_external_tokens(self_: Subtree) -> bool {
-    self_.has_external_tokens()
-}
-
-#[inline]
-pub const unsafe fn subtree_has_external_scanner_state_change(self_: Subtree) -> bool {
-    self_.has_external_scanner_state_change()
-}
-
-#[inline]
-pub const unsafe fn subtree_depends_on_column(self_: Subtree) -> bool {
-    self_.depends_on_column()
-}
-
-#[inline]
-pub unsafe fn subtree_is_error(self_: Subtree) -> bool {
-    self_.is_error()
-}
-
-// Mutable/immutable representation conversion
-
-#[inline]
-pub const fn subtree_from_mut(self_: MutableSubtree) -> Subtree {
-    self_.into_immutable()
-}
-
-#[inline]
-pub const fn subtree_to_mut_unsafe(self_: Subtree) -> MutableSubtree {
-    self_.into_mut()
 }
 
 // Subtree private helpers
@@ -1257,8 +1147,7 @@ pub unsafe fn subtree_new_error(
         false,
         language,
     );
-    subtree_to_mut_unsafe(result).heap_data_mut().data =
-        SubtreeHeapDataContent::LookaheadChar(lookahead_char);
+    result.into_mut().heap_data_mut().data = SubtreeHeapDataContent::LookaheadChar(lookahead_char);
     result
 }
 
@@ -1337,7 +1226,7 @@ pub unsafe fn subtree_new_error_node(
 ) -> Subtree {
     let result = subtree_new_node(TS_BUILTIN_SYM_ERROR, children, 0, language);
     result.heap_data_mut().set_extra(extra);
-    subtree_from_mut(result)
+    result.into_immutable()
 }
 
 pub unsafe fn subtree_new_missing_leaf(
@@ -1362,9 +1251,7 @@ pub unsafe fn subtree_new_missing_leaf(
     if result.data.is_inline() {
         result.data.set_is_missing(true);
     } else {
-        subtree_to_mut_unsafe(result)
-            .heap_data_mut()
-            .set_is_missing(true);
+        result.into_mut().heap_data_mut().set_is_missing(true);
     }
     result
 }
@@ -1388,7 +1275,7 @@ pub unsafe fn subtree_compress(
             break;
         }
 
-        let child = subtree_to_mut_unsafe(mutable_subtree_child(tree, 0));
+        let child = mutable_subtree_child(tree, 0).into_mut();
         if child.data.is_inline()
             || child.heap_data().child_count < 2
             || child.heap_data().ref_count() > 1
@@ -1397,7 +1284,7 @@ pub unsafe fn subtree_compress(
             break;
         }
 
-        let grandchild = subtree_to_mut_unsafe(mutable_subtree_child(child, 0));
+        let grandchild = mutable_subtree_child(child, 0).into_mut();
         if grandchild.data.is_inline()
             || grandchild.heap_data().child_count < 2
             || grandchild.heap_data().ref_count() > 1
@@ -1408,20 +1295,18 @@ pub unsafe fn subtree_compress(
 
         // Rotate: tree[0] = grandchild, child[0] = grandchild[last], grandchild[last] = child
         let gc_last = grandchild.heap_data().child_count as usize - 1;
-        *mutable_subtree_child_mut(tree, 0) = subtree_from_mut(grandchild);
+        *mutable_subtree_child_mut(tree, 0) = grandchild.into_immutable();
         *mutable_subtree_child_mut(child, 0) = mutable_subtree_child(grandchild, gc_last);
-        *mutable_subtree_child_mut(grandchild, gc_last) = subtree_from_mut(child);
+        *mutable_subtree_child_mut(grandchild, gc_last) = child.into_immutable();
         stack.push(tree);
         tree = grandchild;
     }
 
     while stack.size > initial_stack_size {
         tree = stack.pop();
-        let child = subtree_to_mut_unsafe(mutable_subtree_child(tree, 0));
-        let grandchild = subtree_to_mut_unsafe(mutable_subtree_child(
-            child,
-            child.heap_data().child_count as usize - 1,
-        ));
+        let child = mutable_subtree_child(tree, 0).into_mut();
+        let grandchild =
+            mutable_subtree_child(child, child.heap_data().child_count as usize - 1).into_mut();
         subtree_summarize_children(grandchild, language);
         subtree_summarize_children(child, language);
         subtree_summarize_children(tree, language);
@@ -1447,41 +1332,41 @@ pub unsafe fn subtree_summarize_children(self_: MutableSubtree, language: *const
         language_alias_sequence_slice(language, u32::from(data.children().production_id));
     let mut lookahead_end_byte: u32 = 0;
 
-    let children = subtree_children_slice(subtree_from_mut(self_));
+    let children = self_.into_immutable().children();
     for (i, child) in children.iter().copied().enumerate() {
         let i = i as u32;
 
-        if data.size.extent.row == 0 && subtree_depends_on_column(child) {
+        if data.size.extent.row == 0 && child.depends_on_column() {
             data.set_depends_on_column(true);
         }
 
-        if subtree_has_external_scanner_state_change(child) {
+        if child.has_external_scanner_state_change() {
             data.set_has_external_scanner_state_change(true);
         }
 
         if i == 0 {
-            data.padding = subtree_padding(child);
-            data.size = subtree_size(child);
+            data.padding = child.padding();
+            data.size = child.size();
         } else {
-            data.size = length_add(data.size, subtree_total_size(child));
+            data.size = length_add(data.size, child.total_size());
         }
 
         let child_lookahead_end_byte =
-            data.padding.bytes + data.size.bytes + subtree_lookahead_bytes(child);
+            data.padding.bytes + data.size.bytes + child.lookahead_bytes();
         if child_lookahead_end_byte > lookahead_end_byte {
             lookahead_end_byte = child_lookahead_end_byte;
         }
 
-        if subtree_symbol(child) != TS_BUILTIN_SYM_ERROR_REPEAT {
-            data.error_cost += subtree_error_cost(child);
+        if child.symbol() != TS_BUILTIN_SYM_ERROR_REPEAT {
+            data.error_cost += child.error_cost();
         }
 
-        let grandchild_count = subtree_child_count(child);
+        let grandchild_count = child.child_count();
         if (data.symbol == TS_BUILTIN_SYM_ERROR || data.symbol == TS_BUILTIN_SYM_ERROR_REPEAT)
-            && !subtree_extra(child)
-            && !(subtree_is_error(child) && grandchild_count == 0)
+            && !child.extra()
+            && !(child.is_error() && grandchild_count == 0)
         {
-            if subtree_visible(child) {
+            if child.visible() {
                 data.error_cost += ERROR_COST_PER_SKIPPED_TREE;
             } else if grandchild_count > 0 {
                 data.error_cost +=
@@ -1489,23 +1374,23 @@ pub unsafe fn subtree_summarize_children(self_: MutableSubtree, language: *const
             }
         }
 
-        data.children_mut().dynamic_precedence += subtree_dynamic_precedence(child);
-        data.children_mut().visible_descendant_count += subtree_visible_descendant_count(child);
+        data.children_mut().dynamic_precedence += child.dynamic_precedence();
+        data.children_mut().visible_descendant_count += child.visible_descendant_count();
 
         let alias_symbol = alias_sequence
             .get(structural_index as usize)
             .copied()
             .unwrap_or(0);
-        if !subtree_extra(child) && subtree_symbol(child) != 0 && alias_symbol != 0 {
+        if !child.extra() && child.symbol() != 0 && alias_symbol != 0 {
             data.children_mut().visible_descendant_count += 1;
             data.children_mut().visible_child_count += 1;
             if ts_language_symbol_metadata(language, alias_symbol).named {
                 data.children_mut().named_child_count += 1;
             }
-        } else if subtree_visible(child) {
+        } else if child.visible() {
             data.children_mut().visible_descendant_count += 1;
             data.children_mut().visible_child_count += 1;
-            if subtree_named(child) {
+            if child.named() {
                 data.children_mut().named_child_count += 1;
             }
         } else if grandchild_count > 0 {
@@ -1514,15 +1399,15 @@ pub unsafe fn subtree_summarize_children(self_: MutableSubtree, language: *const
             data.children_mut().named_child_count += child.heap_data().children().named_child_count;
         }
 
-        if subtree_has_external_tokens(child) {
+        if child.has_external_tokens() {
             data.set_has_external_tokens(true);
         }
 
-        if subtree_is_error(child) {
+        if child.is_error() {
             data.parse_state = TS_TREE_STATE_NONE;
         }
 
-        if !subtree_extra(child) {
+        if !child.extra() {
             structural_index += 1;
         }
     }
@@ -1542,12 +1427,12 @@ pub unsafe fn subtree_summarize_children(self_: MutableSubtree, language: *const
         if data.child_count >= 2
             && !data.visible()
             && !data.named()
-            && subtree_symbol(first_child) == data.symbol
+            && first_child.symbol() == data.symbol
         {
-            if subtree_repeat_depth(first_child) > subtree_repeat_depth(last_child) {
-                data.children_mut().repeat_depth = (subtree_repeat_depth(first_child) + 1) as u16;
+            if first_child.repeat_depth() > last_child.repeat_depth() {
+                data.children_mut().repeat_depth = (first_child.repeat_depth() + 1) as u16;
             } else {
-                data.children_mut().repeat_depth = (subtree_repeat_depth(last_child) + 1) as u16;
+                data.children_mut().repeat_depth = (last_child.repeat_depth() + 1) as u16;
             }
         }
     }
@@ -1556,17 +1441,17 @@ pub unsafe fn subtree_summarize_children(self_: MutableSubtree, language: *const
 // Subtree comparison and editing
 
 pub unsafe fn subtree_compare(left: Subtree, right: Subtree, pool: &mut SubtreePool) -> i32 {
-    pool.tree_stack.push(subtree_to_mut_unsafe(left));
-    pool.tree_stack.push(subtree_to_mut_unsafe(right));
+    pool.tree_stack.push(left.into_mut());
+    pool.tree_stack.push(right.into_mut());
 
     while pool.tree_stack.size > 0 {
-        let right = subtree_from_mut(pool.tree_stack.pop());
-        let left = subtree_from_mut(pool.tree_stack.pop());
+        let right = pool.tree_stack.pop().into_immutable();
+        let left = pool.tree_stack.pop().into_immutable();
 
-        let left_symbol = subtree_symbol(left);
-        let right_symbol = subtree_symbol(right);
-        let left_child_count = subtree_child_count(left);
-        let right_child_count = subtree_child_count(right);
+        let left_symbol = left.symbol();
+        let right_symbol = right.symbol();
+        let left_child_count = left.child_count();
+        let right_child_count = right.child_count();
 
         let mut result = 0i32;
         if left_symbol < right_symbol {
@@ -1583,15 +1468,15 @@ pub unsafe fn subtree_compare(left: Subtree, right: Subtree, pool: &mut SubtreeP
             return result;
         }
 
-        let left_children = subtree_children_slice(left);
-        let right_children = subtree_children_slice(right);
+        let left_children = left.children();
+        let right_children = right.children();
         let mut i = left_child_count;
         while i > 0 {
             i -= 1;
             let left_child = *left_children.get_unchecked(i as usize);
             let right_child = *right_children.get_unchecked(i as usize);
-            pool.tree_stack.push(subtree_to_mut_unsafe(left_child));
-            pool.tree_stack.push(subtree_to_mut_unsafe(right_child));
+            pool.tree_stack.push(left_child.into_mut());
+            pool.tree_stack.push(right_child.into_mut());
         }
     }
 
@@ -1643,7 +1528,7 @@ mod tests {
             let tree = subtree_edit(inline_leaf(5), &insertion(2, 1), &mut pool);
 
             assert!(tree.data.is_inline());
-            assert_eq!(subtree_size(tree).bytes, 6);
+            assert_eq!(tree.size().bytes, 6);
             assert!(tree.has_changes());
 
             subtree_pool_delete(&mut pool);
@@ -1657,7 +1542,7 @@ mod tests {
             let tree = subtree_edit(inline_leaf(250), &insertion(2, 10), &mut pool);
 
             assert!(!tree.data.is_inline());
-            assert_eq!(subtree_size(tree).bytes, 260);
+            assert_eq!(tree.size().bytes, 260);
             assert!(tree.has_changes());
 
             tree.release(&mut pool);
@@ -1672,12 +1557,8 @@ mod tests {
             let mut children = Array::new();
             children.push(inline_leaf(5));
             children.push(inline_leaf(5));
-            let parent = subtree_from_mut(subtree_new_node(
-                TS_BUILTIN_SYM_ERROR,
-                &mut children,
-                0,
-                ptr::null(),
-            ));
+            let parent = subtree_new_node(TS_BUILTIN_SYM_ERROR, &mut children, 0, ptr::null())
+                .into_immutable();
 
             let tree = subtree_edit(parent, &insertion(2, 1), &mut pool);
             assert!(tree.has_changes());
@@ -1718,18 +1599,12 @@ mod tests {
 
             let parent =
                 subtree_new_node(TS_BUILTIN_SYM_ERROR_REPEAT, &mut children, 0, ptr::null());
-            let parent_tree = subtree_from_mut(parent);
+            let parent_tree = parent.into_immutable();
 
-            assert_eq!(subtree_child_count(parent_tree), 2);
-            assert_eq!(subtree_children_slice(parent_tree).len(), 2);
-            assert_eq!(
-                subtree_symbol(subtree_children_slice(parent_tree)[0]),
-                TS_BUILTIN_SYM_ERROR
-            );
-            assert_eq!(
-                subtree_symbol(subtree_children_slice(parent_tree)[1]),
-                TS_BUILTIN_SYM_ERROR
-            );
+            assert_eq!(parent_tree.child_count(), 2);
+            assert_eq!(parent_tree.children().len(), 2);
+            assert_eq!(parent_tree.children()[0].symbol(), TS_BUILTIN_SYM_ERROR);
+            assert_eq!(parent_tree.children()[1].symbol(), TS_BUILTIN_SYM_ERROR);
 
             parent_tree.release(&mut pool);
             subtree_pool_delete(&mut pool);
