@@ -421,13 +421,16 @@ pub enum Subtree {
     Heap(NonNull<SubtreeHeapData>),
 }
 
-/// Unique-mutation capability for a `Subtree`.
+/// Handle used when subtree mutation may be required.
+///
+/// The intrusive reference count means this wrapper does not itself prove
+/// uniqueness; callers establish uniqueness before invoking mutation methods.
 #[derive(Clone, Copy)]
 pub struct MutableSubtree(Subtree);
 
 // SAFETY: Heap subtrees are immutable while shared. Their only shared mutation
-// is the atomic reference count. A MutableSubtree is created only for a unique
-// allocation or a directly stored inline value.
+// is the atomic reference count. Mutable access is used only after callers have
+// established unique ownership of the allocation.
 unsafe impl Send for Subtree {}
 unsafe impl Sync for Subtree {}
 unsafe impl Send for MutableSubtree {}
