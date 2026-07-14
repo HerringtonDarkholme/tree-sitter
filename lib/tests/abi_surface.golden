@@ -39,8 +39,8 @@ ts_node_edit	pub unsafe extern "C" fn ts_node_edit(self_: *mut TSNode, edit: *co
 ts_node_end_byte	pub unsafe extern "C" fn ts_node_end_byte(self_: TSNode) -> u32
 ts_node_end_point	pub unsafe extern "C" fn ts_node_end_point(self_: TSNode) -> TSPoint
 ts_node_eq	pub unsafe extern "C" fn ts_node_eq(self_: TSNode, other: TSNode) -> bool
-ts_node_field_name_for_child	pub unsafe extern "C" fn ts_node_field_name_for_child( self_: TSNode, mut child_index: u32, ) -> *const i8
-ts_node_field_name_for_named_child	pub unsafe extern "C" fn ts_node_field_name_for_named_child( self_: TSNode, mut named_child_index: u32, ) -> *const i8
+ts_node_field_name_for_child	pub unsafe extern "C" fn ts_node_field_name_for_child(node: TSNode, child_index: u32) -> *const i8
+ts_node_field_name_for_named_child	pub unsafe extern "C" fn ts_node_field_name_for_named_child( node: TSNode, named_child_index: u32, ) -> *const i8
 ts_node_first_child_for_byte	pub unsafe extern "C" fn ts_node_first_child_for_byte(self_: TSNode, byte: u32) -> TSNode
 ts_node_first_named_child_for_byte	pub unsafe extern "C" fn ts_node_first_named_child_for_byte(self_: TSNode, byte: u32) -> TSNode
 ts_node_grammar_symbol	pub unsafe extern "C" fn ts_node_grammar_symbol(self_: TSNode) -> TSSymbol
