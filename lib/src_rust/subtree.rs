@@ -1,5 +1,3 @@
-#[cfg(not(feature = "std"))]
-use alloc::vec::Vec;
 use core::ffi::c_void;
 use core::{
     ptr,
@@ -74,7 +72,6 @@ pub struct TSMapSlice {
 
 const EXTERNAL_SCANNER_STATE_INLINE_SIZE: usize = 24;
 
-#[repr(C)]
 pub struct ExternalScannerState {
     /// Inline or heap state bytes, selected by `length`.
     data: ExternalScannerStateData,
@@ -85,7 +82,6 @@ pub struct ExternalScannerState {
 // SAFETY: Only used in a read-only static (EMPTY_EXTERNAL_SCANNER_STATE).
 unsafe impl Sync for ExternalScannerState {}
 
-#[repr(C)]
 pub union ExternalScannerStateData {
     /// Heap storage when serialized state exceeds inline capacity.
     pub long_data: *mut u8,
@@ -138,6 +134,15 @@ const INLINE_HAS_CHANGES: u8 = 1 << 4;
 const INLINE_IS_MISSING: u8 = 1 << 5;
 const INLINE_IS_KEYWORD: u8 = 1 << 6;
 
+#[inline(always)]
+fn set_u8_flag(flags: &mut u8, mask: u8, value: bool) {
+    if value {
+        *flags |= mask;
+    } else {
+        *flags &= !mask;
+    }
+}
+
 impl SubtreeInlineData {
     #[inline(always)]
     pub const fn is_inline(self) -> bool {
@@ -177,44 +182,24 @@ impl SubtreeInlineData {
     }
 
     #[inline(always)]
-    pub fn set_visible(&mut self, v: bool) {
-        if v {
-            self.flags |= INLINE_VISIBLE;
-        } else {
-            self.flags &= !INLINE_VISIBLE;
-        }
+    pub fn set_visible(&mut self, value: bool) {
+        set_u8_flag(&mut self.flags, INLINE_VISIBLE, value);
     }
     #[inline(always)]
-    pub fn set_named(&mut self, v: bool) {
-        if v {
-            self.flags |= INLINE_NAMED;
-        } else {
-            self.flags &= !INLINE_NAMED;
-        }
+    pub fn set_named(&mut self, value: bool) {
+        set_u8_flag(&mut self.flags, INLINE_NAMED, value);
     }
     #[inline(always)]
-    pub fn set_extra(&mut self, v: bool) {
-        if v {
-            self.flags |= INLINE_EXTRA;
-        } else {
-            self.flags &= !INLINE_EXTRA;
-        }
+    pub fn set_extra(&mut self, value: bool) {
+        set_u8_flag(&mut self.flags, INLINE_EXTRA, value);
     }
     #[inline(always)]
-    pub fn set_has_changes(&mut self, v: bool) {
-        if v {
-            self.flags |= INLINE_HAS_CHANGES;
-        } else {
-            self.flags &= !INLINE_HAS_CHANGES;
-        }
+    pub fn set_has_changes(&mut self, value: bool) {
+        set_u8_flag(&mut self.flags, INLINE_HAS_CHANGES, value);
     }
     #[inline(always)]
-    pub fn set_is_missing(&mut self, v: bool) {
-        if v {
-            self.flags |= INLINE_IS_MISSING;
-        } else {
-            self.flags &= !INLINE_IS_MISSING;
-        }
+    pub fn set_is_missing(&mut self, value: bool) {
+        set_u8_flag(&mut self.flags, INLINE_IS_MISSING, value);
     }
     #[inline(always)]
     pub fn set_padding_rows(&mut self, v: u8) {
@@ -226,7 +211,6 @@ impl SubtreeInlineData {
 // SubtreeHeapData — heap-allocated node
 // ---------------------------------------------------------------------------
 
-#[repr(C)]
 pub struct SubtreeHeapData {
     /// Intrusive reference count for heap-owned subtrees.
     pub ref_count: u32, // volatile / atomic
@@ -247,15 +231,12 @@ pub struct SubtreeHeapData {
 
     /// Packed bitfield flags.
     ///
-    /// The C runtime stores these as bitfields immediately before the anonymous
-    /// union. Rust has no C-compatible bitfields, so this field mirrors their
-    /// little-endian storage as one `u16`.
+    /// Stored as one word so flag access remains compact and explicit.
     /// bit 0: `visible`, bit 1: `named`, bit 2: `extra`, bits 3-4: unused,
     /// bit 5: `has_changes`, bit 6: `has_external_tokens`,
     /// bit 7: `has_external_scanner_state_change`, bit 8: `depends_on_column`,
     /// bit 9: `is_missing`, bit 10: `is_keyword`, bit 11: `arena_owned`
     pub flags: u16,
-    // 2 bytes padding here for 4-byte alignment of the union (inserted by repr(C))
 
     // Anonymous union: children-info / external_scanner_state / lookahead_char
     pub data: SubtreeHeapDataContent,
@@ -272,6 +253,15 @@ const HEAP_DEPENDS_ON_COLUMN: u16 = 1 << 8;
 const HEAP_IS_MISSING: u16 = 1 << 9;
 const HEAP_IS_KEYWORD: u16 = 1 << 10;
 const HEAP_ARENA_OWNED: u16 = 1 << 11;
+
+#[inline(always)]
+fn set_u16_flag(flags: &mut u16, mask: u16, value: bool) {
+    if value {
+        *flags |= mask;
+    } else {
+        *flags &= !mask;
+    }
+}
 
 impl SubtreeHeapData {
     #[inline(always)]
@@ -316,76 +306,44 @@ impl SubtreeHeapData {
     }
 
     #[inline(always)]
-    pub fn set_visible(&mut self, v: bool) {
-        if v {
-            self.flags |= HEAP_VISIBLE;
-        } else {
-            self.flags &= !HEAP_VISIBLE;
-        }
+    pub fn set_visible(&mut self, value: bool) {
+        set_u16_flag(&mut self.flags, HEAP_VISIBLE, value);
     }
     #[inline(always)]
-    pub fn set_named(&mut self, v: bool) {
-        if v {
-            self.flags |= HEAP_NAMED;
-        } else {
-            self.flags &= !HEAP_NAMED;
-        }
+    pub fn set_named(&mut self, value: bool) {
+        set_u16_flag(&mut self.flags, HEAP_NAMED, value);
     }
     #[inline(always)]
-    pub fn set_extra(&mut self, v: bool) {
-        if v {
-            self.flags |= HEAP_EXTRA;
-        } else {
-            self.flags &= !HEAP_EXTRA;
-        }
+    pub fn set_extra(&mut self, value: bool) {
+        set_u16_flag(&mut self.flags, HEAP_EXTRA, value);
     }
     #[inline(always)]
-    pub fn set_has_changes(&mut self, v: bool) {
-        if v {
-            self.flags |= HEAP_HAS_CHANGES;
-        } else {
-            self.flags &= !HEAP_HAS_CHANGES;
-        }
+    pub fn set_has_changes(&mut self, value: bool) {
+        set_u16_flag(&mut self.flags, HEAP_HAS_CHANGES, value);
     }
     #[inline(always)]
-    pub fn set_has_external_tokens(&mut self, v: bool) {
-        if v {
-            self.flags |= HEAP_HAS_EXTERNAL_TOKENS;
-        } else {
-            self.flags &= !HEAP_HAS_EXTERNAL_TOKENS;
-        }
+    pub fn set_has_external_tokens(&mut self, value: bool) {
+        set_u16_flag(&mut self.flags, HEAP_HAS_EXTERNAL_TOKENS, value);
     }
     #[inline(always)]
-    pub fn set_has_external_scanner_state_change(&mut self, v: bool) {
-        if v {
-            self.flags |= HEAP_HAS_EXTERNAL_SCANNER_STATE_CHANGE;
-        } else {
-            self.flags &= !HEAP_HAS_EXTERNAL_SCANNER_STATE_CHANGE;
-        }
+    pub fn set_has_external_scanner_state_change(&mut self, value: bool) {
+        set_u16_flag(
+            &mut self.flags,
+            HEAP_HAS_EXTERNAL_SCANNER_STATE_CHANGE,
+            value,
+        );
     }
     #[inline(always)]
-    pub fn set_depends_on_column(&mut self, v: bool) {
-        if v {
-            self.flags |= HEAP_DEPENDS_ON_COLUMN;
-        } else {
-            self.flags &= !HEAP_DEPENDS_ON_COLUMN;
-        }
+    pub fn set_depends_on_column(&mut self, value: bool) {
+        set_u16_flag(&mut self.flags, HEAP_DEPENDS_ON_COLUMN, value);
     }
     #[inline(always)]
-    pub fn set_is_missing(&mut self, v: bool) {
-        if v {
-            self.flags |= HEAP_IS_MISSING;
-        } else {
-            self.flags &= !HEAP_IS_MISSING;
-        }
+    pub fn set_is_missing(&mut self, value: bool) {
+        set_u16_flag(&mut self.flags, HEAP_IS_MISSING, value);
     }
     #[inline(always)]
-    pub fn set_arena_owned(&mut self, v: bool) {
-        if v {
-            self.flags |= HEAP_ARENA_OWNED;
-        } else {
-            self.flags &= !HEAP_ARENA_OWNED;
-        }
+    pub fn set_arena_owned(&mut self, value: bool) {
+        set_u16_flag(&mut self.flags, HEAP_ARENA_OWNED, value);
     }
 
     /// Build flags from individual booleans (for struct initialization)
@@ -414,7 +372,6 @@ impl SubtreeHeapData {
     }
 }
 
-#[repr(C)]
 pub union SubtreeHeapDataContent {
     /// Aggregate child metadata for internal nodes.
     pub children: SubtreeChildrenData,
@@ -424,7 +381,6 @@ pub union SubtreeHeapDataContent {
     pub lookahead_char: i32,
 }
 
-#[repr(C)]
 #[derive(Clone, Copy)]
 pub struct SubtreeChildrenData {
     /// Number of direct visible children.
@@ -465,10 +421,9 @@ pub union MutableSubtree {
 
 pub const NULL_SUBTREE: Subtree = Subtree { ptr: ptr::null() };
 
-// Compile-time layout assertions. `Subtree` and `MutableSubtree` are real Rust
-// unions because the C ABI depends on their pointer/inline-data overlap. The
-// inline and heap data structs manually mirror C bitfields, so assert both size
-// and field offsets instead of trusting comments.
+// Compile-time layout assertions for the tagged pointer/inline-data overlap.
+// Heap-only records use Rust layout, but inline subtrees must remain exactly
+// one pointer wide with the tag bit in the first byte.
 const _: () = assert!(core::mem::size_of::<SubtreeInlineData>() == 8);
 const _: () = assert!(core::mem::offset_of!(SubtreeInlineData, flags) == 0);
 const _: () = assert!(core::mem::offset_of!(SubtreeInlineData, symbol) == 1);
@@ -479,31 +434,6 @@ const _: () = assert!(core::mem::offset_of!(SubtreeInlineData, padding_bytes) ==
 const _: () = assert!(core::mem::offset_of!(SubtreeInlineData, size_bytes) == 7);
 const _: () = assert!(core::mem::size_of::<Subtree>() == 8);
 const _: () = assert!(core::mem::size_of::<MutableSubtree>() == 8);
-const _: () = assert!(core::mem::offset_of!(SubtreeHeapData, ref_count) == 0);
-const _: () = assert!(core::mem::offset_of!(SubtreeHeapData, padding) == 4);
-const _: () = assert!(core::mem::offset_of!(SubtreeHeapData, size) == 16);
-const _: () = assert!(core::mem::offset_of!(SubtreeHeapData, lookahead_bytes) == 28);
-const _: () = assert!(core::mem::offset_of!(SubtreeHeapData, error_cost) == 32);
-const _: () = assert!(core::mem::offset_of!(SubtreeHeapData, child_count) == 36);
-const _: () = assert!(core::mem::offset_of!(SubtreeHeapData, symbol) == 40);
-const _: () = assert!(core::mem::offset_of!(SubtreeHeapData, parse_state) == 42);
-const _: () = assert!(core::mem::offset_of!(SubtreeHeapData, flags) == 44);
-const _: () = assert!(core::mem::offset_of!(SubtreeHeapData, data) == 48);
-#[cfg(target_pointer_width = "64")]
-const _: () = assert!(core::mem::size_of::<SubtreeHeapData>() == 80);
-#[cfg(target_pointer_width = "64")]
-const _: () = assert!(core::mem::align_of::<SubtreeHeapData>() == 8);
-#[cfg(target_pointer_width = "64")]
-const _: () = assert!(core::mem::size_of::<ExternalScannerState>() == 32);
-#[cfg(target_pointer_width = "64")]
-const _: () = assert!(core::mem::offset_of!(ExternalScannerState, length) == 24);
-const _: () = assert!(core::mem::offset_of!(SubtreeChildrenData, visible_child_count) == 0);
-const _: () = assert!(core::mem::offset_of!(SubtreeChildrenData, named_child_count) == 4);
-const _: () = assert!(core::mem::offset_of!(SubtreeChildrenData, visible_descendant_count) == 8);
-const _: () = assert!(core::mem::offset_of!(SubtreeChildrenData, dynamic_precedence) == 12);
-const _: () = assert!(core::mem::offset_of!(SubtreeChildrenData, repeat_depth) == 16);
-const _: () = assert!(core::mem::offset_of!(SubtreeChildrenData, production_id) == 18);
-const _: () = assert!(core::mem::size_of::<SubtreeChildrenData>() == 20);
 
 pub type SubtreeArray = Array<Subtree>;
 pub type MutableSubtreeArray = Array<MutableSubtree>;
@@ -512,12 +442,11 @@ pub type MutableSubtreeArray = Array<MutableSubtree>;
 // SubtreePool
 // ---------------------------------------------------------------------------
 
-#[repr(C)]
 pub struct SubtreePool {
     /// Free list of heap subtree allocations.
-    pub free_trees: MutableSubtreeArray,
+    free_trees: MutableSubtreeArray,
     /// Scratch stack used by iterative release/compress operations.
-    pub tree_stack: MutableSubtreeArray,
+    pub(super) tree_stack: MutableSubtreeArray,
 }
 
 /// Arena for tree-owned internal nodes.
@@ -525,7 +454,6 @@ pub struct SubtreePool {
 /// Parser reductions can allocate accepted internal nodes in this arena. The
 /// returned `TSTree` retains the arena, so copying a tree only bumps the arena
 /// refcount instead of cloning every internal node.
-#[repr(C)]
 pub struct TreeArena {
     /// Shared ownership count across copied trees.
     ref_count: AtomicU32,
@@ -535,7 +463,6 @@ pub struct TreeArena {
     current_page: *mut TreeArenaPage,
 }
 
-#[repr(C)]
 struct TreeArenaPage {
     /// Next older page in the arena list.
     next: *mut Self,
@@ -551,6 +478,7 @@ struct TreeArenaPage {
 // Internal helper: Edit (local to subtree edit logic)
 // ---------------------------------------------------------------------------
 
+#[derive(Clone, Copy)]
 struct Edit {
     /// Edited range start in old coordinates.
     start: Length,
@@ -558,6 +486,11 @@ struct Edit {
     old_end: Length,
     /// Edited range end in new coordinates.
     new_end: Length,
+}
+
+struct EditEntry {
+    tree: *mut Subtree,
+    edit: Edit,
 }
 
 // ---------------------------------------------------------------------------
@@ -571,9 +504,7 @@ static EMPTY_EXTERNAL_SCANNER_STATE: ExternalScannerState = ExternalScannerState
     length: 0,
 };
 
-// ===========================================================================
-// ExternalScannerState functions
-// ===========================================================================
+// External scanner state
 
 pub unsafe fn external_scanner_state_init(
     self_: &mut ExternalScannerState,
@@ -637,9 +568,7 @@ pub unsafe fn external_scanner_state_eq(
         == core::slice::from_raw_parts(buffer, length)
 }
 
-// ===========================================================================
-// SubtreeArray functions
-// ===========================================================================
+// Subtree arrays
 
 pub unsafe fn subtree_array_copy(self_: &SubtreeArray, dest: &mut SubtreeArray) {
     dest.size = self_.size;
@@ -703,9 +632,7 @@ pub unsafe fn subtree_array_reverse(self_: &mut SubtreeArray) {
     }
 }
 
-// ===========================================================================
-// TreeArena functions
-// ===========================================================================
+// Tree arena
 
 const TREE_ARENA_PAGE_SIZE: usize = 16 * 1024;
 
@@ -810,9 +737,7 @@ unsafe fn tree_arena_alloc(arena: *mut TreeArena, size: usize, alignment: usize)
     tree_arena_alloc_new_page(arena, size, alignment)
 }
 
-// ===========================================================================
-// SubtreePool functions
-// ===========================================================================
+// Subtree pool
 
 pub unsafe fn subtree_pool_new(capacity: u32) -> SubtreePool {
     let mut pool = SubtreePool {
@@ -852,9 +777,7 @@ unsafe fn subtree_pool_free(self_: &mut SubtreePool, tree: MutableSubtree) {
     }
 }
 
-// ===========================================================================
-// Subtree inline helpers (from subtree.h static inline functions)
-// ===========================================================================
+// Subtree accessors
 
 #[inline]
 pub unsafe fn subtree_symbol(self_: Subtree) -> TSSymbol {
@@ -1008,7 +931,7 @@ pub unsafe fn subtree_set_extra(self_: &mut MutableSubtree, is_extra: bool) {
     }
 }
 
-// --- #25: padding, size, total_size, total_bytes ---
+// Source spans
 
 #[inline]
 pub unsafe fn subtree_padding(self_: Subtree) -> Length {
@@ -1050,7 +973,7 @@ pub unsafe fn subtree_total_bytes(self_: Subtree) -> u32 {
     subtree_total_size(self_).bytes
 }
 
-// --- #27: child_count, repeat_depth, is_repetition ---
+// Child and repetition metadata
 
 #[inline]
 pub const unsafe fn subtree_child_count(self_: Subtree) -> u32 {
@@ -1079,7 +1002,7 @@ pub unsafe fn subtree_is_repetition(self_: Subtree) -> u32 {
     }
 }
 
-// --- #28: visible_descendant_count, visible_child_count ---
+// Visible-child metadata
 
 #[inline]
 pub const unsafe fn subtree_visible_descendant_count(self_: Subtree) -> u32 {
@@ -1099,7 +1022,7 @@ pub const unsafe fn subtree_visible_child_count(self_: Subtree) -> u32 {
     }
 }
 
-// --- #29: error_cost ---
+// Error cost
 
 #[inline]
 pub const unsafe fn subtree_error_cost(self_: Subtree) -> u32 {
@@ -1112,7 +1035,7 @@ pub const unsafe fn subtree_error_cost(self_: Subtree) -> u32 {
     }
 }
 
-// --- #30: dynamic_precedence, production_id ---
+// Parse metadata
 
 #[inline]
 pub const unsafe fn subtree_dynamic_precedence(self_: Subtree) -> i32 {
@@ -1169,7 +1092,7 @@ pub unsafe fn subtree_is_eof(self_: Subtree) -> bool {
     subtree_symbol(self_) == TS_BUILTIN_SYM_END
 }
 
-// --- #32: from_mut, to_mut_unsafe ---
+// Mutable/immutable representation conversion
 
 #[inline]
 pub const fn subtree_from_mut(self_: MutableSubtree) -> Subtree {
@@ -1185,11 +1108,7 @@ pub const fn subtree_to_mut_unsafe(self_: Subtree) -> MutableSubtree {
     }
 }
 
-// ===========================================================================
 // Subtree private helpers
-// ===========================================================================
-
-// --- #33: can_inline, set_has_changes ---
 
 #[inline]
 fn subtree_can_inline(padding: Length, size: Length, lookahead_bytes: u32) -> bool {
@@ -1210,11 +1129,7 @@ unsafe fn subtree_set_has_changes(self_: &mut MutableSubtree) {
     }
 }
 
-// ===========================================================================
-// Subtree construction functions (from subtree.c)
-// ===========================================================================
-
-// --- #34: new_leaf ---
+// Subtree construction
 
 #[allow(clippy::too_many_arguments)]
 /// Create a leaf subtree.
@@ -1304,8 +1219,6 @@ pub unsafe fn subtree_new_leaf(
     }
 }
 
-// --- #35: new_error ---
-
 /// Create an error leaf for skipped input.
 ///
 pub unsafe fn subtree_new_error(
@@ -1334,8 +1247,6 @@ pub unsafe fn subtree_new_error(
     result
 }
 
-// --- #36: clone ---
-
 pub unsafe fn subtree_clone(self_: Subtree) -> MutableSubtree {
     let data = subtree_data_ref(self_);
     let alloc_size = subtree_alloc_size(data.child_count);
@@ -1362,8 +1273,6 @@ pub unsafe fn subtree_clone(self_: Subtree) -> MutableSubtree {
     (*result).set_arena_owned(false);
     MutableSubtree { ptr: result }
 }
-
-// --- #37: new_node ---
 
 unsafe fn subtree_init_node_data(
     data: *mut SubtreeHeapData,
@@ -1411,7 +1320,7 @@ unsafe fn subtree_init_node_data(
 /// Create a heap internal node by moving child storage into the node allocation.
 ///
 /// The child array is resized so the `SubtreeHeapData` header can live directly
-/// after the child slice, matching the C memory layout:
+/// after the child slice in one compact allocation:
 /// `[child_0, child_1, ... child_n][SubtreeHeapData]`.
 pub unsafe fn subtree_new_node(
     symbol: TSSymbol,
@@ -1471,8 +1380,6 @@ pub unsafe fn subtree_new_node_in_arena(
     result
 }
 
-// --- #38: new_error_node ---
-
 pub unsafe fn subtree_new_error_node(
     children: *mut SubtreeArray,
     extra: bool,
@@ -1482,8 +1389,6 @@ pub unsafe fn subtree_new_error_node(
     (*result.ptr).set_extra(extra);
     subtree_from_mut(result)
 }
-
-// --- #39: new_missing_leaf ---
 
 pub unsafe fn subtree_new_missing_leaf(
     pool: &mut SubtreePool,
@@ -1512,11 +1417,7 @@ pub unsafe fn subtree_new_missing_leaf(
     result
 }
 
-// ===========================================================================
-// Subtree mutation / ownership functions
-// ===========================================================================
-
-// --- #40: set_symbol ---
+// Subtree mutation and ownership
 
 pub unsafe fn subtree_set_symbol(
     self_: &mut MutableSubtree,
@@ -1537,8 +1438,6 @@ pub unsafe fn subtree_set_symbol(
     }
 }
 
-// --- #41: make_mut ---
-
 pub unsafe fn subtree_make_mut(pool: &mut SubtreePool, self_: Subtree) -> MutableSubtree {
     if self_.data.is_inline() {
         return MutableSubtree { data: self_.data };
@@ -1551,8 +1450,6 @@ pub unsafe fn subtree_make_mut(pool: &mut SubtreePool, self_: Subtree) -> Mutabl
     result
 }
 
-// --- #42: retain ---
-
 pub unsafe fn subtree_retain(self_: Subtree) {
     if self_.data.is_inline() {
         return;
@@ -1562,8 +1459,6 @@ pub unsafe fn subtree_retain(self_: Subtree) {
     let prev = (*ref_count).fetch_add(1, Ordering::SeqCst);
     debug_assert!(prev.wrapping_add(1) != 0);
 }
-
-// --- #43: release ---
 
 pub unsafe fn subtree_release(pool: &mut SubtreePool, self_: Subtree) {
     if self_.data.is_inline() {
@@ -1609,9 +1504,7 @@ pub unsafe fn subtree_release(pool: &mut SubtreePool, self_: Subtree) {
     }
 }
 
-// ===========================================================================
-// Subtree tree-balancing / summarization
-// ===========================================================================
+// Subtree balancing and summarization
 
 pub unsafe fn subtree_compress(
     self_: MutableSubtree,
@@ -1795,9 +1688,7 @@ pub unsafe fn subtree_summarize_children(self_: MutableSubtree, language: *const
     }
 }
 
-// ===========================================================================
-// Subtree comparison / query
-// ===========================================================================
+// Subtree comparison and editing
 
 pub unsafe fn subtree_compare(left: Subtree, right: Subtree, pool: &mut SubtreePool) -> i32 {
     array_push(&mut pool.tree_stack, subtree_to_mut_unsafe(left));
@@ -1842,165 +1733,8 @@ pub unsafe fn subtree_compare(left: Subtree, right: Subtree, pool: &mut SubtreeP
     0
 }
 
-pub unsafe fn subtree_edit(
-    mut self_: Subtree,
-    input_edit: &TSInputEdit,
-    pool: &mut SubtreePool,
-) -> Subtree {
-    struct EditEntry {
-        tree: *mut Subtree,
-        edit: Edit,
-    }
-
-    let mut stack: Vec<EditEntry> = Vec::new();
-    stack.push(EditEntry {
-        tree: core::ptr::addr_of_mut!(self_),
-        edit: Edit {
-            start: Length {
-                bytes: input_edit.start_byte,
-                extent: input_edit.start_point,
-            },
-            old_end: Length {
-                bytes: input_edit.old_end_byte,
-                extent: input_edit.old_end_point,
-            },
-            new_end: Length {
-                bytes: input_edit.new_end_byte,
-                extent: input_edit.new_end_point,
-            },
-        },
-    });
-
-    while let Some(entry) = stack.pop() {
-        let mut edit = entry.edit;
-        let is_noop =
-            edit.old_end.bytes == edit.start.bytes && edit.new_end.bytes == edit.start.bytes;
-        let is_pure_insertion = edit.old_end.bytes == edit.start.bytes;
-        let parent_depends_on_column = subtree_depends_on_column(*entry.tree);
-        let column_shifted = edit.new_end.extent.column != edit.old_end.extent.column;
-
-        let mut size = subtree_size(*entry.tree);
-        let mut padding = subtree_padding(*entry.tree);
-        let total_size = length_add(padding, size);
-        let lookahead_bytes = subtree_lookahead_bytes(*entry.tree);
-        let end_byte = total_size.bytes + lookahead_bytes;
-        if edit.start.bytes > end_byte || (is_noop && edit.start.bytes == end_byte) {
-            continue;
-        }
-
-        // Edit is entirely within the space before this subtree
-        if edit.old_end.bytes <= padding.bytes {
-            padding = length_add(edit.new_end, length_sub(padding, edit.old_end));
-        }
-        // Edit starts before and extends into this subtree
-        else if edit.start.bytes < padding.bytes {
-            size = length_saturating_sub(size, length_sub(edit.old_end, padding));
-            padding = edit.new_end;
-        }
-        // Edit is within this subtree
-        else if edit.start.bytes < total_size.bytes
-            || (edit.start.bytes == total_size.bytes && is_pure_insertion)
-        {
-            size = length_add(
-                length_sub(edit.new_end, padding),
-                length_saturating_sub(total_size, edit.old_end),
-            );
-        }
-
-        let mut result = subtree_make_mut(pool, *entry.tree);
-
-        if result.data.is_inline() {
-            if subtree_can_inline(padding, size, lookahead_bytes) {
-                result.data.padding_bytes = padding.bytes as u8;
-                result.data.set_padding_rows(padding.extent.row as u8);
-                result.data.padding_columns = padding.extent.column as u8;
-                result.data.size_bytes = size.bytes as u8;
-            } else {
-                // Promote inline node to heap
-                let data = subtree_pool_allocate(pool);
-                *data = SubtreeHeapData {
-                    ref_count: 1,
-                    padding,
-                    size,
-                    lookahead_bytes,
-                    error_cost: 0,
-                    child_count: 0,
-                    symbol: TSSymbol::from(result.data.symbol),
-                    parse_state: result.data.parse_state,
-                    flags: SubtreeHeapData::make_flags(
-                        result.data.visible(),
-                        result.data.named(),
-                        result.data.extra(),
-                        false,
-                        false,
-                        false,
-                        false,
-                        result.data.is_missing(),
-                        result.data.is_keyword(),
-                    ),
-                    data: SubtreeHeapDataContent { lookahead_char: 0 },
-                };
-                result.ptr = data;
-            }
-        } else {
-            (*result.ptr).padding = padding;
-            (*result.ptr).size = size;
-        }
-
-        subtree_set_has_changes(&mut result);
-        *entry.tree = subtree_from_mut(result);
-
-        let mut child_right = length_zero();
-        let n = subtree_child_count(*entry.tree);
-        let children = subtree_children_slice(*entry.tree);
-        for i in 0..n {
-            let child = children.get_unchecked(i as usize);
-            let child_size = subtree_total_size(*child);
-            let child_left = child_right;
-            child_right = length_add(child_left, child_size);
-
-            // If this child ends before the edit, it is not affected.
-            if child_right.bytes + subtree_lookahead_bytes(*child) < edit.start.bytes {
-                continue;
-            }
-
-            // Keep editing child nodes until a node is reached that starts after the edit.
-            if ((child_left.bytes > edit.old_end.bytes)
-                || (child_left.bytes == edit.old_end.bytes && child_size.bytes > 0 && i > 0))
-                && (!parent_depends_on_column || child_left.extent.row > padding.extent.row)
-                && (!subtree_depends_on_column(*child)
-                    || !column_shifted
-                    || child_left.extent.row > edit.old_end.extent.row)
-            {
-                break;
-            }
-
-            // Transform edit into the child's coordinate space.
-            let mut child_edit = Edit {
-                start: length_saturating_sub(edit.start, child_left),
-                old_end: length_saturating_sub(edit.old_end, child_left),
-                new_end: length_saturating_sub(edit.new_end, child_left),
-            };
-
-            // Interpret all inserted text as applying to the *first* child that touches the edit.
-            if child_right.bytes > edit.start.bytes
-                || (child_right.bytes == edit.start.bytes && is_pure_insertion)
-            {
-                edit.new_end = edit.start;
-            } else {
-                child_edit.old_end = child_edit.start;
-                child_edit.new_end = child_edit.start;
-            }
-
-            stack.push(EditEntry {
-                tree: ptr::from_ref(child).cast_mut(),
-                edit: child_edit,
-            });
-        }
-    }
-
-    self_
-}
+mod edit;
+pub use edit::subtree_edit;
 
 pub unsafe fn subtree_last_external_token(mut tree: Subtree) -> Subtree {
     if !subtree_has_external_tokens(tree) {
@@ -2048,348 +1782,93 @@ pub unsafe fn subtree_external_scanner_state_eq(self_: &Subtree, other: &Subtree
     )
 }
 
-// ===========================================================================
-// Subtree string / debug output
-// ===========================================================================
-
-extern "C" {
-    fn snprintf(s: *mut i8, n: usize, format: *const i8, ...) -> i32;
-    fn fprintf(f: *mut c_void, format: *const i8, ...) -> i32;
-}
-
-static ROOT_FIELD: &[u8; 9] = b"__ROOT__\0";
-
-unsafe fn subtree_write_char_to_string(s: *mut i8, n: usize, chr: i32) -> usize {
-    if chr == -1 {
-        snprintf(s, n, c"INVALID".as_ptr().cast::<i8>()) as usize
-    } else if chr == 0 {
-        snprintf(s, n, c"'\\0'".as_ptr().cast::<i8>()) as usize
-    } else if chr == i32::from(b'\n') {
-        snprintf(s, n, c"'\\n'".as_ptr().cast::<i8>()) as usize
-    } else if chr == i32::from(b'\t') {
-        snprintf(s, n, c"'\\t'".as_ptr().cast::<i8>()) as usize
-    } else if chr == i32::from(b'\r') {
-        snprintf(s, n, c"'\\r'".as_ptr().cast::<i8>()) as usize
-    } else if (0x20..0x7F).contains(&chr) {
-        snprintf(s, n, c"'%c'".as_ptr().cast::<i8>(), chr) as usize
-    } else {
-        snprintf(s, n, c"%d".as_ptr().cast::<i8>(), chr) as usize
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-unsafe fn subtree_write_to_string(
-    self_: Subtree,
-    string: *mut i8,
-    limit: usize,
-    language: *const TSLanguage,
-    include_all: bool,
-    alias_symbol: TSSymbol,
-    alias_is_named: bool,
-    field_name: *const i8,
-) -> usize {
-    if self_.ptr.is_null() {
-        return snprintf(string, limit, c"(NULL)".as_ptr().cast::<i8>()) as usize;
-    }
-
-    let mut cursor = string;
-    let mut string_measuring = string;
-    let writer: *mut *mut i8 = if limit > 1 {
-        &mut cursor
-    } else {
-        &mut string_measuring
-    };
-    let is_root = field_name == ROOT_FIELD.as_ptr().cast::<i8>();
-    let is_visible = include_all
-        || subtree_missing(self_)
-        || (if alias_symbol != 0 {
-            alias_is_named
-        } else {
-            subtree_visible(self_) && subtree_named(self_)
-        });
-
-    if is_visible {
-        if !is_root {
-            cursor = cursor.add(snprintf(*writer, limit, c" ".as_ptr().cast::<i8>()) as usize);
-            if !field_name.is_null() {
-                cursor =
-                    cursor.add(
-                        snprintf(*writer, limit, c"%s: ".as_ptr().cast::<i8>(), field_name)
-                            as usize,
-                    );
-            }
-        }
-
-        if subtree_is_error(self_) && subtree_child_count(self_) == 0 && (*self_.ptr).size.bytes > 0
-        {
-            cursor = cursor
-                .add(snprintf(*writer, limit, c"(UNEXPECTED ".as_ptr().cast::<i8>()) as usize);
-            cursor = cursor.add(subtree_write_char_to_string(
-                *writer,
-                limit,
-                (*self_.ptr).data.lookahead_char,
-            ));
-        } else {
-            let symbol = if alias_symbol != 0 {
-                alias_symbol
-            } else {
-                subtree_symbol(self_)
-            };
-            let symbol_name = ts_language_symbol_name(language, symbol);
-            if subtree_missing(self_) {
-                cursor = cursor
-                    .add(snprintf(*writer, limit, c"(MISSING ".as_ptr().cast::<i8>()) as usize);
-                if alias_is_named || subtree_named(self_) {
-                    cursor = cursor.add(snprintf(
-                        *writer,
-                        limit,
-                        c"%s".as_ptr().cast::<i8>(),
-                        symbol_name,
-                    ) as usize);
-                } else {
-                    cursor = cursor.add(snprintf(
-                        *writer,
-                        limit,
-                        c"\"%s\"".as_ptr().cast::<i8>(),
-                        symbol_name,
-                    ) as usize);
-                }
-            } else {
-                cursor =
-                    cursor.add(
-                        snprintf(*writer, limit, c"(%s".as_ptr().cast::<i8>(), symbol_name)
-                            as usize,
-                    );
-            }
-        }
-    } else if is_root {
-        let symbol = if alias_symbol != 0 {
-            alias_symbol
-        } else {
-            subtree_symbol(self_)
-        };
-        let symbol_name = ts_language_symbol_name(language, symbol);
-        if subtree_child_count(self_) > 0 {
-            cursor = cursor
-                .add(snprintf(*writer, limit, c"(%s".as_ptr().cast::<i8>(), symbol_name) as usize);
-        } else if subtree_named(self_) {
-            cursor = cursor
-                .add(snprintf(*writer, limit, c"(%s)".as_ptr().cast::<i8>(), symbol_name) as usize);
-        } else {
-            cursor = cursor.add(snprintf(
-                *writer,
-                limit,
-                c"(\"%s\")".as_ptr().cast::<i8>(),
-                symbol_name,
-            ) as usize);
-        }
-    }
-
-    if subtree_child_count(self_) > 0 {
-        let alias_sequence = language_alias_sequence(
-            language,
-            u32::from((*self_.ptr).data.children.production_id),
-        );
-        let mut field_map: *const TSFieldMapEntry = ptr::null();
-        let mut field_map_end: *const TSFieldMapEntry = ptr::null();
-        language_field_map(
-            language,
-            u32::from((*self_.ptr).data.children.production_id),
-            &mut field_map,
-            &mut field_map_end,
-        );
-
-        let mut structural_child_index: u32 = 0;
-        for child in subtree_children_slice(self_) {
-            let child = *child;
-            if subtree_extra(child) {
-                cursor = cursor.add(subtree_write_to_string(
-                    child,
-                    *writer,
-                    limit,
-                    language,
-                    include_all,
-                    0,
-                    false,
-                    ptr::null(),
-                ));
-            } else {
-                let subtree_alias_symbol = if !alias_sequence.is_null() {
-                    *alias_sequence.add(structural_child_index as usize)
-                } else {
-                    0
-                };
-                let subtree_alias_is_named = if subtree_alias_symbol != 0 {
-                    ts_language_symbol_metadata(language, subtree_alias_symbol).named
-                } else {
-                    false
-                };
-
-                let mut child_field_name: *const i8 =
-                    if is_visible { ptr::null() } else { field_name };
-                let mut map = field_map;
-                while map < field_map_end {
-                    if !(*map).inherited && (*map).child_index == structural_child_index as u8 {
-                        let lang = language_full(language);
-                        child_field_name = *lang.field_names.add((*map).field_id as usize);
-                        break;
-                    }
-                    map = map.add(1);
-                }
-
-                cursor = cursor.add(subtree_write_to_string(
-                    child,
-                    *writer,
-                    limit,
-                    language,
-                    include_all,
-                    subtree_alias_symbol,
-                    subtree_alias_is_named,
-                    child_field_name,
-                ));
-                structural_child_index += 1;
-            }
-        }
-    }
-
-    if is_visible {
-        cursor = cursor.add(snprintf(*writer, limit, c")".as_ptr().cast::<i8>()) as usize);
-    }
-
-    cursor as usize - string as usize
-}
-
-pub unsafe fn subtree_string(
-    self_: Subtree,
-    alias_symbol: TSSymbol,
-    alias_is_named: bool,
-    language: *const TSLanguage,
-    include_all: bool,
-) -> *mut i8 {
-    let mut scratch_string: [i8; 1] = [0];
-    let size = subtree_write_to_string(
-        self_,
-        scratch_string.as_mut_ptr(),
-        1,
-        language,
-        include_all,
-        alias_symbol,
-        alias_is_named,
-        ROOT_FIELD.as_ptr().cast::<i8>(),
-    ) + 1;
-    let result = malloc(size).cast::<i8>();
-    subtree_write_to_string(
-        self_,
-        result,
-        size,
-        language,
-        include_all,
-        alias_symbol,
-        alias_is_named,
-        ROOT_FIELD.as_ptr().cast::<i8>(),
-    );
-    result
-}
-
-unsafe fn subtree_print_dot_graph_recursive(
-    self_: *const Subtree,
-    start_offset: u32,
-    language: *const TSLanguage,
-    alias_symbol: TSSymbol,
-    f: *mut c_void,
-) {
-    let tree = *self_;
-    let subtree_symbol = subtree_symbol(tree);
-    let symbol = if alias_symbol != 0 {
-        alias_symbol
-    } else {
-        subtree_symbol
-    };
-    let end_offset = start_offset + subtree_total_bytes(tree);
-    fprintf(
-        f,
-        c"tree_%p [label=\"".as_ptr().cast::<i8>(),
-        self_.cast::<c_void>(),
-    );
-    language_write_symbol_as_dot_string(language, f, symbol);
-    fprintf(f, c"\"".as_ptr().cast::<i8>());
-
-    if subtree_child_count(tree) == 0 {
-        fprintf(f, c", shape=plaintext".as_ptr().cast::<i8>());
-    }
-    if subtree_extra(tree) {
-        fprintf(f, c", fontcolor=gray".as_ptr().cast::<i8>());
-    }
-    if subtree_has_changes(tree) {
-        fprintf(f, c", color=green, penwidth=2".as_ptr().cast::<i8>());
-    }
-
-    fprintf(
-        f,
-        c", tooltip=\"range: %u - %u\nstate: %d\nerror-cost: %u\nhas-changes: %u\ndepends-on-column: %u\ndescendant-count: %u\nrepeat-depth: %u\nlookahead-bytes: %u".as_ptr().cast::<i8>(),
-        start_offset,
-        end_offset,
-        i32::from(subtree_parse_state(tree)),
-        subtree_error_cost(tree),
-        u32::from(subtree_has_changes(tree)),
-        u32::from(subtree_depends_on_column(tree)),
-        subtree_visible_descendant_count(tree),
-        subtree_repeat_depth(tree),
-        subtree_lookahead_bytes(tree),
-    );
-
-    if subtree_is_error(tree)
-        && subtree_child_count(tree) == 0
-        && (*tree.ptr).data.lookahead_char != 0
-    {
-        fprintf(
-            f,
-            c"\ncharacter: '%c'".as_ptr().cast::<i8>(),
-            (*tree.ptr).data.lookahead_char,
-        );
-    }
-
-    fprintf(f, c"\"]\n".as_ptr().cast::<i8>());
-
-    let mut child_start_offset = start_offset;
-    let lang = language_full(language);
-    let mut child_info_offset =
-        u32::from(lang.max_alias_sequence_length) * u32::from(subtree_production_id(tree));
-    for (i, child) in subtree_children_slice(tree).iter().enumerate() {
-        let child_ptr = ptr::from_ref(child);
-        let mut subtree_alias_symbol: TSSymbol = 0;
-        if !subtree_extra(*child) && child_info_offset != 0 {
-            subtree_alias_symbol = *lang.alias_sequences.add(child_info_offset as usize);
-            child_info_offset += 1;
-        }
-        subtree_print_dot_graph_recursive(
-            child_ptr,
-            child_start_offset,
-            language,
-            subtree_alias_symbol,
-            f,
-        );
-        fprintf(
-            f,
-            c"tree_%p -> tree_%p [tooltip=%u]\n".as_ptr().cast::<i8>(),
-            self_.cast::<c_void>(),
-            child_ptr.cast::<c_void>(),
-            i,
-        );
-        child_start_offset += subtree_total_bytes(*child);
-    }
-}
-
-pub unsafe fn subtree_print_dot_graph(self_: Subtree, language: *const TSLanguage, f: *mut c_void) {
-    fprintf(f, c"digraph tree {\n".as_ptr().cast::<i8>());
-    fprintf(f, c"edge [arrowhead=none]\n".as_ptr().cast::<i8>());
-    subtree_print_dot_graph_recursive(core::ptr::addr_of!(self_), 0, language, 0, f);
-    fprintf(f, c"}\n".as_ptr().cast::<i8>());
-}
+mod debug;
+pub use debug::{subtree_print_dot_graph, subtree_string};
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn inline_leaf(size: u8) -> Subtree {
+        Subtree {
+            data: SubtreeInlineData {
+                flags: INLINE_IS_INLINE | INLINE_VISIBLE | INLINE_NAMED,
+                symbol: 1,
+                parse_state: 1,
+                padding_columns: 0,
+                rows_and_lookahead: 0,
+                padding_bytes: 0,
+                size_bytes: size,
+            },
+        }
+    }
+
+    fn insertion(at: u32, size: u32) -> TSInputEdit {
+        TSInputEdit {
+            start_byte: at,
+            old_end_byte: at,
+            new_end_byte: at + size,
+            start_point: TSPoint { row: 0, column: at },
+            old_end_point: TSPoint { row: 0, column: at },
+            new_end_point: TSPoint {
+                row: 0,
+                column: at + size,
+            },
+        }
+    }
+
+    #[test]
+    fn edit_keeps_small_leaf_inline() {
+        unsafe {
+            let mut pool = subtree_pool_new(4);
+            let tree = subtree_edit(inline_leaf(5), &insertion(2, 1), &mut pool);
+
+            assert!(tree.data.is_inline());
+            assert_eq!(subtree_size(tree).bytes, 6);
+            assert!(subtree_has_changes(tree));
+
+            subtree_pool_delete(&mut pool);
+        }
+    }
+
+    #[test]
+    fn edit_promotes_leaf_that_no_longer_fits_inline() {
+        unsafe {
+            let mut pool = subtree_pool_new(4);
+            let tree = subtree_edit(inline_leaf(250), &insertion(2, 10), &mut pool);
+
+            assert!(!tree.data.is_inline());
+            assert_eq!(subtree_size(tree).bytes, 260);
+            assert!(subtree_has_changes(tree));
+
+            subtree_release(&mut pool, tree);
+            subtree_pool_delete(&mut pool);
+        }
+    }
+
+    #[test]
+    fn edit_marks_the_affected_child() {
+        unsafe {
+            let mut pool = subtree_pool_new(4);
+            let mut children = array_new();
+            array_push(&mut children, inline_leaf(5));
+            array_push(&mut children, inline_leaf(5));
+            let parent = subtree_from_mut(subtree_new_node(
+                TS_BUILTIN_SYM_ERROR,
+                &mut children,
+                0,
+                ptr::null(),
+            ));
+
+            let tree = subtree_edit(parent, &insertion(2, 1), &mut pool);
+            assert!(subtree_has_changes(tree));
+            assert!(subtree_has_changes(*subtree_child(tree, 0)));
+            assert!(!subtree_has_changes(*subtree_child(tree, 1)));
+
+            subtree_release(&mut pool, tree);
+            subtree_pool_delete(&mut pool);
+        }
+    }
 
     #[test]
     fn new_node_owns_child_array_until_release() {
