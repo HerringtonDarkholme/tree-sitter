@@ -64,7 +64,7 @@ unsafe fn subtree_apply_edit_size(
         } else {
             let inline = result.inline_data().unwrap();
             let data = subtree_pool_allocate(pool);
-            data.as_ptr().write(SubtreeHeapData {
+            let mut heap_data = SubtreeHeapData {
                 ref_count: AtomicU32::new(1),
                 padding,
                 size,
@@ -73,19 +73,15 @@ unsafe fn subtree_apply_edit_size(
                 child_count: 0,
                 symbol: TSSymbol::from(inline.symbol),
                 parse_state: inline.parse_state,
-                flags: SubtreeHeapData::make_flags(
-                    inline.visible(),
-                    inline.named(),
-                    inline.extra(),
-                    false,
-                    false,
-                    false,
-                    false,
-                    inline.is_missing(),
-                    inline.is_keyword(),
-                ),
+                flags: 0,
                 data: SubtreeHeapDataContent::LookaheadChar(0),
-            });
+            };
+            heap_data.set_visible(inline.visible());
+            heap_data.set_named(inline.named());
+            heap_data.set_extra(inline.extra());
+            heap_data.set_is_missing(inline.is_missing());
+            heap_data.set_is_keyword(inline.is_keyword());
+            data.as_ptr().write(heap_data);
             result = MutableSubtree::from_heap(data);
         }
     } else {

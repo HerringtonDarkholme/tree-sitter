@@ -334,29 +334,9 @@ impl SubtreeHeapData {
     pub fn set_is_missing(&mut self, value: bool) {
         set_u16_flag(&mut self.flags, HEAP_IS_MISSING, value);
     }
-    /// Build flags from individual booleans (for struct initialization)
-    #[allow(clippy::too_many_arguments)]
-    #[inline]
-    pub fn make_flags(
-        visible: bool,
-        named: bool,
-        extra: bool,
-        has_changes: bool,
-        has_external_tokens: bool,
-        has_external_scanner_state_change: bool,
-        depends_on_column: bool,
-        is_missing: bool,
-        is_keyword: bool,
-    ) -> u16 {
-        u16::from(visible)
-            | u16::from(named) << 1
-            | u16::from(extra) << 2
-            | u16::from(has_changes) << 5
-            | u16::from(has_external_tokens) << 6
-            | u16::from(has_external_scanner_state_change) << 7
-            | u16::from(depends_on_column) << 8
-            | u16::from(is_missing) << 9
-            | u16::from(is_keyword) << 10
+    #[inline(always)]
+    pub fn set_is_keyword(&mut self, value: bool) {
+        set_u16_flag(&mut self.flags, HEAP_IS_KEYWORD, value);
     }
 }
 
@@ -1208,7 +1188,7 @@ pub unsafe fn subtree_new_leaf(
         })
     } else {
         let data = subtree_pool_allocate(pool);
-        data.as_ptr().write(SubtreeHeapData {
+        let mut heap_data = SubtreeHeapData {
             ref_count: AtomicU32::new(1),
             padding,
             size,
@@ -1217,17 +1197,7 @@ pub unsafe fn subtree_new_leaf(
             child_count: 0,
             symbol,
             parse_state,
-            flags: SubtreeHeapData::make_flags(
-                metadata.visible,
-                metadata.named,
-                extra,
-                false,
-                has_external_tokens,
-                false,
-                depends_on_column,
-                false,
-                is_keyword,
-            ),
+            flags: 0,
             data: if has_external_tokens {
                 SubtreeHeapDataContent::ExternalScannerState(ExternalScannerState {
                     data: ExternalScannerStateData::Inline([0; EXTERNAL_SCANNER_STATE_INLINE_SIZE]),
@@ -1236,7 +1206,14 @@ pub unsafe fn subtree_new_leaf(
             } else {
                 SubtreeHeapDataContent::LookaheadChar(0)
             },
-        });
+        };
+        heap_data.set_visible(metadata.visible);
+        heap_data.set_named(metadata.named);
+        heap_data.set_extra(extra);
+        heap_data.set_has_external_tokens(has_external_tokens);
+        heap_data.set_depends_on_column(depends_on_column);
+        heap_data.set_is_keyword(is_keyword);
+        data.as_ptr().write(heap_data);
         Subtree::from_heap(data)
     }
 }
@@ -1276,7 +1253,7 @@ unsafe fn subtree_init_node_data(
     language: *const TSLanguage,
 ) -> MutableSubtree {
     let metadata = ts_language_symbol_metadata(language, symbol);
-    data.as_ptr().write(SubtreeHeapData {
+    let mut heap_data = SubtreeHeapData {
         ref_count: AtomicU32::new(1),
         padding: length_zero(),
         size: length_zero(),
@@ -1285,17 +1262,7 @@ unsafe fn subtree_init_node_data(
         child_count,
         symbol,
         parse_state: 0,
-        flags: SubtreeHeapData::make_flags(
-            metadata.visible,
-            metadata.named,
-            false,
-            false,
-            false,
-            false,
-            false,
-            false,
-            false,
-        ),
+        flags: 0,
         data: SubtreeHeapDataContent::Children(SubtreeChildrenData {
             visible_child_count: 0,
             named_child_count: 0,
@@ -1304,7 +1271,10 @@ unsafe fn subtree_init_node_data(
             repeat_depth: 0,
             production_id: production_id as u16,
         }),
-    });
+    };
+    heap_data.set_visible(metadata.visible);
+    heap_data.set_named(metadata.named);
+    data.as_ptr().write(heap_data);
     MutableSubtree::from_heap(data)
 }
 
