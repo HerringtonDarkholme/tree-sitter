@@ -1,12 +1,11 @@
 use super::{
     array_back_mut, array_back_ref, array_clear, array_erase, array_get_mut, array_get_ref,
-    array_insert, array_new, array_push, array_reserve, c_void, ptr, ptr_mut, ptr_ref, stack_head,
+    array_insert, array_new, array_push, array_reserve, ptr, ptr_mut, ptr_ref, stack_head,
     stack_node_retain, subtree_alloc_size, subtree_array_copy, subtree_array_delete,
-    subtree_array_reverse, subtree_extra, subtree_is_error, subtree_retain, Stack, StackAction,
-    StackCallback, StackHead, StackIterator, StackLink, StackNode, StackPopBuilder, StackSlice,
-    StackSliceArray, StackSliceSpan, StackStatus, StackSummaryEntry, StackVersion, Subtree,
-    SubtreeArray, SummarizeStackSession, MAX_ITERATOR_COUNT, NULL_SUBTREE, STACK_ACTION_NONE,
-    STACK_ACTION_POP, STACK_ACTION_STOP, STACK_VERSION_NONE,
+    subtree_array_reverse, subtree_extra, subtree_is_error, subtree_retain, Stack, StackHead,
+    StackIterationAction, StackIterator, StackLink, StackNode, StackPopBuilder, StackSlice,
+    StackSliceArray, StackSliceSpan, StackStatus, StackSummary, StackSummaryEntry, StackVersion,
+    Subtree, SubtreeArray, MAX_ITERATOR_COUNT, NULL_SUBTREE, STACK_VERSION_NONE,
 };
 
 /// Add a new version to the stack, cloning metadata from an existing version.
@@ -85,13 +84,15 @@ pub(super) unsafe fn stack_pop_builder_append_subtrees(
 }
 
 /// Core iteration function for walking the stack graph.
-pub(super) unsafe fn stack_iter(
+pub(super) unsafe fn stack_iter<F>(
     stack: &mut Stack,
     version: StackVersion,
-    callback: StackCallback,
-    payload: *mut c_void,
+    mut action_for: F,
     goal_subtree_count: Option<u32>,
-) -> StackSliceArray {
+) -> StackSliceArray
+where
+    F: FnMut(&StackIterator) -> StackIterationAction,
+{
     array_clear(&mut stack.slices);
     array_clear(&mut stack.iterators);
 
@@ -119,9 +120,12 @@ pub(super) unsafe fn stack_iter(
             let iterator = array_get_ref(&stack.iterators, i);
             let node = iterator.node;
 
-            let action = callback(payload, iterator);
-            let should_pop = (action & STACK_ACTION_POP) != 0;
-            let should_stop = (action & STACK_ACTION_STOP) != 0 || (*node).link_count == 0;
+            let (should_pop, should_stop) = match action_for(iterator) {
+                StackIterationAction::Continue => (false, (*node).link_count == 0),
+                StackIterationAction::Stop => (false, true),
+                StackIterationAction::Pop => (true, (*node).link_count == 0),
+                StackIterationAction::PopAndStop => (true, true),
+            };
 
             if should_pop {
                 let mut subtrees = ptr::read(&array_get_ref(&stack.iterators, i).subtrees);
@@ -187,76 +191,69 @@ pub(super) unsafe fn stack_iter(
     ptr::read(&stack.slices)
 }
 
-// Callbacks for stack_iter
-pub(super) unsafe fn pop_count_callback(
-    payload: *mut c_void,
+pub(super) const fn pop_count_action(
     iterator: &StackIterator,
-) -> StackAction {
-    let goal_subtree_count = *ptr_ref(payload.cast::<u32>());
+    goal_subtree_count: u32,
+) -> StackIterationAction {
     if iterator.subtree_count == goal_subtree_count {
-        STACK_ACTION_POP | STACK_ACTION_STOP
+        StackIterationAction::PopAndStop
     } else {
-        STACK_ACTION_NONE
+        StackIterationAction::Continue
     }
 }
 
-pub(super) unsafe fn pop_error_callback(
-    payload: *mut c_void,
+pub(super) unsafe fn pop_error_action(
     iterator: &StackIterator,
-) -> StackAction {
+    found_error: &mut bool,
+) -> StackIterationAction {
     if iterator.subtrees.size > 0 {
-        let found_error = ptr_mut(payload.cast::<bool>());
         if !*found_error && subtree_is_error(*array_get_ref(&iterator.subtrees, 0)) {
             *found_error = true;
-            STACK_ACTION_POP | STACK_ACTION_STOP
+            StackIterationAction::PopAndStop
         } else {
-            STACK_ACTION_STOP
+            StackIterationAction::Stop
         }
     } else {
-        STACK_ACTION_NONE
+        StackIterationAction::Continue
     }
 }
 
-pub(super) unsafe fn pop_all_callback(
-    _payload: *mut c_void,
-    iterator: &StackIterator,
-) -> StackAction {
+pub(super) unsafe fn pop_all_action(iterator: &StackIterator) -> StackIterationAction {
     let node = ptr_ref(iterator.node);
     if node.link_count == 0 {
-        STACK_ACTION_POP
+        StackIterationAction::Pop
     } else {
-        STACK_ACTION_NONE
+        StackIterationAction::Continue
     }
 }
 
-pub(super) unsafe fn summarize_stack_callback(
-    payload: *mut c_void,
+pub(super) unsafe fn summarize_stack_action(
     iterator: &StackIterator,
-) -> StackAction {
+    summary: &mut StackSummary,
+    max_depth: u32,
+) -> StackIterationAction {
     let node = ptr_ref(iterator.node);
-    let session = ptr_mut(payload.cast::<SummarizeStackSession>());
     let state = node.state;
     let depth = iterator.subtree_count;
-    if depth > session.max_depth {
-        return STACK_ACTION_STOP;
+    if depth > max_depth {
+        return StackIterationAction::Stop;
     }
-    let summary = ptr_ref(session.summary);
     for i in (0..summary.size).rev() {
         let entry = array_get_ref(summary, i);
         if entry.depth < depth {
             break;
         }
         if entry.depth == depth && entry.state == state {
-            return STACK_ACTION_NONE;
+            return StackIterationAction::Continue;
         }
     }
     array_push(
-        ptr_mut(session.summary),
+        summary,
         StackSummaryEntry {
             position: node.position,
             depth,
             state,
         },
     );
-    STACK_ACTION_NONE
+    StackIterationAction::Continue
 }

@@ -165,17 +165,12 @@ pub struct Stack {
     subtree_pool: *mut SubtreePool,
 }
 
-pub type StackAction = u32;
-pub const STACK_ACTION_NONE: StackAction = 0;
-pub const STACK_ACTION_STOP: StackAction = 1;
-pub const STACK_ACTION_POP: StackAction = 2;
-
-pub type StackCallback = unsafe fn(payload: *mut c_void, iterator: &StackIterator) -> StackAction;
-
-/// Session state for the summarize callback.
-struct SummarizeStackSession {
-    summary: *mut StackSummary,
-    max_depth: u32,
+#[derive(Clone, Copy)]
+enum StackIterationAction {
+    Continue,
+    Stop,
+    Pop,
+    PopAndStop,
 }
 
 // ---------------------------------------------------------------------------
@@ -525,8 +520,8 @@ unsafe fn stack_head_delete(
 
 mod pop;
 use pop::{
-    pop_all_callback, pop_count_callback, pop_error_callback, stack_iter,
-    stack_pop_builder_append_subtrees, summarize_stack_callback,
+    pop_all_action, pop_count_action, pop_error_action, stack_iter,
+    stack_pop_builder_append_subtrees, summarize_stack_action,
 };
 
 // ===========================================================================
@@ -679,8 +674,7 @@ pub unsafe fn stack_pop_count(
     stack_iter(
         self_,
         version,
-        pop_count_callback,
-        ptr::addr_of!(count).cast_mut().cast::<c_void>(),
+        |iterator| pop_count_action(iterator, count),
         Some(count),
     )
 }
@@ -696,8 +690,7 @@ pub unsafe fn stack_pop_count_into(
     let pop = stack_iter(
         self_,
         version,
-        pop_count_callback,
-        ptr::addr_of!(count).cast_mut().cast::<c_void>(),
+        |iterator| pop_count_action(iterator, count),
         Some(count),
     );
     for i in 0..pop.size {
@@ -719,8 +712,7 @@ pub unsafe fn stack_pop_error(self_: &mut Stack, version: StackVersion) -> Subtr
             let pop = stack_iter(
                 self_,
                 version,
-                pop_error_callback,
-                ptr::from_mut(&mut found_error).cast::<c_void>(),
+                |iterator| pop_error_action(iterator, &mut found_error),
                 Some(1),
             );
             if pop.size > 0 {
@@ -737,27 +729,26 @@ pub unsafe fn stack_pop_error(self_: &mut Stack, version: StackVersion) -> Subtr
 
 /// Pop all entries from a version.
 pub unsafe fn stack_pop_all(self_: &mut Stack, version: StackVersion) -> StackSliceArray {
-    stack_iter(self_, version, pop_all_callback, ptr::null_mut(), Some(0))
+    stack_iter(self_, version, |iterator| pop_all_action(iterator), Some(0))
 }
 
 /// Record a summary of parse states near the top of a version.
 pub unsafe fn stack_record_summary(self_: &mut Stack, version: StackVersion, max_depth: u32) {
-    let summary = malloc(core::mem::size_of::<StackSummary>()).cast::<StackSummary>();
-    ptr::write(summary, array_new());
-    let mut session = SummarizeStackSession { summary, max_depth };
+    let mut summary = array_new();
     stack_iter(
         self_,
         version,
-        summarize_stack_callback,
-        ptr::from_mut(&mut session).cast::<c_void>(),
+        |iterator| summarize_stack_action(iterator, &mut summary, max_depth),
         None,
     );
+    let summary_ptr = malloc(core::mem::size_of::<StackSummary>()).cast::<StackSummary>();
+    ptr::write(summary_ptr, summary);
     let head = stack_head_mut(self_, version);
     if !head.summary.is_null() {
         array_delete(ptr_mut(head.summary));
         free(head.summary.cast::<c_void>());
     }
-    head.summary = session.summary;
+    head.summary = summary_ptr;
 }
 
 /// Get the recorded summary for a version.
