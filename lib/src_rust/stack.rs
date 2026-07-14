@@ -178,15 +178,15 @@ unsafe fn stack_head_mut(self_: &mut Stack, version: StackVersion) -> &mut Stack
 
 #[inline]
 unsafe fn stack_head_array_pair_mut(
-    self_: &mut Array<StackHead>,
+    heads: &mut Array<StackHead>,
     first: StackVersion,
     second: StackVersion,
 ) -> (&mut StackHead, &mut StackHead) {
     debug_assert_ne!(first, second);
-    debug_assert!(first < self_.size);
-    debug_assert!(second < self_.size);
+    debug_assert!((first as usize) < heads.len());
+    debug_assert!((second as usize) < heads.len());
 
-    let heads = core::slice::from_raw_parts_mut(self_.contents, self_.size as usize);
+    let heads = heads.as_mut_slice();
     let (lower, upper) = if first < second {
         (first as usize, second as usize)
     } else {
@@ -256,13 +256,13 @@ pub unsafe fn stack_delete(self_: &mut Stack) {
     stack_node_release(self_.base_node, &mut self_.node_pool, subtree_pool);
     let heads = &mut self_.heads;
     let node_pool = &mut self_.node_pool;
-    for i in 0..heads.size {
-        stack_head_delete(array_get_mut(heads, i), node_pool, subtree_pool);
+    for head in heads.as_mut_slice() {
+        stack_head_delete(head, node_pool, subtree_pool);
     }
     array_clear(heads);
     if !node_pool.contents.is_null() {
-        for i in 0..node_pool.size {
-            free(array_get_ref(node_pool, i).as_ptr().cast::<c_void>());
+        for node in node_pool.as_slice() {
+            free(node.as_ptr().cast::<c_void>());
         }
         array_delete(node_pool);
     }
@@ -608,8 +608,8 @@ pub unsafe fn stack_clear(self_: &mut Stack) {
     let heads = &mut self_.heads;
     let node_pool = &mut self_.node_pool;
     let subtree_pool = ptr_mut(self_.subtree_pool);
-    for i in 0..heads.size {
-        stack_head_delete(array_get_mut(heads, i), node_pool, subtree_pool);
+    for head in heads.as_mut_slice() {
+        stack_head_delete(head, node_pool, subtree_pool);
     }
     array_clear(heads);
     self_.halted_version_count = 0;

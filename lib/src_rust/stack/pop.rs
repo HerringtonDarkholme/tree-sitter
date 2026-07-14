@@ -41,14 +41,14 @@ unsafe fn stack_add_slice(
     node: NonNull<StackNode>,
     subtrees: &SubtreeArray,
 ) {
-    for i in (0..self_.slices.size).rev() {
-        let version = array_get_ref(&self_.slices, i).version;
+    for (i, slice) in self_.slices.as_slice().iter().enumerate().rev() {
+        let version = slice.version;
         if stack_head(self_, version).node == node {
             let slice = StackSlice {
                 subtrees: ptr::read(subtrees),
                 version,
             };
-            array_insert(&mut self_.slices, i + 1, slice);
+            array_insert(&mut self_.slices, i as u32 + 1, slice);
             return;
         }
     }
@@ -91,7 +91,7 @@ where
 
     array_push(&mut stack.iterators, new_iterator);
 
-    while stack.iterators.size > 0 {
+    while !stack.iterators.is_empty() {
         let mut i: u32 = 0;
         let mut active_iterator_count = stack.iterators.size;
         while i < active_iterator_count {
@@ -184,8 +184,8 @@ pub(super) unsafe fn pop_error_action(
     iterator: &StackIterator,
     found_error: &mut bool,
 ) -> StackIterationAction {
-    if iterator.subtrees.size > 0 {
-        if !*found_error && subtree_is_error(*array_get_ref(&iterator.subtrees, 0)) {
+    if let Some(&first_subtree) = iterator.subtrees.as_slice().first() {
+        if !*found_error && subtree_is_error(first_subtree) {
             *found_error = true;
             StackIterationAction::PopAndStop
         } else {
@@ -216,8 +216,7 @@ pub(super) unsafe fn summarize_stack_action(
     if depth > max_depth {
         return StackIterationAction::Stop;
     }
-    for i in (0..summary.size).rev() {
-        let entry = array_get_ref(summary, i);
+    for entry in summary.as_slice().iter().rev() {
         if entry.depth < depth {
             break;
         }
