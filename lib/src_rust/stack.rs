@@ -91,7 +91,7 @@ pub struct StackSummaryEntry {
 pub type StackSummary = Array<StackSummaryEntry>;
 
 /// Current parser configuration and per-version recovery state.
-pub struct StackHead {
+pub(super) struct StackHead {
     /// Current top node for this parser version.
     node: NonNull<StackNode>,
     /// Optional recovery summary, recorded lazily.
@@ -108,31 +108,31 @@ pub struct StackHead {
 }
 
 impl StackHead {
-    pub const fn state(&self) -> TSStateId {
+    pub(super) const fn state(&self) -> TSStateId {
         unsafe { self.node.as_ref().state }
     }
 
-    pub const fn position(&self) -> Length {
+    pub(super) const fn position(&self) -> Length {
         unsafe { self.node.as_ref().position }
     }
 
-    pub const fn last_external_token(&self) -> Subtree {
+    pub(super) const fn last_external_token(&self) -> Subtree {
         self.last_external_token
     }
 
-    pub const fn dynamic_precedence(&self) -> i32 {
+    pub(super) const fn dynamic_precedence(&self) -> i32 {
         unsafe { self.node.as_ref().dynamic_precedence }
     }
 
-    pub const fn is_active(&self) -> bool {
+    pub(super) const fn is_active(&self) -> bool {
         matches!(self.status, StackStatus::Active)
     }
 
-    pub const fn is_halted(&self) -> bool {
+    pub(super) const fn is_halted(&self) -> bool {
         matches!(self.status, StackStatus::Halted)
     }
 
-    pub const fn is_paused(&self) -> bool {
+    pub(super) const fn is_paused(&self) -> bool {
         matches!(self.status, StackStatus::Paused)
     }
 }
@@ -168,7 +168,7 @@ impl Stack {
     /// # Safety
     ///
     /// `version` must identify a current stack version.
-    pub unsafe fn head(&self, version: StackVersion) -> &StackHead {
+    pub(super) unsafe fn head(&self, version: StackVersion) -> &StackHead {
         self.heads.get_unchecked(version)
     }
 
