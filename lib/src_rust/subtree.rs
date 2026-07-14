@@ -401,7 +401,6 @@ pub struct SubtreeChildrenData {
 // Subtree / MutableSubtree — the core union types
 // ---------------------------------------------------------------------------
 
-#[repr(C)]
 #[derive(Clone, Copy)]
 pub union Subtree {
     /// Inline representation when `data.is_inline()` is set.
@@ -410,7 +409,6 @@ pub union Subtree {
     pub ptr: *const SubtreeHeapData,
 }
 
-#[repr(C)]
 #[derive(Clone, Copy)]
 pub union MutableSubtree {
     /// Inline representation when `data.is_inline()` is set.
@@ -421,9 +419,9 @@ pub union MutableSubtree {
 
 pub const NULL_SUBTREE: Subtree = Subtree { ptr: ptr::null() };
 
-// Compile-time layout assertions for the tagged pointer/inline-data overlap.
-// Heap-only records use Rust layout, but inline subtrees must remain exactly
-// one pointer wide with the tag bit in the first byte.
+// Compile-time layout assertions for the internal tagged pointer/inline-data
+// overlap. The unions use Rust layout, but both representations must remain
+// exactly one pointer wide with the tag bit in the first byte.
 const _: () = assert!(core::mem::size_of::<SubtreeInlineData>() == 8);
 const _: () = assert!(core::mem::offset_of!(SubtreeInlineData, flags) == 0);
 const _: () = assert!(core::mem::offset_of!(SubtreeInlineData, symbol) == 1);
