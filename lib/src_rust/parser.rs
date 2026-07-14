@@ -22,8 +22,9 @@ use super::language::{
 };
 use super::length::{length_sub, length_zero, Length};
 use super::lexer::{
-    lexer_advance, lexer_delete, lexer_finish, lexer_included_ranges, lexer_is_eof, lexer_mark_end,
-    lexer_new, lexer_reset, lexer_set_included_ranges, lexer_set_input, lexer_start, Lexer,
+    lexer_advance, lexer_delete, lexer_finish, lexer_included_ranges, lexer_included_ranges_slice,
+    lexer_is_eof, lexer_mark_end, lexer_new, lexer_reset, lexer_set_included_ranges,
+    lexer_set_input, lexer_start, Lexer,
 };
 use super::reduce_action::{reduce_action_set_add, ReduceAction, ReduceActionSet};
 use super::stack::{
@@ -1299,8 +1300,7 @@ unsafe fn parser_take_finished_tree(self_: &mut TSParser) -> *mut TSTree {
     let result = tree_new_with_arena(
         self_.finished_tree,
         self_.language,
-        self_.lexer.included_ranges,
-        self_.lexer.included_range_count,
+        lexer_included_ranges_slice(&self_.lexer),
         arena,
     );
     self_.finished_tree = NULL_SUBTREE;

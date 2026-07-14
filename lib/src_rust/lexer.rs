@@ -63,6 +63,10 @@ pub struct ColumnData {
 
 /// The main lexer state. Contains the `TSLexer` data (with vtable pointers)
 /// plus all internal state needed for buffered reading and range tracking.
+///
+/// Generated lexers receive a pointer to `data`, and its callbacks cast that
+/// pointer back to `Lexer`. The fixed prefix layout is therefore required even
+/// though the rest of this structure is Rust-internal.
 #[repr(C)]
 pub struct Lexer {
     /// Callback surface passed to generated lexers and external scanners.
@@ -685,4 +689,13 @@ pub unsafe fn lexer_set_included_ranges(
 pub unsafe fn lexer_included_ranges(self_: &Lexer, count: *mut u32) -> *mut TSRange {
     *count = self_.included_range_count;
     self_.included_ranges
+}
+
+/// Borrow the current included ranges for internal Rust callers.
+pub const unsafe fn lexer_included_ranges_slice(self_: &Lexer) -> &[TSRange] {
+    if self_.included_range_count == 0 {
+        &[]
+    } else {
+        core::slice::from_raw_parts(self_.included_ranges, self_.included_range_count as usize)
+    }
 }

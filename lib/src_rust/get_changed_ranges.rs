@@ -72,15 +72,6 @@ const unsafe fn range_array_slice(arr: &TSRangeArray) -> &[TSRange] {
     core::slice::from_raw_parts(arr.contents, arr.size as usize)
 }
 
-#[inline]
-pub const unsafe fn range_slice<'a>(ranges: *const TSRange, count: u32) -> &'a [TSRange] {
-    if count == 0 {
-        &[]
-    } else {
-        core::slice::from_raw_parts(ranges, count as usize)
-    }
-}
-
 pub fn range_edit_ref(range: &mut TSRange, edit: &TSInputEdit) {
     if range.end_byte >= edit.old_end_byte {
         if range.end_byte != u32::MAX {

@@ -4,7 +4,7 @@ use crate::ffi::{TSLanguage, TSNode, TSPoint, TSRange};
 
 use super::alloc::{calloc, free, malloc};
 use super::get_changed_ranges::{
-    range_array_get_changed_ranges_ref, range_edit_ref, range_slice, subtree_get_changed_ranges_ref,
+    range_array_get_changed_ranges_ref, range_edit_ref, subtree_get_changed_ranges_ref,
 };
 use super::length::{length_add, Length};
 use super::node::node_new;
@@ -16,7 +16,7 @@ use super::subtree::{
 #[cfg(not(target_family = "wasm"))]
 use super::subtree::subtree_print_dot_graph;
 use super::tree_cursor::{tree_cursor_init_ref, TreeCursor};
-use super::utils::array_new;
+use super::utils::{array_delete, array_new, array_reserve, Array};
 use super::utils::{ptr_mut, ptr_ref};
 
 // ---------------------------------------------------------------------------
@@ -55,32 +55,45 @@ pub struct TSTree {
     /// Language used to parse this tree.
     pub(super) language: *const TSLanguage,
     /// Copied included ranges for tree comparison and public APIs.
-    pub(super) included_ranges: *mut TSRange,
-    /// Number of entries in `included_ranges`.
-    pub(super) included_range_count: u32,
+    pub(super) included_ranges: Array<TSRange>,
     /// Shared arena for arena-owned internal nodes.
     pub(super) arena: *mut TreeArena,
 }
 
-unsafe fn tree_init_ref(
-    tree: &mut TSTree,
-    root: Subtree,
-    language: *const TSLanguage,
-    included_ranges: &[TSRange],
-    arena: *mut TreeArena,
-) {
-    tree.root = root;
-    tree.language = language;
-    tree.included_range_count = included_ranges.len() as u32;
-    tree.arena = arena;
-    tree.included_ranges =
-        calloc(included_ranges.len(), core::mem::size_of::<TSRange>()).cast::<TSRange>();
+unsafe fn copy_ranges(included_ranges: &[TSRange]) -> Array<TSRange> {
+    let mut result = array_new();
+    let count = u32::try_from(included_ranges.len()).unwrap();
+    array_reserve(&mut result, count);
     if !included_ranges.is_empty() {
         core::ptr::copy_nonoverlapping(
             included_ranges.as_ptr(),
-            tree.included_ranges,
+            result.contents,
             included_ranges.len(),
         );
+    }
+    result.size = count;
+    result
+}
+
+const unsafe fn tree_included_ranges_slice(tree: &TSTree) -> &[TSRange] {
+    if tree.included_ranges.size == 0 {
+        &[]
+    } else {
+        core::slice::from_raw_parts(
+            tree.included_ranges.contents,
+            tree.included_ranges.size as usize,
+        )
+    }
+}
+
+unsafe fn tree_included_ranges_slice_mut(tree: &mut TSTree) -> &mut [TSRange] {
+    if tree.included_ranges.size == 0 {
+        &mut []
+    } else {
+        core::slice::from_raw_parts_mut(
+            tree.included_ranges.contents,
+            tree.included_ranges.size as usize,
+        )
     }
 }
 
@@ -94,8 +107,7 @@ unsafe fn tree_copy_ref(tree: &TSTree) -> *mut TSTree {
     tree_new_with_arena(
         tree.root,
         tree.language,
-        tree.included_ranges,
-        tree.included_range_count,
+        tree_included_ranges_slice(tree),
         tree.arena,
     )
 }
@@ -106,7 +118,7 @@ unsafe fn tree_delete_ref(tree: &mut TSTree) {
     subtree_release(&mut pool, tree.root);
     subtree_pool_delete(&mut pool);
     tree_arena_release(tree.arena);
-    free(tree.included_ranges.cast::<c_void>());
+    array_delete(&mut tree.included_ranges);
 }
 
 pub unsafe fn tree_root_node_ref(tree_ptr: *const TSTree, tree: &TSTree) -> TSNode {
@@ -132,18 +144,11 @@ unsafe fn tree_root_node_with_offset_ref(
 }
 
 unsafe fn tree_included_ranges_ref(tree: &TSTree, length: &mut u32) -> *mut TSRange {
-    *length = tree.included_range_count;
-    let ranges = calloc(
-        tree.included_range_count as usize,
-        core::mem::size_of::<TSRange>(),
-    )
-    .cast::<TSRange>();
-    if tree.included_range_count > 0 {
-        core::ptr::copy_nonoverlapping(
-            tree.included_ranges,
-            ranges,
-            tree.included_range_count as usize,
-        );
+    let included_ranges = tree_included_ranges_slice(tree);
+    *length = u32::try_from(included_ranges.len()).unwrap();
+    let ranges = calloc(included_ranges.len(), core::mem::size_of::<TSRange>()).cast::<TSRange>();
+    if !included_ranges.is_empty() {
+        core::ptr::copy_nonoverlapping(included_ranges.as_ptr(), ranges, included_ranges.len());
     }
     ranges
 }
@@ -161,12 +166,7 @@ const fn tree_cursor_empty() -> TreeCursor {
 /// The edit rewrites byte/point positions in-place where possible and marks
 /// affected subtrees as changed for later tree comparison.
 unsafe fn tree_edit_ref(tree: &mut TSTree, edit: &TSInputEdit) {
-    let included_ranges = if tree.included_range_count == 0 {
-        &mut []
-    } else {
-        core::slice::from_raw_parts_mut(tree.included_ranges, tree.included_range_count as usize)
-    };
-    for range in included_ranges {
+    for range in tree_included_ranges_slice_mut(tree) {
         range_edit_ref(range, edit);
     }
     let mut pool = subtree_pool_new(0);
@@ -194,14 +194,19 @@ unsafe fn tree_print_dot_graph_ref(tree: &TSTree, file_descriptor: i32) {
 pub unsafe fn tree_new_with_arena(
     root: Subtree,
     language: *const TSLanguage,
-    included_ranges: *const TSRange,
-    included_range_count: u32,
+    included_ranges: &[TSRange],
     arena: *mut TreeArena,
 ) -> *mut TSTree {
     let result = malloc(core::mem::size_of::<TSTree>()).cast::<TSTree>();
-    let tree = ptr_mut(result);
-    let included_ranges = range_slice(included_ranges, included_range_count);
-    tree_init_ref(tree, root, language, included_ranges, arena);
+    core::ptr::write(
+        result,
+        TSTree {
+            root,
+            language,
+            included_ranges: copy_ranges(included_ranges),
+            arena,
+        },
+    );
     result
 }
 
@@ -285,14 +290,8 @@ pub unsafe extern "C" fn ts_tree_get_changed_ranges(
     tree_cursor_init_ref(&mut cursor2, tree_root_node_ref(new_tree, new_tree_ref));
 
     let mut included_range_differences = array_new();
-    let old_included_ranges = range_slice(
-        old_tree_ref.included_ranges,
-        old_tree_ref.included_range_count,
-    );
-    let new_included_ranges = range_slice(
-        new_tree_ref.included_ranges,
-        new_tree_ref.included_range_count,
-    );
+    let old_included_ranges = tree_included_ranges_slice(old_tree_ref);
+    let new_included_ranges = tree_included_ranges_slice(new_tree_ref);
     range_array_get_changed_ranges_ref(
         old_included_ranges,
         new_included_ranges,
@@ -438,7 +437,7 @@ mod tests {
             ));
 
             assert_eq!(subtree_child_count(root), 2);
-            let tree = tree_new_with_arena(root, ptr::null(), ptr::null(), 0, arena);
+            let tree = tree_new_with_arena(root, ptr::null(), &[], arena);
             let copy = ts_tree_copy(tree);
 
             assert_eq!((*tree).arena, arena);
