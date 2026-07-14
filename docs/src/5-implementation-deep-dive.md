@@ -1819,7 +1819,7 @@ For an implementation-first reading, use this order:
 5. `stack.rs::stack_push`, `stack_copy_version`, and `stack_merge` — see graph
    persistence.
 6. `stack/pop.rs::stack_iter` — see why one reduction can yield many paths.
-7. `parser/reduction.rs::parser_reduce` — see paths become parents.
+7. `parser/actions.rs::parser_reduce` — see paths become parents.
 8. `subtree/data.rs`, `handle.rs`, and `storage.rs` — see representation and
    ownership.
 9. `parser/recovery.rs::parser_handle_error` and `parser_recover` — see repair

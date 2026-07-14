@@ -1,11 +1,12 @@
-//! Shift, reduce, and accept operations that build the syntax tree.
+//! Stack and tree mutations for successful parse actions.
 //!
-//! A shift pushes one token subtree. A reduction asks the graph-structured
-//! stack for every path matching the production's child count, builds one
-//! parent for each path, and pushes the parents onto their resulting versions.
-//! Compatible results are merged where possible. Accept compares complete
-//! roots by error cost, dynamic precedence, and structural preference so the
-//! parser retains one best tree.
+//! `advance` interprets generated action lists; this module executes their
+//! successful shift, reduce, and accept operations. A shift pushes one token
+//! subtree. A reduction asks the graph-structured stack for every path matching
+//! the production's child count, builds one parent for each path, and pushes
+//! the parents onto their resulting versions. Compatible results are merged
+//! where possible. Accept compares complete roots by error cost, dynamic
+//! precedence, and structural preference so the parser retains one best tree.
 
 use super::{
     array_swap, language_full, language_lookup, parser_log, parser_symbol_name, ptr, ptr_mut,

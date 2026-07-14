@@ -548,7 +548,7 @@ runtime concepts above:
 | `parser` | Owns parser state and drives the outer GLR loop |
 | `parser::advance` | Interprets parse-table actions and condenses versions |
 | `parser::lexing` | Reuses or obtains lookahead tokens |
-| `parser::reduction` | Turns GLR pop paths into parent subtrees |
+| `parser::actions` | Executes shift, reduce, and accept stack/tree mutations |
 | `parser::recovery` | Searches for a low-cost path past invalid input |
 | `lexer` | Buffers and decodes input and implements the `TSLexer` interface |
 | `language` | Reads generated language metadata and parse tables |
@@ -560,7 +560,7 @@ runtime concepts above:
 | `get_changed_ranges` | Compares two trees while skipping unchanged structure |
 
 For a first code-reading pass, follow one successful token through
-`parser::lexing`, `parser::advance`, `parser::reduction`, `stack`, and
+`parser::lexing`, `parser::advance`, `parser::actions`, `stack`, and
 `subtree`. Read `parser::recovery` and `get_changed_ranges` afterward; both are
 easier once the normal shift/reduce path is familiar.
 

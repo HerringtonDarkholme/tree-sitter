@@ -11,7 +11,7 @@
 //!
 //! - `lexing` obtains or reuses a lookahead token;
 //! - `advance` interprets parse-table entries and manages versions;
-//! - `reduction` pops GLR paths and builds parent subtrees;
+//! - `actions` executes shift, reduce, and accept stack/tree mutations;
 //! - `recovery` searches for a useful continuation after invalid input;
 //! - `external_scanner` preserves scanner state across alternatives;
 //! - `balancing` prepares the accepted subtree for long-lived navigation; and
@@ -242,8 +242,8 @@ use external_scanner::{
 mod lexing;
 use lexing::{parser_get_initial_lookahead, parser_lex_lookahead, parser_set_cached_token};
 
-mod reduction;
-use reduction::{parser_accept, parser_new_node, parser_reduce, parser_shift};
+mod actions;
+use actions::{parser_accept, parser_new_node, parser_reduce, parser_shift};
 mod recovery;
 use recovery::{parser_handle_error, parser_recover};
 
