@@ -2,19 +2,27 @@ use core::ptr;
 
 use crate::ffi::{TSNode, TSPoint, TSSymbol, TSTreeCursor};
 
-use super::language::{
-    language_alias_at, language_alias_sequence_slice, ts_language_symbol_metadata,
-};
-use super::length::{length_add, length_is_undefined, length_zero, Length, LENGTH_UNDEFINED};
+use super::language::{language_alias_at, ts_language_symbol_metadata};
+use super::length::{length_zero, Length};
 use super::node::{node_new, ts_node_start_byte, ts_node_start_point};
-use super::point::point_gt;
-use super::subtree::{Subtree, NULL_SUBTREE};
+use super::subtree::Subtree;
 use super::tree::TSTree;
 use super::utils::Array;
 use super::utils::{ptr_mut, ptr_ref};
 
 mod status;
 pub use status::{ts_tree_cursor_current_node, ts_tree_cursor_current_status};
+
+mod navigation;
+use navigation::{
+    tree_cursor_current_depth, tree_cursor_current_descendant_index, tree_cursor_goto_descendant,
+    tree_cursor_goto_first_child, tree_cursor_goto_first_child_for_byte_and_point,
+    tree_cursor_goto_last_child, tree_cursor_goto_parent,
+    tree_cursor_goto_previous_sibling_internal, tree_cursor_parent_node,
+};
+pub use navigation::{
+    tree_cursor_goto_first_child_internal, tree_cursor_goto_next_sibling_internal,
+};
 
 use crate::ffi::TSPoint as POINT_ZERO_TYPE;
 const POINT_ZERO: POINT_ZERO_TYPE = POINT_ZERO_TYPE { row: 0, column: 0 };
@@ -44,7 +52,7 @@ pub struct TreeCursorEntry {
 
 impl TreeCursorEntry {
     #[inline]
-    const fn empty() -> Self {
+    pub(super) const fn empty() -> Self {
         Self {
             subtree: ptr::null(),
             position: length_zero(),
@@ -81,6 +89,16 @@ impl TreeCursorStack {
             contents: self.contents,
             size: self.size,
             capacity: self.capacity,
+        }
+    }
+
+    #[inline]
+    pub const fn as_slice(&self) -> &[TreeCursorEntry] {
+        if self.size == 0 {
+            &[]
+        } else {
+            // SAFETY: Stack operations keep the first `size` entries initialized.
+            unsafe { core::slice::from_raw_parts(self.contents, self.size as usize) }
         }
     }
 
@@ -179,282 +197,16 @@ pub enum TreeCursorStep {
     Visible = 2,
 }
 
-/// Child iterator that maintains cursor-specific position and alias state.
-struct CursorChildIterator {
-    /// Parent whose children are being scanned.
-    parent: Subtree,
-    /// Start position of the next child.
-    position: Length,
-    /// Raw child index of the next child.
-    child_index: u32,
-    /// Non-extra child index of the next child.
-    structural_child_index: u32,
-    /// Visible descendant index of the next child.
-    descendant_index: u32,
-    /// Alias sequence for the parent production.
-    alias_sequence: &'static [TSSymbol],
-}
-
-#[derive(Clone, Copy)]
-struct CursorChild {
-    entry: TreeCursorEntry,
-    visible: bool,
-}
-
 // ---------------------------------------------------------------------------
-// Array helpers for TreeCursorEntry stack
+// Legacy query compatibility
 // ---------------------------------------------------------------------------
 
 #[inline]
 pub const unsafe fn tree_cursor_entry_slice(arr: &TreeCursorStack) -> &[TreeCursorEntry] {
-    core::slice::from_raw_parts(arr.contents, arr.size as usize)
+    arr.as_slice()
 }
 
 // ---------------------------------------------------------------------------
-// Internal helper functions
-// ---------------------------------------------------------------------------
-
-#[inline]
-unsafe fn tree_cursor_is_entry_visible(self_: &TreeCursor, index: u32) -> bool {
-    let entries = tree_cursor_entry_slice(&self_.stack);
-    let entry = entries.get_unchecked(index as usize);
-    if index == 0 || (*entry.subtree).visible() {
-        return true;
-    }
-    if !(*entry.subtree).extra() {
-        let parent_entry = entries.get_unchecked((index - 1) as usize);
-        return language_alias_at(
-            (*self_.tree).language,
-            u32::from((*parent_entry.subtree).heap_data().children().production_id),
-            entry.structural_child_index,
-        ) != 0;
-    }
-    false
-}
-
-#[inline]
-unsafe fn tree_cursor_iterate_children(self_: &TreeCursor) -> CursorChildIterator {
-    let last_entry = tree_cursor_entry_slice(&self_.stack)
-        .last()
-        .unwrap_unchecked();
-    if (*last_entry.subtree).child_count() == 0 {
-        return CursorChildIterator {
-            parent: NULL_SUBTREE,
-            position: length_zero(),
-            child_index: 0,
-            structural_child_index: 0,
-            descendant_index: 0,
-            alias_sequence: &[],
-        };
-    }
-    let alias_sequence = language_alias_sequence_slice(
-        (*self_.tree).language,
-        u32::from((*last_entry.subtree).heap_data().children().production_id),
-    );
-
-    let mut descendant_index = last_entry.descendant_index;
-    if tree_cursor_is_entry_visible(self_, self_.stack.size - 1) {
-        descendant_index += 1;
-    }
-
-    CursorChildIterator {
-        parent: *last_entry.subtree,
-        position: last_entry.position,
-        child_index: 0,
-        structural_child_index: 0,
-        descendant_index,
-        alias_sequence,
-    }
-}
-
-unsafe fn tree_cursor_child_iterator_next(self_: &mut CursorChildIterator) -> Option<CursorChild> {
-    if self_.parent.is_null() || self_.child_index == self_.parent.heap_data().child_count {
-        return None;
-    }
-    let child = (self_.parent).child(self_.child_index);
-    let entry = TreeCursorEntry {
-        subtree: child,
-        position: self_.position,
-        child_index: self_.child_index,
-        structural_child_index: self_.structural_child_index,
-        descendant_index: self_.descendant_index,
-    };
-    let mut visible = (*child).visible();
-    let extra = (*child).extra();
-    if !extra {
-        visible |= self_
-            .alias_sequence
-            .get(self_.structural_child_index as usize)
-            .is_some_and(|alias| *alias != 0);
-        self_.structural_child_index += 1;
-    }
-
-    self_.descendant_index += (*child).visible_descendant_count();
-    if visible {
-        self_.descendant_index += 1;
-    }
-
-    self_.position = length_add(self_.position, (*child).size());
-    self_.child_index += 1;
-
-    if self_.child_index < self_.parent.heap_data().child_count {
-        let next_child = *(self_.parent).child(self_.child_index);
-        self_.position = length_add(self_.position, next_child.padding());
-    }
-
-    Some(CursorChild { entry, visible })
-}
-
-#[inline]
-const fn length_backtrack(a: Length, b: Length) -> Length {
-    if length_is_undefined(a) || b.extent.row != 0 {
-        return LENGTH_UNDEFINED;
-    }
-    Length {
-        bytes: a.bytes - b.bytes,
-        extent: TSPoint {
-            row: a.extent.row,
-            column: a.extent.column - b.extent.column,
-        },
-    }
-}
-
-/// Step the child iterator backward.
-///
-/// Reverse traversal reconstructs each previous child's start position by
-/// subtracting padding and size. If a multi-line span prevents precise column
-/// backtracking, the returned position becomes `LENGTH_UNDEFINED`, matching the
-/// C cursor behavior.
-unsafe fn tree_cursor_child_iterator_previous(
-    self_: &mut CursorChildIterator,
-) -> Option<CursorChild> {
-    if self_.parent.is_null() || self_.child_index == u32::MAX {
-        return None;
-    }
-    let child = (self_.parent).child(self_.child_index);
-    let entry = TreeCursorEntry {
-        subtree: child,
-        position: self_.position,
-        child_index: self_.child_index,
-        structural_child_index: self_.structural_child_index,
-        descendant_index: 0, // not used in previous iteration
-    };
-    let mut visible = (*child).visible();
-    let extra = (*child).extra();
-
-    self_.position = length_backtrack(self_.position, (*child).padding());
-    self_.child_index = self_.child_index.wrapping_sub(1);
-
-    if !extra {
-        visible |= self_
-            .alias_sequence
-            .get(self_.structural_child_index as usize)
-            .is_some_and(|alias| *alias != 0);
-        if self_.structural_child_index > 0 {
-            self_.structural_child_index -= 1;
-        }
-    }
-
-    // unsigned can underflow so compare it to child_count
-    if self_.child_index < self_.parent.heap_data().child_count {
-        let previous_child = *(self_.parent).child(self_.child_index);
-        let size = previous_child.size();
-        self_.position = length_backtrack(self_.position, size);
-    }
-
-    Some(CursorChild { entry, visible })
-}
-
-/// Descend to the first visible child covering a byte/point target.
-///
-/// Hidden nodes are traversed when they contain visible descendants. If no
-/// matching visible child exists, the cursor stack is restored to its original
-/// depth.
-#[inline]
-unsafe fn tree_cursor_goto_first_child_for_byte_and_point(
-    cursor: &mut TreeCursor,
-    goal_byte: u32,
-    goal_point: TSPoint,
-) -> i64 {
-    let initial_size = cursor.stack.size;
-    let mut visible_child_index: u32 = 0;
-
-    loop {
-        let mut did_descend = false;
-
-        let mut iterator = tree_cursor_iterate_children(cursor);
-        while let Some(child) = tree_cursor_child_iterator_next(&mut iterator) {
-            let entry = child.entry;
-            let entry_end = length_add(entry.position, (*entry.subtree).size());
-            let at_goal = entry_end.bytes > goal_byte && point_gt(entry_end.extent, goal_point);
-            let visible_child_count = (*entry.subtree).visible_child_count();
-            if at_goal {
-                if child.visible {
-                    cursor.stack.push(entry);
-                    return i64::from(visible_child_index);
-                }
-                if visible_child_count > 0 {
-                    cursor.stack.push(entry);
-                    did_descend = true;
-                    break;
-                }
-            } else if child.visible {
-                visible_child_index += 1;
-            } else {
-                visible_child_index += visible_child_count;
-            }
-        }
-        if !did_descend {
-            break;
-        }
-    }
-
-    cursor.stack.size = initial_size;
-    -1
-}
-
-/// Shared sibling navigation implementation.
-///
-/// The `advance` callback chooses next-vs-previous traversal. The cursor walks
-/// upward until it can find a visible sibling, or a hidden sibling that contains
-/// visible descendants. On failure, it restores the original stack.
-unsafe fn tree_cursor_goto_sibling_internal(
-    cursor: &mut TreeCursor,
-    advance: unsafe fn(&mut CursorChildIterator) -> Option<CursorChild>,
-) -> TreeCursorStep {
-    let initial_size = cursor.stack.size;
-
-    while cursor.stack.size > 1 {
-        let entry = cursor.stack.pop();
-        let mut iterator = tree_cursor_iterate_children(cursor);
-        iterator.child_index = entry.child_index;
-        iterator.structural_child_index = entry.structural_child_index;
-        iterator.position = entry.position;
-        iterator.descendant_index = entry.descendant_index;
-
-        if let Some(child) = advance(&mut iterator) {
-            if child.visible && cursor.stack.size + 1 < initial_size {
-                break;
-            }
-        }
-
-        while let Some(child) = advance(&mut iterator) {
-            let entry = child.entry;
-            if child.visible {
-                cursor.stack.push(entry);
-                return TreeCursorStep::Visible;
-            }
-
-            if (*entry.subtree).visible_child_count() > 0 {
-                cursor.stack.push(entry);
-                return TreeCursorStep::Hidden;
-            }
-        }
-    }
-
-    cursor.stack.size = initial_size;
-    TreeCursorStep::None
-}
 
 // ---------------------------------------------------------------------------
 // Lifecycle: ts_tree_cursor_new, reset, init, delete
@@ -502,32 +254,6 @@ pub unsafe extern "C" fn ts_tree_cursor_delete(self_: *mut TSTreeCursor) {
 // Navigation: children
 // ---------------------------------------------------------------------------
 
-pub unsafe fn tree_cursor_goto_first_child_internal(cursor: &mut TreeCursor) -> TreeCursorStep {
-    let mut iterator = tree_cursor_iterate_children(cursor);
-    while let Some(child) = tree_cursor_child_iterator_next(&mut iterator) {
-        let entry = child.entry;
-        if child.visible {
-            cursor.stack.push(entry);
-            return TreeCursorStep::Visible;
-        }
-        if (*entry.subtree).visible_child_count() > 0 {
-            cursor.stack.push(entry);
-            return TreeCursorStep::Hidden;
-        }
-    }
-    TreeCursorStep::None
-}
-
-unsafe fn tree_cursor_goto_first_child(cursor: &mut TreeCursor) -> bool {
-    loop {
-        match tree_cursor_goto_first_child_internal(cursor) {
-            TreeCursorStep::Hidden => {}
-            TreeCursorStep::Visible => return true,
-            _ => return false,
-        }
-    }
-}
-
 #[no_mangle]
 pub unsafe extern "C" fn ts_tree_cursor_goto_first_child_internal(
     self_: *mut TSTreeCursor,
@@ -538,42 +264,6 @@ pub unsafe extern "C" fn ts_tree_cursor_goto_first_child_internal(
 #[no_mangle]
 pub unsafe extern "C" fn ts_tree_cursor_goto_first_child(self_: *mut TSTreeCursor) -> bool {
     tree_cursor_goto_first_child(cursor_mut(self_))
-}
-
-unsafe fn tree_cursor_goto_last_child_internal(cursor: &mut TreeCursor) -> TreeCursorStep {
-    let mut iterator = tree_cursor_iterate_children(cursor);
-    if iterator.parent.is_null() || iterator.parent.heap_data().child_count == 0 {
-        return TreeCursorStep::None;
-    }
-
-    let mut last_entry = TreeCursorEntry::empty();
-    let mut last_step = TreeCursorStep::None;
-    while let Some(child) = tree_cursor_child_iterator_next(&mut iterator) {
-        let entry = child.entry;
-        if child.visible {
-            last_entry = entry;
-            last_step = TreeCursorStep::Visible;
-        } else if (*entry.subtree).visible_child_count() > 0 {
-            last_entry = entry;
-            last_step = TreeCursorStep::Hidden;
-        }
-    }
-    if !last_entry.subtree.is_null() {
-        cursor.stack.push(last_entry);
-        return last_step;
-    }
-
-    TreeCursorStep::None
-}
-
-unsafe fn tree_cursor_goto_last_child(cursor: &mut TreeCursor) -> bool {
-    loop {
-        match tree_cursor_goto_last_child_internal(cursor) {
-            TreeCursorStep::Hidden => {}
-            TreeCursorStep::Visible => return true,
-            _ => return false,
-        }
-    }
 }
 
 #[no_mangle]
@@ -603,10 +293,6 @@ pub unsafe extern "C" fn ts_tree_cursor_goto_first_child_for_point(
 // Navigation: siblings, parent, descendant
 // ---------------------------------------------------------------------------
 
-pub unsafe fn tree_cursor_goto_next_sibling_internal(cursor: &mut TreeCursor) -> TreeCursorStep {
-    tree_cursor_goto_sibling_internal(cursor, tree_cursor_child_iterator_next)
-}
-
 #[no_mangle]
 pub unsafe extern "C" fn ts_tree_cursor_goto_next_sibling_internal(
     self_: *mut TSTreeCursor,
@@ -627,48 +313,6 @@ pub unsafe extern "C" fn ts_tree_cursor_goto_next_sibling(self_: *mut TSTreeCurs
     }
 }
 
-unsafe fn tree_cursor_goto_previous_sibling_internal(cursor: &mut TreeCursor) -> TreeCursorStep {
-    let step = tree_cursor_goto_sibling_internal(cursor, tree_cursor_child_iterator_previous);
-    if step == TreeCursorStep::None {
-        return step;
-    }
-
-    // if length is already valid, there's no need to recompute it
-    let entries = tree_cursor_entry_slice(&cursor.stack);
-    let last_entry = entries.last().unwrap_unchecked();
-    if !length_is_undefined(last_entry.position) {
-        return step;
-    }
-
-    // restore position from the parent node
-    let parent = entries.get_unchecked(cursor.stack.size as usize - 2);
-    let mut position = parent.position;
-    let child_index = last_entry.child_index;
-    let children = (*parent.subtree).children();
-
-    if child_index > 0 {
-        // skip first child padding since its position should match the position of the parent
-        position = length_add(position, (*children.get_unchecked(0)).size());
-        for i in 1..child_index {
-            position = length_add(position, (*children.get_unchecked(i as usize)).total_size());
-        }
-        position = length_add(
-            position,
-            (*children.get_unchecked(child_index as usize)).padding(),
-        );
-    }
-
-    cursor
-        .stack
-        .contents
-        .add(cursor.stack.size as usize - 1)
-        .as_mut()
-        .unwrap_unchecked()
-        .position = position;
-
-    step
-}
-
 #[no_mangle]
 pub unsafe extern "C" fn ts_tree_cursor_goto_previous_sibling(self_: *mut TSTreeCursor) -> bool {
     let cursor = cursor_mut(self_);
@@ -684,16 +328,7 @@ pub unsafe extern "C" fn ts_tree_cursor_goto_previous_sibling(self_: *mut TSTree
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_tree_cursor_goto_parent(self_: *mut TSTreeCursor) -> bool {
-    let cursor = cursor_mut(self_);
-    let mut i = cursor.stack.size as i32 - 2;
-    while i + 1 > 0 {
-        if tree_cursor_is_entry_visible(cursor, i as u32) {
-            cursor.stack.size = i as u32 + 1;
-            return true;
-        }
-        i -= 1;
-    }
-    false
+    tree_cursor_goto_parent(cursor_mut(self_))
 }
 
 #[no_mangle]
@@ -701,98 +336,24 @@ pub unsafe extern "C" fn ts_tree_cursor_goto_descendant(
     self_: *mut TSTreeCursor,
     goal_descendant_index: u32,
 ) {
-    let cursor = cursor_mut(self_);
-
-    // Ascend to the lowest ancestor that contains the goal node.
-    loop {
-        let i = cursor.stack.size - 1;
-        let entry = tree_cursor_entry_slice(&cursor.stack).get_unchecked(i as usize);
-        let next_descendant_index = entry.descendant_index
-            + u32::from(tree_cursor_is_entry_visible(cursor, i))
-            + (*entry.subtree).visible_descendant_count();
-        if entry.descendant_index <= goal_descendant_index
-            && next_descendant_index > goal_descendant_index
-        {
-            break;
-        }
-        if cursor.stack.size <= 1 {
-            return;
-        }
-        cursor.stack.size -= 1;
-    }
-
-    // Descend to the goal node.
-    loop {
-        let mut did_descend = false;
-        let mut iterator = tree_cursor_iterate_children(cursor);
-        if iterator.descendant_index > goal_descendant_index {
-            return;
-        }
-
-        while let Some(child) = tree_cursor_child_iterator_next(&mut iterator) {
-            let entry = child.entry;
-            if iterator.descendant_index > goal_descendant_index {
-                cursor.stack.push(entry);
-                if child.visible && entry.descendant_index == goal_descendant_index {
-                    return;
-                }
-                did_descend = true;
-                break;
-            }
-        }
-        if !did_descend {
-            break;
-        }
-    }
+    tree_cursor_goto_descendant(cursor_mut(self_), goal_descendant_index);
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_tree_cursor_current_descendant_index(
     self_: *const TSTreeCursor,
 ) -> u32 {
-    let cursor = cursor_ref(self_);
-    let last_entry = tree_cursor_entry_slice(&cursor.stack)
-        .last()
-        .unwrap_unchecked();
-    last_entry.descendant_index
+    tree_cursor_current_descendant_index(cursor_ref(self_))
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_tree_cursor_current_depth(self_: *const TSTreeCursor) -> u32 {
-    let cursor = cursor_ref(self_);
-    let mut depth: u32 = 0;
-    for i in 1..cursor.stack.size {
-        if tree_cursor_is_entry_visible(cursor, i) {
-            depth += 1;
-        }
-    }
-    depth
+    tree_cursor_current_depth(cursor_ref(self_))
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_tree_cursor_parent_node(self_: *const TSTreeCursor) -> TSNode {
-    let cursor = cursor_ref(self_);
-    let entries = tree_cursor_entry_slice(&cursor.stack);
-    let mut i = cursor.stack.size as i32 - 2;
-    while i >= 0 {
-        let entry = entries.get_unchecked(i as usize);
-        let mut is_visible = true;
-        let mut alias_symbol: TSSymbol = 0;
-        if i > 0 {
-            let parent_entry = entries.get_unchecked(i as usize - 1);
-            alias_symbol = language_alias_at(
-                (*cursor.tree).language,
-                u32::from((*parent_entry.subtree).heap_data().children().production_id),
-                entry.structural_child_index,
-            );
-            is_visible = alias_symbol != 0 || (*entry.subtree).visible();
-        }
-        if is_visible {
-            return node_new(cursor.tree, entry.subtree, entry.position, alias_symbol);
-        }
-        i -= 1;
-    }
-    node_new(ptr::null(), ptr::null(), length_zero(), 0)
+    tree_cursor_parent_node(cursor_ref(self_))
 }
 
 #[no_mangle]

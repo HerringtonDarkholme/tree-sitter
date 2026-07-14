@@ -3,9 +3,10 @@ use core::ptr;
 use crate::ffi::{TSFieldId, TSLanguage, TSNode, TSSymbol, TSTreeCursor};
 
 use super::super::language::{language_field_map_slice, language_full};
+use super::navigation::tree_cursor_is_entry_visible;
 use super::{
-    cursor_ref, language_alias_at, node_new, out_param_mut, tree_cursor_entry_slice,
-    tree_cursor_is_entry_visible, ts_language_symbol_metadata, Subtree, TreeCursorEntry,
+    cursor_ref, language_alias_at, node_new, out_param_mut, ts_language_symbol_metadata, Subtree,
+    TreeCursorEntry,
 };
 
 // ---------------------------------------------------------------------------
@@ -15,7 +16,7 @@ use super::{
 #[no_mangle]
 pub unsafe extern "C" fn ts_tree_cursor_current_node(self_: *const TSTreeCursor) -> TSNode {
     let cursor = cursor_ref(self_);
-    let entries = tree_cursor_entry_slice(&cursor.stack);
+    let entries = cursor.stack.as_slice();
     let last_entry = entries.last().unwrap_unchecked();
     let is_extra = (*last_entry.subtree).extra();
     let alias_symbol = if is_extra {
@@ -154,7 +155,7 @@ pub unsafe extern "C" fn ts_tree_cursor_current_status(
     *has_later_named_siblings = false;
     *can_have_later_siblings_with_this_field = false;
 
-    let entries = tree_cursor_entry_slice(&cursor.stack);
+    let entries = cursor.stack.as_slice();
     let mut i = cursor.stack.size - 1;
     while i > 0 {
         let entry = entries.get_unchecked(i as usize);
@@ -198,7 +199,7 @@ pub unsafe extern "C" fn ts_tree_cursor_current_field_id(self_: *const TSTreeCur
     let cursor = cursor_ref(self_);
 
     // Walk up the tree, visiting the current node and its invisible ancestors.
-    let entries = tree_cursor_entry_slice(&cursor.stack);
+    let entries = cursor.stack.as_slice();
     let mut i = cursor.stack.size - 1;
     while i > 0 {
         let entry = entries.get_unchecked(i as usize);

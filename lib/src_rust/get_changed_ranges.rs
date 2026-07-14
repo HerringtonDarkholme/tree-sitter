@@ -7,7 +7,7 @@ use super::error_costs::ERROR_STATE;
 use super::language::language_alias_at;
 use super::length::{length_add, length_min, length_zero, Length, LENGTH_MAX};
 use super::subtree::{Subtree, NULL_SUBTREE, TS_BUILTIN_SYM_ERROR, TS_TREE_STATE_NONE};
-use super::tree_cursor::{tree_cursor_entry_slice, TreeCursor, TreeCursorEntry};
+use super::tree_cursor::{TreeCursor, TreeCursorEntry};
 use super::utils::Array;
 use super::utils::{ptr_mut, ptr_ref};
 
@@ -91,9 +91,7 @@ impl DiffIterator {
     /// For padding items this is the parent entry position. For node-content items,
     /// it is the position after leading padding.
     unsafe fn start_position(&self) -> Length {
-        let entry = tree_cursor_entry_slice(&self.cursor.stack)
-            .last()
-            .unwrap_unchecked();
+        let entry = self.cursor.stack.as_slice().last().unwrap_unchecked();
         if self.in_padding {
             entry.position
         } else {
@@ -103,9 +101,7 @@ impl DiffIterator {
 
     /// Return the current item's end position.
     unsafe fn end_position(&self) -> Length {
-        let entry = tree_cursor_entry_slice(&self.cursor.stack)
-            .last()
-            .unwrap_unchecked();
+        let entry = self.cursor.stack.as_slice().last().unwrap_unchecked();
         let result = length_add(entry.position, (*entry.subtree).padding());
         if self.in_padding {
             result
@@ -119,7 +115,7 @@ impl DiffIterator {
     /// Hidden grammar nodes can still be visible through aliases, so this must check
     /// the parent production's alias sequence in addition to subtree visibility.
     unsafe fn tree_is_visible(&self) -> bool {
-        let entries = tree_cursor_entry_slice(&self.cursor.stack);
+        let entries = self.cursor.stack.as_slice();
         let entry = entries.last().unwrap_unchecked();
         if (*entry.subtree).visible() {
             return true;
@@ -152,7 +148,7 @@ impl DiffIterator {
             i -= 1;
         }
 
-        let entries = tree_cursor_entry_slice(&self.cursor.stack);
+        let entries = self.cursor.stack.as_slice();
         loop {
             let entry = entries.get_unchecked(i as usize);
 
@@ -187,7 +183,10 @@ impl DiffIterator {
         if self.tree_is_visible() && !self.in_padding {
             self.visible_depth -= 1;
         }
-        if tree_cursor_entry_slice(&self.cursor.stack)
+        if self
+            .cursor
+            .stack
+            .as_slice()
             .last()
             .unwrap_unchecked()
             .child_index
@@ -211,9 +210,7 @@ impl DiffIterator {
         let mut did_descend;
         loop {
             did_descend = false;
-            let entry = *tree_cursor_entry_slice(&self.cursor.stack)
-                .last()
-                .unwrap_unchecked();
+            let entry = *self.cursor.stack.as_slice().last().unwrap_unchecked();
             let mut position = entry.position;
             let mut structural_child_index: u32 = 0;
             let n = (*entry.subtree).child_count();
@@ -282,7 +279,10 @@ impl DiffIterator {
                 return;
             }
 
-            let parent = tree_cursor_entry_slice(&self.cursor.stack)
+            let parent = self
+                .cursor
+                .stack
+                .as_slice()
                 .last()
                 .unwrap_unchecked()
                 .subtree;
