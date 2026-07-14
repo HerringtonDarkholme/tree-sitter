@@ -305,7 +305,7 @@ pub(super) unsafe fn parser_accept(
             index -= 1;
             let tree = trees.as_slice()[index];
             if !tree.extra() {
-                debug_assert!(!tree.data.is_inline());
+                debug_assert!(!tree.is_inline());
                 let children = tree.children();
                 for &child in children {
                     child.retain();

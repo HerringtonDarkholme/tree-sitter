@@ -54,13 +54,15 @@ unsafe fn subtree_apply_edit_size(
 ) -> Subtree {
     let mut result = tree.make_mut(pool);
 
-    if result.data.is_inline() {
+    if result.is_inline() {
         if subtree_can_inline(padding, size, lookahead_bytes) {
-            result.data.padding_bytes = padding.bytes as u8;
-            result.data.set_padding_rows(padding.extent.row as u8);
-            result.data.padding_columns = padding.extent.column as u8;
-            result.data.size_bytes = size.bytes as u8;
+            let data = result.inline_data_mut().unwrap();
+            data.padding_bytes = padding.bytes as u8;
+            data.set_padding_rows(padding.extent.row as u8);
+            data.padding_columns = padding.extent.column as u8;
+            data.size_bytes = size.bytes as u8;
         } else {
+            let inline = result.inline_data().unwrap();
             let data = subtree_pool_allocate(pool);
             data.as_ptr().write(SubtreeHeapData {
                 ref_count: AtomicU32::new(1),
@@ -69,18 +71,18 @@ unsafe fn subtree_apply_edit_size(
                 lookahead_bytes,
                 error_cost: 0,
                 child_count: 0,
-                symbol: TSSymbol::from(result.data.symbol),
-                parse_state: result.data.parse_state,
+                symbol: TSSymbol::from(inline.symbol),
+                parse_state: inline.parse_state,
                 flags: SubtreeHeapData::make_flags(
-                    result.data.visible(),
-                    result.data.named(),
-                    result.data.extra(),
+                    inline.visible(),
+                    inline.named(),
+                    inline.extra(),
                     false,
                     false,
                     false,
                     false,
-                    result.data.is_missing(),
-                    result.data.is_keyword(),
+                    inline.is_missing(),
+                    inline.is_keyword(),
                 ),
                 data: SubtreeHeapDataContent::LookaheadChar(0),
             });
