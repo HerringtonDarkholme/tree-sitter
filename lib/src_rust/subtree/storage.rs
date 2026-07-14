@@ -113,7 +113,7 @@ pub unsafe fn subtree_pool_new(capacity: u32) -> SubtreePool {
 pub unsafe fn subtree_pool_delete(pool: &mut SubtreePool) {
     if !pool.free_trees.contents.is_null() {
         for &tree in pool.free_trees.as_slice() {
-            free(tree.heap_ptr().cast::<c_void>());
+            free(tree.heap_ptr().as_ptr().cast::<c_void>());
         }
         pool.free_trees.delete();
     }
@@ -122,11 +122,11 @@ pub unsafe fn subtree_pool_delete(pool: &mut SubtreePool) {
     }
 }
 
-pub(super) unsafe fn subtree_pool_allocate(pool: &mut SubtreePool) -> *mut SubtreeHeapData {
+pub(super) unsafe fn subtree_pool_allocate(pool: &mut SubtreePool) -> NonNull<SubtreeHeapData> {
     if pool.free_trees.size > 0 {
         pool.free_trees.pop().heap_ptr()
     } else {
-        malloc(core::mem::size_of::<SubtreeHeapData>()).cast::<SubtreeHeapData>()
+        NonNull::new_unchecked(malloc(core::mem::size_of::<SubtreeHeapData>()).cast())
     }
 }
 
@@ -134,6 +134,6 @@ pub(super) unsafe fn subtree_pool_free(pool: &mut SubtreePool, tree: MutableSubt
     if pool.free_trees.capacity > 0 && pool.free_trees.size < TS_MAX_TREE_POOL_SIZE {
         pool.free_trees.push(tree);
     } else {
-        free(tree.heap_ptr().cast::<c_void>());
+        free(tree.heap_ptr().as_ptr().cast::<c_void>());
     }
 }

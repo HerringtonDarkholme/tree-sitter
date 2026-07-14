@@ -62,7 +62,7 @@ unsafe fn subtree_apply_edit_size(
             result.data.size_bytes = size.bytes as u8;
         } else {
             let data = subtree_pool_allocate(pool);
-            *data = SubtreeHeapData {
+            data.as_ptr().write(SubtreeHeapData {
                 ref_count: AtomicU32::new(1),
                 padding,
                 size,
@@ -83,7 +83,7 @@ unsafe fn subtree_apply_edit_size(
                     result.data.is_keyword(),
                 ),
                 data: SubtreeHeapDataContent::LookaheadChar(0),
-            };
+            });
             result = MutableSubtree::from_heap(data);
         }
     } else {

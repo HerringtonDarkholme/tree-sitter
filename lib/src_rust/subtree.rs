@@ -443,24 +443,31 @@ pub struct MutableSubtree {
 }
 
 impl Subtree {
-    pub const fn from_heap(ptr: *const SubtreeHeapData) -> Self {
+    const fn from_heap(ptr: NonNull<SubtreeHeapData>) -> Self {
         Self {
-            data: unsafe { core::mem::transmute::<*const SubtreeHeapData, SubtreeInlineData>(ptr) },
+            data: unsafe {
+                core::mem::transmute::<NonNull<SubtreeHeapData>, SubtreeInlineData>(ptr)
+            },
         }
     }
 
-    pub const fn heap_ptr(self) -> *const SubtreeHeapData {
+    const fn raw_heap_ptr(self) -> *const SubtreeHeapData {
         unsafe { core::mem::transmute::<SubtreeInlineData, *const SubtreeHeapData>(self.data) }
+    }
+
+    /// Recover the allocation address from a non-inline, non-null handle.
+    const unsafe fn heap_ptr(self) -> NonNull<SubtreeHeapData> {
+        NonNull::new_unchecked(self.raw_heap_ptr().cast_mut())
     }
 
     /// Whether this handle is the null subtree sentinel.
     pub fn is_null(self) -> bool {
-        self.heap_ptr().is_null()
+        self.raw_heap_ptr().is_null()
     }
 
     /// Borrow the heap node represented by this non-inline handle.
     pub const unsafe fn heap_data<'a>(self) -> &'a SubtreeHeapData {
-        &*self.heap_ptr()
+        self.heap_ptr().as_ref()
     }
 
     #[inline]
@@ -545,15 +552,15 @@ impl Subtree {
     }
 
     #[inline]
-    const unsafe fn children_ptr(self) -> *mut Self {
-        if self.data.is_inline() {
-            ptr::null_mut()
-        } else {
+    const unsafe fn children_ptr(self) -> NonNull<Self> {
+        debug_assert!(!self.data.is_inline());
+        debug_assert!(self.heap_data().child_count > 0);
+        NonNull::new_unchecked(
             self.heap_ptr()
-                .cast_mut()
                 .cast::<Self>()
-                .sub(self.heap_data().child_count as usize)
-        }
+                .as_ptr()
+                .sub(self.heap_data().child_count as usize),
+        )
     }
 
     #[inline]
@@ -566,7 +573,7 @@ impl Subtree {
         if count == 0 {
             &[]
         } else {
-            core::slice::from_raw_parts(self.children_ptr(), count)
+            core::slice::from_raw_parts(self.children_ptr().as_ptr(), count)
         }
     }
 
@@ -708,12 +715,22 @@ impl Subtree {
     pub unsafe fn clone_mut(self) -> MutableSubtree {
         let data = self.heap_data();
         let alloc_size = subtree_alloc_size(data.child_count);
-        let new_children = malloc(alloc_size).cast::<Self>();
-        ptr::copy_nonoverlapping(self.children_ptr(), new_children, data.child_count as usize);
-        let result = new_children
-            .add(data.child_count as usize)
-            .cast::<SubtreeHeapData>();
-        for &child in core::slice::from_raw_parts(new_children, data.child_count as usize) {
+        let new_children = NonNull::new_unchecked(malloc(alloc_size).cast::<Self>());
+        if data.child_count > 0 {
+            ptr::copy_nonoverlapping(
+                self.children_ptr().as_ptr(),
+                new_children.as_ptr(),
+                data.child_count as usize,
+            );
+        }
+        let result = NonNull::new_unchecked(
+            new_children
+                .as_ptr()
+                .add(data.child_count as usize)
+                .cast::<SubtreeHeapData>(),
+        );
+        for &child in core::slice::from_raw_parts(new_children.as_ptr(), data.child_count as usize)
+        {
             child.retain();
         }
         let content = match &data.data {
@@ -727,21 +744,18 @@ impl Subtree {
                 SubtreeHeapDataContent::LookaheadChar(*character)
             }
         };
-        ptr::write(
-            result,
-            SubtreeHeapData {
-                ref_count: AtomicU32::new(1),
-                padding: data.padding,
-                size: data.size,
-                lookahead_bytes: data.lookahead_bytes,
-                error_cost: data.error_cost,
-                child_count: data.child_count,
-                symbol: data.symbol,
-                parse_state: data.parse_state,
-                flags: data.flags,
-                data: content,
-            },
-        );
+        result.as_ptr().write(SubtreeHeapData {
+            ref_count: AtomicU32::new(1),
+            padding: data.padding,
+            size: data.size,
+            lookahead_bytes: data.lookahead_bytes,
+            error_cost: data.error_cost,
+            child_count: data.child_count,
+            symbol: data.symbol,
+            parse_state: data.parse_state,
+            flags: data.flags,
+            data: content,
+        });
         MutableSubtree::from_heap(result)
     }
 
@@ -840,24 +854,28 @@ impl Subtree {
 }
 
 impl MutableSubtree {
-    pub const fn from_heap(ptr: *mut SubtreeHeapData) -> Self {
+    const fn from_heap(ptr: NonNull<SubtreeHeapData>) -> Self {
         Self {
-            data: unsafe { core::mem::transmute::<*mut SubtreeHeapData, SubtreeInlineData>(ptr) },
+            data: unsafe {
+                core::mem::transmute::<NonNull<SubtreeHeapData>, SubtreeInlineData>(ptr)
+            },
         }
     }
 
-    pub const fn heap_ptr(self) -> *mut SubtreeHeapData {
-        unsafe { core::mem::transmute::<SubtreeInlineData, *mut SubtreeHeapData>(self.data) }
+    const unsafe fn heap_ptr(self) -> NonNull<SubtreeHeapData> {
+        NonNull::new_unchecked(unsafe {
+            core::mem::transmute::<SubtreeInlineData, *mut SubtreeHeapData>(self.data)
+        })
     }
 
     /// Borrow the heap node represented by this mutable handle.
     pub const unsafe fn heap_data<'a>(self) -> &'a SubtreeHeapData {
-        &*self.heap_ptr()
+        self.heap_ptr().as_ref()
     }
 
     /// Mutably borrow the heap node represented by this handle.
-    pub const unsafe fn heap_data_mut<'a>(self) -> &'a mut SubtreeHeapData {
-        &mut *self.heap_ptr()
+    pub unsafe fn heap_data_mut<'a>(self) -> &'a mut SubtreeHeapData {
+        self.heap_ptr().as_mut()
     }
 
     /// Mutably borrow this internal node's children.
@@ -866,7 +884,7 @@ impl MutableSubtree {
         if count == 0 {
             &mut []
         } else {
-            core::slice::from_raw_parts_mut(self.into_immutable().children_ptr(), count)
+            core::slice::from_raw_parts_mut(self.into_immutable().children_ptr().as_ptr(), count)
         }
     }
 
@@ -918,7 +936,17 @@ impl MutableSubtree {
     }
 }
 
-pub const NULL_SUBTREE: Subtree = Subtree::from_heap(ptr::null());
+pub const NULL_SUBTREE: Subtree = Subtree {
+    data: SubtreeInlineData {
+        flags: 0,
+        symbol: 0,
+        parse_state: 0,
+        padding_columns: 0,
+        rows_and_lookahead: 0,
+        padding_bytes: 0,
+        size_bytes: 0,
+    },
+};
 
 // Compile-time layout assertions for the internal tagged pointer/inline-data
 // representation. Both handles remain one word wide, with the tag bit in the
@@ -1086,7 +1114,7 @@ pub unsafe fn subtree_new_leaf(
         }
     } else {
         let data = subtree_pool_allocate(pool);
-        *data = SubtreeHeapData {
+        data.as_ptr().write(SubtreeHeapData {
             ref_count: AtomicU32::new(1),
             padding,
             size,
@@ -1114,7 +1142,7 @@ pub unsafe fn subtree_new_leaf(
             } else {
                 SubtreeHeapDataContent::LookaheadChar(0)
             },
-        };
+        });
         Subtree::from_heap(data)
     }
 }
@@ -1183,7 +1211,7 @@ unsafe fn subtree_init_node_data(
             production_id: production_id as u16,
         }),
     });
-    MutableSubtree::from_heap(data.as_ptr())
+    MutableSubtree::from_heap(data)
 }
 
 /// Create a heap internal node by moving child storage into the node allocation.
