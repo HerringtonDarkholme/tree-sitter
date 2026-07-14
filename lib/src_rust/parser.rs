@@ -54,8 +54,8 @@ use super::subtree::{
 };
 use super::tree::{tree_new, TSTree};
 use super::utils::{
-    array_assign, array_back_ref, array_clear, array_delete, array_erase, array_get_mut,
-    array_get_ref, array_new, array_pop, array_push, array_reserve, array_splice, array_swap,
+    array_assign, array_clear, array_delete, array_erase, array_get_mut, array_get_ref, array_new,
+    array_pop, array_push, array_reserve, array_splice, array_swap,
 };
 use super::utils::{ptr_mut, ptr_ref};
 
@@ -755,28 +755,31 @@ unsafe fn parser_condense_stack(self_: &mut TSParser) -> u32 {
     min_error_cost
 }
 
-unsafe fn parser_balance_subtree(self_: &mut TSParser) -> bool {
-    let finished_tree = self_.finished_tree;
+/// Incrementally rebalance the accepted tree, preserving work across cancellation.
+unsafe fn parser_balance_subtree(parser: &mut TSParser) -> bool {
+    let finished_tree = parser.finished_tree;
 
-    // If we haven't canceled balancing in progress before, then we want to clear the tree stack and
-    // push the initial finished tree onto it. Otherwise, if we're resuming balancing after a
-    // cancellation, we don't want to clear the tree stack.
-    if !self_.canceled_balancing {
-        array_clear(&mut self_.tree_pool.tree_stack);
+    if !parser.canceled_balancing {
+        array_clear(&mut parser.tree_pool.tree_stack);
         if subtree_child_count(finished_tree) > 0 && finished_tree.heap_data().ref_count() == 1 {
             array_push(
-                &mut self_.tree_pool.tree_stack,
+                &mut parser.tree_pool.tree_stack,
                 subtree_to_mut_unsafe(finished_tree),
             );
         }
     }
 
-    while self_.tree_pool.tree_stack.size > 0 {
-        if !parser_check_progress(self_, None, None, 1) {
+    while !parser.tree_pool.tree_stack.is_empty() {
+        if !parser_check_progress(parser, None, None, 1) {
             return false;
         }
 
-        let tree = *array_back_ref(&self_.tree_pool.tree_stack);
+        let tree = *parser
+            .tree_pool
+            .tree_stack
+            .as_slice()
+            .last()
+            .unwrap_unchecked();
 
         if tree.heap_data().children().repeat_depth > 0 {
             let tree_subtree = subtree_from_mut(tree);
@@ -790,13 +793,13 @@ unsafe fn parser_balance_subtree(self_: &mut TSParser) -> bool {
 
                 let mut i = n / 2;
                 while i > 0 {
-                    subtree_compress(tree, i, self_.language, &mut self_.tree_pool.tree_stack);
+                    subtree_compress(tree, i, parser.language, &mut parser.tree_pool.tree_stack);
 
                     // We scale the operation count increment in `parser_check_progress` proportionately to the compression
                     // size since larger values of i take longer to process. Shifting by 4 empirically provides good check
                     // intervals (e.g. 193 operations when i=3100) to prevent blocking during large compressions.
                     let operations = if i >> 4 > 0 { i >> 4 } else { 1 };
-                    if !parser_check_progress(self_, None, None, operations) {
+                    if !parser_check_progress(parser, None, None, operations) {
                         return false;
                     }
                     i /= 2;
@@ -804,14 +807,14 @@ unsafe fn parser_balance_subtree(self_: &mut TSParser) -> bool {
             }
         }
 
-        array_pop(&mut self_.tree_pool.tree_stack);
+        array_pop(&mut parser.tree_pool.tree_stack);
 
         for i in 0..tree.heap_data().child_count {
             let tree_subtree = subtree_from_mut(tree);
             let child = *subtree_child(tree_subtree, i);
             if subtree_child_count(child) > 0 && child.heap_data().ref_count() == 1 {
                 array_push(
-                    &mut self_.tree_pool.tree_stack,
+                    &mut parser.tree_pool.tree_stack,
                     subtree_to_mut_unsafe(child),
                 );
             }
@@ -1038,7 +1041,6 @@ pub unsafe extern "C-unwind" fn ts_parser_parse(
     if parser_has_outstanding_parse(parser) {
         parser_log(parser, |_, log| log.write_str("resume_parsing"));
         if parser.canceled_balancing {
-            // goto balance
             debug_assert!(!parser.finished_tree.is_null());
             if !parser_balance_subtree(parser) {
                 parser.canceled_balancing = true;
@@ -1050,7 +1052,6 @@ pub unsafe extern "C-unwind" fn ts_parser_parse(
 
             let result = parser_take_finished_tree(parser);
 
-            // goto exit
             ts_parser_reset(self_);
             return result;
         }
