@@ -29,12 +29,11 @@ use super::lexer::{
 use super::reduce_action::{ReduceAction, ReduceActionSet};
 use super::stack::{
     stack_can_merge, stack_clear, stack_copy_version, stack_delete, stack_error_cost,
-    stack_get_summary, stack_halt, stack_halted_version_count, stack_has_advanced_since_error,
-    stack_is_active, stack_last_external_token, stack_merge, stack_new,
+    stack_get_summary, stack_halt, stack_has_advanced_since_error, stack_merge, stack_new,
     stack_node_count_since_error, stack_pause, stack_pop_all, stack_pop_count, stack_pop_error,
-    stack_position, stack_print_dot_graph, stack_push, stack_record_summary, stack_remove_version,
-    stack_renumber_version, stack_resume, stack_set_last_external_token, stack_state,
-    stack_swap_versions, stack_version_count, Stack, StackVersion, STACK_VERSION_NONE,
+    stack_print_dot_graph, stack_push, stack_record_summary, stack_remove_version,
+    stack_renumber_version, stack_resume, stack_set_last_external_token, stack_swap_versions,
+    Stack, StackVersion, STACK_VERSION_NONE,
 };
 use super::subtree::{
     external_scanner_state_eq, subtree_array_clear, subtree_array_delete,

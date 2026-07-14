@@ -1,8 +1,7 @@
 use super::{
     array_swap, language_full, language_lookup, parser_log, parser_symbol_name, ptr, ptr_mut,
-    ptr_ref, stack_halt, stack_halted_version_count, stack_merge, stack_pop_all, stack_pop_count,
-    stack_push, stack_remove_version, stack_set_last_external_token, stack_state,
-    stack_version_count, subtree_array_clear, subtree_array_delete,
+    ptr_ref, stack_halt, stack_merge, stack_pop_all, stack_pop_count, stack_push,
+    stack_remove_version, stack_set_last_external_token, subtree_array_clear, subtree_array_delete,
     subtree_array_remove_trailing_extras, subtree_child_count, subtree_children_slice,
     subtree_compare, subtree_dynamic_precedence, subtree_error_cost, subtree_extra,
     subtree_from_mut, subtree_has_external_tokens, subtree_is_eof, subtree_last_external_token,
@@ -200,10 +199,10 @@ pub(super) unsafe fn parser_reduce(
     invalidate_parse_state: bool,
     end_of_non_terminal_extra: bool,
 ) -> StackVersion {
-    let initial_version_count = stack_version_count(ptr_ref(parser.stack));
+    let initial_version_count = ptr_ref(parser.stack).version_count();
     let pop = stack_pop_count(ptr_mut(parser.stack), version, action.count);
     let stack = ptr_mut(parser.stack);
-    let halted_version_count = stack_halted_version_count(stack);
+    let halted_version_count = stack.halted_version_count();
     let mut removed_version_count = 0;
     let mut i = 0;
     while i < pop.size {
@@ -263,7 +262,7 @@ pub(super) unsafe fn parser_reduce(
             }
         }
 
-        let state = stack_state(stack, slice_version);
+        let state = stack.state(slice_version);
         let parse_state = if invalidate_parse_state || pop.size > 1 || initial_version_count > 1 {
             TS_TREE_STATE_NONE
         } else {
@@ -288,7 +287,7 @@ pub(super) unsafe fn parser_reduce(
         i += 1;
     }
 
-    if stack_version_count(stack) > initial_version_count {
+    if stack.version_count() > initial_version_count {
         initial_version_count
     } else {
         STACK_VERSION_NONE

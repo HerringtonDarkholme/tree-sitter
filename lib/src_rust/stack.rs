@@ -305,31 +305,6 @@ pub unsafe fn stack_delete(self_: &mut Stack) {
     free(ptr::from_mut(self_).cast::<c_void>());
 }
 
-/// Get the number of versions in the stack.
-pub const fn stack_version_count(self_: &Stack) -> u32 {
-    self_.version_count()
-}
-
-/// Get the number of halted versions.
-pub const fn stack_halted_version_count(self_: &Stack) -> u32 {
-    self_.halted_version_count()
-}
-
-/// Get the state at the top of a version.
-pub unsafe fn stack_state(self_: &Stack, version: StackVersion) -> TSStateId {
-    self_.state(version)
-}
-
-/// Get the position of a version.
-pub unsafe fn stack_position(self_: &Stack, version: StackVersion) -> Length {
-    self_.position(version)
-}
-
-/// Get the last external token for a version.
-pub unsafe fn stack_last_external_token(self_: &Stack, version: StackVersion) -> Subtree {
-    self_.last_external_token(version)
-}
-
 /// Set the last external token for a version.
 pub unsafe fn stack_set_last_external_token(
     self_: &mut Stack,
@@ -607,11 +582,6 @@ pub unsafe fn stack_pause(stack: &mut Stack, version: StackVersion, lookahead: S
     head.node_count_at_last_error = head.node.as_ref().node_count;
 }
 
-/// Check if a version is active.
-pub unsafe fn stack_is_active(self_: &Stack, version: StackVersion) -> bool {
-    self_.is_active(version)
-}
-
 /// Resume a paused version, returning its stored lookahead.
 pub unsafe fn stack_resume(stack: &mut Stack, version: StackVersion) -> Subtree {
     let head = stack_head_mut(stack, version);
@@ -658,27 +628,27 @@ mod tests {
             let stack = stack_new(&mut pool);
             let stack = ptr_mut(stack);
 
-            assert_eq!(stack_halted_version_count(stack), 0);
+            assert_eq!(stack.halted_version_count(), 0);
 
             let halted = stack_copy_version(stack, 0);
             stack_halt(stack, halted);
-            assert_eq!(stack_halted_version_count(stack), 1);
+            assert_eq!(stack.halted_version_count(), 1);
 
             let halted_copy = stack_copy_version(stack, halted);
-            assert_eq!(stack_halted_version_count(stack), 2);
+            assert_eq!(stack.halted_version_count(), 2);
 
             stack_pause(stack, halted_copy, NULL_SUBTREE);
-            assert_eq!(stack_halted_version_count(stack), 1);
+            assert_eq!(stack.halted_version_count(), 1);
             let _ = stack_resume(stack, halted_copy);
-            assert_eq!(stack_halted_version_count(stack), 1);
+            assert_eq!(stack.halted_version_count(), 1);
 
             stack_halt(stack, halted_copy);
-            assert_eq!(stack_halted_version_count(stack), 2);
+            assert_eq!(stack.halted_version_count(), 2);
             stack_remove_version(stack, halted_copy);
-            assert_eq!(stack_halted_version_count(stack), 1);
+            assert_eq!(stack.halted_version_count(), 1);
 
             stack_clear(stack);
-            assert_eq!(stack_halted_version_count(stack), 0);
+            assert_eq!(stack.halted_version_count(), 0);
 
             stack_delete(stack);
             subtree_pool_delete(&mut pool);

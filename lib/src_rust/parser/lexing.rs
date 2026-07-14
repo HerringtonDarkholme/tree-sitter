@@ -5,13 +5,13 @@ use super::{
     lexer_finish, lexer_is_eof, lexer_reset, lexer_start, parser_call_keyword_lex_fn,
     parser_call_main_lex_fn, parser_external_scanner_deserialize, parser_external_scanner_scan,
     parser_external_scanner_serialize, parser_log, parser_log_lookahead, parser_symbol_name,
-    ptr_ref, stack_has_advanced_since_error, stack_last_external_token, stack_position,
-    subtree_child_count, subtree_external_scanner_state_eq, subtree_is_keyword, subtree_new_error,
-    subtree_new_leaf, subtree_parse_state, subtree_release, subtree_retain,
-    subtree_set_external_scanner_state, subtree_size, subtree_symbol, subtree_to_mut_unsafe,
-    subtree_total_size, ts_language_next_state, DisplayCStr, Length, StackVersion, Subtree,
-    TSParser, TSStateId, TSSymbol, TableEntry, Write, ERROR_STATE, NULL_SUBTREE,
-    TS_BUILTIN_SYM_END, TS_BUILTIN_SYM_ERROR,
+    ptr_ref, stack_has_advanced_since_error, subtree_child_count,
+    subtree_external_scanner_state_eq, subtree_is_keyword, subtree_new_error, subtree_new_leaf,
+    subtree_parse_state, subtree_release, subtree_retain, subtree_set_external_scanner_state,
+    subtree_size, subtree_symbol, subtree_to_mut_unsafe, subtree_total_size,
+    ts_language_next_state, DisplayCStr, Length, StackVersion, Subtree, TSParser, TSStateId,
+    TSSymbol, TableEntry, Write, ERROR_STATE, NULL_SUBTREE, TS_BUILTIN_SYM_END,
+    TS_BUILTIN_SYM_ERROR,
 };
 
 // ---------------------------------------------------------------------------
@@ -196,8 +196,8 @@ unsafe fn parser_lex(
     }
 
     let stack = ptr_ref(self_.stack);
-    let start_position = stack_position(stack, version);
-    let external_token = stack_last_external_token(stack, version);
+    let start_position = stack.position(version);
+    let external_token = stack.last_external_token(version);
 
     let mut found_external_token = false;
     let mut error_mode = parse_state == ERROR_STATE;
