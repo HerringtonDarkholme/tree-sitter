@@ -5,8 +5,11 @@ use std::{
     path::{Path, PathBuf},
     str,
     sync::LazyLock,
-    time::Instant,
+    time::Duration,
 };
+
+#[cfg(not(unix))]
+use std::time::Instant;
 
 use anyhow::Context;
 use log::info;
@@ -20,11 +23,6 @@ static LANGUAGE_FILTER: LazyLock<Option<String>> =
     LazyLock::new(|| env::var("TREE_SITTER_BENCHMARK_LANGUAGE_FILTER").ok());
 static EXAMPLE_FILTER: LazyLock<Option<String>> =
     LazyLock::new(|| env::var("TREE_SITTER_BENCHMARK_EXAMPLE_FILTER").ok());
-static EXAMPLE_PATH: LazyLock<Option<PathBuf>> = LazyLock::new(|| {
-    env::var("TREE_SITTER_BENCHMARK_EXAMPLE_PATH")
-        .ok()
-        .map(PathBuf::from)
-});
 static KIND_FILTER: LazyLock<Option<Vec<String>>> = LazyLock::new(|| {
     env::var("TREE_SITTER_BENCHMARK_KIND_FILTER")
         .ok()
@@ -39,9 +37,6 @@ static KIND_FILTER: LazyLock<Option<Vec<String>>> = LazyLock::new(|| {
 });
 static REPETITION_COUNT: LazyLock<usize> = LazyLock::new(|| {
     env::var("TREE_SITTER_BENCHMARK_REPETITION_COUNT").map_or(5, |s| s.parse::<usize>().unwrap())
-});
-static MIN_SOURCE_BYTES: LazyLock<usize> = LazyLock::new(|| {
-    env::var("TREE_SITTER_BENCHMARK_MIN_SOURCE_BYTES").map_or(0, |s| s.parse::<usize>().unwrap())
 });
 static MIN_SAMPLE_TIME: LazyLock<std::time::Duration> = LazyLock::new(|| {
     std::time::Duration::from_millis(
@@ -128,9 +123,6 @@ static EXAMPLE_AND_QUERY_PATHS_BY_LANGUAGE_DIR: LazyLock<
 });
 
 fn should_run_example(path: &Path) -> bool {
-    if let Some(selected) = EXAMPLE_PATH.as_ref() {
-        return path == selected;
-    }
     EXAMPLE_FILTER
         .as_ref()
         .is_none_or(|filter| path.to_string_lossy().contains(filter))
@@ -305,15 +297,11 @@ fn parse(
         .with_context(|| format!("Failed to read {}", path.display()))
         .unwrap();
     let source_hash = source_hash(&source_code);
-    let parses_per_repetition = calibrated_parses_per_repetition(
-        &source_code,
-        *MIN_SOURCE_BYTES,
-        *MIN_SAMPLE_TIME,
-        &mut action,
-    );
+    let parses_per_repetition =
+        calibrated_parses_per_repetition(&source_code, *MIN_SAMPLE_TIME, &mut action);
     let mut sample_duration_ns = Vec::with_capacity(*REPETITION_COUNT);
     for _ in 0..*REPETITION_COUNT {
-        let time = Instant::now();
+        let time = BenchmarkTimer::start();
         for _ in 0..parses_per_repetition {
             action(&source_code);
         }
@@ -358,24 +346,16 @@ fn source_hash(source: &[u8]) -> u64 {
     })
 }
 
-/// Parse small fixtures enough times for scheduling and timer noise not to
-/// dominate, while preserving the fixture's syntax and tree shape.
-fn parses_per_repetition(source_bytes: usize, minimum_measured_bytes: usize) -> usize {
-    minimum_measured_bytes.div_ceil(source_bytes.max(1)).max(1)
-}
-
-/// Calibrate process-level trials to a useful duration before recording them.
+/// Calibrate samples to a useful duration before recording them.
 /// Three untimed parses warm allocator and parser state and make the estimate
 /// less sensitive to one cold call.
 fn calibrated_parses_per_repetition(
     source: &[u8],
-    minimum_measured_bytes: usize,
     minimum_sample_time: std::time::Duration,
     action: &mut impl FnMut(&[u8]),
 ) -> usize {
-    let byte_floor = parses_per_repetition(source.len(), minimum_measured_bytes);
     if minimum_sample_time.is_zero() {
-        return byte_floor;
+        return 1;
     }
 
     const WARMUP_PARSES: usize = 3;
@@ -384,7 +364,7 @@ fn calibrated_parses_per_repetition(
     }
 
     const CALIBRATION_PARSES: usize = 3;
-    let started = Instant::now();
+    let started = BenchmarkTimer::start();
     for _ in 0..CALIBRATION_PARSES {
         action(source);
     }
@@ -393,7 +373,47 @@ fn calibrated_parses_per_repetition(
         .as_nanos()
         .div_ceil(nanos_per_parse)
         .min(usize::MAX as u128) as usize;
-    byte_floor.max(time_floor).max(1)
+    time_floor.max(1)
+}
+
+/// Process CPU time excludes pauses caused by other work scheduled on the
+/// machine. The parser is single-threaded, so this is the least noisy clock
+/// for throughput measurements.
+#[cfg(unix)]
+struct BenchmarkTimer(Duration);
+
+#[cfg(unix)]
+impl BenchmarkTimer {
+    fn start() -> Self {
+        Self(process_cpu_time())
+    }
+
+    fn elapsed(&self) -> Duration {
+        process_cpu_time().saturating_sub(self.0)
+    }
+}
+
+#[cfg(unix)]
+fn process_cpu_time() -> Duration {
+    let mut time = MaybeUninit::<libc::timespec>::zeroed();
+    let result = unsafe { libc::clock_gettime(libc::CLOCK_PROCESS_CPUTIME_ID, time.as_mut_ptr()) };
+    assert_eq!(result, 0, "failed to read process CPU time");
+    let time = unsafe { time.assume_init() };
+    Duration::new(time.tv_sec as u64, time.tv_nsec as u32)
+}
+
+#[cfg(not(unix))]
+struct BenchmarkTimer(Instant);
+
+#[cfg(not(unix))]
+impl BenchmarkTimer {
+    fn start() -> Self {
+        Self(Instant::now())
+    }
+
+    fn elapsed(&self) -> Duration {
+        self.0.elapsed()
+    }
 }
 
 #[cfg(unix)]
