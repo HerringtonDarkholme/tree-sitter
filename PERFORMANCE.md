@@ -17,6 +17,810 @@ Use strict mode before release:
 cargo xtask perf-gate --offline
 ```
 
+## S9 external-scanner state reuse decision checkpoint (2026-07-16)
+
+- Measurement commit: `12c24bb6` (`Measure external scanner state reuse`)
+- Scope: feature-gated observation only; deserialization remains unconditional
+- Decision: **stop after Task 1**. Python's would-be hit ratio is 19.94%, far
+  below the required greater-than-85% gate. The state-cache elision and debug
+  witness were not implemented.
+
+The observer mirrors the proposed cache state machine without skipping work.
+It counts every attempt reaching the external-scanner deserialize site, an
+attempt as a hit when the payload is modeled as already holding the same
+external-token `NodeId`, and every failed-scan path that invalidates that
+model. The 35 normal fixtures were each parsed once with:
+
+```sh
+env TREE_SITTER_CORE_IMPL=rust \
+  TREE_SITTER_BENCHMARK_LANGUAGE_FILTER=<language> \
+  TREE_SITTER_BENCHMARK_KIND_FILTER=normal \
+  TREE_SITTER_BENCHMARK_REPETITION_COUNT=1 \
+  cargo bench --bench benchmark -p tree-sitter-cli \
+    --features tree-sitter/core-stats
+```
+
+| Language | Fixtures | Scan attempts | Would-be hits | Hit ratio | Failed-scan invalidations |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| TypeScript | 11 | 45,479 | 1,137 | 2.50% | 44,342 |
+| JavaScript | 2 | 75,345 | 3,596 | 4.77% | 71,744 |
+| Python | 12 | 41,922 | 8,359 | 19.94% | 33,567 |
+| Go | 4 | 0 | 0 | n/a | 0 |
+| Rust | 2 | 5,555 | 558 | 10.05% | 4,997 |
+| C++ | 2 | 0 | 0 | n/a | 0 |
+| Java | 2 | 0 | 0 | n/a | 0 |
+| **Overall** | **35** | **168,301** | **13,650** | **8.11%** | **154,650** |
+
+The hypothesis is falsified in its specified form: failed external scans
+invalidate the payload model frequently, so a `NodeId`-only cache would avoid
+few deserializations. Per the S9 stop condition, serialize-and-revalidate or
+byte-equivalence fallbacks require separate authorization and were not tried.
+
+Post-measurement gates on the feature-off commit:
+
+- `cargo test --all`: green
+- `cargo test -p tree-sitter --test abi_surface`: green; exported surface
+  unchanged
+- `cargo xtask core-parity`: green, 15 focused samples
+- `cargo xtask ast-grep-gate`: green, 4/4 packages
+- `cargo xtask perf-gate`: green, **+8.80% raw**, **+11.64% normalized**;
+  peak RSS 33.7 MiB versus 14.9 MiB remains report-only
+
+## Post-S8 bounded follow-up trials (2026-07-15)
+
+Two queued micro-optimizations were tested independently against one untouched
+seven-language control. Both were rejected and removed; this checkpoint changes
+no runtime code.
+
+```sh
+TMPDIR=/private/tmp/tree-sitter-<trial> cargo xtask perf-gate \
+  --language typescript --language javascript --language python \
+  --language go --language rust --language cpp --language java \
+  --repetitions 10 --error-limit 8 --report-only --offline
+```
+
+### Decode-function selection hoist
+
+The trial cached the UTF-8, UTF-16, or custom decoder in `Lexer` when installing
+`TSInput`, instead of selecting it in every `lexer_get_lookahead` call. Core
+tests were green, but overall Rust throughput changed only from **15,330.9 to
+15,355.2 bytes/ms (+0.16%)**. The Rust/C delta moved from **+8.67% to +8.98%**,
+only **+0.31 raw points**, below the +0.5-point acceptance threshold and within
+normal session noise.
+
+| Language | Control Rust/C delta | Hoist Rust/C delta | Movement |
+| --- | ---: | ---: | ---: |
+| TypeScript | +7.76% | +7.87% | +0.11 points |
+| JavaScript | +11.19% | +10.59% | -0.60 points |
+| Python | +7.17% | +7.51% | +0.34 points |
+| Go | +11.54% | +11.11% | -0.43 points |
+| Rust | +16.14% | +18.73% | +2.59 points |
+| C++ | +8.35% | +9.13% | +0.78 points |
+| Java | +8.11% | +9.25% | +1.14 points |
+| **Overall** | **+8.67%** | **+8.98%** | **+0.31 points** |
+
+### Small-state symbol-slice scan
+
+The trial represented each compressed small-state symbol group as a borrowed
+slice, used `slice::contains`, and advanced over the group once. This removed
+the explicit per-symbol raw-pointer increment and was behavior-green, but it
+was slower for the short generated-table groups. Overall Rust throughput fell
+from **15,330.9 to 15,045.0 bytes/ms (-1.86%)**, and the Rust/C delta fell from
+**+8.67% to +7.66% (-1.01 raw points)**.
+
+| Language | Control Rust/C delta | Slice scan Rust/C delta | Movement |
+| --- | ---: | ---: | ---: |
+| TypeScript | +7.76% | +6.84% | -0.92 points |
+| JavaScript | +11.19% | +10.02% | -1.17 points |
+| Python | +7.17% | +7.28% | +0.11 points |
+| Go | +11.54% | +8.71% | -2.83 points |
+| Rust | +16.14% | +13.95% | -2.19 points |
+| C++ | +8.35% | +5.72% | -2.63 points |
+| Java | +8.11% | +4.98% | -3.13 points |
+| **Overall** | **+8.67%** | **+7.66%** | **-1.01 points** |
+
+Conclusion: keep decoder selection local to the comparatively rare full
+decode path, and keep the existing compact pointer loop for compressed
+small-state groups. Neither follow-up justifies additional state or code.
+
+## S8 ASCII fast-region advance checkpoint (2026-07-15)
+
+- Implementation: `4c697d3c` (`Fast-path ASCII lexer advances`)
+- Control: detached worktree at `9e59f6f5` (`Close S6 memory policy decision`)
+- Change: stateless UTF-8/ASCII fast path in `lexer_do_advance`, plus
+  off-by-default `core-stats` hit counters
+- Paired command: strict `cargo xtask perf-gate` with the same explicit
+  TypeScript repository path in the control worktree, then in the candidate
+  worktree in the same session
+- Counter command: one repetition of the normal benchmark for each of the
+  seven strict-gate languages, built with
+  `--features tree-sitter/core-stats`
+
+The initial cold pair improved overall by 0.69 points but moved Java by -0.56
+points, 0.06 outside the universal bound, so the candidate was stopped and
+left uncommitted. After explicit authorization to pursue S8, a detached clean
+control worktree was given the same untracked grammar corpus and TypeScript
+path as the candidate. A final warmed control-to-candidate pair passed the
+strict gate in both worktrees and improved the overall Rust/C delta from
+**+7.90% to +9.16%**, a **+1.26 raw-point** win. Every language met the
+per-language bound; the worst movement was TypeScript at -0.14 points. No
+fast-path condition was tuned and neither queued follow-up was started.
+
+| Language | Control Rust/C delta | Candidate Rust/C delta | Paired movement |
+| --- | ---: | ---: | ---: |
+| C++ | +5.06% | +8.93% | +3.87 points |
+| Go | +11.12% | +11.34% | +0.22 points |
+| Java | +8.46% | +8.82% | +0.36 points |
+| JavaScript | +10.40% | +11.48% | +1.08 points |
+| Python | +6.14% | +7.86% | +1.72 points |
+| Rust | +16.00% | +19.71% | +3.71 points |
+| TypeScript | +7.69% | +7.55% | -0.14 points |
+| **Overall** | **+7.90%** | **+9.16%** | **+1.26 points** |
+
+Peak RSS did not move in the accepted pair: the overall Rust high-water mark
+was 34.0 MiB in both worktrees (C was 14.9 MiB in both). RSS remains
+report-only.
+
+The feature-gated counters aggregate calls across every normal fixture in a
+language. All languages exceeded the expected 85% hit ratio; overall,
+1,876,499 of 1,957,839 calls took the fast path (**95.85%**).
+
+| Language | Fixtures | Fast advances | Total advances | Hit ratio |
+| --- | ---: | ---: | ---: | ---: |
+| C++ | 2 | 16,747 | 17,167 | 97.55% |
+| Go | 4 | 227,851 | 235,602 | 96.71% |
+| Java | 2 | 4,382 | 4,487 | 97.66% |
+| JavaScript | 2 | 555,314 | 587,424 | 94.53% |
+| Python | 12 | 394,398 | 412,976 | 95.50% |
+| Rust | 2 | 84,306 | 88,002 | 95.80% |
+| TypeScript | 11 | 593,501 | 612,181 | 96.95% |
+
+Post-commit behavior gates:
+
+- `cargo test --all`: green when run unsandboxed
+- `cargo test -p tree-sitter --test abi_surface`: green, 123-symbol surface
+  unchanged
+- `cargo xtask core-parity`: green, 15 focused samples
+- `cargo xtask core-parity --full-fixtures`: green, 15 samples, 36 examples,
+  and 1,507 corpus cases
+- `cargo xtask ast-grep-gate`: green, 4/4 packages
+- `cargo xtask perf-gate`: green, **+9.07% raw**, **+11.93% normalized**,
+  32.9 MiB Rust versus 15.0 MiB C peak RSS
+
+### Post-S8 `cargo flamegraph` verification
+
+The committed S8 core was rebuilt with `CARGO_PROFILE_BENCH_DEBUG=true` and
+profiled with `cargo flamegraph` 0.6.13 using the macOS Instruments Time
+Profiler. Repetitions keep each single-fixture process alive for sampling;
+the speeds below are profiler-run context, not substitutes for the strict
+paired gate.
+
+| Source language | Fixture | Repetitions | Samples | Profiled speed |
+| --- | --- | ---: | ---: | ---: |
+| TypeScript | `parser.ts` | 500 | 1,204 | 26,797 bytes/ms |
+| Go | `proc.go` | 1,000 | 1,493 | 16,481 bytes/ms |
+| C++ | `rule.cc` | 5,000 | 1,063 | 11,319 bytes/ms |
+| Rust | `ast.rs` | 1,200 | 895 | 21,396 bytes/ms |
+| Python | `python3.8_grammar.py` | 1,200 | 1,050 | 13,386 bytes/ms |
+
+The SVG artifacts are:
+
+- `/private/tmp/s8-typescript-flamegraph.svg`
+- `/private/tmp/s8-go-flamegraph.svg`
+- `/private/tmp/s8-cpp-flamegraph.svg`
+- `/private/tmp/s8-rust-flamegraph.svg`
+- `/private/tmp/s8-python-flamegraph.svg`
+
+The root-level inclusive phase view after S8 is:
+
+| Inclusive frame | TypeScript | Go | C++ | Rust | Python |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `parser_lex_lookahead` | **38.79%** | 27.60% | **39.79%** | **39.66%** | **48.67%** |
+| `parser_reduce` | 23.92% | **31.88%** | 25.59% | 26.93% | 23.14% |
+| `parser_finalize_tree` | 15.12% | 11.25% | 9.88% | 13.97% | 9.14% |
+| `stack_iter` within reduction | 6.23% | 8.04% | 7.06% | 6.70% | 5.62% |
+| `compact_history_at_boundary` | 0.66% | 0.60% | below resolution | below resolution | 0.10% |
+
+TypeScript, C++, Rust, and especially Python remain lex-phase-bound. Go
+remains reduction-bound. Python's lex phase includes an external-scanner
+`scan` rectangle at 9.62% and a separate scanner-deserialization rectangle at
+6.57%; C++'s contains generated `ts_lex` at 20.70%. These are
+language-specific costs, not all reusable core lexer work.
+
+For the three fixtures with preserved pre-S8 SVGs, the table below sums the
+disjoint `lexer_do_advance` rectangles beneath their different generated and
+external lexer callers. Decoder rectangles are descendants and are shown
+separately, not added to the advance share.
+
+| Language | Profiled speed, pre → S8 | `lexer_do_advance`, pre → S8 | `ts_decode_utf8`, pre → S8 |
+| --- | ---: | ---: | ---: |
+| TypeScript | 26,539 → 26,797 bytes/ms | 8.71% → **7.06%** | 1.73% → **1.41%** |
+| Go | 16,083 → 16,481 bytes/ms | 4.21% → **3.55%** | 1.23% → **0.54%** |
+| C++ | 11,060 → 11,319 bytes/ms | 5.59% → **3.76%** | 1.40% → **0.66%** |
+
+The targeted frames shrink in every comparable language, consistent with the
+95.85% fast-path hit ratio and the accepted strict-gate win. The overall lex
+phase does not disappear because it also contains generated grammar decisions,
+external scanners, table dispatch, and the coordinate/lookahead work that an
+advance must still perform. S8 changes the cost distribution without changing
+the higher-level bottleneck split: Go still favors reduction/stack work, while
+the other four profiles favor lexing.
+
+## Current Rust-core bottleneck profile (2026-07-15)
+
+- Source: current `master` at `1a337cf5`; measurement only, no counter feature
+- Strict command: `cargo xtask perf-gate`
+- Profile binary: optimized `tree-sitter-cli` benchmark, Rust core
+- Sampler: macOS `sample`, five seconds at 1 ms intervals
+
+The strict seven-language gate passed at **+7.67% raw** and **+10.49%
+baseline-normalized** throughput versus C. Peak RSS remained report-only at
+34.1 MiB versus 15.0 MiB. Per-language throughput was:
+
+| Language | Cases | Rust bytes/ms | C bytes/ms | Delta |
+| --- | ---: | ---: | ---: | ---: |
+| C++ | 2 | 11,804.0 | 11,104.1 | +6.30% |
+| Go | 4 | 15,967.8 | 14,331.3 | +11.42% |
+| Java | 2 | 13,774.4 | 12,800.6 | +7.61% |
+| JavaScript | 2 | 17,710.2 | 16,197.4 | +9.34% |
+| Python | 12 | 11,201.9 | 10,606.8 | +5.61% |
+| Rust | 2 | 15,240.8 | 13,145.4 | +15.94% |
+| TypeScript | 11 | 23,361.0 | 21,673.6 | +7.79% |
+| **Overall** | **35** | **15,119.3** | **14,042.1** | **+7.67%** |
+
+Profiles isolated `parser.ts` for TypeScript, `proc.go` for Go, and `rule.cc`
+for C++. Repetition counts only kept the process alive for sampling. Each row
+below assigns exclusive top-of-stack samples to one subsystem, so categories
+do not overlap. Generated `ts_lex`/`ts_lex_keywords` and generated
+`set_contains` are separated from reusable Rust lexer plumbing; scanner
+functions compiled from `scanner.c` are separate again.
+
+```sh
+sample "$PID" 5 1 -mayDie -file /private/tmp/current-LANGUAGE.sample.txt
+```
+
+| Exclusive subsystem | TypeScript (4,163) | Go (4,189) | C++ (4,195) |
+| --- | ---: | ---: | ---: |
+| Generated lexer | 12.85% | 11.36% | **34.73%** |
+| External scanner | 3.07% | <0.12% | <0.12% |
+| Core lexer plumbing | **29.23%** | **21.70%** | 17.54% |
+| Reduce control | 4.16% | **12.32%** | 5.39% |
+| Stack operations | 12.59% | **18.10%** | 12.49% |
+| Node construction/summarization | 12.85% | 13.87% | 10.75% |
+| Parser dispatch/table lookup | 14.24% | 9.50% | 11.23% |
+| Acceptance and balance | 7.04% | 7.04% | 4.20% |
+| Allocator and raw copies | 2.35% | 3.89% | 2.34% |
+| Other named / sub-five-sample symbols | 1.61% | 2.22% | 1.33% |
+
+The hottest exclusive symbols make the language split clearer:
+
+| Rank | TypeScript | Go | C++ |
+| ---: | --- | --- | --- |
+| 1 | `lexer_do_advance` 14.65% | `parser_reduce` 12.32% | generated `ts_lex` 23.93% |
+| 2 | generated `ts_lex` 11.05% | generated `ts_lex` 9.60% | generated `set_contains` 9.08% |
+| 3 | `language_table_entry` 9.37% | `stack_iter` 9.52% | `stack_iter` 6.98% |
+| 4 | `stack_iter` 6.87% | `lexer_do_advance` 7.90% | `language_table_entry` 6.65% |
+| 5 | `parser_lex_lookahead` 6.27% | `add_internal_child` 6.33% | `lexer_do_advance` 5.82% |
+| 6 | `add_internal_child` 5.89% | `parser_lex_lookahead` 6.23% | `parser_reduce` 5.39% |
+
+### Inclusive phase view (`cargo flamegraph`)
+
+`cargo flamegraph` 0.6.13 independently profiled the same three optimized
+benchmarks using the macOS Instruments Time Profiler. The benchmark profile
+was rebuilt with `CARGO_PROFILE_BENCH_DEBUG=true` so the Rust frames remained
+symbolized. These commands generated the SVGs in `/private/tmp`:
+
+```sh
+CARGO_PROFILE_BENCH_DEBUG=true \
+TREE_SITTER_BENCHMARK_LANGUAGE_FILTER=typescript \
+TREE_SITTER_BENCHMARK_EXAMPLE_FILTER=parser.ts \
+TREE_SITTER_BENCHMARK_KIND_FILTER=normal \
+TREE_SITTER_BENCHMARK_REPETITION_COUNT=500 \
+cargo flamegraph -p tree-sitter-cli --bench benchmark \
+  --output /private/tmp/current-typescript-flamegraph.svg --deterministic
+
+CARGO_PROFILE_BENCH_DEBUG=true \
+TREE_SITTER_BENCHMARK_LANGUAGE_FILTER=go \
+TREE_SITTER_BENCHMARK_EXAMPLE_FILTER=proc.go \
+TREE_SITTER_BENCHMARK_KIND_FILTER=normal \
+TREE_SITTER_BENCHMARK_REPETITION_COUNT=1000 \
+cargo flamegraph -p tree-sitter-cli --bench benchmark \
+  --output /private/tmp/current-go-flamegraph.svg --deterministic
+
+CARGO_PROFILE_BENCH_DEBUG=true \
+TREE_SITTER_BENCHMARK_LANGUAGE_FILTER=cpp \
+TREE_SITTER_BENCHMARK_EXAMPLE_FILTER=rule.cc \
+TREE_SITTER_BENCHMARK_KIND_FILTER=normal \
+TREE_SITTER_BENCHMARK_REPETITION_COUNT=5000 \
+cargo flamegraph -p tree-sitter-cli --bench benchmark \
+  --output /private/tmp/current-cpp-flamegraph.svg --deterministic
+```
+
+The table uses the largest top-level rectangle for each phase. Flamegraphs are
+inclusive, so a phase includes its descendants and repeated rectangles under
+other callers must not be added to it. `stack_iter` is shown as an important
+descendant of reduction, not as another disjoint phase.
+
+| Inclusive frame | TypeScript | Go | C++ |
+| --- | ---: | ---: | ---: |
+| `parser_lex_lookahead` | **39.19%** | 26.41% | **41.90%** |
+| `parser_reduce` | 24.24% | **33.14%** | 24.86% |
+| `parser_finalize_tree` | 13.97% | 10.68% | 9.12% |
+| `stack_iter` within reduction | 6.00% | 8.16% | 6.98% |
+| `compact_history_at_boundary` | 0.74% | 0.65% | below sampling resolution |
+
+This call-stack view explains where the exclusive work composes into parser
+phases. TypeScript's 39.19% lex phase contains its core advancement work,
+generated lexer, and external scanner. Go's 33.14% reduction phase contains
+the separately observed pop traversal and node construction costs. C++'s
+41.90% lex phase is dominated by the generated grammar lexer in the exclusive
+profile. Finalization is a meaningful secondary phase at 9.12–13.97%, but it
+is not the leading bottleneck; the new history compactor is below 1% wherever
+the profiler resolves it.
+
+### Bottleneck conclusion
+
+There is no single universal hot function:
+
+- **TypeScript is core-lexer-bound.** Reusable lexer plumbing is 29.23%, led
+  by `lexer_do_advance` alone at 14.65%; generated lexer plus external scanner
+  is another 15.92%. The best core-owned throughput target is therefore the
+  byte/chunk/decode path behind lexer advancement, not the TypeScript scanner.
+- **Go is reduction/stack-bound.** Reduce control, stack operations, and node
+  construction total 44.29%. `parser_reduce` (12.32%) and `stack_iter` (9.52%)
+  are the two hottest exclusive functions. Go is the workload most likely to
+  reward removal of a full reduce/pop/construction phase; small local fast
+  paths remain unlikely to generalize.
+- **C++ is grammar-lexer-bound.** Generated lexer code consumes 34.73%, mostly
+  `ts_lex` and its large Unicode-range `set_contains` helper. That code is
+  generated into the grammar library, so most of the largest C++ bottleneck is
+  outside the reusable Rust core. Core lexer plumbing is still 17.54%, but a
+  core-only change cannot eliminate the dominant generated decision tree.
+
+Across all three profiles, acceptance/balance is only 4.20–7.04% and raw
+allocator/copy symbols are 2.34–3.89%. Stack-history compaction did not reach
+the five-sample exclusive listing in any profile. Neither finalization,
+allocation, nor the new compactor is the current primary throughput limit.
+
+## NodeTable S6 tuned-policy held-out validation (2026-07-15)
+
+- Constant-hygiene commit: `88f4ac80` (`Derive stack compaction threshold from rows`)
+- Counter build: `cargo build --release -p tree-sitter-cli --features tree-sitter/core-stats`
+- Validation corpora: the checked-out TypeScript compiler and ast-grep Rust
+  sources; neither corpus is part of the 35-fixture performance gate
+- Post-change strict gate: **+8.09% raw**, **+10.86% normalized**, 33.7 MiB
+  versus 14.9 MiB (**+126.34%** peak RSS)
+
+The two selected policies now have workload-independent bounds, rather than
+only fixture-sweep justifications:
+
+- Stack compaction declares one semantic capacity: 8,192 rows. Its minimum
+  reclaimable payload is derived as `8,192 * StackNodes::row_size()` (currently
+  352 KiB), so a layout change updates the byte floor automatically. Immediately
+  after a copy the live graph contains no dead history; every later compaction
+  therefore requires at least one fresh standby-buffer-equivalent of dead
+  payload. Across any input with `D` bytes of history that become dead, there
+  can be at most `floor(D / floor_bytes)` triggers. Requiring total rows to be
+  at least four times live rows also caps copied rows at one quarter of the
+  pre-copy row count. These bounds amortize the walk and copy by history
+  appended, independent of file shape.
+- For a parser table containing `N` source rows, the 250-basis-point acceptance
+  test permits at most `floor(N / 40)` unreachable or newly de-shared rows.
+  Thus publishing in place retains/appends at most 2.5% row overhead in that
+  tree and publishes at most `1.025 * N` logical rows. This is a row-column
+  bound; allocator capacity rounding and variable-length child/scanner pools
+  are reported separately and are not silently claimed to share it.
+
+The release CLI used precompiled grammar libraries so grammar compilation is
+excluded from wall time and RSS. Each source file is a separate parse; the
+same parser is deliberately reused, matching an editor/service process and
+exercising the high-water capacity-retention policy. The constants were not
+changed after observing these results.
+
+```sh
+rg --files ../TypeScript/src -g '*.ts' > /tmp/sol-heldout-typescript-paths.txt
+/usr/bin/time -l target/release/tree-sitter parse \
+  --lib-path "$HOME/.cache/tree-sitter/lib/typescript.dylib" \
+  --lang-name typescript --paths /tmp/sol-heldout-typescript-paths.txt \
+  --quiet --stat
+
+rg --files ../../ast-grep -g '*.rs' > /tmp/sol-heldout-ast-grep-paths.txt
+/usr/bin/time -l target/release/tree-sitter parse \
+  --lib-path "$HOME/.cache/tree-sitter/lib/rust.dylib" \
+  --lang-name rust --paths /tmp/sol-heldout-ast-grep-paths.txt \
+  --quiet --stat
+```
+
+| Held-out repository | Files / bytes | Successful | Parses triggering compaction | Total triggers | Average trigger | Max triggers in one parse | Publish in place | Wall time | Peak RSS |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| TypeScript `src/**/*.ts` | 701 / 20,664,279 | 697 | 132 (18.83%) | 478 (0.682/parse) | 2.093 µs | 105 | 217 (30.96%) | 2.02 s | 242.25 MiB |
+| ast-grep `**/*.rs` | 154 / 1,223,145 | 153 | 1 (0.65%) | 1 (0.0065/parse) | 2.792 µs | 1 | 152 (98.70%) | 0.25 s | 15.19 MiB |
+
+The largest trigger count was `TypeScript/src/compiler/checker.ts`: a 3.13 MB
+file caused 105 compactions while creating 949,256 stack rows. Those triggers
+reclaimed 41.70 MB of logical history and consumed 0.246 ms in total. Across
+all 701 TypeScript parses, all 478 triggers consumed 1.000 ms, or 0.050% of the
+end-to-end wall time. This is repeated material reclamation in a very large
+parse, not small-stack trigger churn. The ast-grep corpus crossed the floor
+only once.
+
+TypeScript's aggregate accepted waste was 4.22%, but the threshold is applied
+per tree: 217 individual files still qualified for bounded publication.
+Ast-grep's aggregate waste was 0.075%, and 152 of 154 files qualified. The hit
+rates therefore do not collapse outside the benchmark corpus.
+
+The CLI reported four TypeScript files and one ast-grep file with syntax errors
+under the checked-out grammar revisions (99.43% and 99.35% success). They were
+kept in the workload and still emitted complete parser counters; this is a
+held-out policy/lifetime validation, not a grammar-conformance comparison.
+All behavior comparisons remain covered by the green focused and 1,507-case
+full-fixture parity gates.
+
+## NodeTable S6 stack-history compaction checkpoint (2026-07-15)
+
+- Implementation commit: `4f4754f4` (`Compact unreachable stack history`)
+- Counter build: off-by-default `tree-sitter/core-stats`
+- Strict command: `cargo xtask perf-gate`
+- Coverage command: `cargo xtask core-parity --full-fixtures`
+
+Stack history is compacted only after `parser_condense_stack` reports that it
+merged or pruned versions, when no graph-pop iterator is active. The exact
+reachability walk starts at every remaining version head, follows primary and
+alternate predecessor links, and sorts the resulting live ids. Compaction
+requires total rows to be at least four times live rows and enough exactly
+reclaimable row/link payload to fill one 8,192-row standby buffer (currently
+**352 KiB**). A rejected check schedules its next walk from the remaining byte
+deficit rather than rescanning at every condensation.
+
+The live graph is copied into an 8,192-row standby set. Active and standby
+columns then ping-pong, so ordinary triggers neither allocate nor free their
+row buffers. A delayed trigger whose old pool grew past twice that bound is
+released instead of becoming permanent retained capacity. This is
+swap-then-release, never realloc-in-place; it avoids the old+new high-water
+failure measured in `d232aae4`.
+
+Remapping is sound because `StackNodeId` is parser-private. Every holder is
+updated together: version heads, the base id, primary predecessors, and
+alternate predecessors. Recovery summaries store only positions, depths, and
+parse states, so they contain no ids to remap. A debug-only post-copy walk
+proves that configurations, syntax-node edges, reachable rows, and reachable
+alternate links are identical before and after remapping. The unit test also
+performs a second compaction and verifies that both column sets reuse their
+bounded capacity.
+
+The final feature-gated fixture pass measured the following actual triggers.
+Cost covers the reachability walk, copy, remap, and swap. C++, Java, and Rust
+never crossed the material-payload floor.
+
+| Language | Cases | Checks | Triggers | Live rows copied | Dead rows reclaimed | Average/trigger | Maximum trigger |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| C++ | 2 | 0 | 0 | 0 | 0 | — | — |
+| Go | 4 | 12 | 12 | 288 | 98,398 | 2.01 µs | 4.63 µs |
+| Java | 2 | 0 | 0 | 0 | 0 | — | — |
+| JavaScript | 2 | 20 | 20 | 675 | 170,789 | 2.34 µs | 9.25 µs |
+| Python | 12 | 6 | 6 | 179 | 78,366 | 1.90 µs | 3.25 µs |
+| Rust | 2 | 0 | 0 | 0 | 0 | — | — |
+| TypeScript | 11 | 13 | 12 | 371 | 102,324 | 2.24 µs | 5.17 µs |
+
+Trigger timing disproved the idea that copying the tiny live graph itself was
+a one-point cost: the aggregate collector time is tens of microseconds per
+large fixture. The initial allocator-per-trigger 8,192-row design averaged
+2.1–3.2 µs per trigger and appeared in only about 0.29% of JavaScript profile
+samples. The larger observed throughput movement was code-layout and run
+variance, so the acceptance decision uses the required same-session control
+and checked-in normalized baseline rather than an absolute raw number from a
+different session.
+
+| Policy | Raw delta | Normalized delta | Peak RSS | Result |
+| --- | ---: | ---: | ---: | --- |
+| Compaction disabled, adjacent control | +8.64% | +11.48% | 37.9 MiB | paired baseline |
+| 8,192-row-derived floor / ping-pong | +8.52% | +11.35% | 32.8 MiB | adopt: −0.12 raw points |
+| 512 KiB / 16,384-row ping-pong | +7.64% | +10.45% | 34.3 MiB | reject: retained pools too large |
+| 264 KiB / 6,400-row ping-pong | +7.57% | +10.37% | 32.9 MiB | reject: −1.07 raw points |
+| 176 KiB / 4,096-row ping-pong | +7.56% | +10.37% | 32.0 MiB | reject: −1.08 raw points |
+
+In the adopted paired run, JavaScript fell from 37.7 to 32.8 MiB and
+TypeScript from 37.9 to 32.8 MiB: reductions of 4.9 and 5.1 MiB, respectively,
+while staying inside the authorized ±0.5 raw-point window. RSS high-water
+samples vary more than paired throughput; the final committed strict gate
+reported **+7.96% raw**, **+10.82% normalized**, and 32.9 MiB versus 15.0 MiB
+(**+119.29%**). The mechanism therefore removes the measured dead-history
+term but does not satisfy the overall +10% RSS ceiling.
+
+All required post-commit gates passed: workspace tests, ABI surface, focused
+core parity, ast-grep, the strict performance gate, and full parity over 15
+focused samples, 36 examples, and 1,507 corpus cases. Stop here before compact
+leaves / the S6 gate-policy decision.
+
+## NodeTable S6 stack-history lifetime measurement (2026-07-15)
+
+- Measurement commit: `8d6c107c` (`Measure unreachable stack history`)
+- Counter build: off-by-default `tree-sitter/core-stats`
+- Strict command: `cargo xtask perf-gate`
+- Coverage command: `cargo xtask core-parity --full-fixtures`
+
+The counter walks backward from every current GLR version head after each
+`parser_condense_stack` call. It follows primary and alternate predecessor
+links, marks each reachable stack row once, and compares that exact set with
+the append-only row and alternate-link pools. A second snapshot runs
+immediately before acceptance calls `stack_clear`; this is necessary because
+`clear` resets logical lengths while deliberately retaining all capacity.
+
+The table below aggregates each fixture's largest post-condensation row count
+while at least one live head remains. “Dead payload” is the logical storage
+that no head can reach: 44 bytes per configuration/history row plus 8 bytes per
+alternate-link slot. The summed payload column describes the 35 independent
+workloads and is not simultaneous process memory. “Largest dead payload” and
+“max stack allocation” are per-language high-water values; stack allocation
+also includes capacity, pop scratch, heads, iterators, and slices.
+
+| Language | Cases | Rows at peak | Reachable | Unreachable | Dead rows | Dead alternate links | Summed dead payload | Largest dead payload | Max stack allocation |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| C++ | 2 | 7,926 | 15 | 7,911 | 99.811% | 14 | 0.332 MiB | 0.219 MiB | 0.344 MiB |
+| Go | 4 | 116,694 | 35 | 116,659 | 99.970% | 4,945 | 4.933 MiB | 2.722 MiB | 2.784 MiB |
+| Java | 2 | 2,068 | 16 | 2,052 | 99.226% | 18 | 0.086 MiB | 0.077 MiB | 0.087 MiB |
+| JavaScript | 2 | 180,673 | 13 | 180,660 | 99.993% | 1,005 | 7.588 MiB | 4.858 MiB | 5.509 MiB |
+| Python | 12 | 102,382 | 148 | 102,234 | 99.855% | 14 | 4.290 MiB | 1.165 MiB | 1.376 MiB |
+| Rust | 2 | 35,950 | 27 | 35,923 | 99.925% | 0 | 1.507 MiB | 1.284 MiB | 1.376 MiB |
+| TypeScript | 11 | 114,963 | 109 | 114,854 | 99.905% | 281 | 4.822 MiB | 4.378 MiB | 5.504 MiB |
+| **Overall** | **35** | **560,656** | **363** | **560,293** | **99.935%** | **6,277** | **23.559 MiB** | — | — |
+
+Every alternate-link slot present at the selected peaks was unreachable. At
+acceptance, every fixture had zero remaining heads: all 560,974 accumulated
+rows were unreachable before `stack_clear`. The nontrivial result is the
+post-condensation snapshot with live heads: reductions repeatedly replace a
+long construction history with a shallow live stack, so almost the entire
+append-only pool is already dead while parsing continues.
+
+The largest-fixture dead payload is 97.8% of Go's retained stack allocation,
+93.4% for Rust, 88.2% for JavaScript, 84.7% for Python, and 79.5% for
+TypeScript. This proves dead history is the dominant stack term and justifies
+designing reclamation; it does not yet choose epochs, chunks, remapping, or a
+free list. Per the review boundary, no trimming/recycling mechanism has been
+implemented.
+
+The feature-off strict checkpoint stayed green:
+
+| Language | Raw delta | Rust RSS | C RSS | RSS delta |
+| --- | ---: | ---: | ---: | ---: |
+| C++ | +8.93% | 11.2 MiB | 10.0 MiB | +12.03% |
+| Go | +12.71% | 24.4 MiB | 10.9 MiB | +123.50% |
+| Java | +9.77% | 8.7 MiB | 8.3 MiB | +4.52% |
+| JavaScript | +12.57% | 39.7 MiB | 14.7 MiB | +170.14% |
+| Python | +7.87% | 16.9 MiB | 10.1 MiB | +67.39% |
+| Rust | +16.78% | 17.3 MiB | 10.7 MiB | +62.02% |
+| TypeScript | +8.27% | 35.9 MiB | 15.0 MiB | +139.98% |
+| **Overall** | **+9.47%** | **39.7 MiB** | **15.0 MiB** | **+165.34%** |
+
+The baseline-normalized result was **+12.34%**. Workspace tests, ABI surface,
+focused core parity, ast-grep, the strict performance gate, and full-fixture
+parity over 15 samples, 36 examples, and 1,507 corpus cases all passed. Stop
+here for mechanism review.
+
+## NodeTable S6 bounded publish checkpoint (2026-07-15)
+
+- Implementation commits: `b6609fdb` (`Bound publish-in-place tree waste`)
+  and `ba350976` (`Keep sharing witnesses debug-only`)
+- Strict command: `cargo xtask perf-gate`
+- Coverage command: `cargo xtask core-parity --full-fixtures`
+
+The strict-zero result below was followed by a bounded sweep at 0.5%, 1%, and
+2.5%. The numerator is unreachable source rows plus rows appended to turn each
+extra accepted-graph occurrence into a unique row; the denominator is the
+original live parser-row count. Sharing no longer rejects publication by
+itself. Repeated occurrences are copied surgically, their parent child slots
+are patched, and their descendants are de-shared before the table is
+published.
+
+Shape accounting is not a separate release-mode acceptance walk. The balance
+discovery walk now marks reachable rows, folds error flags, measures waste, and
+builds the balance worklist together. When the threshold is exceeded, the
+compacting path consumes those marks in a linear copy instead of walking the
+accepted graph again. Sharing-source counters remain only as debug assertions.
+
+| Waste limit | In-place hits | Raw delta | Normalized delta | Peak RSS delta | Decision |
+| ---: | ---: | ---: | ---: | ---: | --- |
+| 0.5% | 2/35 (5.7%) | +7.88% | +10.71% | +154.81% | reject: below +8.20% raw floor |
+| 1.0% | 3/35 (8.6%) | +8.60% | +11.45% | +153.55% | passes floor, but fewer hits |
+| 2.5% | 15/35 (42.9%) | +9.34% | +12.20% | +149.18% | adopt |
+
+| Language | Cases | 0.5% hits | 1.0% hits | 2.5% hits |
+| --- | ---: | ---: | ---: | ---: |
+| C++ | 2 | 0 | 0 | 0 |
+| Go | 4 | 0 | 0 | 0 |
+| Java | 2 | 0 | 0 | 0 |
+| JavaScript | 2 | 0 | 0 | 1 |
+| Python | 12 | 0 | 0 | 8 |
+| Rust | 2 | 2 | 2 | 2 |
+| TypeScript | 11 | 0 | 1 | 4 |
+| **Overall** | **35** | **2** | **3** | **15** |
+
+The adopted 2.5% policy therefore reaches JavaScript and TypeScript rather
+than selecting only sharing-free fixtures. A fresh gate on the final committed
+code reported **+9.28% raw**, **+12.14% baseline-normalized**, and 37.7 MiB
+versus 14.9 MiB peak RSS (**+152.67%**). Throughput is above the S5 +8.20%
+adoption floor. Peak RSS remains far outside the +10% goal, so this completes
+only S6 prong 1.
+
+The never-zero garbage floor has a concrete source. `parser_accept` creates a
+final wrapper and leaves the pre-accept root unreachable, accounting for the
+universal one-row floor. The EOF lookahead and final token-cache token are
+reachable and are not part of that floor. Occasional additional one-row waste
+comes from the original leaf retained after shift-extra or keyword-fallback
+cloning. Larger JavaScript, TypeScript, Go, C++, and Java counts include
+abandoned GLR/reduction rows rather than a fixed constant set.
+
+All required gates passed. Full-fixture parity remained byte-identical for 15
+focused samples, 36 examples, and 1,507 corpus cases. Stop here for review;
+stack-history lifetime work (S6 prong 2) has not started.
+
+## NodeTable S6 publish-in-place checkpoint (2026-07-15)
+
+- Measured head: `f060c26c` (`Publish compact parser tables in place`)
+- Strict command: `cargo xtask perf-gate`
+- Coverage command: `cargo xtask core-parity --full-fixtures`
+- Result: all behavior and throughput gates passed; the strict zero-only
+  publish-in-place condition hit no benchmark fixture.
+
+The accepted-graph walk counts unreachable live rows and duplicate row
+occurrences exactly. Stack merge/version-fork and token-cache reuse counters
+act as a debug completeness witness: an accepted duplicate without a recorded
+sharing source is an assertion failure. Scratch vectors are parser-owned and
+retain capacity, and `cargo check -p tree-sitter --no-default-features`
+confirms they use `alloc::Vec` without depending on `std`.
+
+| Language | Cases | In-place hits | Smallest garbage count | Largest shared count |
+| --- | ---: | ---: | ---: | ---: |
+| C++ | 2 | 0 (0%) | 252 | 0 |
+| Go | 4 | 0 (0%) | 13 | 0 |
+| Java | 2 | 0 (0%) | 13 | 0 |
+| JavaScript | 2 | 0 (0%) | 954 | 62 |
+| Python | 12 | 0 (0%) | 1 | 0 |
+| Rust | 2 | 0 (0%) | 1 | 0 |
+| TypeScript | 11 | 0 (0%) | 2 | 402 |
+| **Overall** | **35** | **0 (0%)** | **1** | **402** |
+
+Because every fixture retained at least one unreachable row, the strict path
+did not transfer a parser table. This checkpoint therefore measures the exact
+accounting walk plus the existing compact finalizer, not the expected benefit
+of eliminating its copy. No garbage threshold was introduced; that is a
+separate decision after this required zero-only measurement.
+
+| Language | Cases | Rust bytes/ms | C bytes/ms | Delta | Rust RSS | C RSS | RSS delta |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| C++ | 2 | 11759.2 | 10923.6 | +7.65% | 11.1 MiB | 10.0 MiB | +11.41% |
+| Go | 4 | 15746.9 | 14307.3 | +10.06% | 23.8 MiB | 11.0 MiB | +117.26% |
+| Java | 2 | 13499.2 | 12490.0 | +8.08% | 8.5 MiB | 8.3 MiB | +2.63% |
+| JavaScript | 2 | 16938.9 | 15807.4 | +7.16% | 40.0 MiB | 14.7 MiB | +172.55% |
+| Python | 12 | 10912.1 | 10537.3 | +3.56% | 16.2 MiB | 10.1 MiB | +59.57% |
+| Rust | 2 | 14024.6 | 12954.7 | +8.26% | 18.7 MiB | 10.6 MiB | +76.81% |
+| TypeScript | 11 | 22884.8 | 21605.0 | +5.92% | 37.8 MiB | 15.0 MiB | +153.08% |
+| **Overall** | **35** | **14731.7** | **13922.9** | **+5.81%** | **40.0 MiB** | **15.0 MiB** | **+167.71%** |
+
+The checked-in-ratio normalized result is **+8.58%**, with no enforced
+per-case regression. Peak RSS remains far outside the +10% target and moved
+within the high variance already observed for the JavaScript high-water mark.
+Full-fixture parity remained byte-identical for 15 focused samples, 36
+examples, and 1,507 corpus cases. The S6 stop condition applies here: do not
+start stack-history work until the zero-hit result and a possible bounded
+garbage threshold have been reviewed.
+
+## Finalization worklist checkpoint (2026-07-15)
+
+- Measured head: `60d4de7c` (`Discover balance work during finalization`)
+- Command: `cargo xtask perf-gate`
+- Result: strict throughput gate passed; no enforced per-case regression above
+  5%.
+- Throughput: 15,471.4 bytes/ms for Rust versus 14,023.3 bytes/ms for C,
+  **+10.33% raw** and **+13.22% baseline-normalized**.
+- Peak RSS: 37.5 MiB for Rust versus 14.9 MiB for C, **+150.84%**
+  (report only; the S3 resource gate remains open).
+
+The accepted-tree copy now discovers internal nodes in the exact order needed
+by the resumable balance loop, removing its separate child-discovery walk.
+`cargo xtask core-parity --full-fixtures` remains byte-identical across all 36
+examples and 1,507 corpus cases. A disposable postorder-balance experiment
+failed on TypeScript `src/server/packageJsonCache.ts`; parent-before-child,
+right-to-left traversal is therefore observable behavior and is pinned by a
+NodeTable unit test.
+
+## NodeTable full-fixture behavior checkpoint (2026-07-15)
+
+- Measured head: `1cd08ae8` (`Compare the full fixture corpus`)
+- Command: `cargo xtask core-parity --full-fixtures`
+- Historical reference: C core revision
+  `c9f80282ad355a88a389d75173d918de84ef3e79`
+- Result: 36 example files and 1,507 corpus cases across all 15 checked-in
+  fixture packages and 17 grammar configurations produced byte-identical
+  S-expressions. Exit status also matched for every batch.
+
+The corpus comparison preserves intentional error cases. The CLI adds a
+process-specific `Parse: ... ms` diagnostic line for those cases; the harness
+removes only that timing line and compares the remaining S-expression bytes
+directly. The ordinary 15-sample core-parity probe, full workspace tests, ABI
+surface test, ast-grep gate, and strict performance gate are also green at
+this checkpoint.
+
+## NodeTable S5 final checkpoint (2026-07-15)
+
+- Measured head: `4634fc92` (`Record final parser runtime ownership`)
+- Command: `cargo xtask perf-gate`
+- Result: strict throughput gate passed; no enforced per-case regression above
+  5%.
+
+| Language | Cases | Rust bytes/ms | C bytes/ms | Delta | Rust RSS | C RSS | RSS delta |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| C++ | 2 | 12125.7 | 11228.3 | +7.99% | 11.2 MiB | 10.0 MiB | +11.86% |
+| Go | 4 | 16091.0 | 14293.2 | +12.58% | 23.8 MiB | 10.9 MiB | +117.71% |
+| Java | 2 | 13864.4 | 12502.3 | +10.89% | 8.6 MiB | 8.3 MiB | +3.77% |
+| JavaScript | 2 | 17675.0 | 16127.8 | +9.59% | 37.2 MiB | 14.7 MiB | +153.94% |
+| Python | 12 | 11073.2 | 10430.4 | +6.16% | 16.3 MiB | 10.1 MiB | +62.17% |
+| Rust | 2 | 14625.5 | 13089.3 | +11.74% | 17.3 MiB | 10.7 MiB | +61.90% |
+| TypeScript | 11 | 23644.3 | 21872.2 | +8.10% | 36.4 MiB | 15.0 MiB | +143.47% |
+| **Overall** | **35** | **15092.0** | **13947.8** | **+8.20%** | **37.2 MiB** | **15.0 MiB** | **+148.90%** |
+
+The checked-in-ratio normalized result is **+11.01%**. `cargo test --all`,
+the explicit ABI-surface test, `core-parity`, and `ast-grep-gate` are green at
+this checkpoint.
+
+The throughput gate is green, but the S3 peak-RSS target is not: the overall
+high-water mark remains 37.2 MiB versus 15.0 MiB for C. The retained parser
+columns coexist with fresh final rows at acceptance, as required by the current
+finalization design. Keep the S3 memory checkbox open; this report-only metric
+is not a pass and S5 documentation cleanup does not change that decision.
+
+## NodeTable allocation attribution checkpoint (2026-07-15)
+
+Feature-gated allocation-shape reporting landed in `71e559d0` and
+`e737560a`. The report counts actual column capacities after acceptance and
+the exact occurrence-expanded shape that finalization will produce. Commands:
+
+```sh
+env TREE_SITTER_CORE_IMPL=rust \
+  TREE_SITTER_BENCHMARK_LANGUAGE_FILTER=javascript \
+  TREE_SITTER_BENCHMARK_EXAMPLE_FILTER=jquery.js \
+  TREE_SITTER_BENCHMARK_KIND_FILTER=normal \
+  TREE_SITTER_BENCHMARK_REPETITION_COUNT=1 \
+  cargo bench --bench benchmark -p tree-sitter-cli \
+    --features tree-sitter/core-stats
+```
+
+The same command was run for Go with `proc.go`.
+
+| Fixture | Parser rows | Parser allocation | Stack allocation | Final rows | Final payload | Peak RSS |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| JavaScript `jquery.js` | 114,116 | 9,994,240 B | 5,776,096 B | 110,103 | 8,378,096 B | 37,879,808 B |
+| Go `proc.go` | 58,759 | 4,980,752 B | 2,918,816 B | 46,628 | 3,543,724 B | 21,757,952 B |
+
+For JavaScript, parser and retained stack columns alone occupy 15,770,336 B
+(15.04 MiB) before fresh final columns are allocated. The entire C benchmark
+process peaks around 14.4–14.5 MiB, so the specified uniform parser rows and
+append-only stack already exceed the +10% whole-process RSS ceiling without
+counting the executable, lexer, input, or final tree.
+
+Reserving the exact finalized shape cannot close the gap. Compared with the
+current source-shape reservation it can avoid only about 0.30 MiB for
+`jquery.js` and 0.89 MiB for `proc.go`. The dominant costs are simultaneous
+parse/final storage and retained stack history, not final-column overcapacity.
+Meeting the RSS gate therefore requires a representation or lifetime change;
+capacity tuning and the syntax-row free-list escape hatch are insufficient.
+
+### Rejected finalized-column shrink trial
+
+Commit `d232aae4` tried shrinking every finalized node column immediately
+after publication so the returned tree retained no spare capacity. The
+focused behavior tests stayed green, but strict performance measurement was
+stopped during JavaScript after peak RSS reached 64.3 MiB versus 14.4 MiB for
+C (+346%). On macOS, reallocating the columns during `shrink_to_fit` made the
+old and replacement allocations coexist transiently, increasing the exact
+high-water mark this change was intended to reduce.
+
+Commit `5b6cb85f` reverted the trial. Its full gate run passed at +8.02% raw
+and +10.85% baseline-normalized throughput, with 38.0 MiB versus 14.9 MiB
+overall peak RSS (+154.50%). Post-copy shrinking is therefore rejected. Exact
+right-sizing would need a different allocation/finalization plan; it cannot
+be added as a harmless capacity cleanup.
+
 ## Trial History Summary
 
 The former `PERFORMANCE_TRIALS.md` file has been merged here as the compact
@@ -27,14 +831,14 @@ Target languages: TypeScript, JavaScript, Python, Go, Rust, C++, Java.
 Current status:
 
 - Universal 20% normal-parse target: not met.
-- Kept gains: arena-backed reduction parents for fresh normal parses and the
-  parser-owned fresh reduction stack-pop builder.
-- Current direction: architecture investigation before more code trials. The
-  next attempt must remove a hot phase from normal parsing, not add another
-  partial fast path.
-- Avoid for now: small local fast paths, refcount-order tweaks, node-pool
-  tuning, benchmark-harness edits, dormant storage foundations, and SIMD
-  without a reusable-runtime scan-loop profile.
+- Current architecture: flat `NodeTable` syntax rows, indexed GLR stack
+  columns, pooled child/scanner/link storage, and bulk tree ownership.
+- Final strict checkpoint: +9.28% raw and +12.14% baseline-normalized versus C.
+- Open issue: peak RSS is +152.67% overall. The 2.5% publish-in-place policy
+  avoids parser/final coexistence for 15 of 35 fixtures, but high-waste large
+  fixtures still compact and retained stack history remains live.
+- Rejected S4 trial: carrying the full parent summary through pop DFS was
+  behavior-correct but lost roughly 4.2 normalized performance points.
 
 The hot loop remains:
 
@@ -162,6 +966,389 @@ for optimization decisions and record the gain against this table until a
 broader baseline replaces it.
 
 ## Checkpoints
+
+### 2026-07-14 EDT - representative S1 regression baseline
+
+The original strict gate compared one timing sample per fixture directly with
+the C core. Java and C++ had only two small fixtures each, and back-to-back
+runs moved individual Rust/C ratios by more than 20%, so that gate could not
+reliably measure S2's required regression from S1.
+
+The repaired gate preserves each fixture's syntax and makes the comparison
+repeatable:
+
+- fixtures below 128 KiB are parsed repeatedly instead of concatenated;
+- each fixture is measured independently in five alternating Rust/C trials;
+- the median paired Rust/C ratio is compared with a checked-in S1 baseline;
+- every fixture contributes to the overall gate, which permits at most the
+  design's 4% S2 regression;
+- the 5% per-case limit is enforced for original fixtures of at least 128 KiB;
+  smaller cases remain visible in the report but do not fail the gate; and
+- absolute Rust-versus-C throughput and peak RSS remain visible. Peak RSS is
+  now measured in a fresh process per fixture, although only the overall
+  maximum is used for the architecture decision.
+
+Baseline creation and strict validation used:
+
+```sh
+cargo xtask perf-gate --write-baseline
+cargo xtask perf-gate
+```
+
+| Run | Rust bytes/ms | C bytes/ms | Absolute delta | Delta from S1 baseline | Max RSS delta |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Baseline | 13,871.8 | 14,235.3 | -2.55% | 0.00% | +1.15% |
+| Immediate strict validation | 14,072.1 | 14,413.1 | -2.37% | +0.20% | +1.04% |
+
+The strict validation had no baseline-normalized regression above 5% among
+fixtures at least 128 KiB and passed. The checked-in ratios are a frozen S1
+reference; `--write-baseline` is only for deliberately establishing a new
+architecture checkpoint, never for accepting a regression.
+
+### 2026-07-14 EDT - NodeTable S1 read-side identity seam
+
+S1 centralized public node-id encoding and decoding, changed tree-cursor
+entries to carry opaque identities, and introduced `NodeRef<'tree>` for node
+navigation. The parser, stack, subtree representation, and construction path
+are unchanged.
+
+```sh
+cargo xtask perf-gate --report-only
+```
+
+| Language | Rust bytes/ms | C bytes/ms | Delta | Rust peak RSS | C peak RSS |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| C++ | 5,222.2 | 6,477.3 | -19.38% | 10.2 MiB | 10.1 MiB |
+| Go | 14,277.1 | 14,114.4 | +1.15% | 10.9 MiB | 11.1 MiB |
+| Java | 8,946.4 | 11,533.8 | -22.43% | 8.3 MiB | 8.2 MiB |
+| JavaScript | 16,586.9 | 16,671.5 | -0.51% | 14.6 MiB | 14.7 MiB |
+| Python | 11,378.1 | 11,311.8 | +0.59% | 10.2 MiB | 10.0 MiB |
+| Rust | 16,571.9 | 17,157.3 | -3.41% | 10.7 MiB | 10.5 MiB |
+| TypeScript | 24,967.4 | 24,486.5 | +1.96% | 15.1 MiB | 15.0 MiB |
+| Overall | 16,453.5 | 16,511.1 | -0.35% | 15.1 MiB maximum | 15.0 MiB maximum |
+
+The immediately preceding post-S0 report-only run was -1.13% overall versus
+C; S1 moved that relationship by +0.78 percentage points, within the observed
+run-to-run noise and in the non-regressing direction. This satisfies S1's
+zero-delta expectation. The strict gate again reproduced the pre-existing
+baseline failure (-1.59% overall with noisy small-fixture outliers); no parser
+hot-path code changed in S1.
+
+### 2026-07-14 EDT - NodeTable S0 shape and memory baseline
+
+S0 added off-by-default `core-stats` counters, peak-RSS reporting, and tree
+copy/edit identity probes without changing the parser or tree representation.
+Each normal corpus fixture was parsed once with the Rust core. Heap-backed
+nodes reachable through more than one tree edge were counted once at accept,
+so created-versus-live measures current allocation garbage rather than DAG
+edge multiplicity. Finalization intentionally duplicates shared occurrences
+into separate NodeTable rows; that multiplier is measured separately below.
+Counts below are aggregated by language.
+
+```sh
+TREE_SITTER_CORE_IMPL=rust \
+TREE_SITTER_BENCHMARK_LANGUAGE_FILTER=<language> \
+TREE_SITTER_BENCHMARK_KIND_FILTER=normal \
+TREE_SITTER_BENCHMARK_REPETITION_COUNT=1 \
+cargo bench benchmark -p tree-sitter-cli --features tree-sitter/core-stats
+```
+
+| Language | Fixtures | Created rows | Inline leaves | Heap leaves | Internal nodes | Garbage rows |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| C++ | 2 | 7,772 | 40.787% | 0.103% | 59.110% | 11.040% |
+| Go | 4 | 104,644 | 34.957% | 3.364% | 61.680% | 18.846% |
+| Java | 2 | 2,038 | 42.738% | 0.000% | 57.262% | 11.776% |
+| JavaScript | 2 | 177,365 | 40.411% | 2.073% | 57.516% | 2.015% |
+| Python | 12 | 102,154 | 32.560% | 8.716% | 58.724% | 0.981% |
+| Rust | 2 | 35,115 | 38.083% | 1.589% | 60.327% | 0.006% |
+| TypeScript | 11 | 111,418 | 39.775% | 1.065% | 59.159% | 2.314% |
+
+Go's worst individual fixture discarded 20.329% (10,907 rows). At a
+provisional 72 bytes per row, that is about 0.75 MiB of parse-time storage.
+
+The follow-up occurrence counter measured the extra rows created when the
+preorder finalizer turns accepted DAG sharing into a proper tree:
+
+| Language | Unique accepted nodes | Final rows | Duplicated rows | Row overhead |
+| --- | ---: | ---: | ---: | ---: |
+| C++ | 6,914 | 6,914 | 0 | 0.000% |
+| Go | 84,923 | 84,923 | 0 | 0.000% |
+| Java | 1,798 | 1,798 | 0 | 0.000% |
+| JavaScript | 173,791 | 173,869 | 78 | 0.045% |
+| Python | 101,152 | 101,152 | 0 | 0.000% |
+| Rust | 35,113 | 35,113 | 0 | 0.000% |
+| TypeScript | 108,840 | 109,290 | 450 | 0.413% |
+
+The largest measured multiplier is TypeScript at 1.0041×. Finalization
+duplication is therefore negligible for the uniform-row and free-list
+decisions; importantly, it is distinct from the created-versus-live garbage
+ratio above.
+
+Peak RSS was measured by the benchmark child using `getrusage(RUSAGE_SELF)`.
+The full seven-language, ten-repetition report-only run produced:
+
+These S0 per-language values are process-lifetime high-water marks and inherit
+fixture run-order contamination; only the overall maximum was used for the S0
+architecture decision. The repaired gate above now runs each fixture in a
+fresh process.
+
+| Language | Rust peak RSS | C peak RSS | Delta |
+| --- | ---: | ---: | ---: |
+| C++ | 10.1 MiB | 10.1 MiB | +0.15% |
+| Go | 10.9 MiB | 10.9 MiB | +0.14% |
+| Java | 8.3 MiB | 8.3 MiB | +0.00% |
+| JavaScript | 14.7 MiB | 14.7 MiB | -0.11% |
+| Python | 10.1 MiB | 10.1 MiB | +0.00% |
+| Rust | 10.7 MiB | 10.6 MiB | +0.74% |
+| TypeScript | 15.2 MiB | 15.0 MiB | +1.15% |
+| Overall maximum | 15.2 MiB | 15.0 MiB | +1.15% |
+
+## NodeTable S2 decision checkpoint (2026-07-14)
+
+The completed tree-side cutover was measured without changing the parser-side
+`Subtree` representation. The converter consumes the accepted pointer tree as
+it creates NodeTable rows, so it replaces the former teardown walk. Even with
+that overlap reduction, S2 alone missed both decision limits:
+
+- baseline-normalized throughput: **-10.23%** (required: no worse than -4%);
+- peak Rust RSS: **32.9 MiB**, versus the S1 Rust maximum of 15.1 MiB
+  (**+117.9%**, required: no more than +10%).
+
+| Language | Rust bytes/ms | C bytes/ms | Delta | Rust peak RSS | S1 Rust peak RSS |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| C++ | 9,314.0 | 11,161.6 | -16.55% | 11.2 MiB | 10.2 MiB |
+| Go | 13,752.7 | 14,950.9 | -8.01% | 19.8 MiB | 10.9 MiB |
+| Java | 11,923.0 | 13,263.8 | -10.11% | 8.6 MiB | 8.3 MiB |
+| JavaScript | 15,383.7 | 16,603.9 | -7.35% | 32.0 MiB | 14.6 MiB |
+| Python | 9,206.5 | 10,807.0 | -14.81% | 15.0 MiB | 10.2 MiB |
+| Rust | 11,350.1 | 13,225.9 | -14.18% | 15.8 MiB | 10.7 MiB |
+| TypeScript | 19,282.3 | 21,567.9 | -10.60% | 32.9 MiB | 15.1 MiB |
+| Overall | 12,483.1 | 14,272.6 | -12.54% | 32.9 MiB maximum | 15.1 MiB maximum |
+
+The checked-in-ratio gate also reported two baseline-normalized large-case
+regressions above 5%: `jquery.js` (-10.75%) and `parser.ts` (-10.18%). This is
+the transient cost anticipated by the design: parsing still allocates the old
+pointer representation, then publishes a second uniform-row representation.
+S2 was committed as `42026429` at the user's direction so that it remained a
+separate, reviewable history point before S3. Its failed checkpoint is kept
+here unchanged; S2 is only acceptable as the first half of the stacked S2+S3
+cutover. The numbers do not justify weakening the gate or its baseline.
+
+Decision checkpoint:
+
+- Inline leaves are not the majority node class: they account for
+  32.560–42.738% of created nodes, and all leaves together account for
+  38.320–42.738%. This contradicts the design's leaf-majority expectation.
+  Start the S3 spike with uniform rows; adopt compact leaves only if the S3
+  bandwidth profile shows that uniform rows erase the allocation/refcount
+  gain.
+- Do not add a free list by default. Go's garbage ratio is material, but the
+  worst measured provisional waste is only about 0.75 MiB and the current
+  Rust/C RSS difference is 0.14%. Retain the free list as the specified S3
+  escape hatch if the table-backed implementation exceeds the +10% RSS gate.
+
+The corresponding report-only throughput run was -2.67% overall versus C.
+The pre-existing strict performance gate remains noisy and was already red
+before S0; S0 changes are diagnostic/off by default, so RSS collection used
+the specified report-only mode. Correctness, ABI, core-parity, and consumer
+gates remained strict.
+
+## NodeTable S3 parser-cutover checkpoint (2026-07-14)
+
+Commits `8dabbc89` and `ffd943b1` build lexer, parser, recovery, and stack-link
+syntax values directly in the parser-owned `NodeTable`, then delete the
+pointer-backed `Subtree` storage. Internal-node creation now summarizes its
+children during the row append, and finalization drops unreachable GLR rows
+and performs cancellable repeat balancing before publishing the tree.
+
+```sh
+cargo xtask perf-gate
+```
+
+| Language | Rust bytes/ms | C bytes/ms | Delta | Rust peak RSS | C peak RSS |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| C++ | 10,933.1 | 11,164.5 | -2.07% | 12.1 MiB | 10.0 MiB |
+| Go | 14,862.0 | 14,438.9 | +2.93% | 27.0 MiB | 11.0 MiB |
+| Java | 12,849.8 | 12,704.5 | +1.14% | 8.7 MiB | 8.3 MiB |
+| JavaScript | 16,068.1 | 15,551.8 | +3.32% | 40.1 MiB | 14.5 MiB |
+| Python | 10,294.6 | 10,624.1 | -3.10% | 17.6 MiB | 10.1 MiB |
+| Rust | 12,964.1 | 12,855.0 | +0.85% | 18.1 MiB | 10.6 MiB |
+| TypeScript | 21,337.2 | 21,656.3 | -1.47% | 36.8 MiB | 15.0 MiB |
+| Overall | 13,847.8 | 14,005.9 | -1.13% | 40.1 MiB maximum | 15.0 MiB maximum |
+
+The checked-in S1 ratio comparison moved by **+1.44%**, with no
+baseline-normalized regression above 5% for fixtures of at least 128 KiB, so
+the throughput gate passed. This confirms that uniform 72-byte parser rows do
+not erase the allocation/refcount gain; the compact-leaf fallback remains
+unnecessary for bandwidth.
+
+Peak RSS remains the open S3 failure: the maximum is **+167.36%** versus C,
+and Go is **+145.31%**. Recycling provably unpublished losing candidates is
+already enabled, so the remaining memory is dominated by retained parser-table
+capacity plus the finalized tree, not just dead reduction parents. S3 is not
+complete until the stack/table allocation work addresses this peak; the RSS
+threshold remains unchanged.
+
+### S3 indexed-stack checkpoint
+
+The stack-side cutover was kept in four reviewable commits:
+
+- `d9521d71` replaces allocated, refcounted stack nodes with 32-bit ids and
+  jointly-reserved configuration/history columns;
+- `dd47322b` shrinks the common history row from 68 bytes to 16 bytes by
+  storing one primary link inline and uncommon alternatives in a range pool;
+- `1b819b12` replaces per-branch pop child arrays with checkpointed linked
+  scratch paths, so a GLR fork copies only a tail id;
+- `cf08a2fe` stores recovery summaries directly in stack heads instead of
+  heap-allocating an `Array` header behind `NonNull`.
+
+An intermediate borrow workaround accidentally materialized every node's
+links with `to_vec()` inside `stack_iter`; the focused normalized result fell
+to -11.03%. A sample profile identified the allocation immediately. Borrowing
+the `stack_nodes` and `iterators` fields independently removed the allocation
+and restored the gate before any commit was made.
+
+Final command:
+
+```sh
+cargo xtask perf-gate
+```
+
+| Language | Rust bytes/ms | C bytes/ms | Delta | Rust peak RSS | C peak RSS |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| C++ | 11,139.0 | 10,691.3 | +4.19% | 11.7 MiB | 10.0 MiB |
+| Go | 14,828.5 | 13,963.0 | +6.20% | 27.9 MiB | 10.9 MiB |
+| Java | 13,234.1 | 12,947.7 | +2.21% | 8.7 MiB | 8.3 MiB |
+| JavaScript | 16,535.7 | 16,088.8 | +2.78% | 46.6 MiB | 14.5 MiB |
+| Python | 10,485.2 | 10,500.2 | -0.14% | 18.3 MiB | 10.1 MiB |
+| Rust | 13,098.7 | 12,917.9 | +1.40% | 20.0 MiB | 10.6 MiB |
+| TypeScript | 21,938.2 | 21,843.7 | +0.43% | 44.5 MiB | 14.9 MiB |
+| Overall | 14,110.0 | 13,913.8 | +1.41% | 46.6 MiB maximum | 14.9 MiB maximum |
+
+The checked-in S1 ratio comparison improved by **+4.08%** and had no enforced
+large-case regression. The compact-leaf fallback remains unnecessary.
+
+Peak RSS still fails the design target: the overall delta is **+212.13%** and
+Go is **+155.00%**, versus the normative maximum of +10%. The range pool does
+materially reduce stack memory—the fixed-history intermediate peaked at 53.5
+MiB in the same harness, while the range-pool checkpoints were 44–47 MiB—but
+the parser table and finalized tree coexist at accept and remain dominant.
+The harness still prints RSS as report-only, so its successful exit status is
+not evidence that the design's memory gate passed.
+
+Behavior validation remained green:
+
+```sh
+cargo test --all
+cargo test -p tree-sitter --test abi_surface
+cargo xtask core-parity
+cargo xtask ast-grep-gate
+cargo xtask core-parity --sample-limit 10 --corpus-sample-limit 100000
+```
+
+The exhaustive parity command compared **123** TypeScript/TSX corpus and
+focused-source samples in both normal and `--no-ranges` modes, byte-for-byte
+against the historical C core. The broader all-language fixture byte-diff and
+RSS target remain open, so the S3 gate is not checked off.
+
+### S3 right-sized finalization checkpoint
+
+`4ca204fc` reserves each finalized column from the measured parse-table shape.
+This avoids power-of-two overcapacity while the reusable parser table and the
+new published tree coexist. It does not change row contents or ownership.
+
+| Language | Rust bytes/ms | C bytes/ms | Delta | Rust peak RSS | C peak RSS |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| C++ | 11,325.3 | 11,000.4 | +2.95% | 11.2 MiB | 10.0 MiB |
+| Go | 15,196.6 | 14,399.5 | +5.54% | 24.1 MiB | 10.9 MiB |
+| Java | 13,102.0 | 12,796.1 | +2.39% | 8.5 MiB | 8.3 MiB |
+| JavaScript | 16,533.3 | 15,826.6 | +4.47% | 37.3 MiB | 14.7 MiB |
+| Python | 10,889.6 | 10,545.0 | +3.27% | 16.1 MiB | 10.1 MiB |
+| Rust | 13,898.5 | 13,024.0 | +6.71% | 17.4 MiB | 10.5 MiB |
+| TypeScript | 22,244.6 | 21,670.8 | +2.65% | 36.5 MiB | 15.0 MiB |
+| Overall | 14,480.4 | 13,977.2 | +3.60% | 37.3 MiB maximum | 15.0 MiB maximum |
+
+The checked-in S1 ratio comparison is **+6.30%**. Peak RSS fell by 9.3 MiB
+from the indexed-stack checkpoint, but **+148.80%** still fails the normative
++10% target. The remaining peak is structural coexistence, not final-column
+overcapacity, so the S3 gate remains open.
+
+### S4 source-length capacity measurement
+
+The proposed source-length reservation was measured before adding parser
+state or changing growth policy. One `core-stats` parse per stress fixture
+produced:
+
+| Fixture | Source bytes | Created rows | Rows/source byte |
+| --- | ---: | ---: | ---: |
+| JavaScript `jquery.js` | 247,351 | 114,116 | 0.461 |
+| JavaScript `text-editor-component.js` | 151,531 | 64,704 | 0.427 |
+| TypeScript `parser.ts` | 376,385 | 102,366 | 0.272 |
+
+The smaller TypeScript fixtures ranged roughly from 0.35 to 0.40 rows per
+byte. Consequently, one language-independent reserve ratio does not improve
+the high-water mark reliably: `/2` avoids JavaScript growth but over-reserves
+the large TypeScript fixture substantially, while `/3` under-reserves
+JavaScript and triggers a doubling step larger than the current power-of-two
+capacity. Callback `TSInput` also has no authoritative total length.
+
+The measured S4 decision is therefore to keep joint geometric growth and
+retain each parser's observed high-water capacity. No source-length field or
+speculative per-language heuristic is added.
+
+### S4 parser-owned `Vec` checkpoint
+
+Three manual `Array` payloads with no ABI or allocator-boundary requirement
+were replaced in separate commits:
+
+- `5884621b`: popped reduction child lists use `Vec<NodeId>`;
+- `84f0c1c4`: trailing-extra scratch uses `Vec<NodeId>`;
+- `5f62fafb`: recovery reduction candidates use `Vec<ReduceAction>`.
+
+This removes explicit child-list deletion, two read-before-consume patterns,
+and the unused `array_swap` helper. The final canonical gate reported:
+
+| Language | Rust bytes/ms | C bytes/ms | Delta | Rust peak RSS | C peak RSS |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| C++ | 11,581.6 | 11,368.4 | +1.88% | 11.2 MiB | 10.0 MiB |
+| Go | 15,684.2 | 14,460.9 | +8.46% | 23.9 MiB | 11.0 MiB |
+| Java | 13,443.6 | 12,355.8 | +8.80% | 8.6 MiB | 8.3 MiB |
+| JavaScript | 16,269.9 | 15,856.6 | +2.61% | 36.6 MiB | 14.4 MiB |
+| Python | 11,188.4 | 10,644.5 | +5.11% | 16.1 MiB | 10.0 MiB |
+| Rust | 14,070.0 | 12,830.4 | +9.66% | 17.4 MiB | 10.5 MiB |
+| TypeScript | 23,038.5 | 22,092.0 | +4.28% | 36.6 MiB | 14.9 MiB |
+| Overall | 14,849.6 | 14,089.6 | +5.39% | 36.6 MiB maximum | 14.9 MiB maximum |
+
+The checked-in S1 ratio comparison is **+8.15%**. Peak RSS remains outside
+the S3 target; the ownership cleanup neither introduces nor solves the fresh
+parse-table/final-tree coexistence.
+
+Follow-up commits `787f0525`, `e96c96b9`, and `6acf48f4` moved recovery
+summaries, GLR version heads, and DFS iterator scratch to `Vec`. The final
+repeat gate passed at **+4.71%** normalized overall; its preceding run missed
+one large JavaScript threshold by 0.02 percentage points, while the repeat
+placed that case within the gate. This spread is benchmark noise, so no
+throughput improvement is attributed to the ownership-only changes.
+
+`dff8be59` then replaced one allocation per selected pop result with a shared,
+retained child buffer. Pop slices carry `(offset, len)`; only recovery and
+accept copy children because those cold paths mutate the list. The canonical
+gate improved to **+10.58%** raw Rust/C throughput and **+13.49%** normalized,
+with no enforced large-case regression. Peak RSS remained 37.2 MiB versus
+14.9 MiB, confirming that pop-result allocations were CPU overhead rather
+than the unresolved finalization peak.
+
+Current TypeScript sampling (3,814 samples, with `core-stats` enabled) placed
+`stack_iter` at 214 samples (5.61%) and `summarize_internal` at 134 (3.51%).
+`ff18fa4a` therefore recorded the trailing-extra boundary during stack DFS,
+removing the later scan without enlarging each result's summary payload.
+
+The follow-up incremental-summary trial was behavior-green but regressed the
+normalized gate from **+11.15%** immediately before the trial to **+6.95%**.
+It attached an 88-byte aggregate to every selected reduction path, including
+paths later discarded by ambiguity selection. The trial was removed and is
+not present in history. S4 retains the flat child buffer and boundary metadata,
+but does not retain pop-path summary accumulators.
 
 ### 2026-07-14 EDT - subtree ownership and readability split
 
