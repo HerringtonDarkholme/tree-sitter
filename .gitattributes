@@ -4,5 +4,5 @@
 /lib/src/unicode/LICENSE linguist-vendored
 
 Cargo.lock -diff
-crates/cli/benches/examples/python/crlf-line-endings.py -text
-crates/cli/benches/examples/python/*-crlf.py -text
+crates/cli/benches/examples/python/crlf-line-endings.py -text !eol
+crates/cli/benches/examples/python/*-crlf.py -text !eol
