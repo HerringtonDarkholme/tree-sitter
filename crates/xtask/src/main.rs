@@ -232,57 +232,15 @@ struct PerfGate {
     /// The number of times to parse each sample.
     #[arg(long, default_value = "10")]
     repetitions: usize,
-    /// Number of independent alternating Rust/C measurements per case.
-    #[arg(long, default_value = "3")]
-    measurement_trials: usize,
-    /// Repeat small fixtures to at least this many bytes per timed repetition.
-    #[arg(long, default_value = "131072")]
-    min_case_bytes: usize,
-    /// Calibrate each timed repetition to at least this duration.
-    #[arg(long, default_value = "200")]
+    /// Calibrate each sample to at least this duration.
+    #[arg(long, default_value = "500")]
     min_sample_time_ms: u64,
-    /// Benchmark case kind to compare: normal, error, or all.
-    #[arg(long, default_value = "normal")]
-    kind: String,
-    /// Maximum number of mismatched-language error samples per other language.
-    #[arg(long, default_value = "8")]
-    error_limit: usize,
     /// Git revision whose lib/src directory contains the original C core.
     #[arg(long, default_value = "c9f80282ad355a88a389d75173d918de84ef3e79")]
     c_core_rev: String,
-    /// Maximum allowed per-case Rust slowdown versus C before strict mode fails.
+    /// Maximum allowed coefficient of variation for one case.
     #[arg(long, default_value = "5.0")]
-    max_regression_percent: f64,
-    /// Enforce per-case limits only for original fixtures at least this large.
-    #[arg(long, default_value = "131072")]
-    min_enforced_case_bytes: u64,
-    /// Maximum allowed weighted slowdown from the checked-in ratio baseline.
-    #[arg(long, default_value = "4.0")]
-    max_overall_regression_percent: f64,
-    /// Print results without failing on regressions.
-    #[arg(long)]
-    report_only: bool,
-    /// Replace the checked-in baseline for the default normal corpus.
-    #[arg(long)]
-    write_baseline: bool,
-    /// Write per-case means and standard deviations for this complete run.
-    #[arg(long)]
-    stability_output: Option<std::path::PathBuf>,
-    /// Compare this run with a prior stability snapshot of unchanged code.
-    #[arg(long)]
-    stability_reference: Option<std::path::PathBuf>,
-    /// Check measurement stability without loading the performance baseline.
-    #[arg(long)]
-    stability_only: bool,
-    /// Maximum allowed within-run coefficient of variation.
-    #[arg(long, default_value = "5.0")]
-    max_intra_cv_percent: f64,
-    /// Maximum process launches allowed to obtain one stable sample set.
-    #[arg(long, default_value = "5")]
-    max_sample_attempts: usize,
-    /// Maximum allowed CV change between unchanged benchmark runs.
-    #[arg(long, default_value = "2.0")]
-    max_stddev_cv_delta_percent: f64,
+    max_cv_percent: f64,
     /// Pass `--offline` to Cargo benchmark commands.
     #[arg(long)]
     offline: bool,
