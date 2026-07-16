@@ -64,6 +64,16 @@ pub fn run(args: &PerfGate) -> Result<()> {
     if let Some(path) = &args.stability_output {
         stability.write(path)?;
     }
+    if args.stability_only {
+        if !args.report_only && !stability_failures.is_empty() {
+            bail!(
+                "stability check failed for {} case/metric combinations",
+                stability_failures.len()
+            );
+        }
+        println!("stability-only mode: skipping the Rust/C performance baseline");
+        return Ok(());
+    }
     if args.write_baseline {
         write_baseline(root, args, &all_comparisons)?;
         return Ok(());

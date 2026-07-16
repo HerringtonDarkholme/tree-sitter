@@ -271,6 +271,9 @@ struct PerfGate {
     /// Compare this run with a prior stability snapshot of unchanged code.
     #[arg(long)]
     stability_reference: Option<std::path::PathBuf>,
+    /// Check measurement stability without loading the performance baseline.
+    #[arg(long)]
+    stability_only: bool,
     /// Maximum allowed within-run coefficient of variation.
     #[arg(long, default_value = "5.0")]
     max_intra_cv_percent: f64,
