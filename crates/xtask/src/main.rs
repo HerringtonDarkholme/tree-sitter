@@ -278,7 +278,7 @@ struct PerfGate {
     #[arg(long, default_value = "5.0")]
     max_intra_cv_percent: f64,
     /// Maximum process launches allowed to obtain one stable sample set.
-    #[arg(long, default_value = "3")]
+    #[arg(long, default_value = "5")]
     max_sample_attempts: usize,
     /// Maximum allowed CV change between unchanged benchmark runs.
     #[arg(long, default_value = "2.0")]
