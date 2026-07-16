@@ -239,7 +239,7 @@ struct PerfGate {
     #[arg(long, default_value = "131072")]
     min_case_bytes: usize,
     /// Calibrate each timed repetition to at least this duration.
-    #[arg(long, default_value = "50")]
+    #[arg(long, default_value = "100")]
     min_sample_time_ms: u64,
     /// Benchmark case kind to compare: normal, error, or all.
     #[arg(long, default_value = "normal")]
