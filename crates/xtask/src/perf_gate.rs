@@ -532,19 +532,19 @@ fn compare_stability(
                     current_stats.stddev,
                 ));
             }
-            let stddev_ratio = reference_stats.normalized_stddev_ratio(current_stats);
-            if stddev_ratio > args.max_stddev_ratio {
+            let cv_delta = (reference_stats.cv_percent - current_stats.cv_percent).abs();
+            if cv_delta > args.max_stddev_cv_delta_percent {
                 failures.push(format!(
-                    "{case} {metric}: normalized stddev changed {:.2}x (CV {:.2}% -> {:.2}%)",
-                    stddev_ratio, reference_stats.cv_percent, current_stats.cv_percent,
+                    "{case} {metric}: CV changed {:.2} points ({:.2}% -> {:.2}%)",
+                    cv_delta, reference_stats.cv_percent, current_stats.cv_percent,
                 ));
             }
         }
     }
     if failures.is_empty() {
         println!(
-            "    every mean±stddev interval overlaps; normalized stddev changes are at most {:.2}x",
-            args.max_stddev_ratio
+            "    every mean±stddev interval overlaps; CV changes are at most {:.2} points",
+            args.max_stddev_cv_delta_percent
         );
     } else {
         println!("    {} inter-run stability failures:", failures.len());
@@ -932,13 +932,6 @@ impl DistributionStatistics {
 
     fn intervals_overlap(self, other: Self) -> bool {
         (self.mean - other.mean).abs() <= self.stddev + other.stddev
-    }
-
-    fn normalized_stddev_ratio(self, other: Self) -> f64 {
-        const CV_FLOOR_PERCENT: f64 = 0.1;
-        let left = self.cv_percent.max(CV_FLOOR_PERCENT);
-        let right = other.cv_percent.max(CV_FLOOR_PERCENT);
-        left.max(right) / left.min(right)
     }
 }
 

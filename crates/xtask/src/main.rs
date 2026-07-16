@@ -280,9 +280,9 @@ struct PerfGate {
     /// Maximum process launches allowed to obtain one stable sample set.
     #[arg(long, default_value = "3")]
     max_sample_attempts: usize,
-    /// Maximum allowed ratio between normalized standard deviations across runs.
+    /// Maximum allowed CV change between unchanged benchmark runs.
     #[arg(long, default_value = "2.0")]
-    max_stddev_ratio: f64,
+    max_stddev_cv_delta_percent: f64,
     /// Pass `--offline` to Cargo benchmark commands.
     #[arg(long)]
     offline: bool,
