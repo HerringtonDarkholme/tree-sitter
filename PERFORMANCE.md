@@ -218,6 +218,106 @@ cargo flamegraph -p tree-sitter-cli --bench benchmark \
 Profiler-run throughput is context only; use `cargo xtask perf-gate` for
 performance decisions.
 
+## Allocation and data-layout audit (2026-07-16)
+
+Temporary atomic counters instrumented `stack.rs`, `stack/stack_node.rs`,
+`stack/pop.rs`, and subtree construction/storage. The counters were removed
+after measurement. They deliberately distort timing, so this section reports
+shapes, counts, and allocation behavior—not throughput.
+
+The optimized Rust core parsed all 40 normal fixtures with one validation parse
+and one measured parse per fixture. Absolute event counts therefore represent
+two passes; percentages and maxima are the useful results. A focused Ruby
+corpus run covered scanner states and ambiguous/recovery behavior absent from
+the normal performance corpus.
+
+Current 64-bit layouts:
+
+| Type | Bytes | Important contents |
+| --- | ---: | --- |
+| `Subtree` | 8 | Inline leaf bits or heap pointer |
+| `SubtreeHeapData` | 88 | 48-byte common prefix plus 40-byte content enum |
+| `SubtreeChildrenData` | 20 | Internal-node summary fields |
+| `ExternalScannerState` | 40 | 24 inline bytes or heap pointer, plus length/tag |
+| `StackLink` | 16 | Predecessor pointer and `Subtree` |
+| `StackNode` | 160 | Eight links (128 bytes) plus configuration fields |
+| `StackHead` | 40 | Version head and recovery/scanner state |
+| `StackIterator` | 32 | Graph-pop cursor and collected-child array |
+
+### Stack findings
+
+- 1,139,623 logical stack nodes were created. The 50-node pool served 99.855%
+  of creations; only 1,650 reached `malloc`. Increasing the pool is not a
+  meaningful target.
+- 98.898% of released nodes had one predecessor. Average link count was 1.011,
+  so only 12.64% of the eight fixed link slots carried data.
+- Across the two-pass corpus, initialization wrote about 127.4 MB of link slots
+  that were never used. This is cumulative write/cache traffic, not peak RSS.
+- Go was the important exception: 4.10% of its nodes had multiple links and it
+  caused 10,132 alternate-path subtree-array copies. Other normal languages
+  ranged from 0% to 1.07% multi-link nodes.
+- The Ruby corpus reached all eight link slots and recorded attempts to add a
+  ninth. Therefore eight is a real ambiguity/recovery bound; simply reducing
+  `MAX_LINK_COUNT` is incorrect.
+
+The fixed link array is the largest obvious layout inefficiency, but removing
+it is not a local cleanup. A primary inline link plus rare alternate storage
+would halve the common node size, while adding allocation/indirection exactly
+where Go and high-ambiguity recovery are sensitive. Treat that as a separately
+profiled representation experiment, not a field shuffle.
+
+### Subtree findings
+
+- Of 449,050 leaves, 92.14% fit in the 8-byte inline representation. Inline
+  leaves are working well and should remain pointer-sized.
+- Internal nodes were 59.09% of all 1,097,636 created subtrees. They owned
+  1,117,772 child slots and averaged 1.72 children.
+- Unary nodes were 57.08% of internals; 94.84% had at most three children.
+- Combined child/header allocations totaled 66.0 MB across two passes. The
+  88-byte header accounted for 86.45% of those bytes; child handles accounted
+  for only 13.55%.
+- Only 0.90% of internal-node constructions needed the final header `realloc`.
+  Reserving pop storage for children plus the header is effective; splitting
+  the allocation would likely be worse.
+- Heap leaves were only 3.21% of all subtrees. Their pool reused little, but
+  their allocation volume was small compared with internal headers. Enlarging
+  the leaf pool is not worthwhile.
+- Copy-on-write clones and heap scanner-byte allocations were negligible in
+  normal parsing. Wide symbols forced only two heap leaves.
+
+The heap header is the most plausible subtree target. Its 40-byte content enum
+is sized by the 24-byte inline scanner buffer, even for every internal node.
+Normal JavaScript and TypeScript states were empty; Rust used one byte; Python
+used at most eight. However, the Ruby corpus reached 80 bytes, proving that an
+8-byte buffer is not generally safe for allocation behavior.
+
+A layout-only trial found:
+
+| Scanner inline capacity | Scanner state | Heap header | Projected internal allocation change |
+| ---: | ---: | ---: | ---: |
+| 24 bytes (current) | 40 bytes | 88 bytes | baseline |
+| 16 bytes | 32 bytes | 80 bytes | -7.86% (-5.19 MB in the two-pass corpus) |
+| 8 bytes | 24 bytes | 72 bytes | -15.72%, but rejected below |
+
+In the Ruby corpus, 47,416 serialized states were observed: 47,274 were at
+most 16 bytes, 67 were 17–24 bytes, and 75 exceeded 24 bytes. An 8-byte buffer
+would have caused 2,959 scanner allocations instead of 75. Do not adopt it.
+A 16-byte buffer would add only the 67 allocations in the 17–24-byte band and
+is a bounded candidate for a clean, paired performance and full-corpus trial.
+
+### Audit priorities
+
+1. Trial a 16-byte scanner inline capacity with no instrumentation; require
+   stable Python/TypeScript results and full corpus/parity coverage.
+2. Keep the compact 8-byte `Subtree` handle and combined child/header
+   allocation.
+3. Do not tune stack or leaf pool sizes; allocation calls are not the dominant
+   cost.
+4. Revisit stack link storage only as a full representation experiment with Go
+   and Ruby ambiguity/recovery as mandatory gates.
+5. Prefer shrinking metadata paid by every internal node over optimizing rare
+   heap leaves or copy-on-write paths.
+
 ## Updating this document
 
 - Replace the current-status table after a meaningful accepted change.
