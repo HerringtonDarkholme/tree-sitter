@@ -233,7 +233,7 @@ struct PerfGate {
     #[arg(long, default_value = "10")]
     repetitions: usize,
     /// Number of independent alternating Rust/C measurements per case.
-    #[arg(long, default_value = "5")]
+    #[arg(long, default_value = "9")]
     measurement_trials: usize,
     /// Repeat small fixtures to at least this many bytes per timed repetition.
     #[arg(long, default_value = "131072")]
@@ -262,6 +262,18 @@ struct PerfGate {
     /// Replace the checked-in baseline for the default normal corpus.
     #[arg(long)]
     write_baseline: bool,
+    /// Write per-case means and standard deviations for this complete run.
+    #[arg(long)]
+    stability_output: Option<std::path::PathBuf>,
+    /// Compare this run with a prior stability snapshot of unchanged code.
+    #[arg(long)]
+    stability_reference: Option<std::path::PathBuf>,
+    /// Maximum allowed within-run coefficient of variation.
+    #[arg(long, default_value = "3.0")]
+    max_intra_cv_percent: f64,
+    /// Maximum allowed ratio between normalized standard deviations across runs.
+    #[arg(long, default_value = "2.0")]
+    max_stddev_ratio: f64,
     /// Pass `--offline` to Cargo benchmark commands.
     #[arg(long)]
     offline: bool,

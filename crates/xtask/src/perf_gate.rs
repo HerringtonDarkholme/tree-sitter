@@ -23,6 +23,7 @@ const DEFAULT_LANGUAGES: &[&str] = &[
 
 const BASELINE_VERSION: u64 = 2;
 const BASELINE_PATH: &str = "crates/xtask/perf_baseline.json";
+const STABILITY_VERSION: u64 = 1;
 
 pub fn run(args: &PerfGate) -> Result<()> {
     let root = root_dir();
@@ -39,10 +40,11 @@ pub fn run(args: &PerfGate) -> Result<()> {
     for language in &languages {
         println!("\n==> {language}: discovering cases");
         let discovered = run_benchmark(root, args, language, CoreImpl::Rust, None, None)?;
-        let (rust_results, c_results) =
+        let (rust_results, c_results, statistics) =
             measure_cases(root, args, language, &discovered, c_core_src_dir.as_path())?;
 
-        let comparisons = compare_measurements(args, language, &rust_results, &c_results)?;
+        let comparisons =
+            compare_measurements(args, language, &rust_results, &c_results, &statistics)?;
         print_language_summary(args, language, &comparisons)?;
         all_comparisons.extend(comparisons);
     }
@@ -52,6 +54,16 @@ pub fn run(args: &PerfGate) -> Result<()> {
     }
 
     print_overall_summary(args, &all_comparisons);
+    let stability = StabilitySnapshot::new(args, &all_comparisons);
+    print_intra_run_stability(args, &stability);
+    let mut stability_failures = intra_run_stability_failures(args, &stability);
+    if let Some(path) = &args.stability_reference {
+        let reference = StabilitySnapshot::read(path)?;
+        stability_failures.extend(compare_stability(args, &reference, &stability)?);
+    }
+    if let Some(path) = &args.stability_output {
+        stability.write(path)?;
+    }
     if args.write_baseline {
         write_baseline(root, args, &all_comparisons)?;
         return Ok(());
@@ -60,6 +72,12 @@ pub fn run(args: &PerfGate) -> Result<()> {
     let baseline = load_baseline(root, args)?;
     print_baseline_summary(args, &all_comparisons, &baseline)?;
     enforce_thresholds(args, &all_comparisons, &baseline)?;
+    if !args.report_only && !stability_failures.is_empty() {
+        bail!(
+            "stability check failed for {} case/metric combinations",
+            stability_failures.len()
+        );
+    }
 
     Ok(())
 }
@@ -73,6 +91,7 @@ fn measure_cases(
 ) -> Result<(
     BTreeMap<CaseKey, Measurement>,
     BTreeMap<CaseKey, Measurement>,
+    BTreeMap<CaseKey, TrialStatistics>,
 )> {
     let kinds = parser_kinds(args)?;
     let cases = discovered
@@ -81,6 +100,7 @@ fn measure_cases(
         .collect::<Vec<_>>();
     let mut rust_results = BTreeMap::new();
     let mut c_results = BTreeMap::new();
+    let mut statistics = BTreeMap::new();
 
     for (case_index, key) in cases.iter().enumerate() {
         println!(
@@ -107,18 +127,19 @@ fn measure_cases(
                 trials.push((measure(CoreImpl::Rust)?, c));
             }
         }
-        let (rust, c) = median_pair(key, &mut trials)?;
+        let (rust, c, trial_statistics) = median_pair(key, &mut trials)?;
         rust_results.insert((*key).clone(), rust);
         c_results.insert((*key).clone(), c);
+        statistics.insert((*key).clone(), trial_statistics);
     }
 
-    Ok((rust_results, c_results))
+    Ok((rust_results, c_results, statistics))
 }
 
 fn median_pair(
     key: &CaseKey,
     trials: &mut [(Measurement, Measurement)],
-) -> Result<(Measurement, Measurement)> {
+) -> Result<(Measurement, Measurement, TrialStatistics)> {
     let Some(first) = trials.first() else {
         bail!("no benchmark trials were measured for {key:?}");
     };
@@ -142,6 +163,13 @@ fn median_pair(
         .map(|(_, c)| c.peak_rss_bytes)
         .max()
         .unwrap_or(0);
+    let statistics = TrialStatistics::from_trials(trials);
+    println!(
+        "    intra-run CV  Rust {:>5.2}%  C {:>5.2}%  paired {:>5.2}%",
+        statistics.rust_throughput.cv_percent,
+        statistics.c_throughput.cv_percent,
+        statistics.throughput_ratio.cv_percent,
+    );
     trials.sort_by(|(rust_a, c_a), (rust_b, c_b)| {
         let ratio_a = rust_a.duration_ns as f64 / c_a.duration_ns as f64;
         let ratio_b = rust_b.duration_ns as f64 / c_b.duration_ns as f64;
@@ -149,20 +177,10 @@ fn median_pair(
             .partial_cmp(&ratio_b)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
-    let first_ratio = paired_ratio(trials[0]);
-    let last_ratio = paired_ratio(trials[trials.len() - 1]);
-    println!(
-        "    paired ratio spread {:>5.2}%",
-        (last_ratio / first_ratio - 1.0) * 100.0
-    );
     let (mut rust, mut c) = trials[trials.len() / 2];
     rust.peak_rss_bytes = rust_peak_rss;
     c.peak_rss_bytes = c_peak_rss;
-    Ok((rust, c))
-}
-
-fn paired_ratio((rust, c): (Measurement, Measurement)) -> f64 {
-    rust.duration_ns as f64 / c.duration_ns as f64
+    Ok((rust, c, statistics))
 }
 
 fn languages(args: &PerfGate) -> Vec<String> {
@@ -280,6 +298,7 @@ fn compare_measurements(
     language: &str,
     rust_results: &BTreeMap<CaseKey, Measurement>,
     c_results: &BTreeMap<CaseKey, Measurement>,
+    statistics: &BTreeMap<CaseKey, TrialStatistics>,
 ) -> Result<Vec<Comparison>> {
     let rust_keys = rust_results.keys().collect::<BTreeSet<_>>();
     let c_keys = c_results.keys().collect::<BTreeSet<_>>();
@@ -298,13 +317,18 @@ fn compare_measurements(
             if !is_parser_case(&parser_kinds, key) {
                 return None;
             }
-            c_results.get(key).map(|c| Comparison {
-                key: key.clone(),
-                rust: *rust,
-                c: *c,
+            c_results.get(key).map(|c| {
+                Ok(Comparison {
+                    key: key.clone(),
+                    rust: *rust,
+                    c: *c,
+                    statistics: *statistics
+                        .get(key)
+                        .with_context(|| format!("missing trial statistics for {key:?}"))?,
+                })
             })
         })
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<_>>>()?;
 
     if comparisons.is_empty() {
         bail!("no shared parser benchmark cases for language {language}");
@@ -395,6 +419,99 @@ fn print_overall_summary(args: &PerfGate, comparisons: &[Comparison]) {
             );
         }
     }
+}
+
+fn print_intra_run_stability(args: &PerfGate, snapshot: &StabilitySnapshot) {
+    let failures = intra_run_stability_failures(args, snapshot);
+    println!("\n==> Intra-run stability");
+    println!(
+        "    {} cases, {} alternating pairs per case, maximum CV {:.2}%",
+        snapshot.cases.len(),
+        snapshot.measurement_trials,
+        args.max_intra_cv_percent,
+    );
+    if failures.is_empty() {
+        println!("    all Rust, C, and paired-ratio distributions are within the CV limit");
+    } else {
+        println!("    {} distributions exceed the CV limit:", failures.len());
+        for failure in failures.iter().take(20) {
+            println!("    - {failure}");
+        }
+    }
+}
+
+fn intra_run_stability_failures(args: &PerfGate, snapshot: &StabilitySnapshot) -> Vec<String> {
+    let mut failures = Vec::new();
+    for (case, measurement) in &snapshot.cases {
+        for (metric, statistics) in measurement.statistics.distributions() {
+            if statistics.cv_percent > args.max_intra_cv_percent {
+                failures.push(format!("{case} {metric}: CV {:.2}%", statistics.cv_percent));
+            }
+        }
+    }
+    failures
+}
+
+fn compare_stability(
+    args: &PerfGate,
+    reference: &StabilitySnapshot,
+    current: &StabilitySnapshot,
+) -> Result<Vec<String>> {
+    if reference.repetitions != current.repetitions
+        || reference.measurement_trials != current.measurement_trials
+        || reference.min_case_bytes != current.min_case_bytes
+    {
+        bail!("stability snapshots use different measurement settings");
+    }
+    if reference.cases.keys().collect::<Vec<_>>() != current.cases.keys().collect::<Vec<_>>() {
+        bail!("stability snapshots contain different benchmark cases");
+    }
+
+    let mut failures = Vec::new();
+    println!("\n==> Inter-run stability");
+    for (case, current_case) in &current.cases {
+        let reference_case = &reference.cases[case];
+        if current_case.source_bytes != reference_case.source_bytes
+            || current_case.source_hash != reference_case.source_hash
+        {
+            bail!("stability fixture {case} changed between runs");
+        }
+        for ((metric, reference_stats), (_, current_stats)) in reference_case
+            .statistics
+            .distributions()
+            .into_iter()
+            .zip(current_case.statistics.distributions())
+        {
+            if !reference_stats.intervals_overlap(current_stats) {
+                failures.push(format!(
+                    "{case} {metric}: means {:.3} and {:.3} differ by more than one stddev from each run ({:.3} + {:.3})",
+                    reference_stats.mean,
+                    current_stats.mean,
+                    reference_stats.stddev,
+                    current_stats.stddev,
+                ));
+            }
+            let stddev_ratio = reference_stats.normalized_stddev_ratio(current_stats);
+            if stddev_ratio > args.max_stddev_ratio {
+                failures.push(format!(
+                    "{case} {metric}: normalized stddev changed {:.2}x (CV {:.2}% -> {:.2}%)",
+                    stddev_ratio, reference_stats.cv_percent, current_stats.cv_percent,
+                ));
+            }
+        }
+    }
+    if failures.is_empty() {
+        println!(
+            "    every mean±stddev interval overlaps; normalized stddev changes are at most {:.2}x",
+            args.max_stddev_ratio
+        );
+    } else {
+        println!("    {} inter-run stability failures:", failures.len());
+        for failure in failures.iter().take(20) {
+            println!("    - {failure}");
+        }
+    }
+    Ok(failures)
 }
 
 fn enforce_thresholds(
@@ -718,6 +835,142 @@ struct Measurement {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+struct DistributionStatistics {
+    mean: f64,
+    stddev: f64,
+    cv_percent: f64,
+}
+
+impl DistributionStatistics {
+    fn from_values(values: &[f64]) -> Self {
+        let mean = values.iter().sum::<f64>() / values.len() as f64;
+        let variance = if values.len() > 1 {
+            values
+                .iter()
+                .map(|value| (value - mean).powi(2))
+                .sum::<f64>()
+                / (values.len() - 1) as f64
+        } else {
+            0.0
+        };
+        let stddev = variance.sqrt();
+        let cv_percent = if mean == 0.0 {
+            0.0
+        } else {
+            stddev / mean.abs() * 100.0
+        };
+        Self {
+            mean,
+            stddev,
+            cv_percent,
+        }
+    }
+
+    fn intervals_overlap(self, other: Self) -> bool {
+        (self.mean - other.mean).abs() <= self.stddev + other.stddev
+    }
+
+    fn normalized_stddev_ratio(self, other: Self) -> f64 {
+        const CV_FLOOR_PERCENT: f64 = 0.1;
+        let left = self.cv_percent.max(CV_FLOOR_PERCENT);
+        let right = other.cv_percent.max(CV_FLOOR_PERCENT);
+        left.max(right) / left.min(right)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+struct TrialStatistics {
+    rust_throughput: DistributionStatistics,
+    c_throughput: DistributionStatistics,
+    throughput_ratio: DistributionStatistics,
+}
+
+impl TrialStatistics {
+    fn from_trials(trials: &[(Measurement, Measurement)]) -> Self {
+        let rust = trials
+            .iter()
+            .map(|(rust, _)| rust.speed())
+            .collect::<Vec<_>>();
+        let c = trials.iter().map(|(_, c)| c.speed()).collect::<Vec<_>>();
+        let ratio = trials
+            .iter()
+            .map(|(rust, c)| rust.speed() / c.speed())
+            .collect::<Vec<_>>();
+        Self {
+            rust_throughput: DistributionStatistics::from_values(&rust),
+            c_throughput: DistributionStatistics::from_values(&c),
+            throughput_ratio: DistributionStatistics::from_values(&ratio),
+        }
+    }
+
+    fn distributions(self) -> [(&'static str, DistributionStatistics); 3] {
+        [
+            ("Rust throughput", self.rust_throughput),
+            ("C throughput", self.c_throughput),
+            ("paired throughput ratio", self.throughput_ratio),
+        ]
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+struct StabilityCase {
+    source_bytes: u64,
+    source_hash: u64,
+    statistics: TrialStatistics,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct StabilitySnapshot {
+    version: u64,
+    repetitions: usize,
+    measurement_trials: usize,
+    min_case_bytes: usize,
+    cases: BTreeMap<String, StabilityCase>,
+}
+
+impl StabilitySnapshot {
+    fn new(args: &PerfGate, comparisons: &[Comparison]) -> Self {
+        let cases = comparisons
+            .iter()
+            .map(|comparison| {
+                (
+                    baseline_key(&comparison.key),
+                    StabilityCase {
+                        source_bytes: comparison.rust.source_bytes,
+                        source_hash: comparison.rust.source_hash,
+                        statistics: comparison.statistics,
+                    },
+                )
+            })
+            .collect();
+        Self {
+            version: STABILITY_VERSION,
+            repetitions: args.repetitions,
+            measurement_trials: args.measurement_trials,
+            min_case_bytes: args.min_case_bytes,
+            cases,
+        }
+    }
+
+    fn read(path: &Path) -> Result<Self> {
+        let snapshot: Self = serde_json::from_slice(
+            &fs::read(path).with_context(|| format!("failed to read {}", path.display()))?,
+        )?;
+        if snapshot.version != STABILITY_VERSION {
+            bail!("unsupported stability snapshot version");
+        }
+        Ok(snapshot)
+    }
+
+    fn write(&self, path: &Path) -> Result<()> {
+        fs::write(path, format!("{}\n", serde_json::to_string_pretty(self)?))
+            .with_context(|| format!("failed to write {}", path.display()))?;
+        println!("wrote stability statistics to {}", path.display());
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 struct BaselineCase {
     source_bytes: u64,
     source_hash: u64,
@@ -746,6 +999,7 @@ struct Comparison {
     key: CaseKey,
     rust: Measurement,
     c: Measurement,
+    statistics: TrialStatistics,
 }
 
 impl Comparison {
@@ -809,12 +1063,13 @@ mod tests {
             (measurement(100, 50), measurement(100, 60)),
         ];
 
-        let (rust, c) = median_pair(&key(), &mut trials).unwrap();
+        let (rust, c, statistics) = median_pair(&key(), &mut trials).unwrap();
 
         assert_eq!(rust.duration_ns, 100);
         assert_eq!(c.duration_ns, 100);
         assert_eq!(rust.peak_rss_bytes, 50);
         assert_eq!(c.peak_rss_bytes, 60);
+        assert!(statistics.rust_throughput.stddev > 0.0);
     }
 
     #[test]
@@ -824,6 +1079,7 @@ mod tests {
             key: key.clone(),
             rust: measurement(100, 0),
             c: measurement(100, 0),
+            statistics: TrialStatistics::from_trials(&[(measurement(100, 0), measurement(100, 0))]),
         };
         let baseline = BTreeMap::from([(
             baseline_key(&key),
