@@ -149,10 +149,20 @@ fn median_pair(
             .partial_cmp(&ratio_b)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
+    let first_ratio = paired_ratio(trials[0]);
+    let last_ratio = paired_ratio(trials[trials.len() - 1]);
+    println!(
+        "    paired ratio spread {:>5.2}%",
+        (last_ratio / first_ratio - 1.0) * 100.0
+    );
     let (mut rust, mut c) = trials[trials.len() / 2];
     rust.peak_rss_bytes = rust_peak_rss;
     c.peak_rss_bytes = c_peak_rss;
     Ok((rust, c))
+}
+
+fn paired_ratio((rust, c): (Measurement, Measurement)) -> f64 {
+    rust.duration_ns as f64 / c.duration_ns as f64
 }
 
 fn languages(args: &PerfGate) -> Vec<String> {
