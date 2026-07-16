@@ -298,6 +298,7 @@ fn parse(
     let source_code = fs::read(path)
         .with_context(|| format!("Failed to read {}", path.display()))
         .unwrap();
+    let source_hash = source_hash(&source_code);
     let parses_per_repetition = parses_per_repetition(source_code.len(), *MIN_SOURCE_BYTES);
     let time = Instant::now();
     for _ in 0..*REPETITION_COUNT {
@@ -324,6 +325,7 @@ fn parse(
             "kind": kind,
             "path": path.display().to_string(),
             "source_bytes": source_code.len() as u64,
+            "source_hash": source_hash,
             "bytes": measured_bytes,
             "duration_ns": duration_ns,
             "peak_rss_bytes": peak_rss_bytes,
@@ -331,6 +333,13 @@ fn parse(
         })
     );
     speed as usize
+}
+
+/// Stable FNV-1a fingerprint used to reject stale performance baselines.
+fn source_hash(source: &[u8]) -> u64 {
+    source.iter().fold(0xcbf29ce484222325, |hash, byte| {
+        (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3)
+    })
 }
 
 /// Parse small fixtures enough times for scheduling and timer noise not to

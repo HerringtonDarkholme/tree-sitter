@@ -2201,6 +2201,7 @@ dependencies = [
  "regex",
  "schemars",
  "semver",
+ "serde",
  "serde_json",
  "tree-sitter-cli",
  "tree-sitter-loader",

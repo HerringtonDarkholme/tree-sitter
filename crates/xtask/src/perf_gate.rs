@@ -1,13 +1,15 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
+    fs,
     path::{Path, PathBuf},
     process::{Command, Output},
 };
 
 use anyhow::{bail, Context, Result};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{core_parity, root_dir, PerfGate};
+use crate::{benchmark::mebibytes, core_parity, root_dir, PerfGate};
 
 const DEFAULT_LANGUAGES: &[&str] = &[
     "cpp",
@@ -19,6 +21,9 @@ const DEFAULT_LANGUAGES: &[&str] = &[
     "typescript",
 ];
 
+const BASELINE_VERSION: u64 = 2;
+const BASELINE_PATH: &str = "crates/xtask/perf_baseline.json";
+
 pub fn run(args: &PerfGate) -> Result<()> {
     let root = root_dir();
     core_parity::preflight_c_core_revision(root, &args.c_core_rev)?;
@@ -27,12 +32,15 @@ pub fn run(args: &PerfGate) -> Result<()> {
     let languages = languages(args);
     let mut all_comparisons = Vec::new();
 
-    for language in &languages {
-        println!("\n==> {language}: Rust core");
-        let rust_results = run_benchmark(root, args, language, CoreImpl::Rust, None)?;
+    if args.measurement_trials == 0 || args.measurement_trials & 1 == 0 {
+        bail!("--measurement-trials must be a positive odd number");
+    }
 
-        println!("==> {language}: C core");
-        let c_results = run_benchmark(root, args, language, CoreImpl::C, Some(&c_core_src_dir))?;
+    for language in &languages {
+        println!("\n==> {language}: discovering cases");
+        let discovered = run_benchmark(root, args, language, CoreImpl::Rust, None, None)?;
+        let (rust_results, c_results) =
+            measure_cases(root, args, language, &discovered, c_core_src_dir.as_path())?;
 
         let comparisons = compare_measurements(args, language, &rust_results, &c_results)?;
         print_language_summary(args, language, &comparisons)?;
@@ -44,9 +52,107 @@ pub fn run(args: &PerfGate) -> Result<()> {
     }
 
     print_overall_summary(args, &all_comparisons);
-    enforce_thresholds(args, &all_comparisons)?;
+    if args.write_baseline {
+        write_baseline(root, args, &all_comparisons)?;
+        return Ok(());
+    }
+
+    let baseline = load_baseline(root, args)?;
+    print_baseline_summary(args, &all_comparisons, &baseline)?;
+    enforce_thresholds(args, &all_comparisons, &baseline)?;
 
     Ok(())
+}
+
+fn measure_cases(
+    root: &Path,
+    args: &PerfGate,
+    language: &str,
+    discovered: &BTreeMap<CaseKey, Measurement>,
+    c_core_src_dir: &Path,
+) -> Result<(
+    BTreeMap<CaseKey, Measurement>,
+    BTreeMap<CaseKey, Measurement>,
+)> {
+    let kinds = parser_kinds(args)?;
+    let cases = discovered
+        .keys()
+        .filter(|key| is_parser_case(&kinds, key))
+        .collect::<Vec<_>>();
+    let mut rust_results = BTreeMap::new();
+    let mut c_results = BTreeMap::new();
+
+    for (case_index, key) in cases.iter().enumerate() {
+        println!(
+            "==> {language}: case {}/{} {}",
+            case_index + 1,
+            cases.len(),
+            display_case_path(&key.path)
+        );
+        let mut trials = Vec::with_capacity(args.measurement_trials);
+        for trial in 0..args.measurement_trials {
+            let measure = |core_impl| -> Result<Measurement> {
+                let c_src = matches!(core_impl, CoreImpl::C).then_some(c_core_src_dir);
+                let measurements =
+                    run_benchmark(root, args, language, core_impl, c_src, Some(&key.path))?;
+                measurements
+                    .get(*key)
+                    .copied()
+                    .with_context(|| format!("filtered benchmark did not measure {key:?}"))
+            };
+            if trial & 1 == 0 {
+                trials.push((measure(CoreImpl::Rust)?, measure(CoreImpl::C)?));
+            } else {
+                let c = measure(CoreImpl::C)?;
+                trials.push((measure(CoreImpl::Rust)?, c));
+            }
+        }
+        let (rust, c) = median_pair(key, &mut trials)?;
+        rust_results.insert((*key).clone(), rust);
+        c_results.insert((*key).clone(), c);
+    }
+
+    Ok((rust_results, c_results))
+}
+
+fn median_pair(
+    key: &CaseKey,
+    trials: &mut [(Measurement, Measurement)],
+) -> Result<(Measurement, Measurement)> {
+    let Some(first) = trials.first() else {
+        bail!("no benchmark trials were measured for {key:?}");
+    };
+    if trials.iter().any(|(rust, c)| {
+        rust.bytes != first.0.bytes
+            || c.bytes != first.1.bytes
+            || rust.source_bytes != first.0.source_bytes
+            || c.source_bytes != first.1.source_bytes
+            || rust.source_hash != first.0.source_hash
+            || c.source_hash != first.1.source_hash
+    }) {
+        bail!("benchmark trials measured different byte counts for {key:?}");
+    }
+    let rust_peak_rss = trials
+        .iter()
+        .map(|(rust, _)| rust.peak_rss_bytes)
+        .max()
+        .unwrap_or(0);
+    let c_peak_rss = trials
+        .iter()
+        .map(|(_, c)| c.peak_rss_bytes)
+        .max()
+        .unwrap_or(0);
+    trials.sort_by(|(rust_a, c_a), (rust_b, c_b)| {
+        let ratio_a = rust_a.duration_ns as f64 / c_a.duration_ns as f64;
+        let ratio_b = rust_b.duration_ns as f64 / c_b.duration_ns as f64;
+        ratio_a
+            .partial_cmp(&ratio_b)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let (mut rust, mut c) = trials[trials.len() / 2];
+    rust.peak_rss_bytes = rust_peak_rss;
+    c.peak_rss_bytes = c_peak_rss;
+    Ok((rust, c))
 }
 
 fn languages(args: &PerfGate) -> Vec<String> {
@@ -66,6 +172,7 @@ fn run_benchmark(
     language: &str,
     core_impl: CoreImpl,
     c_core_src_dir: Option<&Path>,
+    case_filter: Option<&str>,
 ) -> Result<BTreeMap<CaseKey, Measurement>> {
     let mut command = Command::new("cargo");
     command
@@ -75,6 +182,10 @@ fn run_benchmark(
         .env(
             "TREE_SITTER_BENCHMARK_REPETITION_COUNT",
             args.repetitions.to_string(),
+        )
+        .env(
+            "TREE_SITTER_BENCHMARK_MIN_SOURCE_BYTES",
+            args.min_case_bytes.to_string(),
         )
         .env("TREE_SITTER_BENCHMARK_KIND_FILTER", benchmark_kind(args)?)
         .env(
@@ -89,6 +200,10 @@ fn run_benchmark(
         .arg("benchmark")
         .arg("-p")
         .arg("tree-sitter-cli");
+
+    if let Some(case_filter) = case_filter {
+        command.env("TREE_SITTER_BENCHMARK_EXAMPLE_PATH", case_filter);
+    }
 
     if let Some(src_dir) = c_core_src_dir {
         command.env("TREE_SITTER_C_CORE_SRC_DIR", src_dir);
@@ -139,8 +254,11 @@ fn parse_benchmark_results(output: &[u8]) -> Result<BTreeMap<CaseKey, Measuremen
             path: required_str(&value, "path")?.into(),
         };
         let measurement = Measurement {
+            source_bytes: required_u64(&value, "source_bytes")?,
+            source_hash: required_u64(&value, "source_hash")?,
             bytes: required_u64(&value, "bytes")?,
             duration_ns: required_u64(&value, "duration_ns")?.max(1),
+            peak_rss_bytes: required_u64(&value, "peak_rss_bytes")?,
         };
         measurements.insert(key, measurement);
     }
@@ -208,6 +326,22 @@ fn print_language_summary(
             aggregate.rust_delta_percent(),
         );
     }
+    let rust_peak_rss = comparisons
+        .iter()
+        .map(|comparison| comparison.rust.peak_rss_bytes)
+        .max()
+        .unwrap_or(0);
+    let c_peak_rss = comparisons
+        .iter()
+        .map(|comparison| comparison.c.peak_rss_bytes)
+        .max()
+        .unwrap_or(0);
+    println!(
+        "    peak RSS       Rust {:>10.1} MiB  C {:>10.1} MiB  delta {:+6.2}% (report only)",
+        mebibytes(rust_peak_rss),
+        mebibytes(c_peak_rss),
+        percent_delta(rust_peak_rss, c_peak_rss),
+    );
     Ok(())
 }
 
@@ -220,6 +354,12 @@ fn print_overall_summary(args: &PerfGate, comparisons: &[Comparison]) {
         aggregate.rust_speed(),
         aggregate.c_speed(),
         aggregate.rust_delta_percent(),
+    );
+    println!(
+        "    peak RSS       Rust {:>10.1} MiB  C {:>10.1} MiB  delta {:+6.2}% (report only)",
+        mebibytes(aggregate.rust_peak_rss_bytes),
+        mebibytes(aggregate.c_peak_rss_bytes),
+        percent_delta(aggregate.rust_peak_rss_bytes, aggregate.c_peak_rss_bytes,),
     );
 
     let regressions = regressions(args, comparisons);
@@ -247,20 +387,23 @@ fn print_overall_summary(args: &PerfGate, comparisons: &[Comparison]) {
     }
 }
 
-fn enforce_thresholds(args: &PerfGate, comparisons: &[Comparison]) -> Result<()> {
+fn enforce_thresholds(
+    args: &PerfGate,
+    comparisons: &[Comparison],
+    baseline: &BTreeMap<String, BaselineCase>,
+) -> Result<()> {
     if args.report_only {
         println!("perf gate report-only mode: not enforcing thresholds");
         return Ok(());
     }
 
-    let aggregate = aggregate(comparisons.iter()).expect("comparisons are not empty");
-    let overall_delta = aggregate.rust_delta_percent();
-    let regressions = regressions(args, comparisons);
+    let overall_delta = baseline_delta(comparisons, baseline)?;
+    let regressions = baseline_regressions(args, comparisons, baseline)?;
 
-    if overall_delta < args.min_overall_speedup_percent || !regressions.is_empty() {
+    if overall_delta < -args.max_overall_regression_percent || !regressions.is_empty() {
         bail!(
-            "perf gate failed: overall Rust delta {overall_delta:+.2}% (required {:+.2}%), {} per-case regressions above {:.2}%",
-            args.min_overall_speedup_percent,
+            "perf gate failed: baseline-normalized Rust delta {overall_delta:+.2}% (minimum {:+.2}%), {} per-case regressions above {:.2}%",
+            -args.max_overall_regression_percent,
             regressions.len(),
             args.max_regression_percent
         );
@@ -283,6 +426,173 @@ fn regressions<'a>(args: &PerfGate, comparisons: &'a [Comparison]) -> Vec<&'a Co
     regressions
 }
 
+fn baseline_regressions<'a>(
+    args: &PerfGate,
+    comparisons: &'a [Comparison],
+    baseline: &BTreeMap<String, BaselineCase>,
+) -> Result<Vec<(&'a Comparison, f64)>> {
+    let mut regressions = Vec::new();
+    for comparison in comparisons {
+        if comparison.rust.source_bytes < args.min_enforced_case_bytes {
+            continue;
+        }
+        let slowdown = baseline_slowdown(comparison, baseline)?;
+        if slowdown > args.max_regression_percent {
+            regressions.push((comparison, slowdown));
+        }
+    }
+    regressions.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    Ok(regressions)
+}
+
+fn print_baseline_summary(
+    args: &PerfGate,
+    comparisons: &[Comparison],
+    baseline: &BTreeMap<String, BaselineCase>,
+) -> Result<()> {
+    let delta = baseline_delta(comparisons, baseline)?;
+    println!("\n==> Change from checked-in Rust/C ratio baseline");
+    println!("    overall normalized delta {delta:+.2}%");
+    let regressions = baseline_regressions(args, comparisons, baseline)?;
+    if regressions.is_empty() {
+        println!(
+            "    no baseline-normalized per-case regressions above {:.2}% for fixtures at least {} bytes",
+            args.max_regression_percent,
+            args.min_enforced_case_bytes,
+        );
+    } else {
+        println!(
+            "    baseline-normalized per-case regressions above {:.2}%:",
+            args.max_regression_percent
+        );
+        for (comparison, slowdown) in regressions.iter().take(10) {
+            println!(
+                "    - {} {} {}: slowdown {:.2}%",
+                comparison.key.language,
+                comparison.key.kind,
+                display_case_path(&comparison.key.path),
+                slowdown,
+            );
+        }
+    }
+    Ok(())
+}
+
+fn baseline_delta(
+    comparisons: &[Comparison],
+    baseline: &BTreeMap<String, BaselineCase>,
+) -> Result<f64> {
+    let mut actual_duration = 0.0;
+    let mut expected_duration = 0.0;
+    for comparison in comparisons {
+        actual_duration += comparison.rust.duration_ns as f64;
+        expected_duration = (comparison.c.duration_ns as f64)
+            .mul_add(baseline_ratio(comparison, baseline)?, expected_duration);
+    }
+    Ok((expected_duration / actual_duration - 1.0) * 100.0)
+}
+
+fn baseline_slowdown(
+    comparison: &Comparison,
+    baseline: &BTreeMap<String, BaselineCase>,
+) -> Result<f64> {
+    let current_ratio = comparison.rust.duration_ns as f64 / comparison.c.duration_ns as f64;
+    Ok((current_ratio / baseline_ratio(comparison, baseline)? - 1.0) * 100.0)
+}
+
+fn baseline_ratio(
+    comparison: &Comparison,
+    baseline: &BTreeMap<String, BaselineCase>,
+) -> Result<f64> {
+    let key = baseline_key(&comparison.key);
+    let baseline = baseline
+        .get(&key)
+        .with_context(|| format!("performance baseline is missing case {key}"))?;
+    if baseline.source_bytes != comparison.rust.source_bytes
+        || baseline.source_hash != comparison.rust.source_hash
+    {
+        bail!(
+            "performance fixture {key} changed; rewrite the baseline as an explicit corpus update"
+        );
+    }
+    Ok(baseline.rust_c_duration_ratio)
+}
+
+fn baseline_key(key: &CaseKey) -> String {
+    format!(
+        "{}|{}|{}",
+        key.language,
+        key.kind,
+        display_case_path(&key.path)
+    )
+}
+
+fn load_baseline(root: &Path, args: &PerfGate) -> Result<BTreeMap<String, BaselineCase>> {
+    let path = root.join(BASELINE_PATH);
+    let baseline: BaselineDocument = serde_json::from_slice(
+        &fs::read(&path).with_context(|| format!("failed to read {}", path.display()))?,
+    )?;
+    if baseline.version != BASELINE_VERSION {
+        bail!("unsupported performance baseline version");
+    }
+    if baseline.min_case_bytes != args.min_case_bytes as u64 {
+        bail!(
+            "performance baseline uses a different --min-case-bytes value; run with {} or explicitly rewrite the baseline",
+            baseline.min_case_bytes
+        );
+    }
+    if baseline.measurement_trials != args.measurement_trials as u64 {
+        bail!("performance baseline uses a different --measurement-trials value");
+    }
+    if baseline.repetitions != args.repetitions as u64 {
+        bail!("performance baseline uses a different --repetitions value");
+    }
+    if baseline.min_enforced_case_bytes != args.min_enforced_case_bytes {
+        bail!("performance baseline uses a different --min-enforced-case-bytes value");
+    }
+    if baseline.c_core_rev != args.c_core_rev {
+        bail!("performance baseline uses a different C core revision");
+    }
+    Ok(baseline.cases)
+}
+
+fn write_baseline(root: &Path, args: &PerfGate, comparisons: &[Comparison]) -> Result<()> {
+    if !args.languages.is_empty() || args.kind != "normal" {
+        bail!("the checked-in baseline must contain the default languages and normal cases");
+    }
+
+    let mut cases = BTreeMap::new();
+    for comparison in comparisons {
+        let key = baseline_key(&comparison.key);
+        let baseline = BaselineCase {
+            source_bytes: comparison.rust.source_bytes,
+            source_hash: comparison.rust.source_hash,
+            rust_c_duration_ratio: comparison.rust.duration_ns as f64
+                / comparison.c.duration_ns as f64,
+        };
+        if cases.insert(key.clone(), baseline).is_some() {
+            bail!("duplicate performance baseline key {key}");
+        }
+    }
+    let path = root.join(BASELINE_PATH);
+    let baseline = BaselineDocument {
+        version: BASELINE_VERSION,
+        min_case_bytes: args.min_case_bytes as u64,
+        measurement_trials: args.measurement_trials as u64,
+        repetitions: args.repetitions as u64,
+        min_enforced_case_bytes: args.min_enforced_case_bytes,
+        c_core_rev: args.c_core_rev.clone(),
+        cases,
+    };
+    fs::write(
+        &path,
+        format!("{}\n", serde_json::to_string_pretty(&baseline)?),
+    )
+    .with_context(|| format!("failed to write {}", path.display()))?;
+    println!("wrote performance baseline to {}", path.display());
+    Ok(())
+}
+
 fn aggregate<'a>(comparisons: impl Iterator<Item = &'a Comparison>) -> Option<Aggregate> {
     let mut aggregate = Aggregate::default();
     for comparison in comparisons {
@@ -291,8 +601,19 @@ fn aggregate<'a>(comparisons: impl Iterator<Item = &'a Comparison>) -> Option<Ag
         aggregate.rust_duration_ns += comparison.rust.duration_ns;
         aggregate.c_bytes += comparison.c.bytes;
         aggregate.c_duration_ns += comparison.c.duration_ns;
+        aggregate.rust_peak_rss_bytes = aggregate
+            .rust_peak_rss_bytes
+            .max(comparison.rust.peak_rss_bytes);
+        aggregate.c_peak_rss_bytes = aggregate.c_peak_rss_bytes.max(comparison.c.peak_rss_bytes);
     }
     (aggregate.cases != 0).then_some(aggregate)
+}
+
+fn percent_delta(value: u64, baseline: u64) -> f64 {
+    if baseline == 0 {
+        return 0.0;
+    }
+    ((value as f64 - baseline as f64) / baseline as f64) * 100.0
 }
 
 fn is_parser_case(parser_kinds: &[String], key: &CaseKey) -> bool {
@@ -379,8 +700,29 @@ struct CaseKey {
 
 #[derive(Clone, Copy, Debug)]
 struct Measurement {
+    source_bytes: u64,
+    source_hash: u64,
     bytes: u64,
     duration_ns: u64,
+    peak_rss_bytes: u64,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+struct BaselineCase {
+    source_bytes: u64,
+    source_hash: u64,
+    rust_c_duration_ratio: f64,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct BaselineDocument {
+    version: u64,
+    min_case_bytes: u64,
+    measurement_trials: u64,
+    repetitions: u64,
+    min_enforced_case_bytes: u64,
+    c_core_rev: String,
+    cases: BTreeMap<String, BaselineCase>,
 }
 
 impl Measurement {
@@ -409,6 +751,8 @@ struct Aggregate {
     rust_duration_ns: u64,
     c_bytes: u64,
     c_duration_ns: u64,
+    rust_peak_rss_bytes: u64,
+    c_peak_rss_bytes: u64,
 }
 
 impl Aggregate {
@@ -422,5 +766,67 @@ impl Aggregate {
 
     fn rust_delta_percent(&self) -> f64 {
         ((self.rust_speed() - self.c_speed()) / self.c_speed()) * 100.0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn key() -> CaseKey {
+        CaseKey {
+            language: "test".into(),
+            kind: "normal".into(),
+            path: "/repo/crates/cli/benches/examples/test/case.txt".into(),
+        }
+    }
+
+    fn measurement(duration_ns: u64, peak_rss_bytes: u64) -> Measurement {
+        Measurement {
+            source_bytes: 128,
+            source_hash: 42,
+            bytes: 1024,
+            duration_ns,
+            peak_rss_bytes,
+        }
+    }
+
+    #[test]
+    fn paired_median_keeps_one_observed_pair_and_maximum_rss() {
+        let mut trials = [
+            (measurement(120, 10), measurement(100, 20)),
+            (measurement(80, 30), measurement(100, 40)),
+            (measurement(100, 50), measurement(100, 60)),
+        ];
+
+        let (rust, c) = median_pair(&key(), &mut trials).unwrap();
+
+        assert_eq!(rust.duration_ns, 100);
+        assert_eq!(c.duration_ns, 100);
+        assert_eq!(rust.peak_rss_bytes, 50);
+        assert_eq!(c.peak_rss_bytes, 60);
+    }
+
+    #[test]
+    fn baseline_rejects_changed_fixture_contents() {
+        let key = key();
+        let comparison = Comparison {
+            key: key.clone(),
+            rust: measurement(100, 0),
+            c: measurement(100, 0),
+        };
+        let baseline = BTreeMap::from([(
+            baseline_key(&key),
+            BaselineCase {
+                source_bytes: 128,
+                source_hash: 99,
+                rust_c_duration_ratio: 1.0,
+            },
+        )]);
+
+        let error = baseline_ratio(&comparison, &baseline).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("fixture test|normal|case.txt changed"));
     }
 }

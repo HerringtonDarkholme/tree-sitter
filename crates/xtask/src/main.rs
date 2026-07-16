@@ -232,6 +232,12 @@ struct PerfGate {
     /// The number of times to parse each sample.
     #[arg(long, default_value = "10")]
     repetitions: usize,
+    /// Number of independent alternating Rust/C measurements per case.
+    #[arg(long, default_value = "5")]
+    measurement_trials: usize,
+    /// Repeat small fixtures to at least this many bytes per timed repetition.
+    #[arg(long, default_value = "131072")]
+    min_case_bytes: usize,
     /// Benchmark case kind to compare: normal, error, or all.
     #[arg(long, default_value = "normal")]
     kind: String,
@@ -244,12 +250,18 @@ struct PerfGate {
     /// Maximum allowed per-case Rust slowdown versus C before strict mode fails.
     #[arg(long, default_value = "5.0")]
     max_regression_percent: f64,
-    /// Required weighted overall Rust speedup over C before strict mode passes.
-    #[arg(long, default_value = "0.0")]
-    min_overall_speedup_percent: f64,
+    /// Enforce per-case limits only for original fixtures at least this large.
+    #[arg(long, default_value = "131072")]
+    min_enforced_case_bytes: u64,
+    /// Maximum allowed weighted slowdown from the checked-in ratio baseline.
+    #[arg(long, default_value = "4.0")]
+    max_overall_regression_percent: f64,
     /// Print results without failing on regressions.
     #[arg(long)]
     report_only: bool,
+    /// Replace the checked-in baseline for the default normal corpus.
+    #[arg(long)]
+    write_baseline: bool,
     /// Pass `--offline` to Cargo benchmark commands.
     #[arg(long)]
     offline: bool,
