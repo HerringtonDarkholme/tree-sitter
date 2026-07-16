@@ -23,7 +23,7 @@ const DEFAULT_LANGUAGES: &[&str] = &[
 
 const BASELINE_VERSION: u64 = 3;
 const BASELINE_PATH: &str = "crates/xtask/perf_baseline.json";
-const STABILITY_VERSION: u64 = 1;
+const STABILITY_VERSION: u64 = 2;
 
 pub fn run(args: &PerfGate) -> Result<()> {
     let root = root_dir();
@@ -127,7 +127,7 @@ fn measure_cases(
                     run_benchmark(root, args, language, core_impl, c_src, Some(&key.path))?;
                 measurements
                     .get(*key)
-                    .copied()
+                    .cloned()
                     .with_context(|| format!("filtered benchmark did not measure {key:?}"))
             };
             if trial & 1 == 0 {
@@ -158,6 +158,8 @@ fn median_pair(
             || c.source_bytes != first.1.source_bytes
             || rust.source_hash != first.0.source_hash
             || c.source_hash != first.1.source_hash
+            || rust.sample_duration_ns.len() != first.0.sample_duration_ns.len()
+            || c.sample_duration_ns.len() != first.1.sample_duration_ns.len()
     }) {
         bail!("benchmark trials measured different byte counts for {key:?}");
     }
@@ -171,12 +173,12 @@ fn median_pair(
         .map(|(_, c)| c.peak_rss_bytes)
         .max()
         .unwrap_or(0);
-    let statistics = TrialStatistics::from_trials(trials);
+    let process_statistics = TrialStatistics::from_process_means(trials);
     println!(
-        "    intra-run CV  Rust {:>5.2}%  C {:>5.2}%  paired {:>5.2}%",
-        statistics.rust_throughput.cv_percent,
-        statistics.c_throughput.cv_percent,
-        statistics.throughput_ratio.cv_percent,
+        "    process-mean CV Rust {:>5.2}%  C {:>5.2}%  paired {:>5.2}%",
+        process_statistics.rust_throughput.cv_percent,
+        process_statistics.c_throughput.cv_percent,
+        process_statistics.throughput_ratio.cv_percent,
     );
     trials.sort_by(|(rust_a, c_a), (rust_b, c_b)| {
         let ratio_a = rust_a.speed() / c_a.speed();
@@ -185,9 +187,16 @@ fn median_pair(
             .partial_cmp(&ratio_b)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
-    let (mut rust, mut c) = trials[trials.len() / 2];
+    let (mut rust, mut c) = trials[trials.len() / 2].clone();
     rust.peak_rss_bytes = rust_peak_rss;
     c.peak_rss_bytes = c_peak_rss;
+    let statistics = TrialStatistics::from_measurements(&rust, &c)?;
+    println!(
+        "    intra-process CV Rust {:>5.2}%  C {:>5.2}%  paired {:>5.2}%",
+        statistics.rust_throughput.cv_percent,
+        statistics.c_throughput.cv_percent,
+        statistics.throughput_ratio.cv_percent,
+    );
     Ok((rust, c, statistics))
 }
 
@@ -298,6 +307,7 @@ fn parse_benchmark_results(output: &[u8]) -> Result<BTreeMap<CaseKey, Measuremen
             source_hash: required_u64(&value, "source_hash")?,
             bytes: required_u64(&value, "bytes")?,
             duration_ns: required_u64(&value, "duration_ns")?.max(1),
+            sample_duration_ns: required_u64_array(&value, "sample_duration_ns")?,
             peak_rss_bytes: required_u64(&value, "peak_rss_bytes")?,
         };
         measurements.insert(key, measurement);
@@ -332,8 +342,8 @@ fn compare_measurements(
             c_results.get(key).map(|c| {
                 Ok(Comparison {
                     key: key.clone(),
-                    rust: *rust,
-                    c: *c,
+                    rust: rust.clone(),
+                    c: c.clone(),
                     statistics: *statistics
                         .get(key)
                         .with_context(|| format!("missing trial statistics for {key:?}"))?,
@@ -790,6 +800,20 @@ fn required_u64(value: &Value, key: &str) -> Result<u64> {
         .with_context(|| format!("BENCHMARK_RESULT missing integer field {key}"))
 }
 
+fn required_u64_array(value: &Value, key: &str) -> Result<Vec<u64>> {
+    value
+        .get(key)
+        .and_then(Value::as_array)
+        .with_context(|| format!("BENCHMARK_RESULT missing array field {key}"))?
+        .iter()
+        .map(|value| {
+            value
+                .as_u64()
+                .with_context(|| format!("BENCHMARK_RESULT field {key} contains a non-integer"))
+        })
+        .collect()
+}
+
 fn display_case_path(path: &str) -> String {
     let path = Path::new(path);
     path.file_name()
@@ -842,12 +866,13 @@ struct CaseKey {
     path: String,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 struct Measurement {
     source_bytes: u64,
     source_hash: u64,
     bytes: u64,
     duration_ns: u64,
+    sample_duration_ns: Vec<u64>,
     peak_rss_bytes: u64,
 }
 
@@ -903,7 +928,7 @@ struct TrialStatistics {
 }
 
 impl TrialStatistics {
-    fn from_trials(trials: &[(Measurement, Measurement)]) -> Self {
+    fn from_process_means(trials: &[(Measurement, Measurement)]) -> Self {
         let rust = trials
             .iter()
             .map(|(rust, _)| rust.speed())
@@ -918,6 +943,26 @@ impl TrialStatistics {
             c_throughput: DistributionStatistics::from_values(&c),
             throughput_ratio: DistributionStatistics::from_values(&ratio),
         }
+    }
+
+    fn from_measurements(rust: &Measurement, c: &Measurement) -> Result<Self> {
+        if rust.sample_duration_ns.is_empty()
+            || rust.sample_duration_ns.len() != c.sample_duration_ns.len()
+        {
+            bail!("paired benchmark processes emitted different sample counts");
+        }
+        let rust_samples = rust.sample_speeds();
+        let c_samples = c.sample_speeds();
+        let ratio = rust_samples
+            .iter()
+            .zip(&c_samples)
+            .map(|(rust, c)| rust / c)
+            .collect::<Vec<_>>();
+        Ok(Self {
+            rust_throughput: DistributionStatistics::from_values(&rust_samples),
+            c_throughput: DistributionStatistics::from_values(&c_samples),
+            throughput_ratio: DistributionStatistics::from_values(&ratio),
+        })
     }
 
     fn distributions(self) -> [(&'static str, DistributionStatistics); 3] {
@@ -1009,8 +1054,15 @@ struct BaselineDocument {
 }
 
 impl Measurement {
-    fn speed(self) -> f64 {
+    fn speed(&self) -> f64 {
         self.bytes as f64 * 1_000_000.0 / self.duration_ns as f64
+    }
+
+    fn sample_speeds(&self) -> Vec<f64> {
+        self.sample_duration_ns
+            .iter()
+            .map(|duration| self.bytes as f64 * 1_000_000.0 / *duration as f64)
+            .collect()
     }
 }
 
@@ -1071,6 +1123,7 @@ mod tests {
             source_hash: 42,
             bytes: 1024,
             duration_ns,
+            sample_duration_ns: vec![duration_ns, duration_ns + 1],
             peak_rss_bytes,
         }
     }
@@ -1099,7 +1152,11 @@ mod tests {
             key: key.clone(),
             rust: measurement(100, 0),
             c: measurement(100, 0),
-            statistics: TrialStatistics::from_trials(&[(measurement(100, 0), measurement(100, 0))]),
+            statistics: TrialStatistics::from_measurements(
+                &measurement(100, 0),
+                &measurement(100, 0),
+            )
+            .unwrap(),
         };
         let baseline = BTreeMap::from([(
             baseline_key(&key),
@@ -1114,5 +1171,13 @@ mod tests {
         assert!(error
             .to_string()
             .contains("fixture test|normal|case.txt changed"));
+    }
+
+    #[test]
+    fn distribution_uses_sample_standard_deviation() {
+        let statistics = DistributionStatistics::from_values(&[10.0, 12.0, 14.0]);
+        assert_eq!(statistics.mean, 12.0);
+        assert_eq!(statistics.stddev, 2.0);
+        assert!((statistics.cv_percent - 16.666_666_666_7).abs() < 1e-9);
     }
 }

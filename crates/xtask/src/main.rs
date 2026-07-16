@@ -233,7 +233,7 @@ struct PerfGate {
     #[arg(long, default_value = "10")]
     repetitions: usize,
     /// Number of independent alternating Rust/C measurements per case.
-    #[arg(long, default_value = "9")]
+    #[arg(long, default_value = "5")]
     measurement_trials: usize,
     /// Repeat small fixtures to at least this many bytes per timed repetition.
     #[arg(long, default_value = "131072")]

@@ -311,16 +311,20 @@ fn parse(
         *MIN_SAMPLE_TIME,
         &mut action,
     );
-    let time = Instant::now();
+    let mut sample_duration_ns = Vec::with_capacity(*REPETITION_COUNT);
     for _ in 0..*REPETITION_COUNT {
+        let time = Instant::now();
         for _ in 0..parses_per_repetition {
             action(&source_code);
         }
+        sample_duration_ns.push(
+            u64::try_from(time.elapsed().as_nanos())
+                .unwrap_or(u64::MAX)
+                .max(1),
+        );
     }
-    let duration = time.elapsed() / (*REPETITION_COUNT as u32);
-    let duration_ns = u64::try_from(duration.as_nanos())
-        .unwrap_or(u64::MAX)
-        .max(1);
+    let duration_ns =
+        sample_duration_ns.iter().sum::<u64>() / u64::try_from(sample_duration_ns.len()).unwrap();
     let measured_bytes = source_code.len() as u64 * parses_per_repetition as u64;
     let speed = (measured_bytes * 1_000_000) / duration_ns;
     let peak_rss_bytes = peak_rss_bytes();
@@ -339,6 +343,7 @@ fn parse(
             "source_hash": source_hash,
             "bytes": measured_bytes,
             "duration_ns": duration_ns,
+            "sample_duration_ns": sample_duration_ns,
             "peak_rss_bytes": peak_rss_bytes,
             "speed_bytes_per_ms": speed,
         })
