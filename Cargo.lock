@@ -1631,6 +1631,7 @@ dependencies = [
  "heck",
  "html-escape",
  "indoc",
+ "libc",
  "log",
  "memchr",
  "pretty_assertions",

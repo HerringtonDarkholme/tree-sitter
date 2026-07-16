@@ -1,6 +1,7 @@
 use std::{
     collections::BTreeMap,
     env, fs,
+    mem::MaybeUninit,
     path::{Path, PathBuf},
     str,
     sync::LazyLock,
@@ -19,6 +20,11 @@ static LANGUAGE_FILTER: LazyLock<Option<String>> =
     LazyLock::new(|| env::var("TREE_SITTER_BENCHMARK_LANGUAGE_FILTER").ok());
 static EXAMPLE_FILTER: LazyLock<Option<String>> =
     LazyLock::new(|| env::var("TREE_SITTER_BENCHMARK_EXAMPLE_FILTER").ok());
+static EXAMPLE_PATH: LazyLock<Option<PathBuf>> = LazyLock::new(|| {
+    env::var("TREE_SITTER_BENCHMARK_EXAMPLE_PATH")
+        .ok()
+        .map(PathBuf::from)
+});
 static KIND_FILTER: LazyLock<Option<Vec<String>>> = LazyLock::new(|| {
     env::var("TREE_SITTER_BENCHMARK_KIND_FILTER")
         .ok()
@@ -33,6 +39,9 @@ static KIND_FILTER: LazyLock<Option<Vec<String>>> = LazyLock::new(|| {
 });
 static REPETITION_COUNT: LazyLock<usize> = LazyLock::new(|| {
     env::var("TREE_SITTER_BENCHMARK_REPETITION_COUNT").map_or(5, |s| s.parse::<usize>().unwrap())
+});
+static MIN_SOURCE_BYTES: LazyLock<usize> = LazyLock::new(|| {
+    env::var("TREE_SITTER_BENCHMARK_MIN_SOURCE_BYTES").map_or(0, |s| s.parse::<usize>().unwrap())
 });
 static ERROR_CASE_LIMIT: LazyLock<Option<usize>> = LazyLock::new(|| {
     env::var("TREE_SITTER_BENCHMARK_ERROR_LIMIT")
@@ -145,6 +154,15 @@ fn typescript_repo_examples() -> Vec<PathBuf> {
     .collect()
 }
 
+fn should_run_example(path: &Path) -> bool {
+    if let Some(selected) = EXAMPLE_PATH.as_ref() {
+        return path == selected;
+    }
+    EXAMPLE_FILTER
+        .as_ref()
+        .is_none_or(|filter| path.to_string_lossy().contains(filter))
+}
+
 fn main() {
     tree_sitter_cli::logger::init();
 
@@ -182,10 +200,8 @@ fn main() {
         if should_run_kind("query") {
             info!("  Constructing Queries");
             for path in query_paths {
-                if let Some(filter) = EXAMPLE_FILTER.as_ref() {
-                    if !path.to_str().unwrap().contains(filter.as_str()) {
-                        continue;
-                    }
+                if !should_run_example(path) {
+                    continue;
                 }
 
                 parse(language_name, "query", path, max_path_length, |source| {
@@ -200,10 +216,8 @@ fn main() {
         if should_run_kind("normal") {
             info!("  Parsing Valid Code:");
             for example_path in example_paths {
-                if let Some(filter) = EXAMPLE_FILTER.as_ref() {
-                    if !example_path.to_str().unwrap().contains(filter.as_str()) {
-                        continue;
-                    }
+                if !should_run_example(example_path) {
+                    continue;
                 }
 
                 normal_speeds.push(parse(
@@ -229,10 +243,8 @@ fn main() {
                         .iter()
                         .take((*ERROR_CASE_LIMIT).unwrap_or(usize::MAX))
                     {
-                        if let Some(filter) = EXAMPLE_FILTER.as_ref() {
-                            if !example_path.to_str().unwrap().contains(filter.as_str()) {
-                                continue;
-                            }
+                        if !should_run_example(example_path) {
+                            continue;
                         }
 
                         error_speeds.push(parse(
@@ -308,15 +320,20 @@ fn parse(
     let source_code = fs::read(path)
         .with_context(|| format!("Failed to read {}", path.display()))
         .unwrap();
+    let parses_per_repetition = parses_per_repetition(source_code.len(), *MIN_SOURCE_BYTES);
     let time = Instant::now();
     for _ in 0..*REPETITION_COUNT {
-        action(&source_code);
+        for _ in 0..parses_per_repetition {
+            action(&source_code);
+        }
     }
     let duration = time.elapsed() / (*REPETITION_COUNT as u32);
     let duration_ns = u64::try_from(duration.as_nanos())
         .unwrap_or(u64::MAX)
         .max(1);
-    let speed = (source_code.len() as u64 * 1_000_000) / duration_ns;
+    let measured_bytes = source_code.len() as u64 * parses_per_repetition as u64;
+    let speed = (measured_bytes * 1_000_000) / duration_ns;
+    let peak_rss_bytes = peak_rss_bytes();
     info!(
         "    {:max_path_length$}\ttime {:>7.2} ms\t\tspeed {speed:>6} bytes/ms",
         path.file_name().unwrap().to_str().unwrap(),
@@ -328,12 +345,41 @@ fn parse(
             "language": language,
             "kind": kind,
             "path": path.display().to_string(),
-            "bytes": source_code.len() as u64,
+            "source_bytes": source_code.len() as u64,
+            "bytes": measured_bytes,
             "duration_ns": duration_ns,
+            "peak_rss_bytes": peak_rss_bytes,
             "speed_bytes_per_ms": speed,
         })
     );
     speed as usize
+}
+
+/// Parse small fixtures enough times for scheduling and timer noise not to
+/// dominate, while preserving the fixture's syntax and tree shape.
+fn parses_per_repetition(source_bytes: usize, minimum_measured_bytes: usize) -> usize {
+    minimum_measured_bytes.div_ceil(source_bytes.max(1)).max(1)
+}
+
+#[cfg(unix)]
+fn peak_rss_bytes() -> u64 {
+    let mut usage = MaybeUninit::<libc::rusage>::zeroed();
+    let result = unsafe { libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr()) };
+    if result != 0 {
+        return 0;
+    }
+
+    let raw = unsafe { usage.assume_init() }.ru_maxrss.max(0) as u64;
+    if cfg!(any(target_os = "linux", target_os = "android")) {
+        raw.saturating_mul(1024)
+    } else {
+        raw
+    }
+}
+
+#[cfg(not(unix))]
+const fn peak_rss_bytes() -> u64 {
+    0
 }
 
 fn get_language(path: &Path) -> Language {

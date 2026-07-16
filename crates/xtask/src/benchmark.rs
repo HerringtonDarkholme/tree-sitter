@@ -2,6 +2,10 @@ use anyhow::Result;
 
 use crate::{bail_on_err, Benchmark};
 
+pub fn mebibytes(bytes: u64) -> f64 {
+    bytes as f64 / (1024.0 * 1024.0)
+}
+
 pub fn run(args: &Benchmark) -> Result<()> {
     if let Some(ref example) = args.example_file_name {
         unsafe { std::env::set_var("TREE_SITTER_BENCHMARK_EXAMPLE_FILTER", example) };
