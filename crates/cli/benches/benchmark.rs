@@ -378,6 +378,11 @@ fn calibrated_parses_per_repetition(
         return byte_floor;
     }
 
+    const WARMUP_PARSES: usize = 3;
+    for _ in 0..WARMUP_PARSES {
+        action(source);
+    }
+
     const CALIBRATION_PARSES: usize = 3;
     let started = Instant::now();
     for _ in 0..CALIBRATION_PARSES {
