@@ -90,10 +90,6 @@ fn run_benchmark(
         .arg("-p")
         .arg("tree-sitter-cli");
 
-    if let Some(path) = &args.typescript_path {
-        command.env("TREE_SITTER_BENCHMARK_TYPESCRIPT_PATH", path);
-    }
-
     if let Some(src_dir) = c_core_src_dir {
         command.env("TREE_SITTER_C_CORE_SRC_DIR", src_dir);
     }

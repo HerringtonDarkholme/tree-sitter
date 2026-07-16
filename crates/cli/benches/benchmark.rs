@@ -48,15 +48,6 @@ static ERROR_CASE_LIMIT: LazyLock<Option<usize>> = LazyLock::new(|| {
         .ok()
         .and_then(|s| s.parse().ok())
 });
-static TYPESCRIPT_PATH: LazyLock<Option<PathBuf>> = LazyLock::new(|| {
-    env::var("TREE_SITTER_BENCHMARK_TYPESCRIPT_PATH")
-        .ok()
-        .map(PathBuf::from)
-        .or_else(|| {
-            let path = ROOT_DIR.parent().unwrap().join("typescript");
-            path.is_dir().then_some(path)
-        })
-});
 static TEST_LOADER: LazyLock<Loader> =
     LazyLock::new(|| Loader::with_parser_lib_path(SCRATCH_DIR.clone()));
 
@@ -106,12 +97,11 @@ static EXAMPLE_AND_QUERY_PATHS_BY_LANGUAGE_DIR: LazyLock<
             let relative_path = dir.strip_prefix(GRAMMARS_DIR.as_path()).unwrap();
             let (example_paths, query_paths) = result.entry(relative_path.to_owned()).or_default();
 
-            example_paths.extend(collect_local_and_parent_files(dir, "examples"));
+            // Performance inputs are repository-owned snapshots. Do not make
+            // benchmark results depend on ignored grammar examples or sibling
+            // repositories that happen to exist on one developer's machine.
             example_paths.extend(collect_benchmark_examples(relative_path));
             query_paths.extend(collect_local_and_parent_files(dir, "queries"));
-            if relative_path == Path::new("typescript/typescript") {
-                example_paths.extend(typescript_repo_examples());
-            }
             example_paths.sort();
             example_paths.dedup();
             query_paths.sort();
@@ -130,29 +120,6 @@ static EXAMPLE_AND_QUERY_PATHS_BY_LANGUAGE_DIR: LazyLock<
     process_dir(&mut result, &GRAMMARS_DIR);
     result
 });
-
-fn typescript_repo_examples() -> Vec<PathBuf> {
-    let Some(typescript_path) = TYPESCRIPT_PATH.as_ref() else {
-        return Vec::new();
-    };
-
-    [
-        "src/compiler/builderStatePublic.ts",
-        "src/services/transform.ts",
-        "src/compiler/corePublic.ts",
-        "src/services/refactorProvider.ts",
-        "src/server/types.ts",
-        "src/server/packageJsonCache.ts",
-        "src/compiler/performanceCore.ts",
-        "src/server/utilities.ts",
-        "src/services/codeFixProvider.ts",
-        "src/compiler/performance.ts",
-    ]
-    .into_iter()
-    .map(|path| typescript_path.join(path))
-    .filter(|path| path.is_file())
-    .collect()
-}
 
 fn should_run_example(path: &Path) -> bool {
     if let Some(selected) = EXAMPLE_PATH.as_ref() {
@@ -219,6 +186,17 @@ fn main() {
                 if !should_run_example(example_path) {
                     continue;
                 }
+
+                let source = fs::read(example_path)
+                    .with_context(|| format!("Failed to read {}", example_path.display()))
+                    .unwrap();
+                let tree = parser.parse(&source, None).expect("Failed to parse");
+                assert!(
+                    !tree.root_node().has_error(),
+                    "normal benchmark fixture has parse errors: {}\n{}",
+                    example_path.display(),
+                    tree.root_node().to_sexp()
+                );
 
                 normal_speeds.push(parse(
                     language_name,

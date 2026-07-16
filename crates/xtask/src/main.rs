@@ -238,9 +238,6 @@ struct PerfGate {
     /// Maximum number of mismatched-language error samples per other language.
     #[arg(long, default_value = "8")]
     error_limit: usize,
-    /// TypeScript repository path. Defaults to ../typescript when present.
-    #[arg(long)]
-    typescript_path: Option<std::path::PathBuf>,
     /// Git revision whose lib/src directory contains the original C core.
     #[arg(long, default_value = "c9f80282ad355a88a389d75173d918de84ef3e79")]
     c_core_rev: String,
