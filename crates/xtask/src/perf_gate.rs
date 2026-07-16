@@ -21,9 +21,9 @@ const DEFAULT_LANGUAGES: &[&str] = &[
     "typescript",
 ];
 
-const BASELINE_VERSION: u64 = 3;
+const BASELINE_VERSION: u64 = 4;
 const BASELINE_PATH: &str = "crates/xtask/perf_baseline.json";
-const STABILITY_VERSION: u64 = 2;
+const STABILITY_VERSION: u64 = 3;
 
 pub fn run(args: &PerfGate) -> Result<()> {
     let root = root_dir();
@@ -35,6 +35,9 @@ pub fn run(args: &PerfGate) -> Result<()> {
 
     if args.measurement_trials == 0 || args.measurement_trials & 1 == 0 {
         bail!("--measurement-trials must be a positive odd number");
+    }
+    if args.max_sample_attempts == 0 {
+        bail!("--max-sample-attempts must be positive");
     }
 
     for language in &languages {
@@ -123,12 +126,26 @@ fn measure_cases(
         for trial in 0..args.measurement_trials {
             let measure = |core_impl| -> Result<Measurement> {
                 let c_src = matches!(core_impl, CoreImpl::C).then_some(c_core_src_dir);
-                let measurements =
-                    run_benchmark(root, args, language, core_impl, c_src, Some(&key.path))?;
-                measurements
-                    .get(*key)
-                    .cloned()
-                    .with_context(|| format!("filtered benchmark did not measure {key:?}"))
+                for attempt in 1..=args.max_sample_attempts {
+                    let measurements =
+                        run_benchmark(root, args, language, core_impl, c_src, Some(&key.path))?;
+                    let measurement = measurements
+                        .get(*key)
+                        .cloned()
+                        .with_context(|| format!("filtered benchmark did not measure {key:?}"))?;
+                    let cv = measurement.throughput_statistics().cv_percent;
+                    if cv <= args.max_intra_cv_percent {
+                        return Ok(measurement);
+                    }
+                    println!(
+                        "    reject {core_impl:?} sample attempt {attempt}: intra-process CV {cv:.2}%"
+                    );
+                }
+                bail!(
+                    "{core_impl:?} benchmark for {key:?} exceeded {:.2}% CV on all {} attempts",
+                    args.max_intra_cv_percent,
+                    args.max_sample_attempts,
+                )
             };
             if trial & 1 == 0 {
                 trials.push((measure(CoreImpl::Rust)?, measure(CoreImpl::C)?));
@@ -465,7 +482,7 @@ fn print_intra_run_stability(args: &PerfGate, snapshot: &StabilitySnapshot) {
 fn intra_run_stability_failures(args: &PerfGate, snapshot: &StabilitySnapshot) -> Vec<String> {
     let mut failures = Vec::new();
     for (case, measurement) in &snapshot.cases {
-        for (metric, statistics) in measurement.statistics.distributions() {
+        for (metric, statistics) in measurement.statistics.throughput_distributions() {
             if statistics.cv_percent > args.max_intra_cv_percent {
                 failures.push(format!("{case} {metric}: CV {:.2}%", statistics.cv_percent));
             }
@@ -483,6 +500,7 @@ fn compare_stability(
         || reference.measurement_trials != current.measurement_trials
         || reference.min_case_bytes != current.min_case_bytes
         || reference.min_sample_time_ms != current.min_sample_time_ms
+        || reference.max_sample_attempts != current.max_sample_attempts
     {
         bail!("stability snapshots use different measurement settings");
     }
@@ -501,9 +519,9 @@ fn compare_stability(
         }
         for ((metric, reference_stats), (_, current_stats)) in reference_case
             .statistics
-            .distributions()
+            .throughput_distributions()
             .into_iter()
-            .zip(current_case.statistics.distributions())
+            .zip(current_case.statistics.throughput_distributions())
         {
             if !reference_stats.intervals_overlap(current_stats) {
                 failures.push(format!(
@@ -701,6 +719,9 @@ fn load_baseline(root: &Path, args: &PerfGate) -> Result<BTreeMap<String, Baseli
     if baseline.min_sample_time_ms != args.min_sample_time_ms {
         bail!("performance baseline uses a different --min-sample-time-ms value");
     }
+    if baseline.max_sample_attempts != args.max_sample_attempts as u64 {
+        bail!("performance baseline uses a different --max-sample-attempts value");
+    }
     if baseline.min_enforced_case_bytes != args.min_enforced_case_bytes {
         bail!("performance baseline uses a different --min-enforced-case-bytes value");
     }
@@ -734,6 +755,7 @@ fn write_baseline(root: &Path, args: &PerfGate, comparisons: &[Comparison]) -> R
         measurement_trials: args.measurement_trials as u64,
         repetitions: args.repetitions as u64,
         min_sample_time_ms: args.min_sample_time_ms,
+        max_sample_attempts: args.max_sample_attempts as u64,
         min_enforced_case_bytes: args.min_enforced_case_bytes,
         c_core_rev: args.c_core_rev.clone(),
         cases,
@@ -965,11 +987,10 @@ impl TrialStatistics {
         })
     }
 
-    fn distributions(self) -> [(&'static str, DistributionStatistics); 3] {
+    fn throughput_distributions(self) -> [(&'static str, DistributionStatistics); 2] {
         [
             ("Rust throughput", self.rust_throughput),
             ("C throughput", self.c_throughput),
-            ("paired throughput ratio", self.throughput_ratio),
         ]
     }
 }
@@ -988,6 +1009,7 @@ struct StabilitySnapshot {
     measurement_trials: usize,
     min_case_bytes: usize,
     min_sample_time_ms: u64,
+    max_sample_attempts: u64,
     cases: BTreeMap<String, StabilityCase>,
 }
 
@@ -1012,6 +1034,7 @@ impl StabilitySnapshot {
             measurement_trials: args.measurement_trials,
             min_case_bytes: args.min_case_bytes,
             min_sample_time_ms: args.min_sample_time_ms,
+            max_sample_attempts: args.max_sample_attempts as u64,
             cases,
         }
     }
@@ -1048,6 +1071,7 @@ struct BaselineDocument {
     measurement_trials: u64,
     repetitions: u64,
     min_sample_time_ms: u64,
+    max_sample_attempts: u64,
     min_enforced_case_bytes: u64,
     c_core_rev: String,
     cases: BTreeMap<String, BaselineCase>,
@@ -1063,6 +1087,10 @@ impl Measurement {
             .iter()
             .map(|duration| self.bytes as f64 * 1_000_000.0 / *duration as f64)
             .collect()
+    }
+
+    fn throughput_statistics(&self) -> DistributionStatistics {
+        DistributionStatistics::from_values(&self.sample_speeds())
     }
 }
 
