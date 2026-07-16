@@ -144,9 +144,7 @@ fn median_pair(
         bail!("no benchmark trials were measured for {key:?}");
     };
     if trials.iter().any(|(rust, c)| {
-        rust.bytes != first.0.bytes
-            || c.bytes != first.1.bytes
-            || rust.source_bytes != first.0.source_bytes
+        rust.source_bytes != first.0.source_bytes
             || c.source_bytes != first.1.source_bytes
             || rust.source_hash != first.0.source_hash
             || c.source_hash != first.1.source_hash
@@ -171,8 +169,8 @@ fn median_pair(
         statistics.throughput_ratio.cv_percent,
     );
     trials.sort_by(|(rust_a, c_a), (rust_b, c_b)| {
-        let ratio_a = rust_a.duration_ns as f64 / c_a.duration_ns as f64;
-        let ratio_b = rust_b.duration_ns as f64 / c_b.duration_ns as f64;
+        let ratio_a = rust_a.speed() / c_a.speed();
+        let ratio_b = rust_b.speed() / c_b.speed();
         ratio_a
             .partial_cmp(&ratio_b)
             .unwrap_or(std::cmp::Ordering::Equal)
@@ -617,9 +615,10 @@ fn baseline_delta(
     let mut actual_duration = 0.0;
     let mut expected_duration = 0.0;
     for comparison in comparisons {
-        actual_duration += comparison.rust.duration_ns as f64;
-        expected_duration = (comparison.c.duration_ns as f64)
-            .mul_add(baseline_ratio(comparison, baseline)?, expected_duration);
+        let weight = comparison.rust.source_bytes as f64;
+        actual_duration += weight / comparison.rust.speed();
+        expected_duration +=
+            weight / (comparison.c.speed() * baseline_ratio(comparison, baseline)?);
     }
     Ok((expected_duration / actual_duration - 1.0) * 100.0)
 }
@@ -628,8 +627,8 @@ fn baseline_slowdown(
     comparison: &Comparison,
     baseline: &BTreeMap<String, BaselineCase>,
 ) -> Result<f64> {
-    let current_ratio = comparison.rust.duration_ns as f64 / comparison.c.duration_ns as f64;
-    Ok((current_ratio / baseline_ratio(comparison, baseline)? - 1.0) * 100.0)
+    let current_ratio = comparison.rust.speed() / comparison.c.speed();
+    Ok((baseline_ratio(comparison, baseline)? / current_ratio - 1.0) * 100.0)
 }
 
 fn baseline_ratio(
@@ -647,7 +646,7 @@ fn baseline_ratio(
             "performance fixture {key} changed; rewrite the baseline as an explicit corpus update"
         );
     }
-    Ok(baseline.rust_c_duration_ratio)
+    Ok(baseline.rust_c_throughput_ratio)
 }
 
 fn baseline_key(key: &CaseKey) -> String {
@@ -702,8 +701,7 @@ fn write_baseline(root: &Path, args: &PerfGate, comparisons: &[Comparison]) -> R
         let baseline = BaselineCase {
             source_bytes: comparison.rust.source_bytes,
             source_hash: comparison.rust.source_hash,
-            rust_c_duration_ratio: comparison.rust.duration_ns as f64
-                / comparison.c.duration_ns as f64,
+            rust_c_throughput_ratio: comparison.rust.speed() / comparison.c.speed(),
         };
         if cases.insert(key.clone(), baseline).is_some() {
             bail!("duplicate performance baseline key {key}");
@@ -985,7 +983,7 @@ impl StabilitySnapshot {
 struct BaselineCase {
     source_bytes: u64,
     source_hash: u64,
-    rust_c_duration_ratio: f64,
+    rust_c_throughput_ratio: f64,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -1098,7 +1096,7 @@ mod tests {
             BaselineCase {
                 source_bytes: 128,
                 source_hash: 99,
-                rust_c_duration_ratio: 1.0,
+                rust_c_throughput_ratio: 1.0,
             },
         )]);
 
