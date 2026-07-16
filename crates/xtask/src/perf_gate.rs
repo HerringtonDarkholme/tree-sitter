@@ -21,7 +21,7 @@ const DEFAULT_LANGUAGES: &[&str] = &[
     "typescript",
 ];
 
-const BASELINE_VERSION: u64 = 2;
+const BASELINE_VERSION: u64 = 3;
 const BASELINE_PATH: &str = "crates/xtask/perf_baseline.json";
 const STABILITY_VERSION: u64 = 1;
 
@@ -214,6 +214,10 @@ fn run_benchmark(
         .env(
             "TREE_SITTER_BENCHMARK_MIN_SOURCE_BYTES",
             args.min_case_bytes.to_string(),
+        )
+        .env(
+            "TREE_SITTER_BENCHMARK_MIN_SAMPLE_TIME_MS",
+            args.min_sample_time_ms.to_string(),
         )
         .env("TREE_SITTER_BENCHMARK_KIND_FILTER", benchmark_kind(args)?)
         .env(
@@ -460,6 +464,7 @@ fn compare_stability(
     if reference.repetitions != current.repetitions
         || reference.measurement_trials != current.measurement_trials
         || reference.min_case_bytes != current.min_case_bytes
+        || reference.min_sample_time_ms != current.min_sample_time_ms
     {
         bail!("stability snapshots use different measurement settings");
     }
@@ -674,6 +679,9 @@ fn load_baseline(root: &Path, args: &PerfGate) -> Result<BTreeMap<String, Baseli
     if baseline.repetitions != args.repetitions as u64 {
         bail!("performance baseline uses a different --repetitions value");
     }
+    if baseline.min_sample_time_ms != args.min_sample_time_ms {
+        bail!("performance baseline uses a different --min-sample-time-ms value");
+    }
     if baseline.min_enforced_case_bytes != args.min_enforced_case_bytes {
         bail!("performance baseline uses a different --min-enforced-case-bytes value");
     }
@@ -707,6 +715,7 @@ fn write_baseline(root: &Path, args: &PerfGate, comparisons: &[Comparison]) -> R
         min_case_bytes: args.min_case_bytes as u64,
         measurement_trials: args.measurement_trials as u64,
         repetitions: args.repetitions as u64,
+        min_sample_time_ms: args.min_sample_time_ms,
         min_enforced_case_bytes: args.min_enforced_case_bytes,
         c_core_rev: args.c_core_rev.clone(),
         cases,
@@ -925,6 +934,7 @@ struct StabilitySnapshot {
     repetitions: usize,
     measurement_trials: usize,
     min_case_bytes: usize,
+    min_sample_time_ms: u64,
     cases: BTreeMap<String, StabilityCase>,
 }
 
@@ -948,6 +958,7 @@ impl StabilitySnapshot {
             repetitions: args.repetitions,
             measurement_trials: args.measurement_trials,
             min_case_bytes: args.min_case_bytes,
+            min_sample_time_ms: args.min_sample_time_ms,
             cases,
         }
     }
@@ -983,6 +994,7 @@ struct BaselineDocument {
     min_case_bytes: u64,
     measurement_trials: u64,
     repetitions: u64,
+    min_sample_time_ms: u64,
     min_enforced_case_bytes: u64,
     c_core_rev: String,
     cases: BTreeMap<String, BaselineCase>,

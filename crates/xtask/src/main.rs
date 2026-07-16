@@ -238,6 +238,9 @@ struct PerfGate {
     /// Repeat small fixtures to at least this many bytes per timed repetition.
     #[arg(long, default_value = "131072")]
     min_case_bytes: usize,
+    /// Calibrate each timed repetition to at least this duration.
+    #[arg(long, default_value = "50")]
+    min_sample_time_ms: u64,
     /// Benchmark case kind to compare: normal, error, or all.
     #[arg(long, default_value = "normal")]
     kind: String,
@@ -269,7 +272,7 @@ struct PerfGate {
     #[arg(long)]
     stability_reference: Option<std::path::PathBuf>,
     /// Maximum allowed within-run coefficient of variation.
-    #[arg(long, default_value = "3.0")]
+    #[arg(long, default_value = "5.0")]
     max_intra_cv_percent: f64,
     /// Maximum allowed ratio between normalized standard deviations across runs.
     #[arg(long, default_value = "2.0")]

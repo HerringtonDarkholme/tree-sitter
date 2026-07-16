@@ -43,6 +43,12 @@ static REPETITION_COUNT: LazyLock<usize> = LazyLock::new(|| {
 static MIN_SOURCE_BYTES: LazyLock<usize> = LazyLock::new(|| {
     env::var("TREE_SITTER_BENCHMARK_MIN_SOURCE_BYTES").map_or(0, |s| s.parse::<usize>().unwrap())
 });
+static MIN_SAMPLE_TIME: LazyLock<std::time::Duration> = LazyLock::new(|| {
+    std::time::Duration::from_millis(
+        env::var("TREE_SITTER_BENCHMARK_MIN_SAMPLE_TIME_MS")
+            .map_or(0, |s| s.parse::<u64>().unwrap()),
+    )
+});
 static ERROR_CASE_LIMIT: LazyLock<Option<usize>> = LazyLock::new(|| {
     env::var("TREE_SITTER_BENCHMARK_ERROR_LIMIT")
         .ok()
@@ -299,7 +305,12 @@ fn parse(
         .with_context(|| format!("Failed to read {}", path.display()))
         .unwrap();
     let source_hash = source_hash(&source_code);
-    let parses_per_repetition = parses_per_repetition(source_code.len(), *MIN_SOURCE_BYTES);
+    let parses_per_repetition = calibrated_parses_per_repetition(
+        &source_code,
+        *MIN_SOURCE_BYTES,
+        *MIN_SAMPLE_TIME,
+        &mut action,
+    );
     let time = Instant::now();
     for _ in 0..*REPETITION_COUNT {
         for _ in 0..parses_per_repetition {
@@ -346,6 +357,33 @@ fn source_hash(source: &[u8]) -> u64 {
 /// dominate, while preserving the fixture's syntax and tree shape.
 fn parses_per_repetition(source_bytes: usize, minimum_measured_bytes: usize) -> usize {
     minimum_measured_bytes.div_ceil(source_bytes.max(1)).max(1)
+}
+
+/// Calibrate process-level trials to a useful duration before recording them.
+/// Three untimed parses warm allocator and parser state and make the estimate
+/// less sensitive to one cold call.
+fn calibrated_parses_per_repetition(
+    source: &[u8],
+    minimum_measured_bytes: usize,
+    minimum_sample_time: std::time::Duration,
+    action: &mut impl FnMut(&[u8]),
+) -> usize {
+    let byte_floor = parses_per_repetition(source.len(), minimum_measured_bytes);
+    if minimum_sample_time.is_zero() {
+        return byte_floor;
+    }
+
+    const CALIBRATION_PARSES: usize = 3;
+    let started = Instant::now();
+    for _ in 0..CALIBRATION_PARSES {
+        action(source);
+    }
+    let nanos_per_parse = started.elapsed().as_nanos().max(1) / CALIBRATION_PARSES as u128;
+    let time_floor = minimum_sample_time
+        .as_nanos()
+        .div_ceil(nanos_per_parse)
+        .min(usize::MAX as u128) as usize;
+    byte_floor.max(time_floor).max(1)
 }
 
 #[cfg(unix)]
