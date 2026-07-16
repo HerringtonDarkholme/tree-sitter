@@ -23,7 +23,7 @@ const DEFAULT_LANGUAGES: &[&str] = &[
 
 const BASELINE_VERSION: u64 = 4;
 const BASELINE_PATH: &str = "crates/xtask/perf_baseline.json";
-const STABILITY_VERSION: u64 = 3;
+const STABILITY_VERSION: u64 = 4;
 
 pub fn run(args: &PerfGate) -> Result<()> {
     let root = root_dir();
@@ -204,12 +204,12 @@ fn median_pair(
             .partial_cmp(&ratio_b)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
+    let statistics = TrialStatistics::from_trial_samples(trials)?;
     let (mut rust, mut c) = trials[trials.len() / 2].clone();
     rust.peak_rss_bytes = rust_peak_rss;
     c.peak_rss_bytes = c_peak_rss;
-    let statistics = TrialStatistics::from_measurements(&rust, &c)?;
     println!(
-        "    intra-process CV Rust {:>5.2}%  C {:>5.2}%  paired {:>5.2}%",
+        "    intra-run CV     Rust {:>5.2}%  C {:>5.2}%  paired {:>5.2}%",
         statistics.rust_throughput.cv_percent,
         statistics.c_throughput.cv_percent,
         statistics.throughput_ratio.cv_percent,
@@ -967,23 +967,26 @@ impl TrialStatistics {
         }
     }
 
-    fn from_measurements(rust: &Measurement, c: &Measurement) -> Result<Self> {
-        if rust.sample_duration_ns.is_empty()
-            || rust.sample_duration_ns.len() != c.sample_duration_ns.len()
-        {
-            bail!("paired benchmark processes emitted different sample counts");
+    fn from_trial_samples(trials: &[(Measurement, Measurement)]) -> Result<Self> {
+        let mut rust_samples = Vec::new();
+        let mut c_samples = Vec::new();
+        let mut ratio_samples = Vec::new();
+        for (rust, c) in trials {
+            if rust.sample_duration_ns.is_empty()
+                || rust.sample_duration_ns.len() != c.sample_duration_ns.len()
+            {
+                bail!("paired benchmark processes emitted different sample counts");
+            }
+            let rust_trial = rust.sample_speeds();
+            let c_trial = c.sample_speeds();
+            ratio_samples.extend(rust_trial.iter().zip(&c_trial).map(|(rust, c)| rust / c));
+            rust_samples.extend(rust_trial);
+            c_samples.extend(c_trial);
         }
-        let rust_samples = rust.sample_speeds();
-        let c_samples = c.sample_speeds();
-        let ratio = rust_samples
-            .iter()
-            .zip(&c_samples)
-            .map(|(rust, c)| rust / c)
-            .collect::<Vec<_>>();
         Ok(Self {
             rust_throughput: DistributionStatistics::from_values(&rust_samples),
             c_throughput: DistributionStatistics::from_values(&c_samples),
-            throughput_ratio: DistributionStatistics::from_values(&ratio),
+            throughput_ratio: DistributionStatistics::from_values(&ratio_samples),
         })
     }
 
@@ -1180,10 +1183,10 @@ mod tests {
             key: key.clone(),
             rust: measurement(100, 0),
             c: measurement(100, 0),
-            statistics: TrialStatistics::from_measurements(
-                &measurement(100, 0),
-                &measurement(100, 0),
-            )
+            statistics: TrialStatistics::from_trial_samples(&[(
+                measurement(100, 0),
+                measurement(100, 0),
+            )])
             .unwrap(),
         };
         let baseline = BTreeMap::from([(
