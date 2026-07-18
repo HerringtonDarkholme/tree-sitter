@@ -738,6 +738,48 @@ reverted without implementing an extended overflow record: the safety branch
 already prices the common-path cost, and the result provides no throughput
 budget for the additional rare-shape machinery.
 
+### Specialized unary internal records
+
+The final record-shape experiment targeted the 57.08% of internal nodes that
+have exactly one physical child. The general coallocated layout rounds a
+four-byte child prefix to eight bytes before its 72-byte internal record, for
+an 80-byte allocation. The prototype instead used a 72-byte unary record:
+
+```text
+[48-byte common header][4-byte child][20-byte child summary]
+```
+
+An explicit unary flag selected the child and summary offsets. Owned unary
+nodes used the specialized shape, while temporary scratch nodes retained the
+general prefixed layout so their borrowed child array was never relocated.
+Zero-child and multi-child internal nodes were unchanged. The prototype passed
+the 16 core tests, ABI and strict clippy checks, 15 core-parity samples, and all
+four ast-grep packages.
+
+The first A/B/A run compared the prototype with the immediately preceding
+lazy-column Rust implementation over all 40 fixtures. Python, Rust, and
+TypeScript crossed the regression guard, so every row for those languages was
+repeated in A/B/A order with one-second samples and replaced. Maximum candidate
+CV after replacement was 2.65%.
+
+| Language | Fixtures | Specialized unary record | Control RSS | Candidate RSS |
+|---|---:|---:|---:|---:|
+| C++ | 4 | -0.55% | 11.02 MiB | 11.02 MiB |
+| Go | 5 | +0.51% | 14.61 MiB | 14.53 MiB |
+| Java | 4 | -0.73% | 8.44 MiB | 8.34 MiB |
+| JavaScript | 2 | -0.75% | 19.71 MiB | 19.11 MiB |
+| Python | 12 | -0.94% | 11.76 MiB | 11.48 MiB |
+| Rust | 2 | -1.57% | 11.98 MiB | 11.77 MiB |
+| TypeScript | 11 | -1.12% | 19.26 MiB | 19.48 MiB |
+| **All fixtures** | **40** | **-0.66%** |  |  |
+
+The initial 250 ms run reduced geometric-mean peak RSS by 1.33%, but throughput
+regressed in six languages and crossed the -1% guard in Rust and TypeScript
+after the long rerun. Saving eight allocation bytes does not repay another
+record-shape branch plus the loss of the general child-prefix access pattern on
+the hot reduction path. The prototype was reverted. Unary specialization is
+closed unless a future design removes fields or work as well as padding.
+
 ### Every-parse live-tree copying collection
 
 The GC endpoint retained normal atomic refcounts during parsing and performed

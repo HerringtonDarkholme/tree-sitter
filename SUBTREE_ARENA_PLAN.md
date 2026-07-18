@@ -704,15 +704,15 @@ The current audit constrains the useful search space:
 
 | Priority | Candidate | Throughput mechanism | Main evidence | Principal risk / dependency |
 | ---: | --- | --- | --- | --- |
-| 1 | Reduce external-scanner inline capacity from 24 to 16 bytes | Shrinks the common heap header from 88 to about 80 bytes without changing handles or child access | Projected 7.86% reduction in internal allocation bytes; the Ruby audit adds only 67 scanner-state allocations in the 17–24 byte band | Benefit may be write-bandwidth-only and too small to survive full-corpus noise |
+| 1 | Reduce external-scanner inline capacity from 24 to 16 bytes (reverted: +0.32%) | Shrinks the common heap header from 88 to 80 bytes without changing handles or child access | RSS fell in several large languages, but throughput was neutral and C++/Go regressed | Crossing one eight-byte boundary was insufficient; subsequent shape changes need to remove more bytes or work |
 | 2 | Kind-specialized internal header (retained: +0.79%) | Stops every internal node from paying for the 40-byte leaf/scanner content enum; uses a 72-byte internal record | Header bytes dominate internal allocation traffic; six of seven languages improved and RSS fell on the larger fixtures | Requires an explicit kind bit because valid internal nodes may have zero children |
 | 3 | Fuse deterministic-window child copying with reduction summarization (reverted: -1.19%) | Accumulates the parent summary while performing the already-required child-handle move, removing a second traversal and repeated index resolution | The stack-accumulator formulation passed parity but regressed all seven languages | A retry must update a preallocated final parent directly; moving arithmetic into a large temporary accumulator is closed |
 | 4 | Pack direct-child counters (reverted: +0.07%) | Narrowed visible/named direct-child counts to target a 64-byte internal record | RSS improved in several large fixtures, but throughput was neutral and C++ regressed 1.24% | Checked narrowing consumes the common-path benefit; an extended overflow record was not justified |
-| 5 | Candidate D: 4-byte uniform physical index | Halves every subtree reference in child arrays and stack/window storage; compact leaf records attempt to offset loss of inline leaves | This is the only candidate that can materially shrink reference traffic throughout the parser | 92.14% of leaves currently require no record access or allocation; moving all leaves out of line may dominate the density win |
+| 5 | Candidate D: 4-byte uniform physical index (retained: +1.88%) | Halves every subtree reference in child arrays and stack/window storage; compact leaf records offset loss of inline leaves | Six of seven languages improved and RSS was neutral | Compact leaves now require arena resolution, so later work must avoid adding more dependent handle loads |
 | 6 | Lazily reconstruct internal column dependence (retained: +1.20%) | Keeps the lexer fact on leaves but removes internal reduction-time propagation; edit/debug access reconstructs it from children | `old_tree` is ignored, while public edit behavior remains available on the cold path | Recursive cold-path access trades edit latency for fresh-parse throughput; `has_changes` remains because changed ranges consume it directly |
 | 7 | Four-byte child references with an 8-byte parser handle | Keeps inline leaves on the stack but promotes them to compact records only when stored under a parent, shrinking child arrays without globally losing the inline fast path | Isolates child density from parser-stack representation | Child bytes are only 13.55% of combined internal allocation traffic; promotion adds record work and two representations |
-| 8 | Global child ranges | Places compact child references in one sequential array and stores `{child_start, child_count}` in fixed internal records | Natural continuation if Candidate D proves that four-byte reference density is valuable | Adds a second allocation/lifetime domain, weakens parent/child locality, and requires coordinated movement or reclamation |
-| 9 | Specialized unary record | Removes range/count overhead for the 57.08% of internal nodes with one child | Unary nodes are the dominant arity | Adds another kind branch and duplicates layout logic; lower leverage than a general specialized internal header |
+| 8 | Global child ranges (reverted: -0.09%; direct-final retry: -2.72%) | Places compact child references in one sequential array and stores `{child_start, child_count}` in fixed internal records | Direct-final construction removed the first prototype's retained-buffer RSS growth | A second reservation, extra address calculation, and lost parent/child locality regressed the deterministic path broadly |
+| 9 | Specialized unary record (reverted: -0.66%) | Stores the sole child inside a 72-byte record instead of an aligned prefix plus 72-byte record (80 bytes total) | Unary nodes are the dominant arity and the prototype modestly reduced RSS | The additional shape branch and separated access outweighed eight saved bytes; Rust and TypeScript crossed the regression guard |
 | 10 | Logical handle table | Stores `u32 NodeId` values in child ranges; `handle_array[NodeId]` is an 8-byte inline-leaf-or-arena-index value | Stable child identity permits heap-record movement by updating one handle-table entry; inline leaves still fit in one table slot | Adds a dependent `NodeId -> handle -> heap` load for full/internal children and does not itself eliminate temporary child-buffer duplication |
 
 An 8-byte global-child-range experiment is explicitly excluded as a standalone
@@ -740,10 +740,12 @@ the final child-index range directly, or use genuinely reusable scratch
 storage. Only then can the handle table be layered independently to price its
 movement benefit.
 
-The preferred general exploration order is: scanner-capacity reduction,
-kind-specialized internal records, fused child-copy/summarization, counter
-packing, Candidate D, and only then global child ranges. For the next requested
-experiment the order is intentionally different: measure Candidate D first,
-then layer global child ranges on that exact endpoint. This establishes whether
-four-byte uniform references pay for out-of-line leaves before attributing any
-additional result to separated child storage.
+The completed measurements establish a narrower retained direction: Candidate
+D's four-byte physical indexes, kind-specialized 72-byte internal records, and
+lazy internal column reconstruction improve throughput without separating
+children from their parent. Scanner-capacity reduction, accumulator-based
+summary fusion, checked counter packing, both global-range constructions, and
+unary physical specialization are closed in their measured forms. The two
+unmeasured rows above—child-only four-byte references and a logical handle
+table—remain architectural experiments, but both add a representation or
+dependent lookup and have weaker throughput evidence than the retained path.
