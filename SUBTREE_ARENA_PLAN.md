@@ -57,20 +57,23 @@ Those concepts do not have to remain combined. Even when every syntax node is
 stored out of line, the runtime still needs a small copyable reference value,
 but that value can be only a pointer or index.
 
-### Independent design axes
+### Design axes exercised by the scheduled experiments
 
-| Axis | Principal options |
+This table is deliberately narrower than the theoretical design space. It lists
+only values exercised by candidates A, C, or D.
+
+| Axis | Values that will be measured |
 | --- | --- |
-| Subtree value model | inline-or-reference, uniform reference, direct embedded value |
-| Reference encoding | raw pointer, physical arena index, stable logical ID, tagged table index |
-| Reference width | four-byte index, eight-byte index, native pointer |
-| Record uniformity | current full heap record, variable-sized per-kind records, fixed node slab, separate kind tables |
-| Node storage | per-node heap, pointer-stable paged arena, contiguous byte arena, fixed-record slab |
-| Child storage | coallocated tail, fixed inline capacity, global child range, separate child block, sibling links |
-| Leaf ownership | inline/no ownership, refcounted arena record, tracing-only arena record |
-| Internal ownership | intrusive refcount, tracing, refcount plus tracing GC |
-| Reclamation | bulk-only, free list, mark-sweep, semispace, mark-compact |
-| Public identity | address, physical slot index, stable occurrence ID, frozen index after publication |
+| Subtree value model | inline-or-reference; uniform physical index |
+| Reference encoding | raw pointer; physical arena index |
+| Reference width | native pointer/eight-byte hybrid; four-byte index |
+| Record shape | current full heap record; variable-sized compact-leaf/full-leaf/internal records |
+| Node storage | pointer-stable pages; one contiguous byte arena |
+| Child storage | coallocated tail in every candidate |
+| Leaf ownership | inline/no ownership; refcounted or tracing-only compact arena record |
+| Internal ownership | intrusive refcount plus arena reclamation in every candidate |
+| Reclamation | bulk-only control; mark-compact after the representation gate |
+| Public identity | existing address control; frozen physical slot index |
 
 Pointer versus index, storage shape, reclamation, and child representation are
 orthogonal. A pointer normally favors pages because growth must not move existing
@@ -81,19 +84,47 @@ virtual region.
 
 ### Subtree value models
 
+This table contains only representations that stage 0 is prepared to build and
+measure. Rejected and deferred representations are documented after the table;
+they are not experimental candidates.
+
 | Model | Value copied by the parser | Leaf storage | Internal storage | Main tradeoff |
 | --- | --- | --- | --- | --- |
 | Hybrid inline/reference | inline leaf bits or pointer/index | qualifying leaves inside the handle | out-of-line record | avoids many leaf allocations but has two access paths |
-| Uniform pointer | `*const NodeRecord` | every leaf allocated | every internal allocated | simple and direct, but requires stable addresses |
 | Uniform physical index | four- or eight-byte offset | every leaf in arena | every internal in arena | compact and movable, but every access needs arena context |
-| Uniform logical ID | ID resolved through a location table | every leaf in storage | every internal in storage | stable movement with a permanent extra lookup |
-| Tagged table index | kind plus table index | specialized leaf table | specialized internal table | dense per-kind records but multiple storage domains |
-| Direct full value | complete node record | embedded | cannot naturally embed recursive/shared children | unsuitable as the universal tree edge value |
 
-The direct-value model cannot remove references from a shared recursive tree.
-Parents, stack links, and GLR alternatives must still refer to independently
-owned or shared descendants. The meaningful alternative is therefore not “no
-`Subtree` type”; it is “`Subtree` becomes only a `NodeRef`.”
+#### Ruled out before experiment
+
+**Direct full value** is structurally impossible as the universal value stored
+on a stack edge or in a parent's child array. An internal node recursively owns
+children, and GLR paths and tree copies can share the same child. Embedding the
+complete child value would either require an infinitely recursive type or copy
+the descendant hierarchy and destroy sharing. Some small leaves can remain
+direct values, as they are today, but every general representation still needs
+a pointer or index for internal nodes. There is no useful direct-full-value
+prototype to benchmark.
+
+A **16-byte `{arena, index}` value** is also ruled out. The arena is already
+known from the parser, stack, or tree that owns the handle, and the performance
+ledger measured a 19.74% regression from doubling `Subtree` to 16 bytes.
+
+#### Not planned for this experiment
+
+**Uniform pointer** would allocate every currently inline leaf while retaining
+the stable-address restriction. Candidate A measures pointer-stable arena
+allocation without first imposing that cost, and candidate D measures removal
+of inline leaves together with the smaller reference that could compensate for
+it. A uniform-pointer result would not decide anything those two controls leave
+unknown.
+
+**Uniform logical ID** requires a permanent location table and an extra lookup
+on every heap access. Its benefit is post-publication movement, which v1
+explicitly forbids. It should be reconsidered only if frozen published indexes
+become a demonstrated limitation.
+
+**Tagged table indexes** require multiple storage domains and coordinated
+collection. They conflict with the single contiguous arena being tested and
+would mix record-layout effects into the reference experiment.
 
 ### Handle width
 
@@ -103,9 +134,13 @@ eight bytes:
 | Reference | Capacity | Consequence |
 | --- | --- | --- |
 | `u32` word index | about 32 GiB at eight-byte granularity | halves child-reference storage and remains ample for one tree arena |
-| `u32` byte index | 4 GiB | simpler arithmetic but a lower arena limit |
 | `u64` index | effectively unlimited | same width as the current handle |
 | native pointer | platform address space | direct lookup and non-moving records |
+
+A `u32` byte index is not a separate candidate: it gives up the word index's
+capacity without changing handle width or access shape. A reference wider than
+eight bytes is ruled out by the hot-handle constraint and the measured 16-byte
+regression.
 
 The performance ledger rejects a 16-byte `Subtree`, which regressed parse time
 by 19.74%. It does not reject a four-byte uniform index. The invariant to carry
@@ -120,14 +155,18 @@ leaf would be simple but likely wasteful. The allocation audit measured about
 inline leaves. Literal unification would turn that last group from eight-byte
 values into full arena records.
 
-Three physical models keep a uniform reference without requiring identical
-record sizes:
+The planned uniform-index experiment uses variable-sized arena records; it does
+not require identical record sizes:
 
 | Record model | Layout | Benefit | Cost |
 | --- | --- | --- | --- |
 | Variable-sized arena records | small compact-leaf, full-leaf, and internal block kinds | one reference and one arena while keeping leaves small | block-kind branch and variable-size GC scan |
-| Fixed node slab plus child array | `NodeRecord[]` and separate `ChildRef[]` | true fixed-index slab and easy node compaction | separate child lifetime/compaction and additional lookup |
-| Separate kind tables | compact-leaf, full-leaf, and internal arrays | densest record for each kind | tagged references and coordinated multi-table collection |
+
+A fixed node slab plus global child array is not included because it changes
+both node and child representation and requires two coordinated compaction
+domains. Separate kind tables are not included because they are multiple
+arenas in practice. Neither will be prototyped unless the single-arena,
+coallocated-child candidates fail for a reason those layouts directly address.
 
 The strongest uniform-reference candidate is a four-byte physical index into a
 variable-sized arena:
@@ -146,46 +185,48 @@ relocatable.
 
 ### Refcount implications of removing inline leaves
 
-| Policy | Internal records | Leaf records | Tradeoff |
+Only the ownership policies needed by the scheduled representations are under
+consideration:
+
+| Candidate representation | Internal records | Leaf records | Tradeoff |
 | --- | ---: | ---: | --- |
-| Refcount every node | yes | yes | uniform ownership but many new leaf atomics |
-| Refcount only internals | yes | no | preserves internal DAG/COW ownership; tracing determines leaf liveness |
-| Pure tracing | no | no | simplest collector graph but a much larger ownership rewrite |
-| Refcount for sharing plus tracing for reclamation | yes | optional | likely final hybrid; policy can differ by record kind |
+| A/C hybrid inline/reference | yes | heap leaves yes; inline leaves no | preserves current ownership exactly |
+| D uniform physical index | yes | compact leaves tracing-only; full leaves refcounted if shared | avoids adding atomics to every former inline leaf |
 
 The requirement that internal nodes remain refcounted does not require every
 compact leaf to gain a refcount. A uniform index may address an immutable,
 tracing-only compact leaf record while internal nodes retain intrusive counts.
+Pure tracing is not considered because it violates the internal-node refcount
+requirement and would turn an allocation experiment into an ownership rewrite.
 
 ### Children representation
 
-| Model | Node fields/layout | Locality | Reclamation/compaction consequence |
-| --- | --- | --- | --- |
-| Coallocated tail | `[record][child handles...]` | best parent/child-array locality | variable-sized node blocks move together |
-| Fixed inline capacity | fixed child slots plus overflow | excellent for small arities | every node pays capacity; two access paths |
-| Global child range | `{child_start, child_count}` into `ChildRef[]` | dense sequential children | nodes and child array compact separately |
-| Separate child block | pointer/index to variable block | extra indirection | two block kinds and two ownership paths |
-| First-child/next-sibling | two references per record | good sequential walk | indexed child lookup becomes linear |
+Every scheduled candidate keeps the existing coallocated child tail:
+`[record][child handles...]`. It has the best parent/child-array locality and
+lets one variable-sized block move as a unit.
 
-The existing coallocated child representation is the correct control for the
-first pointer and index experiments. Externalizing children at the same time as
-changing references would prevent attributing the result to either decision.
+Fixed inline child capacity is not considered because every node would pay for
+unused slots and overflow would add a second path. A global child array or
+separate child block would introduce a second lifetime and compaction domain.
+First-child/next-sibling links would make indexed child lookup linear. None of
+these designs isolates the pointer-versus-index or allocation question, so none
+will be prototyped in stage 0.
 
 ### Architecture candidates
+
+Only candidates scheduled in the representation gate appear here.
 
 | Candidate | Subtree value | Node storage | Children | Reclamation | Question answered |
 | --- | --- | --- | --- | --- | --- |
 | A | current inline-or-pointer, 8 B | pointer-stable paged arena | coallocated | bulk-only | value of removing per-node allocation alone |
-| B | uniform pointer | variable leaf/internal records in pages | coallocated | bulk-only | cost of removing inline leaves while retaining direct access |
 | C | current inline-or-index, 8 B | contiguous byte arena | coallocated | bulk-only, then compact | cost of arena-aware indexed heap access |
 | D | uniform physical index, 4 B | variable compact-leaf/full-leaf/internal records | coallocated | bulk-only, then compact | benefit of one small reference representation |
-| E | uniform physical index, 4 B | fixed `NodeRecord[]` | global `ChildRef[]` | compact both arrays | fully flattened slab architecture |
-| F | uniform logical ID | movable arena through location table | either | moving GC | cost/benefit of stable IDs and post-publication movement |
 
-The experiments should proceed A, C, then D. A isolates allocator removal. C
-isolates indexed access without allocating current inline leaves. D tests the
-more radical uniform model only after the index plumbing exists. B is optional,
-and E/F are follow-up architectures rather than first implementations.
+The experiments proceed A, C, then D. A isolates allocator removal. C isolates
+indexed access without allocating current inline leaves. D tests the more
+radical uniform model only after the index plumbing exists. The uniform-pointer,
+flattened-slab, and stable-logical-ID designs described above are not hidden
+candidates; stage 0 will not implement them.
 
 ## Current contiguous-arena candidate
 
