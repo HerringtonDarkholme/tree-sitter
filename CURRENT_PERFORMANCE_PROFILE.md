@@ -221,10 +221,13 @@ compilation. Address-level samples place hot PCs near the beginning, around
 therefore executing hot regions spread across most of the function, not merely
 carrying unreachable cold bytes in the binary.
 
-This is the strongest evidence for a hybrid or partitioned generated lexer:
-keep common states compiled and colocated, while moving cold state clusters to
-separate functions or a compact interpreter. Simply reordering source cases
-without measuring the resulting machine layout is too weak.
+This proves that generated lexer layout contributes materially to C++ and
+TypeScript performance. It does **not** make generator changes an active
+candidate for the current runtime program. Tree-sitter does not control the
+size, state topology, corpus, compiler, or regeneration cadence of user
+grammars, so a layout that wins on the seven repository fixtures cannot be
+assumed to win across the language ecosystem. The result is retained as a
+diagnosis and deferred below.
 
 ### Rust runtime
 
@@ -312,11 +315,10 @@ the experiment ledger in `PERFORMANCE.md` and `SUBTREE_ARENA_PLAN.md`.
 | ---: | --- | --- | --- | --- |
 | 1 | Restore the UTF-8 ASCII advance fast path | Decoder, range-seek, and callback work for an ordinary in-chunk ASCII byte | Lexer runtime is 17-33%; an ancestor measured a 95.85% hit rate and +1.26 paired points | Boundary/newline/included-range parity |
 | 2 | Dedicated direct-final deterministic reducer | Large shared frame, temporary child-array lifecycle, trailing-extra pass, and separate child-summary pass | Go reduction is 46.3%; linked reducer frame is 304 B; summary is 7.9% and window pop 2.2% exclusive | Ownership and exact summary parity |
-| 3 | Hybrid hot/cold generated lexer | Instruction fetch/decode across large scattered generated state code | C++ delivery loss is 27.7%; `ts_lex` is 92 KiB and hot PCs span most of it | Extra dispatch or table dependencies can hurt small lexers |
-| 4 | Reuse accepted-DAG discovery for balancing | Second child-edge discovery traversal and its work stack | Balance is 3-7%; exact sharing already requires one accepted-DAG scan | Candidate writes may cost more than the saved traversal |
-| 5 | Single-action parser interpreter fast path | Generic action loop and multi-action bookkeeping for the common one-action entry | Dispatch is 10-16%; discarded bandwidth is 10-14% | A branch-only optimization may remain below noise |
-| 6 | Parser-private arena bump cursor with published atomic fallback | CAS loop on allocations made before publication | Arena allocation is 1.5% exclusive in Go | Published tree copies may allocate concurrently in the same arena |
-| 7 | Versioned external-scanner snapshot ABI | Repeated deserialize and grammar-owned malloc/free | Python external scanner is 5.7%, allocation 4.8% | ABI and grammar complexity; identity cache already had low reuse |
+| 3 | Reuse accepted-DAG discovery for balancing | Second child-edge discovery traversal and its work stack | Balance is 3-7%; exact sharing already requires one accepted-DAG scan | Candidate writes may cost more than the saved traversal |
+| 4 | Single-action parser interpreter fast path | Generic action loop and multi-action bookkeeping for the common one-action entry | Dispatch is 10-16%; discarded bandwidth is 10-14% | A branch-only optimization may remain below noise |
+| 5 | Parser-private arena bump cursor with published atomic fallback | CAS loop on allocations made before publication | Arena allocation is 1.5% exclusive in Go | Published tree copies may allocate concurrently in the same arena |
+| 6 | Versioned external-scanner snapshot ABI | Repeated deserialize and grammar-owned malloc/free | Python external scanner is 5.7%, allocation 4.8% | ABI and grammar complexity; identity cache already had low reuse |
 
 ### 1. UTF-8 ASCII advance
 
@@ -377,32 +379,7 @@ debug builds; all deterministic-window ownership tests; full parity; at least
 +1.0% overall paired throughput; no language below -1.0%; and no material RSS
 increase. Go, Java, and Ruby recovery are mandatory individual gates.
 
-### 3. Hybrid generated lexer
-
-Three increasingly invasive experiments should price this axis:
-
-1. **PGO control:** instrument grammar libraries, run the existing corpus,
-   rebuild with profile use, and measure the achievable code-layout ceiling.
-   This is evidence, not the shipping design.
-2. **Hot/cold function partition:** weight lexer states using parse-state
-   references or measured state frequency. Keep the hot connected state region
-   in `ts_lex`; move cold clusters to one or more out-of-line functions.
-3. **Hybrid compiled/table states:** if partitioning duplicates too many shared
-   transitions, compile the hot states and interpret compact cold transition
-   rows. Cold code pays the table dispatch; ordinary tokens retain compiled
-   control flow.
-
-A blanket table-driven lexer is not the first experiment. A 128-entry ASCII
-row for every C++ state would itself be large and would add dependent data loads
-to Go and Java. The objective is to shrink and colocate the **executed** code,
-not merely exchange instruction bytes for an equally large data table.
-
-Acceptance gate: demonstrate lower C++/TypeScript delivery-bottleneck fraction
-or a materially smaller hot function, then require a seven-language paired
-gain. Small generated lexers must not regress by more than 1%; C++ must improve
-enough to justify generator complexity.
-
-### 4. Accepted-DAG balancing worklist reuse
+### 3. Accepted-DAG balancing worklist reuse
 
 `subtree_prepare_for_balancing` must already traverse the accepted DAG to turn
 conservative parser sharing marks into exact accepted sharing. It can, in the
@@ -420,7 +397,7 @@ volume is comparable to the edge scan it replaces, do not implement it. Any
 prototype must preserve progress-callback resume behavior and exact sharing
 before mutation.
 
-### 5. Single-action dispatch
+### 4. Single-action dispatch
 
 The action interpreter dynamically loops over `action_count` and carries GLR
 reduction state even when an entry contains one shift or one reduction. A
@@ -432,7 +409,7 @@ usually noise. Count dynamic action-entry shapes first; require at least 95%
 single-action coverage before building it. Inspect the resulting
 `parser_advance` frame and text size before benchmarking.
 
-### 6. Parser-private arena bumping
+### 5. Parser-private arena bumping
 
 The arena's atomic cursor is required after publication because separate tree
 copies may perform copy-on-write edits concurrently. Parsing itself is
@@ -445,11 +422,12 @@ A safe design therefore needs two phases, not a global replacement:
 - synchronization into the arena's atomic cursor at publication, after which
   public copy/edit allocation continues using atomics.
 
-This is a small-ceiling candidate. Do it only after the larger lexer and reducer
-work, and reject it if routing every `SubtreeArray` growth through the private
-cursor expands the change beyond a focused allocation layer.
+This is a small-ceiling candidate. Do it only after the ASCII fast path and
+deterministic-reducer work, and reject it if routing every `SubtreeArray`
+growth through the private cursor expands the change beyond a focused
+allocation layer.
 
-### 7. External-scanner snapshots
+### 6. External-scanner snapshots
 
 The current scanner ABI exposes one mutable grammar-owned object plus serialized
 bytes. The runtime must deserialize a stack version's bytes before scanning,
@@ -465,6 +443,31 @@ The existing serialize/deserialize callbacks remain the compatibility fallback.
 This is only justified after a Python-specific prototype proves that scanner
 snapshot creation is cheaper than deserialize plus malloc/free and that memory
 does not grow with abandoned GLR versions.
+
+## Deferred axis: generated lexer layout
+
+The instruction-delivery diagnosis remains valid: C++'s 92 KiB `ts_lex` and
+widely separated hot PCs make generated code layout a plausible explanation
+for its front-end stalls. It is deferred because it sits outside the runtime's
+controlled optimization surface:
+
+- users generate parsers from grammars whose lexer-state graphs and hot-token
+  distributions are not represented by the seven-language corpus;
+- generated parser sources are compiled by different C/C++ toolchains and
+  flags, which can transform the same source layout differently;
+- changing generator output affects checked-in parser artifacts and therefore
+  requires users to regenerate or upgrade them; and
+- a corpus-trained PGO layout cannot ship as a general policy for grammars that
+  Tree-sitter has never observed.
+
+Hot/cold state partitioning, a compiled-hot/table-cold hybrid, and generator
+PGO remain possible research mechanisms, but they are not scheduled or ranked
+for this throughput program. Revisit them only with a separately approved,
+opt-in generator mode and a broad ecosystem corpus that includes large, small,
+sparse, external-scanner-heavy, and conflict-heavy grammars. Runtime-owned
+lexer improvements such as the conservative ASCII advance fast path are not
+deferred because they preserve generated-language behavior and apply uniformly
+to existing parser artifacts.
 
 ## Designs not reopened by this profile
 
@@ -491,11 +494,11 @@ does not grow with abandoned GLR versions.
 1. Reintroduce the conservative ASCII advance fast path.
 2. Split deterministic and GLR reduction and inspect the resulting assembly.
 3. If the frame shrinks, implement the direct-final deterministic builder.
-4. In parallel with runtime work, run the generated-lexer PGO control on C++
-   and TypeScript to price the instruction-layout ceiling.
-5. Only then consider balancing-worklist reuse, single-action dispatch, or the
-   private arena cursor.
+4. Gate accepted-DAG balancing reuse with edge and worklist counts.
+5. Measure single-action coverage before attempting a dispatch fast path.
+6. Only then consider the small-ceiling parser-private arena cursor.
 
 This order starts with one previously measured low-complexity win, then attacks
-the largest removable runtime phase, then prices the largest generator-level
-opportunity. It deliberately postpones GC, new indirection, and ABI expansion.
+the largest removable runtime phase, and stays within behavior that the runtime
+controls for every existing generated parser. It deliberately postpones GC,
+new indirection, ABI expansion, and generated-lexer changes.

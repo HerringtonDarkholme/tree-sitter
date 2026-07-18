@@ -204,15 +204,18 @@ Hardware counters add an important distinction. C++ and TypeScript lose 27.7%
 and 23.9% of sustainable instruction bandwidth to delivery, while Go has the
 largest reduction-oriented processing/dependency loss. C++'s generated
 `ts_lex` is 92 KiB and has hot addresses spread across most of that function.
+Generated-lexer layout remains a valid diagnosis but is deferred: the runtime
+cannot assume that the repository corpus represents the state graphs, token
+distributions, compiler choices, or regeneration practices of user grammars.
 
 The next experiments, in order, are:
 
 1. restore the previously measured conservative UTF-8 ASCII advance fast path;
 2. split deterministic reduction from GLR reduction, then build a direct-final
    deterministic parent if assembly proves the fast-path frame shrinks;
-3. price a hot/cold generated lexer with a PGO layout control; and
-4. only afterward consider accepted-DAG balancing worklist reuse,
-   single-action dispatch, or parser-private arena bumping.
+3. gate accepted-DAG balancing worklist reuse with traversal counts; and
+4. only afterward consider single-action dispatch or parser-private arena
+   bumping.
 
 Allocator/GC tuning is not the next throughput target. A Python snapshot had
 about 7.2 MiB physical footprint and 2.1 MiB resident/dirty arena pages despite
