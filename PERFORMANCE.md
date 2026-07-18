@@ -143,6 +143,7 @@ branch was reverted to `fe2605c1`, so these are candidates, not current wins.
 | Small-state symbol slice scan | -1.86% throughput / -1.01 Rust/C points | Keep the compact generated-table pointer loop |
 | External-scanner state reuse by token identity | Only 8.11% overall would-be hit rate; Python 19.94% was the best | Do not add this cache |
 | Incremental reduction summaries | Regressed the normalized gate by about 4.2 points; paid an 88-byte payload on discarded paths | Do not attach broad summaries to every pop path |
+| Direct-final deterministic reducer | +1.09% in the short current-Rust A/B/A run, but only +0.58% in the longer confirmation; C++ -2.39%, Go -1.43%, and Rust -1.33%; RSS neutral | Reject the combined outlining/direct-builder change; the smaller frame did not produce a stable cross-language win |
 | Post-finalization column shrinking | Increased peak RSS by 346% because old and new allocations coexisted | Do not shrink by reallocating after construction |
 
 ### Repeatedly unproductive categories

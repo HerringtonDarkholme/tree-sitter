@@ -311,14 +311,14 @@ The conclusions are narrow but strong:
 The ranks combine profile size, hardware evidence, implementation scope, and
 the experiment ledger in `PERFORMANCE.md` and `SUBTREE_ARENA_PLAN.md`.
 
-| Rank | Design | Work removed | Main evidence | Main risk |
-| ---: | --- | --- | --- | --- |
-| 1 | Restore the UTF-8 ASCII advance fast path | Decoder, range-seek, and callback work for an ordinary in-chunk ASCII byte | Lexer runtime is 17-33%; an ancestor measured a 95.85% hit rate and +1.26 paired points | Boundary/newline/included-range parity |
-| 2 | Dedicated direct-final deterministic reducer | Large shared frame, temporary child-array lifecycle, trailing-extra pass, and separate child-summary pass | Go reduction is 46.3%; linked reducer frame is 304 B; summary is 7.9% and window pop 2.2% exclusive | Ownership and exact summary parity |
-| 3 | Reuse accepted-DAG discovery for balancing | Second child-edge discovery traversal and its work stack | Balance is 3-7%; exact sharing already requires one accepted-DAG scan | Candidate writes may cost more than the saved traversal |
-| 4 | Single-action parser interpreter fast path | Generic action loop and multi-action bookkeeping for the common one-action entry | Dispatch is 10-16%; discarded bandwidth is 10-14% | A branch-only optimization may remain below noise |
-| 5 | Parser-private arena bump cursor with published atomic fallback | CAS loop on allocations made before publication | Arena allocation is 1.5% exclusive in Go | Published tree copies may allocate concurrently in the same arena |
-| 6 | Versioned external-scanner snapshot ABI | Repeated deserialize and grammar-owned malloc/free | Python external scanner is 5.7%, allocation 4.8% | ABI and grammar complexity; identity cache already had low reuse |
+| Priority/status | Design | Work removed | Main evidence | Main risk |
+| --- | --- | --- | --- | --- |
+| Retained | UTF-8 ASCII advance fast path | Decoder, range-seek, and callback work for an ordinary in-chunk ASCII byte | +2.70% current-Rust throughput, all languages positive | Boundary/newline/included-range parity |
+| Rejected | Dedicated direct-final deterministic reducer | Large shared frame, temporary child-array lifecycle, trailing-extra pass, and separate child-summary pass | +0.58% longer confirmation; three languages below -1% | Code placement and dependency chains offset removed work |
+| 1 | Reuse accepted-DAG discovery for balancing | Second child-edge discovery traversal and its work stack | Balance is 3-7%; exact sharing already requires one accepted-DAG scan | Candidate writes may cost more than the saved traversal |
+| 2 | Single-action parser interpreter fast path | Generic action loop and multi-action bookkeeping for the common one-action entry | Dispatch is 10-16%; discarded bandwidth is 10-14% | A branch-only optimization may remain below noise |
+| 3 | Parser-private arena bump cursor with published atomic fallback | CAS loop on allocations made before publication | Arena allocation is 1.5% exclusive in Go | Published tree copies may allocate concurrently in the same arena |
+| 4 | Versioned external-scanner snapshot ABI | Repeated deserialize and grammar-owned malloc/free | Python external scanner is 5.7%, allocation 4.8% | ABI and grammar complexity; identity cache already had low reuse |
 
 ### 1. UTF-8 ASCII advance
 
@@ -401,6 +401,38 @@ Acceptance gate: exact summary-field witness against `subtree_new_node` in
 debug builds; all deterministic-window ownership tests; full parity; at least
 +1.0% overall paired throughput; no language below -1.0%; and no material RSS
 increase. Go, Java, and Ruby recovery are mandatory individual gates.
+
+Implemented result: **rejected**. The implementation did achieve the intended
+code shape: the deterministic reducer frame fell from 304 B to 80 B, GLR
+locals moved out of line, child handles moved directly into the exact final
+arena block, and the final header was summarized during the move. Focused
+ownership, trailing-extra, straddle-fallback, and summary-parity witnesses
+passed.
+
+The first five-sample, 200 ms current-Rust A/B/A gate was narrowly positive at
++1.09% overall, but the longer 500 ms confirmation did not reproduce the
+required win:
+
+| Language | Fixtures | Confirmed throughput change |
+| --- | ---: | ---: |
+| C++ | 4 | -2.39% |
+| Go | 5 | -1.43% |
+| Java | 4 | -0.27% |
+| JavaScript | 2 | +2.80% |
+| Python | 12 | +1.80% |
+| Rust | 2 | -1.33% |
+| TypeScript | 11 | +1.55% |
+| **All fixtures** | **40** | **+0.58%** |
+
+All 40 source hashes and byte lengths matched. Final-process peak RSS was
+24.98 MiB for the candidate versus 24.95/24.92 MiB for the bracketing
+controls, which is neutral. Maximum sample CV was 2.05%, 9.71%, and 5.45% for
+control, candidate, and control, so the confirmation also failed the 5%
+stability limit. The candidate fails the +1.0% overall gate and the -1.0%
+per-language floor. The result shows that shrinking a hot caller's frame is
+not sufficient evidence: moving the direct summary loop and final allocation
+into a new helper changed code placement and dependency chains without
+reliably improving the reduction-heavy languages.
 
 ### 3. Accepted-DAG balancing worklist reuse
 
@@ -515,13 +547,14 @@ to existing parser artifacts.
 ## Recommended experiment order
 
 1. Retain the completed conservative ASCII advance fast path.
-2. Split deterministic and GLR reduction and inspect the resulting assembly.
-3. If the frame shrinks, implement the direct-final deterministic builder.
-4. Gate accepted-DAG balancing reuse with edge and worklist counts.
-5. Measure single-action coverage before attempting a dispatch fast path.
-6. Only then consider the small-ceiling parser-private arena cursor.
+2. Keep the direct-final deterministic reducer rejected unless a materially
+   different design removes more work than the measured candidate.
+3. Gate accepted-DAG balancing reuse with edge and worklist counts.
+4. Measure single-action coverage before attempting a dispatch fast path.
+5. Only then consider the small-ceiling parser-private arena cursor.
 
-This order starts with one previously measured low-complexity win, then attacks
-the largest removable runtime phase, and stays within behavior that the runtime
-controls for every existing generated parser. It deliberately postpones GC,
-new indirection, ABI expansion, and generated-lexer changes.
+This order records the retained low-complexity win and the rejected reducer
+experiment before moving to the next measured runtime phases. It stays within
+behavior that the runtime controls for every existing generated parser and
+deliberately postpones GC, new indirection, ABI expansion, and generated-lexer
+changes.
