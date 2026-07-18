@@ -90,6 +90,11 @@ const unsafe fn node_language(self_: TSNode) -> *const TSLanguage {
 }
 
 #[inline]
+pub(super) const unsafe fn node_arena(self_: TSNode) -> *mut super::subtree::SubtreeArena {
+    (*node_tree(self_)).arena
+}
+
+#[inline]
 fn node_is_null(self_: TSNode) -> bool {
     self_.id.is_null()
 }
@@ -97,8 +102,9 @@ fn node_is_null(self_: TSNode) -> bool {
 #[inline]
 const unsafe fn node_child_count(self_: TSNode) -> u32 {
     let tree = node_subtree(self_);
-    if tree.child_count() > 0 {
-        tree.heap_data().children().visible_child_count
+    let arena = node_arena(self_);
+    if tree.child_count(arena) > 0 {
+        tree.heap_data(arena).children().visible_child_count
     } else {
         0
     }
@@ -107,8 +113,9 @@ const unsafe fn node_child_count(self_: TSNode) -> u32 {
 #[inline]
 const unsafe fn node_named_child_count(self_: TSNode) -> u32 {
     let tree = node_subtree(self_);
-    if tree.child_count() > 0 {
-        tree.heap_data().children().named_child_count
+    let arena = node_arena(self_);
+    if tree.child_count(arena) > 0 {
+        tree.heap_data(arena).children().named_child_count
     } else {
         0
     }
@@ -129,19 +136,22 @@ const fn node_start_point(self_: TSNode) -> TSPoint {
 
 #[inline]
 unsafe fn node_end_byte(self_: TSNode) -> u32 {
-    node_start_byte(self_) + node_subtree(self_).size().bytes
+    node_start_byte(self_) + node_subtree(self_).size(node_arena(self_)).bytes
 }
 
 #[inline]
 unsafe fn node_end_point(self_: TSNode) -> TSPoint {
-    point_add(node_start_point(self_), node_subtree(self_).size().extent)
+    point_add(
+        node_start_point(self_),
+        node_subtree(self_).size(node_arena(self_)).extent,
+    )
 }
 
 #[inline]
 unsafe fn node_symbol(self_: TSNode) -> TSSymbol {
     let mut symbol = node_alias(&self_) as TSSymbol;
     if symbol == 0 {
-        symbol = node_subtree(self_).symbol();
+        symbol = node_subtree(self_).symbol(node_arena(self_));
     }
     language_public_symbol(node_language(self_), symbol)
 }
@@ -150,7 +160,7 @@ unsafe fn node_symbol(self_: TSNode) -> TSSymbol {
 unsafe fn node_type(self_: TSNode) -> *const i8 {
     let mut symbol = node_alias(&self_) as TSSymbol;
     if symbol == 0 {
-        symbol = node_subtree(self_).symbol();
+        symbol = node_subtree(self_).symbol(node_arena(self_));
     }
     ts_language_symbol_name(node_language(self_), symbol)
 }
@@ -162,7 +172,8 @@ unsafe fn node_type(self_: TSNode) -> *const i8 {
 #[inline]
 unsafe fn node_iterate_children(node: &TSNode) -> NodeChildIterator {
     let subtree = node_subtree(*node);
-    if subtree.child_count() == 0 {
+    let arena = node_arena(*node);
+    if subtree.child_count(arena) == 0 {
         return NodeChildIterator {
             parent: NULL_SUBTREE,
             tree: node_tree(*node),
@@ -174,7 +185,7 @@ unsafe fn node_iterate_children(node: &TSNode) -> NodeChildIterator {
     }
     let alias_sequence = language_alias_sequence_slice(
         node_language(*node),
-        u32::from(subtree.heap_data().children().production_id),
+        u32::from(subtree.heap_data(arena).children().production_id),
     );
     NodeChildIterator {
         parent: subtree,
@@ -195,12 +206,13 @@ unsafe fn node_iterate_children(node: &TSNode) -> NodeChildIterator {
 /// from the production's alias sequence, and leaves `position` at the child's
 /// end after returning.
 unsafe fn node_child_iterator_next(self_: &mut NodeChildIterator, result: &mut TSNode) -> bool {
-    if self_.parent.is_null() || self_.child_index == self_.parent.heap_data().child_count {
+    let arena = (*self_.tree).arena;
+    if self_.parent.is_null() || self_.child_index == self_.parent.heap_data(arena).child_count {
         return false;
     }
-    let child = (self_.parent).child(self_.child_index);
+    let child = (self_.parent).child(arena, self_.child_index);
     let mut alias_symbol: TSSymbol = 0;
-    if !(*child).extra() {
+    if !(*child).extra(arena) {
         alias_symbol = self_
             .alias_sequence
             .get(self_.structural_child_index as usize)
@@ -209,7 +221,7 @@ unsafe fn node_child_iterator_next(self_: &mut NodeChildIterator, result: &mut T
         self_.structural_child_index += 1;
     }
     if self_.child_index > 0 {
-        self_.position = length_add(self_.position, (*child).padding());
+        self_.position = length_add(self_.position, (*child).padding(arena));
     }
     *result = node_new(
         self_.tree,
@@ -217,7 +229,7 @@ unsafe fn node_child_iterator_next(self_: &mut NodeChildIterator, result: &mut T
         self_.position,
         alias_symbol,
     );
-    self_.position = length_add(self_.position, (*child).size());
+    self_.position = length_add(self_.position, (*child).size(arena));
     self_.child_index += 1;
     true
 }
@@ -229,14 +241,15 @@ unsafe fn node_child_iterator_next(self_: &mut NodeChildIterator, result: &mut T
 #[inline]
 const unsafe fn node_is_relevant(self_: TSNode, include_anonymous: bool) -> bool {
     let tree = node_subtree(self_);
+    let arena = node_arena(self_);
     if include_anonymous {
-        tree.visible() || node_alias(&self_) != 0
+        tree.visible(arena) || node_alias(&self_) != 0
     } else {
         let alias = node_alias(&self_) as TSSymbol;
         if alias != 0 {
             ts_language_symbol_metadata(node_language(self_), alias).named
         } else {
-            tree.visible() && tree.named()
+            tree.visible(arena) && tree.named(arena)
         }
     }
 }
@@ -244,11 +257,12 @@ const unsafe fn node_is_relevant(self_: TSNode, include_anonymous: bool) -> bool
 #[inline]
 const unsafe fn node_relevant_child_count(self_: TSNode, include_anonymous: bool) -> u32 {
     let tree = node_subtree(self_);
-    if tree.child_count() > 0 {
+    let arena = node_arena(self_);
+    if tree.child_count(arena) > 0 {
         if include_anonymous {
-            tree.heap_data().children().visible_child_count
+            tree.heap_data(arena).children().visible_child_count
         } else {
-            tree.heap_data().children().named_child_count
+            tree.heap_data(arena).children().named_child_count
         }
     } else {
         0
@@ -318,12 +332,15 @@ pub const unsafe extern "C" fn ts_node_language(self_: TSNode) -> *const TSLangu
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_node_grammar_symbol(self_: TSNode) -> TSSymbol {
-    node_subtree(self_).symbol()
+    node_subtree(self_).symbol(node_arena(self_))
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_node_grammar_type(self_: TSNode) -> *const i8 {
-    ts_language_symbol_name(node_language(self_), node_subtree(self_).symbol())
+    ts_language_symbol_name(
+        node_language(self_),
+        node_subtree(self_).symbol(node_arena(self_)),
+    )
 }
 
 #[no_mangle]
@@ -332,6 +349,7 @@ pub unsafe extern "C" fn ts_node_string(self_: TSNode) -> *mut i8 {
     let language = node_language(self_);
     subtree_string(
         node_subtree(self_),
+        node_arena(self_),
         alias_symbol,
         ts_language_symbol_metadata(language, alias_symbol).visible,
         language,
@@ -351,7 +369,7 @@ pub unsafe extern "C" fn ts_node_is_null(self_: TSNode) -> bool {
 
 #[no_mangle]
 pub const unsafe extern "C" fn ts_node_is_extra(self_: TSNode) -> bool {
-    node_subtree(self_).extra()
+    node_subtree(self_).extra(node_arena(self_))
 }
 
 #[no_mangle]
@@ -360,23 +378,23 @@ pub const unsafe extern "C" fn ts_node_is_named(self_: TSNode) -> bool {
     if alias != 0 {
         ts_language_symbol_metadata(node_language(self_), alias).named
     } else {
-        node_subtree(self_).named()
+        node_subtree(self_).named(node_arena(self_))
     }
 }
 
 #[no_mangle]
 pub const unsafe extern "C" fn ts_node_is_missing(self_: TSNode) -> bool {
-    node_subtree(self_).missing()
+    node_subtree(self_).missing(node_arena(self_))
 }
 
 #[no_mangle]
 pub const unsafe extern "C" fn ts_node_has_changes(self_: TSNode) -> bool {
-    node_subtree(self_).has_changes()
+    node_subtree(self_).has_changes(node_arena(self_))
 }
 
 #[no_mangle]
 pub const unsafe extern "C" fn ts_node_has_error(self_: TSNode) -> bool {
-    node_subtree(self_).error_cost() > 0
+    node_subtree(self_).error_cost(node_arena(self_)) > 0
 }
 
 #[no_mangle]
@@ -386,22 +404,23 @@ pub unsafe extern "C" fn ts_node_is_error(self_: TSNode) -> bool {
 
 #[no_mangle]
 pub const unsafe extern "C" fn ts_node_descendant_count(self_: TSNode) -> u32 {
-    node_subtree(self_).visible_descendant_count() + 1
+    node_subtree(self_).visible_descendant_count(node_arena(self_)) + 1
 }
 
 #[no_mangle]
 pub const unsafe extern "C" fn ts_node_parse_state(self_: TSNode) -> TSStateId {
-    node_subtree(self_).parse_state()
+    node_subtree(self_).parse_state(node_arena(self_))
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_node_next_parse_state(self_: TSNode) -> TSStateId {
     let subtree = node_subtree(self_);
-    let state = subtree.parse_state();
+    let arena = node_arena(self_);
+    let state = subtree.parse_state(arena);
     if state == TS_TREE_STATE_NONE {
         return TS_TREE_STATE_NONE;
     }
-    let symbol = subtree.symbol();
+    let symbol = subtree.symbol(arena);
     ts_language_next_state(node_language(self_), state, symbol)
 }
 
@@ -516,7 +535,12 @@ pub unsafe extern "C" fn ts_node_child_by_field_id(
 
         let field_map = language_field_map_slice(
             node_language(self_),
-            u32::from(node_subtree(self_).heap_data().children().production_id),
+            u32::from(
+                node_subtree(self_)
+                    .heap_data(node_arena(self_))
+                    .children()
+                    .production_id,
+            ),
         );
         if field_map.is_empty() {
             return node_null();
@@ -538,7 +562,7 @@ pub unsafe extern "C" fn ts_node_child_by_field_id(
         let mut child = node_null();
         let mut iterator = node_iterate_children(&self_);
         while node_child_iterator_next(&mut iterator, &mut child) {
-            if !node_subtree(child).extra() {
+            if !node_subtree(child).extra(node_arena(child)) {
                 let index = iterator.structural_child_index - 1;
                 if (index as u8) < field_map[field_map_start].child_index {
                     continue;

@@ -160,6 +160,13 @@ pub struct TreeCursor {
     pub root_alias_symbol: TSSymbol,
 }
 
+impl TreeCursor {
+    #[inline]
+    pub(super) const unsafe fn arena(&self) -> *mut super::subtree::SubtreeArena {
+        (*self.tree).arena
+    }
+}
+
 // `TreeCursor` is stored directly in the public `TSTreeCursor` value. Keep the
 // outer layout fixed while allowing heap-allocated cursor entries to use Rust
 // layout.

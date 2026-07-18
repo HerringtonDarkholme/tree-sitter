@@ -314,10 +314,6 @@ pub unsafe fn array_splice<T>(
     arr.splice(index, old_count, new_count, new_contents);
 }
 
-pub fn array_swap<T>(left: &mut Array<T>, right: &mut Array<T>) {
-    core::mem::swap(left, right);
-}
-
 pub unsafe fn array_assign<T>(destination: &mut Array<T>, source: &Array<T>) {
     destination.assign(source);
 }

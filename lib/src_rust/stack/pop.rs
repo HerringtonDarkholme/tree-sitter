@@ -9,10 +9,10 @@
 use core::ptr::{self, NonNull};
 
 use super::super::subtree::{
-    subtree_alloc_size, subtree_array_copy, subtree_array_delete, subtree_array_reverse, Subtree,
-    SubtreeArray, NULL_SUBTREE,
+    subtree_alloc_size, subtree_array_copy, subtree_array_delete, subtree_array_new,
+    subtree_array_reverse, Subtree, SubtreeArena, SubtreeArray, NULL_SUBTREE,
 };
-use super::super::utils::{ptr_mut, Array};
+use super::super::utils::ptr_mut;
 use super::stack_node::stack_node_retain;
 use super::{
     Stack, StackHead, StackIterationAction, StackIterator, StackLink, StackNode, StackSlice,
@@ -26,6 +26,7 @@ unsafe fn stack_add_version(
     original_version: StackVersion,
     node: NonNull<StackNode>,
 ) -> StackVersion {
+    let arena = self_.arena();
     let original_head = self_.head(original_version);
     let head = StackHead {
         node,
@@ -44,7 +45,7 @@ unsafe fn stack_add_version(
     stack_node_retain(node);
     let head = self_.heads.last_unchecked();
     if !head.last_external_token.is_null() {
-        head.last_external_token.retain();
+        head.last_external_token.retain(arena);
     }
     self_.heads.size - 1
 }
@@ -86,13 +87,14 @@ pub(super) unsafe fn stack_iter<F>(
 where
     F: FnMut(&StackIterator) -> StackIterationAction,
 {
+    let arena = stack.arena();
     stack.slices.clear();
     stack.iterators.clear();
 
     let head = stack.head(version);
     let mut new_iterator = StackIterator {
         node: head.node,
-        subtrees: Array::new(),
+        subtrees: subtree_array_new(ptr_mut(stack.subtree_pool)),
         subtree_count: 0,
     };
 
@@ -169,10 +171,10 @@ where
                     if include_subtrees {
                         let subtrees = &mut next_iterator.subtrees;
                         subtrees.push(subtree);
-                        subtree.retain();
+                        subtree.retain(arena);
                     }
 
-                    if !subtree.extra() {
+                    if !subtree.extra(arena) {
                         next_iterator.subtree_count += 1;
                     }
                 }
@@ -197,10 +199,11 @@ pub(super) const fn pop_count_action(
 
 pub(super) unsafe fn pop_error_action(
     iterator: &StackIterator,
+    arena: *mut SubtreeArena,
     found_error: &mut bool,
 ) -> StackIterationAction {
     if let Some(&first_subtree) = iterator.subtrees.as_slice().first() {
-        if !*found_error && first_subtree.is_error() {
+        if !*found_error && first_subtree.is_error(arena) {
             *found_error = true;
             StackIterationAction::PopAndStop
         } else {

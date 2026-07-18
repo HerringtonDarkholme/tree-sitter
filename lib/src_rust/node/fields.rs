@@ -11,8 +11,8 @@ use crate::ffi::TSNode;
 
 use super::super::language::{language_field_map_slice, language_full};
 use super::{
-    node_child_iterator_next, node_is_relevant, node_iterate_children, node_language, node_null,
-    node_relevant_child_count, node_subtree,
+    node_arena, node_child_iterator_next, node_is_relevant, node_iterate_children, node_language,
+    node_null, node_relevant_child_count, node_subtree,
 };
 
 /// Look up the direct field attached to a structural child.
@@ -20,7 +20,12 @@ use super::{
 unsafe fn node_field_name_from_language(node: TSNode, structural_child_index: u32) -> *const i8 {
     let field_map = language_field_map_slice(
         node_language(node),
-        u32::from(node_subtree(node).heap_data().children().production_id),
+        u32::from(
+            node_subtree(node)
+                .heap_data(node_arena(node))
+                .children()
+                .production_id,
+        ),
     );
     let language = language_full(node_language(node));
     for entry in field_map {
@@ -51,7 +56,7 @@ unsafe fn node_field_name_for_child(
         while node_child_iterator_next(&mut iterator, &mut child) {
             if node_is_relevant(child, include_anonymous) {
                 if visible_index == child_index {
-                    if node_subtree(child).extra() {
+                    if node_subtree(child).extra(node_arena(child)) {
                         return ptr::null();
                     }
                     let field_name =

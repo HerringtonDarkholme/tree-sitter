@@ -17,7 +17,10 @@ use crate::ffi::TSStateId;
 use super::alloc::{free, malloc};
 use super::error_costs::{ERROR_COST_PER_RECOVERY, ERROR_STATE};
 use super::length::{length_add, Length};
-use super::subtree::{subtree_alloc_size, Subtree, SubtreeArray, SubtreePool, NULL_SUBTREE};
+use super::subtree::{
+    subtree_alloc_size, subtree_array_new, Subtree, SubtreeArena, SubtreeArray, SubtreePool,
+    NULL_SUBTREE,
+};
 use super::utils::ptr_mut;
 use super::utils::Array;
 
@@ -178,6 +181,11 @@ pub struct Stack {
 }
 
 impl Stack {
+    #[inline]
+    pub(super) unsafe fn arena(&self) -> *mut SubtreeArena {
+        ptr_mut(self.subtree_pool).arena()
+    }
+
     pub const fn version_count(&self) -> u32 {
         self.heads.size
     }
@@ -205,10 +213,17 @@ impl Stack {
         }
         debug_assert_eq!(self.heads.size, 1);
 
+        let arena = self.arena();
         let mut node = self.head(0).node;
         for i in 0..self.window.size {
             let entry = self.window.get_unchecked(i);
-            node = stack_node_new(Some(node), entry.subtree, entry.state, &mut self.node_pool);
+            node = stack_node_new(
+                Some(node),
+                entry.subtree,
+                entry.state,
+                arena,
+                &mut self.node_pool,
+            );
             let materialized = node.as_ref();
             debug_assert_eq!(materialized.position, entry.position);
             debug_assert_eq!(materialized.error_cost, entry.error_cost);
@@ -250,9 +265,10 @@ impl Stack {
 
     pub unsafe fn set_last_external_token(&mut self, version: StackVersion, token: Subtree) {
         let subtree_pool = ptr_mut(self.subtree_pool);
+        let arena = subtree_pool.arena();
         let head = self.heads.get_unchecked_mut(version);
         if !token.is_null() {
-            token.retain();
+            token.retain(arena);
         }
         if !head.last_external_token.is_null() {
             head.last_external_token.release(subtree_pool);
@@ -297,6 +313,7 @@ impl Stack {
     }
 
     pub unsafe fn has_advanced_since_error(&self, version: StackVersion) -> bool {
+        let arena = self.arena();
         let head = self.head(version);
         if head.error_cost == 0 {
             return true;
@@ -306,12 +323,12 @@ impl Stack {
             let mut node_count = head.node_count;
             for entry in self.window.as_slice().iter().rev() {
                 let subtree = entry.subtree;
-                if subtree.total_bytes() > 0 {
+                if subtree.total_bytes(arena) > 0 {
                     return true;
                 }
-                if node_count > head.node_count_at_last_error && subtree.error_cost() == 0 {
-                    node_count =
-                        node_count.saturating_sub(stack_node::stack_subtree_node_count(subtree));
+                if node_count > head.node_count_at_last_error && subtree.error_cost(arena) == 0 {
+                    node_count = node_count
+                        .saturating_sub(stack_node::stack_subtree_node_count(subtree, arena));
                     continue;
                 }
                 return false;
@@ -327,10 +344,10 @@ impl Stack {
             if node_ref.link_count > 0 {
                 let subtree = node_ref.links[0].subtree;
                 if !subtree.is_null() {
-                    if subtree.total_bytes() > 0 {
+                    if subtree.total_bytes(arena) > 0 {
                         return true;
                     } else if node_ref.node_count > head.node_count_at_last_error
-                        && subtree.error_cost() == 0
+                        && subtree.error_cost(arena) == 0
                     {
                         node = node_ref.links[0].node;
                         continue;
@@ -450,7 +467,7 @@ use pop::{pop_all_action, pop_count_action, pop_error_action, stack_iter, summar
 pub unsafe fn stack_new(subtree_pool: &mut SubtreePool) -> *mut Stack {
     let mut node_pool = Array::new();
     node_pool.reserve(MAX_NODE_POOL_SIZE);
-    let base_node = stack_node_new(None, NULL_SUBTREE, 1, &mut node_pool);
+    let base_node = stack_node_new(None, NULL_SUBTREE, 1, subtree_pool.arena(), &mut node_pool);
 
     let self_ = malloc(core::mem::size_of::<Stack>()).cast::<Stack>();
     ptr::write(
@@ -517,6 +534,7 @@ pub unsafe fn stack_push(
     subtree: Subtree,
     state: TSStateId,
 ) {
+    let arena = stack.arena();
     if stack.window_enabled && version == 0 && !subtree.is_null() {
         debug_assert_eq!(stack.heads.size, 1);
         let head = stack.head(0);
@@ -528,10 +546,10 @@ pub unsafe fn stack_push(
             dynamic_precedence: head.dynamic_precedence,
             subtree,
         };
-        entry.error_cost += subtree.error_cost();
-        entry.position = length_add(entry.position, subtree.total_size());
-        entry.node_count += stack_node::stack_subtree_node_count(subtree);
-        entry.dynamic_precedence += subtree.dynamic_precedence();
+        entry.error_cost += subtree.error_cost(arena);
+        entry.position = length_add(entry.position, subtree.total_size(arena));
+        entry.node_count += stack_node::stack_subtree_node_count(subtree, arena);
+        entry.dynamic_precedence += subtree.dynamic_precedence(arena);
         stack.window.push(entry);
 
         let head = stack.head_mut(0);
@@ -547,7 +565,7 @@ pub unsafe fn stack_push(
     let heads = &mut stack.heads;
     let node_pool = &mut stack.node_pool;
     let head = heads.get_unchecked_mut(version);
-    let new_node = stack_node_new(Some(head.node), subtree, state, node_pool);
+    let new_node = stack_node_new(Some(head.node), subtree, state, arena, node_pool);
     if subtree.is_null() {
         head.node_count_at_last_error = new_node.as_ref().node_count;
     }
@@ -573,6 +591,7 @@ pub unsafe fn stack_pop_count_from_window(
         return None;
     }
 
+    let arena = stack.arena();
     let mut start = stack.window.size;
     let mut remaining = count;
     while remaining > 0 {
@@ -581,13 +600,13 @@ pub unsafe fn stack_pop_count_from_window(
         }
         start -= 1;
         let subtree = stack.window.get_unchecked(start).subtree;
-        if subtree.is_null() || !subtree.extra() {
+        if subtree.is_null() || !subtree.extra(arena) {
             remaining -= 1;
         }
     }
 
     let physical_count = stack.window.size - start;
-    let mut children = SubtreeArray::new();
+    let mut children = subtree_array_new(ptr_mut(stack.subtree_pool));
     let capacity = subtree_alloc_size(physical_count) / core::mem::size_of::<Subtree>();
     children.reserve(u32::try_from(capacity).unwrap());
     for i in start..stack.window.size {
@@ -643,15 +662,16 @@ pub unsafe fn stack_pop_count(
 /// Pop an error from the top of a version.
 pub unsafe fn stack_pop_error(self_: &mut Stack, version: StackVersion) -> SubtreeArray {
     self_.materialize_window();
+    let arena = self_.arena();
     let node = self_.head(version).node;
     for link in &node.as_ref().links[..node.as_ref().link_count as usize] {
         let subtree = link.subtree;
-        if !subtree.is_null() && subtree.is_error() {
+        if !subtree.is_null() && subtree.is_error(arena) {
             let mut found_error = false;
             let pop = stack_iter(
                 self_,
                 version,
-                |iterator| pop_error_action(iterator, &mut found_error),
+                |iterator| pop_error_action(iterator, arena, &mut found_error),
                 Some(1),
             );
             if pop.size > 0 {
@@ -663,7 +683,7 @@ pub unsafe fn stack_pop_error(self_: &mut Stack, version: StackVersion) -> Subtr
             break;
         }
     }
-    Array::new()
+    SubtreeArray::new()
 }
 
 /// Pop all entries from a version.
@@ -746,13 +766,14 @@ pub unsafe fn stack_swap_versions(stack: &mut Stack, v1: StackVersion, v2: Stack
 /// Copy a version, creating a new one.
 pub unsafe fn stack_copy_version(stack: &mut Stack, version: StackVersion) -> StackVersion {
     stack.materialize_window();
+    let arena = stack.arena();
     debug_assert!(version < stack.heads.size);
     let version_head = ptr::read(stack.heads.get_unchecked(version));
     stack.heads.push(version_head);
     let head = stack.heads.last_unchecked_mut();
     stack_node_retain(head.node);
     if !head.last_external_token.is_null() {
-        head.last_external_token.retain();
+        head.last_external_token.retain(arena);
     }
     if head.status == StackStatus::Halted {
         stack.halted_version_count += 1;
@@ -803,6 +824,7 @@ pub unsafe fn stack_can_merge(
     version1: StackVersion,
     version2: StackVersion,
 ) -> bool {
+    let arena = stack.arena();
     let head1 = stack.head(version1);
     let head2 = stack.head(version2);
     head1.status == StackStatus::Active
@@ -810,9 +832,11 @@ pub unsafe fn stack_can_merge(
         && head1.state == head2.state
         && head1.position.bytes == head2.position.bytes
         && head1.error_cost == head2.error_cost
-        && head1
-            .last_external_token
-            .has_same_external_scanner_state(head2.last_external_token)
+        && head1.last_external_token.has_same_external_scanner_state(
+            head2.last_external_token,
+            arena,
+            arena,
+        )
 }
 
 /// Clear all versions, resetting to initial state.

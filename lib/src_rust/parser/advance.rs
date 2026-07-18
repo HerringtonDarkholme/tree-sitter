@@ -105,7 +105,9 @@ pub(super) unsafe fn parser_better_version_exists(
     is_in_error: bool,
     cost: u32,
 ) -> bool {
-    if !self_.finished_tree.is_null() && self_.finished_tree.error_cost() <= cost {
+    if !self_.finished_tree.is_null()
+        && self_.finished_tree.error_cost(self_.tree_pool.arena()) <= cost
+    {
         return true;
     }
 
@@ -311,7 +313,12 @@ unsafe fn parser_continue_after_reduction(
     if lookahead.is_null() {
         true
     } else {
-        language_table_entry(self_.language, *state, lookahead.symbol(), table_entry);
+        language_table_entry(
+            self_.language,
+            *state,
+            lookahead.symbol(self_.tree_pool.arena()),
+            table_entry,
+        );
         false
     }
 }
@@ -334,9 +341,10 @@ unsafe fn parser_try_keyword_fallback(
     table_entry: &mut TableEntry,
 ) -> bool {
     let keyword_capture_token = language_full(self_.language).keyword_capture_token;
-    if !(*lookahead).is_keyword()
-        || (*lookahead).symbol() == keyword_capture_token
-        || language_is_reserved_word(self_.language, state, (*lookahead).symbol())
+    let arena = self_.tree_pool.arena();
+    if !(*lookahead).is_keyword(arena)
+        || (*lookahead).symbol(arena) == keyword_capture_token
+        || language_is_reserved_word(self_.language, state, (*lookahead).symbol(arena))
     {
         return false;
     }
@@ -350,23 +358,24 @@ unsafe fn parser_try_keyword_fallback(
         write!(
             log,
             "switch from_keyword:{}, to_word_token:{}",
-            DisplayCStr(parser_tree_name(context.language, *lookahead)),
+            DisplayCStr(parser_tree_name(context.language, arena, *lookahead)),
             DisplayCStr(parser_symbol_name(context.language, keyword_capture_token))
         )
     });
 
     let mut mutable_lookahead = (*lookahead).make_mut(&mut self_.tree_pool);
-    mutable_lookahead.set_symbol(keyword_capture_token, self_.language);
+    mutable_lookahead.set_symbol(arena, keyword_capture_token, self_.language);
     *lookahead = mutable_lookahead.into_immutable();
     true
 }
 
 unsafe fn parser_pause_with_error(self_: &mut TSParser, version: StackVersion, lookahead: Subtree) {
+    let arena = self_.tree_pool.arena();
     parser_log(self_, |context, log| {
         write!(
             log,
             "detect_error lookahead:{}",
-            DisplayCStr(parser_tree_name(context.language, lookahead))
+            DisplayCStr(parser_tree_name(context.language, arena, lookahead,))
         )
     });
     ptr_mut(self_.stack).pause(version, lookahead);

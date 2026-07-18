@@ -24,15 +24,21 @@ use super::{cursor_ref, out_param_mut, TreeCursorEntry};
 pub unsafe extern "C" fn ts_tree_cursor_current_node(self_: *const TSTreeCursor) -> TSNode {
     let cursor = cursor_ref(self_);
     let entries = cursor.stack.as_slice();
+    let arena = cursor.arena();
     let last_entry = entries.last().unwrap_unchecked();
-    let is_extra = (*last_entry.subtree).extra();
+    let is_extra = (*last_entry.subtree).extra(arena);
     let alias_symbol = if is_extra {
         0
     } else if cursor.stack.size > 1 {
         let parent_entry = entries.get_unchecked(cursor.stack.size as usize - 2);
         language_alias_at(
             (*cursor.tree).language,
-            u32::from((*parent_entry.subtree).heap_data().children().production_id),
+            u32::from(
+                (*parent_entry.subtree)
+                    .heap_data(arena)
+                    .children()
+                    .production_id,
+            ),
             last_entry.structural_child_index,
         )
     } else {
@@ -49,26 +55,28 @@ pub unsafe extern "C" fn ts_tree_cursor_current_node(self_: *const TSTreeCursor)
 /// Resolve a child's alias-aware symbol within its parent production.
 unsafe fn tree_cursor_child_symbol(
     language: *const TSLanguage,
+    arena: *mut super::super::subtree::SubtreeArena,
     parent: Subtree,
     child: Subtree,
     structural_child_index: u32,
 ) -> TSSymbol {
-    if !child.extra() {
+    if !child.extra(arena) {
         let alias = language_alias_at(
             language,
-            u32::from(parent.heap_data().children().production_id),
+            u32::from(parent.heap_data(arena).children().production_id),
             structural_child_index,
         );
         if alias != 0 {
             return alias;
         }
     }
-    child.symbol()
+    child.symbol(arena)
 }
 
 /// Record whether an entry has later visible or named siblings.
 unsafe fn tree_cursor_record_later_siblings(
     language: *const TSLanguage,
+    arena: *mut super::super::subtree::SubtreeArena,
     parent: &TreeCursorEntry,
     entry: &TreeCursorEntry,
     has_later_siblings: &mut bool,
@@ -79,28 +87,34 @@ unsafe fn tree_cursor_record_later_siblings(
     }
 
     let parent_subtree = *parent.subtree;
-    let sibling_count = parent_subtree.heap_data().child_count;
+    let sibling_count = parent_subtree.heap_data(arena).child_count;
     let mut structural_child_index = entry.structural_child_index;
-    if !(*entry.subtree).extra() {
+    if !(*entry.subtree).extra(arena) {
         structural_child_index += 1;
     }
     for child_index in entry.child_index + 1..sibling_count {
-        let sibling = (parent_subtree).child(child_index);
+        let sibling = (parent_subtree).child(arena, child_index);
         let metadata = ts_language_symbol_metadata(
             language,
-            tree_cursor_child_symbol(language, parent_subtree, *sibling, structural_child_index),
+            tree_cursor_child_symbol(
+                language,
+                arena,
+                parent_subtree,
+                *sibling,
+                structural_child_index,
+            ),
         );
         if metadata.visible {
             *has_later_siblings = true;
             *has_later_named_siblings |= metadata.named;
-        } else if (*sibling).visible_child_count() > 0 {
+        } else if (*sibling).visible_child_count(arena) > 0 {
             *has_later_siblings = true;
-            *has_later_named_siblings |= sibling.heap_data().children().named_child_count > 0;
+            *has_later_named_siblings |= sibling.heap_data(arena).children().named_child_count > 0;
         }
         if *has_later_named_siblings {
             return;
         }
-        if !(*sibling).extra() {
+        if !(*sibling).extra(arena) {
             structural_child_index += 1;
         }
     }
@@ -109,18 +123,19 @@ unsafe fn tree_cursor_record_later_siblings(
 /// Update the current field and whether it can occur again later.
 unsafe fn tree_cursor_update_field_status(
     language: *const TSLanguage,
+    arena: *mut super::super::subtree::SubtreeArena,
     parent: &TreeCursorEntry,
     entry: &TreeCursorEntry,
     field_id: &mut TSFieldId,
     can_have_later_siblings_with_this_field: &mut bool,
 ) {
-    if (*entry.subtree).extra() {
+    if (*entry.subtree).extra(arena) {
         return;
     }
 
     let field_map = language_field_map_slice(
         language,
-        u32::from((*parent.subtree).heap_data().children().production_id),
+        u32::from((*parent.subtree).heap_data(arena).children().production_id),
     );
 
     for map in field_map {
@@ -149,6 +164,7 @@ pub unsafe extern "C" fn ts_tree_cursor_current_status(
 ) {
     let cursor = cursor_ref(self_);
     let language = (*cursor.tree).language;
+    let arena = cursor.arena();
     let field_id = out_param_mut(field_id);
     let has_later_siblings = out_param_mut(has_later_siblings);
     let has_later_named_siblings = out_param_mut(has_later_named_siblings);
@@ -169,6 +185,7 @@ pub unsafe extern "C" fn ts_tree_cursor_current_status(
         let parent = entries.get_unchecked((i - 1) as usize);
         let entry_symbol = tree_cursor_child_symbol(
             language,
+            arena,
             *parent.subtree,
             *entry.subtree,
             entry.structural_child_index,
@@ -185,6 +202,7 @@ pub unsafe extern "C" fn ts_tree_cursor_current_status(
 
         tree_cursor_record_later_siblings(
             language,
+            arena,
             parent,
             entry,
             has_later_siblings,
@@ -192,6 +210,7 @@ pub unsafe extern "C" fn ts_tree_cursor_current_status(
         );
         tree_cursor_update_field_status(
             language,
+            arena,
             parent,
             entry,
             field_id,
@@ -217,7 +236,7 @@ pub unsafe extern "C" fn ts_tree_cursor_current_field_id(self_: *const TSTreeCur
             break;
         }
 
-        if (*entry.subtree).extra() {
+        if (*entry.subtree).extra(cursor.arena()) {
             break;
         }
 
@@ -225,6 +244,7 @@ pub unsafe extern "C" fn ts_tree_cursor_current_field_id(self_: *const TSTreeCur
         let mut can_repeat = false;
         tree_cursor_update_field_status(
             (*cursor.tree).language,
+            cursor.arena(),
             parent_entry,
             entry,
             &mut field_id,

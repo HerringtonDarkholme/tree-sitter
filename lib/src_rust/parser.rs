@@ -40,7 +40,8 @@ use super::lexer::{
 use super::reduce_action::ReduceActionSet;
 use super::stack::{stack_clear, stack_delete, stack_new, Stack, StackVersion};
 use super::subtree::{
-    subtree_pool_delete, subtree_pool_new, Subtree, SubtreeArray, SubtreePool, NULL_SUBTREE,
+    subtree_pool_delete, subtree_pool_new, subtree_pool_prepare_for_parse,
+    subtree_pool_retain_arena, subtree_publish, Subtree, SubtreeArray, SubtreePool, NULL_SUBTREE,
 };
 use super::tree::TSTree;
 use super::utils::Array;
@@ -226,8 +227,11 @@ unsafe fn parser_has_outstanding_parse(self_: &TSParser) -> bool {
 }
 
 unsafe fn parser_take_finished_tree(self_: &mut TSParser) -> *mut TSTree {
+    subtree_publish(self_.tree_pool.arena());
+    let arena = subtree_pool_retain_arena(&mut self_.tree_pool);
     let result = TSTree::new(
         self_.finished_tree,
+        arena,
         self_.language,
         lexer_included_ranges_slice(&self_.lexer),
     );
@@ -251,9 +255,9 @@ pub unsafe extern "C" fn ts_parser_new() -> *mut TSParser {
             language: ptr::null(),
             reduce_actions: Array::new(),
             finished_tree: NULL_SUBTREE,
-            trailing_extras: Array::new(),
-            trailing_extras2: Array::new(),
-            scratch_trees: Array::new(),
+            trailing_extras: SubtreeArray::new(),
+            trailing_extras2: SubtreeArray::new(),
+            scratch_trees: SubtreeArray::new(),
             token_cache: TokenCache {
                 token: NULL_SUBTREE,
                 last_external_token: NULL_SUBTREE,
@@ -450,6 +454,7 @@ pub unsafe extern "C-unwind" fn ts_parser_parse(
             return result;
         }
     } else {
+        subtree_pool_prepare_for_parse(&mut parser.tree_pool);
         parser_external_scanner_create(parser);
         parser_log(parser, |_, log| log.write_str("new_parse"));
     }
@@ -501,7 +506,9 @@ pub unsafe extern "C-unwind" fn ts_parser_parse(
         // then terminate parsing. Clear the parse stack to remove any extra references to subtrees
         // within the finished tree, ensuring that these subtrees can be safely mutated in-place
         // for rebalancing.
-        if !parser.finished_tree.is_null() && parser.finished_tree.error_cost() < min_error_cost {
+        if !parser.finished_tree.is_null()
+            && parser.finished_tree.error_cost(parser.tree_pool.arena()) < min_error_cost
+        {
             stack_clear(ptr_mut(parser.stack));
             break;
         }

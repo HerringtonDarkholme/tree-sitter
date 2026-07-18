@@ -28,8 +28,9 @@ use super::super::stack::{
     stack_renumber_version, StackVersion, STACK_VERSION_NONE,
 };
 use super::super::subtree::{
-    subtree_array_delete, subtree_array_remove_trailing_extras, subtree_new_error_node,
-    subtree_new_missing_leaf, Subtree, SubtreeArray, NULL_SUBTREE, TS_BUILTIN_SYM_ERROR_REPEAT,
+    subtree_array_delete, subtree_array_new, subtree_array_remove_trailing_extras,
+    subtree_new_error_node, subtree_new_missing_leaf, Subtree, SubtreeArray, NULL_SUBTREE,
+    TS_BUILTIN_SYM_ERROR_REPEAT,
 };
 use super::super::utils::{ptr_mut, ptr_ref};
 use super::actions::{parser_accept, parser_new_node, parser_reduce};
@@ -140,6 +141,7 @@ unsafe fn parser_recover_to_state(
     depth: u32,
     goal_state: TSStateId,
 ) -> bool {
+    let arena = self_.tree_pool.arena();
     let stack = ptr_mut(self_.stack);
     let mut pop = stack_pop_count(stack, version, depth);
     let mut previous_version = STACK_VERSION_NONE;
@@ -164,23 +166,28 @@ unsafe fn parser_recover_to_state(
         let mut error_trees = stack_pop_error(stack, slice.version);
         if let Some(&error_tree) = error_trees.as_slice().first() {
             debug_assert_eq!(error_trees.len(), 1);
-            let error_child_count = error_tree.child_count();
+            let error_child_count = error_tree.child_count(arena);
             if error_child_count > 0 {
-                let error_children = error_tree.children();
+                let error_children = error_tree.children(arena);
                 slice
                     .subtrees
                     .splice(0, 0, error_child_count, error_children.as_ptr());
                 for child in error_children {
-                    (*child).retain();
+                    (*child).retain(arena);
                 }
             }
             subtree_array_delete(&mut self_.tree_pool, &mut error_trees);
         }
 
-        subtree_array_remove_trailing_extras(&mut slice.subtrees, &mut self_.trailing_extras);
+        subtree_array_remove_trailing_extras(
+            &mut slice.subtrees,
+            &mut self_.trailing_extras,
+            arena,
+        );
 
         if !slice.subtrees.is_empty() {
-            let error = subtree_new_error_node(slice.subtrees, true, self_.language);
+            let error =
+                subtree_new_error_node(&mut self_.tree_pool, slice.subtrees, true, self_.language);
             stack_push(stack, slice.version, error, goal_state);
         } else {
             slice.subtrees.delete();
@@ -207,6 +214,7 @@ pub(super) unsafe fn parser_recover(
     version: StackVersion,
     mut lookahead: Subtree,
 ) {
+    let arena = self_.tree_pool.arena();
     stack_materialize(ptr_mut(self_.stack));
     let mut did_recover = false;
     let stack = ptr_mut(self_.stack);
@@ -217,7 +225,7 @@ pub(super) unsafe fn parser_recover(
     let summary = stack_get_summary(stack, version);
 
     // Strategy 1: Find a previous state where the lookahead is valid.
-    if let Some(summary) = summary.filter(|_| !lookahead.is_error()) {
+    if let Some(summary) = summary.filter(|_| !lookahead.is_error(arena)) {
         for &entry in summary.as_slice() {
             if entry.state == ERROR_STATE {
                 continue;
@@ -252,7 +260,7 @@ pub(super) unsafe fn parser_recover(
                 break;
             }
 
-            if language_has_actions(self_.language, entry.state, lookahead.symbol())
+            if language_has_actions(self_.language, entry.state, lookahead.symbol(arena))
                 && parser_recover_to_state(self_, version, depth, entry.state)
             {
                 did_recover = true;
@@ -282,10 +290,10 @@ pub(super) unsafe fn parser_recover(
     }
 
     // EOF: wrap everything and terminate
-    if lookahead.is_eof() {
+    if lookahead.is_eof(arena) {
         parser_log(self_, |_, log| log.write_str("recover_eof"));
         let children = SubtreeArray::new();
-        let parent = subtree_new_error_node(children, false, self_.language);
+        let parent = subtree_new_error_node(&mut self_.tree_pool, children, false, self_.language);
         stack_push(stack, version, parent, 1);
         parser_accept(self_, version, lookahead);
         return;
@@ -294,11 +302,11 @@ pub(super) unsafe fn parser_recover(
     // Strategy 2: skip the current token
     let new_cost = current_error_cost
         + ERROR_COST_PER_SKIPPED_TREE
-        + lookahead.total_bytes() * ERROR_COST_PER_SKIPPED_CHAR
-        + lookahead.total_size().extent.row * ERROR_COST_PER_SKIPPED_LINE;
+        + lookahead.total_bytes(arena) * ERROR_COST_PER_SKIPPED_CHAR
+        + lookahead.total_size(arena).extent.row * ERROR_COST_PER_SKIPPED_LINE;
     let cannot_skip_after_recovery = did_recover
         && (stack.version_count() > MAX_VERSION_COUNT
-            || lookahead.has_external_scanner_state_change());
+            || lookahead.has_external_scanner_state_change(arena));
     if cannot_skip_after_recovery || parser_better_version_exists(self_, version, false, new_cost) {
         stack.halt(version);
         lookahead.release(&mut self_.tree_pool);
@@ -307,7 +315,7 @@ pub(super) unsafe fn parser_recover(
 
     // Mark extra tokens
     let mut n: u32 = 0;
-    let actions = language_actions(self_.language, 1, lookahead.symbol(), &mut n);
+    let actions = language_actions(self_.language, 1, lookahead.symbol(arena), &mut n);
     let marks_extra = if n == 0 {
         false
     } else {
@@ -316,7 +324,7 @@ pub(super) unsafe fn parser_recover(
     };
     if marks_extra {
         let mut mutable_lookahead = lookahead.make_mut(&mut self_.tree_pool);
-        mutable_lookahead.set_extra(true);
+        mutable_lookahead.set_extra(arena, true);
         lookahead = mutable_lookahead.into_immutable();
     }
 
@@ -325,10 +333,13 @@ pub(super) unsafe fn parser_recover(
         write!(
             log,
             "skip_token symbol:{}",
-            DisplayCStr(parser_symbol_name(context.language, lookahead.symbol()))
+            DisplayCStr(parser_symbol_name(
+                context.language,
+                lookahead.symbol(arena)
+            ))
         )
     });
-    let mut children = SubtreeArray::new();
+    let mut children = subtree_array_new(&mut self_.tree_pool);
     children.reserve(1);
     children.push(lookahead);
     let mut error_repeat = parser_new_node(self_, TS_BUILTIN_SYM_ERROR_REPEAT, children, 0);
@@ -358,8 +369,8 @@ pub(super) unsafe fn parser_recover(
 
     // Push the ERROR
     stack_push(stack, version, error_repeat.into_immutable(), ERROR_STATE);
-    if lookahead.has_external_tokens() {
-        stack.set_last_external_token(version, lookahead.last_external_token());
+    if lookahead.has_external_tokens(arena) {
+        stack.set_last_external_token(version, lookahead.last_external_token(arena));
     }
 
     let mut has_error = true;
@@ -380,6 +391,7 @@ unsafe fn parser_try_insert_missing_token(
     lookahead: Subtree,
     position: Length,
 ) -> bool {
+    let arena = self_.tree_pool.arena();
     let state = ptr_ref(self_.stack).head(version).state();
     let language = language_full(self_.language);
     let mut missing_symbol: TSSymbol = 1;
@@ -393,7 +405,7 @@ unsafe fn parser_try_insert_missing_token(
         if !language_has_reduce_action(
             self_.language,
             state_after_missing_symbol,
-            lookahead.symbol(),
+            lookahead.symbol(arena),
         ) {
             missing_symbol += 1;
             continue;
@@ -404,7 +416,7 @@ unsafe fn parser_try_insert_missing_token(
         lexer_reset(&mut self_.lexer, position);
         lexer_mark_end(&mut self_.lexer);
         let padding = length_sub(self_.lexer.token_end_position, position);
-        let lookahead_bytes = lookahead.total_bytes() + lookahead.lookahead_bytes();
+        let lookahead_bytes = lookahead.total_bytes(arena) + lookahead.lookahead_bytes(arena);
         let candidate = stack_copy_version(ptr_mut(self_.stack), version);
         let missing_tree = subtree_new_missing_leaf(
             &mut self_.tree_pool,
@@ -420,7 +432,7 @@ unsafe fn parser_try_insert_missing_token(
             state_after_missing_symbol,
         );
 
-        if parser_do_all_potential_reductions(self_, candidate, lookahead.symbol()) {
+        if parser_do_all_potential_reductions(self_, candidate, lookahead.symbol(arena)) {
             parser_log(self_, |context, log| {
                 write!(
                     log,

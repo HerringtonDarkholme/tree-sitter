@@ -20,7 +20,10 @@ use super::get_changed_ranges::{
 };
 use super::length::{length_add, Length};
 use super::node::node_new;
-use super::subtree::{subtree_edit, subtree_pool_delete, subtree_pool_new, Subtree};
+use super::subtree::{
+    subtree_arena_release, subtree_arena_retain, subtree_edit, subtree_pool_delete,
+    subtree_pool_from_arena, subtree_pool_retain_arena, Subtree, SubtreeArena,
+};
 // Only used by `TSTree::print_dot_graph`, which is unavailable on wasm.
 #[cfg(not(target_family = "wasm"))]
 use super::subtree::subtree_print_dot_graph;
@@ -60,6 +63,9 @@ use crate::ffi::TSInputEdit;
 pub struct TSTree {
     /// Root syntax subtree, retained by the tree.
     pub(super) root: Subtree,
+    /// Pointer-stable allocation containing all heap records reachable from
+    /// `root`. Tree copies retain this arena independently.
+    pub(super) arena: *mut SubtreeArena,
     /// Language used to parse this tree.
     pub(super) language: *const TSLanguage,
     /// Copied included ranges for tree comparison and public APIs.
@@ -94,8 +100,9 @@ const fn tree_cursor_empty() -> TreeCursor {
 // ---------------------------------------------------------------------------
 
 impl TSTree {
-    pub unsafe fn new(
+    pub(super) unsafe fn new(
         root: Subtree,
+        arena: *mut SubtreeArena,
         language: *const TSLanguage,
         included_ranges: &[TSRange],
     ) -> *mut Self {
@@ -104,6 +111,7 @@ impl TSTree {
             result,
             Self {
                 root,
+                arena,
                 language,
                 included_ranges: copy_ranges(included_ranges),
             },
@@ -121,20 +129,23 @@ impl TSTree {
 
     /// Copy a tree by retaining its shared immutable subtree storage.
     unsafe fn copy(&self) -> *mut Self {
-        self.root.retain();
-        Self::new(self.root, self.language, self.included_ranges())
+        self.root.retain(self.arena);
+        subtree_arena_retain(self.arena);
+        Self::new(self.root, self.arena, self.language, self.included_ranges())
     }
 
     /// Release all references and buffers owned by this tree.
     unsafe fn delete(&mut self) {
-        let mut pool = subtree_pool_new(0);
+        let mut pool = subtree_pool_from_arena(self.arena);
         self.root.release(&mut pool);
         subtree_pool_delete(&mut pool);
         self.included_ranges.delete();
+        subtree_arena_release(self.arena);
+        self.arena = core::ptr::null_mut();
     }
 
     pub unsafe fn root_node(&self, tree_ptr: *const Self) -> TSNode {
-        node_new(tree_ptr, &self.root, self.root.padding(), 0)
+        node_new(tree_ptr, &self.root, self.root.padding(self.arena), 0)
     }
 
     unsafe fn root_node_with_offset(
@@ -150,7 +161,7 @@ impl TSTree {
         node_new(
             tree_ptr,
             &self.root,
-            length_add(offset, self.root.padding()),
+            length_add(offset, self.root.padding(self.arena)),
             0,
         )
     }
@@ -171,8 +182,11 @@ impl TSTree {
         for range in self.included_ranges_mut() {
             range_edit_ref(range, edit);
         }
-        let mut pool = subtree_pool_new(0);
+        let mut pool = subtree_pool_from_arena(self.arena);
         self.root = subtree_edit(self.root, edit, &mut pool);
+        if self.arena.is_null() {
+            self.arena = subtree_pool_retain_arena(&mut pool);
+        }
         subtree_pool_delete(&mut pool);
     }
 
@@ -186,7 +200,7 @@ impl TSTree {
         #[cfg(not(target_os = "windows"))]
         let dup_fd = _ts_dup(file_descriptor);
         let file = fdopen(dup_fd, c"a".as_ptr().cast::<i8>());
-        subtree_print_dot_graph(self.root, self.language, file);
+        subtree_print_dot_graph(self.root, self.arena, self.language, file);
         fclose(file);
     }
 }
@@ -371,7 +385,7 @@ mod tests {
     use super::*;
     use crate::core_impl::length::length_zero;
     use crate::core_impl::subtree::{
-        subtree_new_error, subtree_new_node, TS_BUILTIN_SYM_ERROR_REPEAT,
+        subtree_new_error, subtree_new_node, subtree_pool_new, TS_BUILTIN_SYM_ERROR_REPEAT,
     };
 
     #[test]
@@ -396,18 +410,25 @@ mod tests {
                 0,
                 ptr::null(),
             );
-            let mut children = Array::new();
+            let mut children = super::super::subtree::SubtreeArray::new();
             children.push(child1);
             children.push(child2);
-            let root = subtree_new_node(TS_BUILTIN_SYM_ERROR_REPEAT, children, 0, ptr::null())
-                .into_immutable();
+            let root = subtree_new_node(
+                &mut pool,
+                TS_BUILTIN_SYM_ERROR_REPEAT,
+                children,
+                0,
+                ptr::null(),
+            )
+            .into_immutable();
 
-            assert_eq!(root.child_count(), 2);
-            let tree = TSTree::new(root, ptr::null(), &[]);
+            let arena = subtree_pool_retain_arena(&mut pool);
+            assert_eq!(root.child_count(arena), 2);
+            let tree = TSTree::new(root, arena, ptr::null(), &[]);
             let copy = ts_tree_copy(tree);
 
             ts_tree_delete(tree);
-            assert_eq!((*copy).root.child_count(), 2);
+            assert_eq!((*copy).root.child_count((*copy).arena), 2);
             ts_tree_delete(copy);
             subtree_pool_delete(&mut pool);
         }

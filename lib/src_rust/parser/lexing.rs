@@ -78,8 +78,9 @@ unsafe fn parser_external_scanner_serialize(parser: &mut TSParser) -> u32 {
 }
 
 unsafe fn parser_external_scanner_deserialize(parser: &mut TSParser, external_token: Subtree) {
+    let arena = parser.tree_pool.arena();
     let (data, length) = if !external_token.is_null() {
-        let state = external_token.external_scanner_state();
+        let state = external_token.external_scanner_state(arena);
         (state.as_bytes().as_ptr(), state.length)
     } else {
         (ptr::null(), 0)
@@ -116,8 +117,9 @@ unsafe fn parser_can_reuse_token(
     token: Subtree,
     table_entry: &TableEntry,
 ) -> bool {
-    debug_assert_eq!(token.child_count(), 0);
-    let token_symbol = token.symbol();
+    let arena = self_.tree_pool.arena();
+    debug_assert_eq!(token.child_count(arena), 0);
+    let token_symbol = token.symbol(arena);
     let current_lex_mode = language_lex_mode_for_state(self_.language, state);
 
     // At the end of a non-terminal extra node, the lexer normally returns
@@ -129,7 +131,7 @@ unsafe fn parser_can_reuse_token(
 
     // If the token was created in a state with the same set of lookaheads, it is reusable.
     if table_entry.action_count > 0 {
-        let token_state = token.parse_state();
+        let token_state = token.parse_state(arena);
         let token_lex_mode = language_lex_mode_for_state(self_.language, token_state);
         if token_lex_mode.lex_state == current_lex_mode.lex_state
             && token_lex_mode.external_lex_state == current_lex_mode.external_lex_state
@@ -137,7 +139,7 @@ unsafe fn parser_can_reuse_token(
         {
             let lang = language_full(self_.language);
             if token_symbol != lang.keyword_capture_token
-                || (!token.is_keyword() && token.parse_state() == state)
+                || (!token.is_keyword(arena) && token.parse_state(arena) == state)
             {
                 return true;
             }
@@ -145,7 +147,7 @@ unsafe fn parser_can_reuse_token(
     }
 
     // Empty tokens are not reusable in states with different lookaheads.
-    if token.size().bytes == 0 && token_symbol != TS_BUILTIN_SYM_END {
+    if token.size(arena).bytes == 0 && token_symbol != TS_BUILTIN_SYM_END {
         return false;
     }
 
@@ -253,12 +255,14 @@ unsafe fn parser_new_leaf_lookahead(
     );
 
     if found_external_token {
+        let arena = self_.tree_pool.arena();
         let mut mut_result = result.into_mut();
         mut_result.set_external_scanner_state(
+            arena,
             &self_.lexer.debug_buffer[..external_scanner_state_len as usize],
         );
         mut_result
-            .heap_data_mut()
+            .heap_data_mut(arena)
             .set_has_external_scanner_state_change(external_scanner_state_changed);
     }
 
@@ -324,7 +328,8 @@ unsafe fn parser_lex(
 
             if found_token {
                 external_scanner_state_len = parser_external_scanner_serialize(self_);
-                let external_scanner_state = external_token.external_scanner_state();
+                let external_scanner_state =
+                    external_token.external_scanner_state(self_.tree_pool.arena());
                 external_scanner_state_changed = external_scanner_state.as_bytes()
                     != &self_.lexer.debug_buffer[..external_scanner_state_len as usize];
 
@@ -431,8 +436,8 @@ unsafe fn parser_lex(
 
     parser_log_lookahead(
         self_,
-        parser_symbol_name(self_.language, result.symbol()),
-        result.total_size().bytes,
+        parser_symbol_name(self_.language, result.symbol(self_.tree_pool.arena())),
+        result.total_size(self_.tree_pool.arena()).bytes,
     );
     result
 }
@@ -443,22 +448,25 @@ unsafe fn parser_get_cached_token(
     position: usize,
     last_external_token: Subtree,
 ) -> Option<(Subtree, TableEntry)> {
+    let arena = self_.tree_pool.arena();
     let cache = &self_.token_cache;
     if !cache.token.is_null()
         && cache.byte_index == position as u32
-        && cache
-            .last_external_token
-            .has_same_external_scanner_state(last_external_token)
+        && cache.last_external_token.has_same_external_scanner_state(
+            last_external_token,
+            arena,
+            arena,
+        )
     {
         let mut table_entry = TableEntry::empty();
         language_table_entry(
             self_.language,
             state,
-            cache.token.symbol(),
+            cache.token.symbol(arena),
             &mut table_entry,
         );
         if parser_can_reuse_token(self_, state, cache.token, &table_entry) {
-            cache.token.retain();
+            cache.token.retain(arena);
             return Some((cache.token, table_entry));
         }
     }
@@ -471,12 +479,13 @@ pub(super) unsafe fn parser_set_cached_token(
     last_external_token: Subtree,
     token: Subtree,
 ) {
+    let arena = self_.tree_pool.arena();
     let cache = &mut self_.token_cache;
     if !token.is_null() {
-        token.retain();
+        token.retain(arena);
     }
     if !last_external_token.is_null() {
-        last_external_token.retain();
+        last_external_token.retain(arena);
     }
     if !cache.token.is_null() {
         cache.token.release(&mut self_.tree_pool);
@@ -530,7 +539,12 @@ pub(super) unsafe fn parser_lex_lookahead(
 
     if !lookahead.is_null() {
         parser_set_cached_token(self_, position, last_external_token, *lookahead);
-        language_table_entry(self_.language, state, (*lookahead).symbol(), table_entry);
+        language_table_entry(
+            self_.language,
+            state,
+            (*lookahead).symbol(self_.tree_pool.arena()),
+            table_entry,
+        );
     } else {
         language_table_entry(self_.language, state, TS_BUILTIN_SYM_END, table_entry);
     }

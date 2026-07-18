@@ -11,9 +11,9 @@ use crate::ffi::{TSNode, TSPoint};
 use super::super::point::{point_eq, point_gt, point_lt, point_lte};
 use super::super::subtree::Subtree;
 use super::{
-    node_child_count, node_child_iterator_next, node_end_byte, node_is_null, node_is_relevant,
-    node_iterate_children, node_null, node_relevant_child_count, node_start_byte, node_start_point,
-    node_subtree, ts_node_parent, NodeChildIterator,
+    node_arena, node_child_count, node_child_iterator_next, node_end_byte, node_is_null,
+    node_is_relevant, node_iterate_children, node_null, node_relevant_child_count, node_start_byte,
+    node_start_point, node_subtree, ts_node_parent, NodeChildIterator,
 };
 
 pub(super) unsafe fn node_child(
@@ -60,18 +60,22 @@ pub(super) unsafe fn node_child(
 /// Empty nodes make sibling navigation ambiguous because multiple nodes can end
 /// at the same byte. This recursive check lets previous-sibling logic decide
 /// whether an equal end byte means "inside this child" or "before this child".
-unsafe fn subtree_has_trailing_empty_descendant(self_: Subtree, other: Subtree) -> bool {
-    let count = self_.child_count();
+unsafe fn subtree_has_trailing_empty_descendant(
+    self_: Subtree,
+    other: Subtree,
+    arena: *mut super::super::subtree::SubtreeArena,
+) -> bool {
+    let count = self_.child_count(arena);
     if count == 0 {
         return false;
     }
     let mut i = count - 1;
     loop {
-        let child = *(self_).child(i);
-        if child.total_bytes() > 0 {
+        let child = *(self_).child(arena, i);
+        if child.total_bytes(arena) > 0 {
             break;
         }
-        if child == other || subtree_has_trailing_empty_descendant(child, other) {
+        if child == other || subtree_has_trailing_empty_descendant(child, other, arena) {
             return true;
         }
         if i == 0 {
@@ -89,7 +93,8 @@ unsafe fn subtree_has_trailing_empty_descendant(self_: Subtree, other: Subtree) 
 /// sibling APIs skip implementation-only nodes while preserving source order.
 pub(super) unsafe fn node_prev_sibling(self_: TSNode, include_anonymous: bool) -> TSNode {
     let self_subtree = node_subtree(self_);
-    let self_is_empty = self_subtree.total_bytes() == 0;
+    let arena = node_arena(self_);
+    let self_is_empty = self_subtree.total_bytes(arena) == 0;
     let target_end_byte = node_end_byte(self_);
 
     let mut node = ts_node_parent(self_);
@@ -114,7 +119,11 @@ pub(super) unsafe fn node_prev_sibling(self_: TSNode, include_anonymous: bool) -
 
             if iterator.position.bytes == target_end_byte
                 && (!self_is_empty
-                    || subtree_has_trailing_empty_descendant(node_subtree(child), self_subtree))
+                    || subtree_has_trailing_empty_descendant(
+                        node_subtree(child),
+                        self_subtree,
+                        arena,
+                    ))
             {
                 found_child_containing_target = true;
                 break;
@@ -243,7 +252,8 @@ pub(super) unsafe fn node_first_child_for_byte(
                     if node_is_relevant(child, include_anonymous) {
                         return child;
                     } else if node_child_count(child) > 0 {
-                        if iterator.child_index < node_subtree(child).child_count() {
+                        if iterator.child_index < node_subtree(child).child_count(node_arena(child))
+                        {
                             resume_iterator = Some(iterator);
                         }
                         did_descend = true;

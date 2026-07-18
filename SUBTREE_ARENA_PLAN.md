@@ -4,9 +4,10 @@
 
 This document explains the representation choices for replacing independent
 subtree allocations with arena storage. It is a design comparison, not an
-implementation plan. It deliberately stops before choosing a final candidate,
-specifying a collector algorithm, listing code changes, or defining an
-implementation schedule.
+implementation plan. Candidate C has since been implemented as an experiment;
+its concrete layout and measurements are recorded in
+`SUBTREE_INDEX_RESULTS.md`. This document still deliberately avoids a collector
+plan, code-change checklist, or implementation schedule.
 
 The scope is syntax-subtree storage in `lib/src_rust`. Stack nodes, generic
 runtime arrays, lexer buffers, query storage, and generated language tables are
@@ -35,9 +36,10 @@ not imply compaction: it can address an append-only buffer. A tracing collector
 does not imply removing refcounts: refcounts can continue to govern sharing and
 copy-on-write while tracing reclaims arena space in batches.
 
-## Current representation, from parser value to public node
+## Baseline representation used by this decision space
 
-The current runtime is easiest to understand as four layers.
+The direct-pointer baseline is easiest to understand as four layers. Candidate
+C changes the heap arm and its resolution but preserves the remaining layers.
 
 ### 1. `Subtree` handle
 
@@ -156,16 +158,21 @@ branch from accessors but greatly increase live storage and writes. A uniform
 reference is plausible only if its leaf records are substantially smaller than
 the current full heap record or its narrower child references compensate.
 
-### Internal nodes remain refcounted
+### Internal sharing must remain observable
 
-Internal refcounts currently answer two questions:
+The original design requirement used internal refcounts to answer two
+questions:
 
 - is another owner keeping this node alive? and
 - is the node uniquely owned and therefore safe to mutate in place?
 
 Arena reclamation may batch physical space recovery, but it must not silently
-remove this sharing and copy-on-write contract. Whether compact leaf records
-also need refcounts is a separate choice.
+remove this sharing and copy-on-write contract. The later retained phase-split
+experiment showed that exact counts are not the only valid implementation:
+parser-private conservative sharing plus accepted-DAG normalization preserves
+balancing eligibility, while a published atomic sharing marker preserves
+copy-on-write across tree copies. The semantic constraint is sharing
+observability, not the physical presence of a count field.
 
 ### The graph is shared but acyclic
 
@@ -325,6 +332,50 @@ growth and relocation. A four-byte index additionally changes cache density,
 child-array size, stack-link layout, null/tag encoding, and possibly alignment.
 Those effects make it a different candidate rather than a small variation.
 
+### Deferred capacity-scaling constraints
+
+Candidate D's current `u32` is a tagged **byte offset**, but its low tag bit
+does not reduce the arena to 2 GiB. Compact-leaf records have at least two-byte
+alignment because their `repr(C)` payload contains a `u16` parse state, and
+full records have stronger alignment. Every valid record offset is therefore
+even, so the otherwise-unused low offset bit carries the compact/full tag. The
+remaining values address almost the full 4 GiB byte-offset domain (subject to
+the null sentinel and enough space for the final record).
+
+The 4 GiB reservation is virtual address space, not eagerly resident memory.
+Supported native targets commit payload pages on demand in 64 KiB increments,
+so a small parse does not acquire 4 GiB of RSS. On 32-bit targets the prototype
+uses a smaller 512 MiB reservation because address space itself is scarce.
+
+The important limit is neither compressed file size nor final live-tree size.
+It is the **cumulative number of arena bytes allocated in one parse epoch**.
+This bump-only prototype does not reuse individual records when their intrusive
+refcount reaches zero. Rejected GLR alternatives, superseded tokens, temporary
+internal nodes, alignment padding, and the surviving tree all advance the same
+cursor. The cursor can be rewound only when a new parse starts and no published
+tree still owns that arena. A 16 MiB minified JavaScript input would exhaust a
+4 GiB arena only after roughly 256 cumulative arena bytes per input byte; that
+is plausible for a pathological highly ambiguous parse, but it cannot be
+inferred from input size alone.
+
+Merely "using the alignment bit" cannot expand this domain; Candidate D already
+does that. A future four-byte-handle variant could encode offsets in aligned
+words instead of bytes—for example, forcing four-byte record alignment and
+encoding `((offset / 4) << 1) | tag` yields an approximately 8 GiB domain, while
+eight-byte units yield approximately 16 GiB. This is capacity scaling, not a
+throughput optimization. It adds scaling on hot resolution paths, may add
+padding to compact records, changes overflow and layout checks, and still does
+nothing to reduce RSS or reclaim dead bump allocations.
+
+Do not revisit the scaled-index variant merely because a large virtual maximum
+sounds safer. Revisit it when arena high-water measurements from an actual
+large/minified or conflict-heavy corpus show meaningful pressure on the current
+limit. Those measurements must report cumulative allocated bytes and record
+counts by kind, as well as final live-tree size, so capacity pressure can be
+distinguished from a reclamation problem. If dead allocations dominate, a
+larger index only postpones failure and the storage-lifetime design—not the
+offset encoding—is the relevant axis.
+
 ## Record shape and node storage
 
 Handle uniformity does not require record uniformity. These are separate
@@ -393,6 +444,7 @@ They can be combined in several ways:
 | Policy | Internal refcount | Leaf refcount | When physical space returns |
 | --- | ---: | ---: | --- |
 | Current immediate free | yes | heap leaves only | zero-count cascade frees each block |
+| Retained parser/published phase split | no; sharing bits | no | whole arena generation dies or rewinds |
 | Refcount plus bulk arena lifetime | yes | configurable | only when entire arena dies |
 | Refcount plus free list | yes | configurable | zero-count blocks enter size-aware holes |
 | Refcount plus mark-sweep | yes | configurable | collector identifies/reuses dead blocks without moving live ones |
@@ -436,6 +488,41 @@ physical indexes, roots and child handles must be rewritten. With logical IDs,
 only the location table changes. Neither version can safely run while public
 readers concurrently resolve the same mutable storage without an additional
 synchronization scheme.
+
+### Measured ownership and collection bounds
+
+The Candidate D implementation subsequently priced three temporary endpoints;
+full methodology and per-language results are in `SUBTREE_INDEX_RESULTS.md`.
+Replacing subtree atomic read-modify-write counts with single-threaded
+load/store counts preserved copy-on-write decisions and improved full-corpus
+throughput by only **1.27%**, with uneven language results. Refcount
+synchronization is therefore not a large standalone throughput reserve.
+
+Literal removal of the count was also tested. A sticky atomic sharing marker
+initially appeared **8.28%** faster, but that endpoint was invalid: stale marks
+caused the parser to skip required final-tree balancing. Reconstructing exact
+accepted-DAG sharing before balancing restored semantics and changed the
+full-corpus result to **-0.32%**. Peak RSS was neutral, and the heap record
+remained 88 bytes because removing one four-byte field did not cross its
+eight-byte alignment boundary.
+
+A subsequent phase split made the sharing marker parser-private without
+weakening published-tree synchronization. Parsing now uses `Cell<bool>` and no
+release cascade; an accepted-DAG pass restores exact balancing eligibility;
+published trees use a separate relaxed atomic sharing marker and the atomic
+arena owner count. In a bracketed Rust-only comparison this improved all 40
+fixtures by **3.35%** geometrically, with every language positive and neutral
+RSS. This endpoint is retained. Full layout, lifecycle, and per-language
+measurements are recorded in `SUBTREE_INDEX_RESULTS.md`.
+
+An every-parse stop-the-world copying collection was much more expensive. It
+copied the accepted tree into a fresh arena at publication, passed parity, but
+regressed throughput by **37.45%** and increased peak RSS because from-space
+and to-space coexisted. That result does not rule out GC; it rules out
+unconditional publication-time copying for the current high-survival tree.
+Any next collector must be pressure-triggered from measured live/dead/high-water
+data. If rejected GLR allocations dominate the reclaimable bytes, non-moving
+sweep/free-list reuse is the stronger next candidate than semispace copying.
 
 ## Public occurrence identity choices
 
@@ -502,6 +589,10 @@ movability.
 Candidate C preserves the current inline leaf format and eight-byte handle. It
 changes only the heap arm from pointer to physical index and places heap records
 in one contiguous arena.
+
+This is the implemented experiment. Its result is documented in
+`SUBTREE_INDEX_RESULTS.md`; the description here remains the architecture
+rationale rather than a detailed implementation plan.
 
 This is the cleanest comparison for arena-aware indexed access because inline
 leaf frequency, handle width, and internal record semantics remain familiar.
@@ -584,3 +675,75 @@ The architecture discussion ultimately needs answers to these questions:
 
 No collector or detailed code plan should be selected before the handle,
 record, storage-domain, and public-identity choices are understood together.
+
+## Throughput-only follow-up candidates
+
+This section is a triage list, not an implementation plan. It deliberately
+holds reclamation and GC policy constant so that each experiment answers a
+throughput question. Measurements must compare one Rust implementation with
+the immediately preceding Rust implementation; the C core is too different to
+attribute a representation change reliably.
+
+The current audit constrains the useful search space:
+
+- `Subtree` is 8 bytes, `SubtreeHeapData` is 88 bytes, and internal child
+  metadata is 20 bytes.
+- 92.14% of leaves fit in the inline handle.
+- Internal nodes are 59.09% of created subtrees, average 1.72 children, 57.08%
+  are unary, and 94.84% have at most three children.
+- Across the audited two passes, combined internal allocations wrote about
+  66 MB. The 88-byte header accounted for 86.45% of those bytes; child handles
+  accounted for only 13.55%.
+- Coallocation already sizes children effectively: only 0.90% of constructions
+  required a final header reallocation.
+- A 16-byte `Subtree` experiment regressed parse throughput by 19.74%, so all
+  candidates below preserve a parser-facing handle of at most 8 bytes.
+- Arena-relative indexing alone did not improve throughput. The later
+  reduction-local resolved summary did: +2.04% across 40 fixtures, with all
+  seven languages positive and effectively neutral RSS.
+
+| Priority | Candidate | Throughput mechanism | Main evidence | Principal risk / dependency |
+| ---: | --- | --- | --- | --- |
+| 1 | Reduce external-scanner inline capacity from 24 to 16 bytes | Shrinks the common heap header from 88 to about 80 bytes without changing handles or child access | Projected 7.86% reduction in internal allocation bytes; the Ruby audit adds only 67 scanner-state allocations in the 17–24 byte band | Benefit may be write-bandwidth-only and too small to survive full-corpus noise |
+| 2 | Kind-specialized internal header | Stops every internal node from paying for the 40-byte leaf/scanner content enum; targets an approximately 68–72 byte internal record | Header bytes dominate internal allocation traffic; internals are 59.09% of created subtrees | More record kinds and dispatch; leaf and internal accessors must remain cheap |
+| 3 | Fuse deterministic-window child copying with reduction summarization | Accumulates the parent summary while performing the already-required child-handle move, removing a second traversal and repeated index resolution | The stack window already owns a contiguous child sequence; the local resolved-summary result shows that fewer hot-path resolutions help | Must preserve exact child order, ownership moves, trailing extras, and summary arithmetic |
+| 4 | Pack internal summary counters | Narrows child/descendant counters with an overflow representation to target a 64-byte internal header | Most nodes have very low arity and counts; a cache-line record could reduce allocation writes | Overflow checks add branches; descendant counts, not just direct arity, need audit data |
+| 5 | Candidate D: 4-byte uniform physical index | Halves every subtree reference in child arrays and stack/window storage; compact leaf records attempt to offset loss of inline leaves | This is the only candidate that can materially shrink reference traffic throughout the parser | 92.14% of leaves currently require no record access or allocation; moving all leaves out of line may dominate the density win |
+| 6 | Remove incremental-only metadata propagation | Removes writes and reduction-time OR operations for fields whose consumer disappeared when incremental parsing was removed | `old_tree` is ignored; `depends_on_column` and `has_changes` appear largely confined to edit/change-range paths | Public edit and changed-range APIs still exist, so semantics must be retired explicitly rather than fields removed blindly |
+| 7 | Four-byte child references with an 8-byte parser handle | Keeps inline leaves on the stack but promotes them to compact records only when stored under a parent, shrinking child arrays without globally losing the inline fast path | Isolates child density from parser-stack representation | Child bytes are only 13.55% of combined internal allocation traffic; promotion adds record work and two representations |
+| 8 | Global child ranges | Places compact child references in one sequential array and stores `{child_start, child_count}` in fixed internal records | Natural continuation if Candidate D proves that four-byte reference density is valuable | Adds a second allocation/lifetime domain, weakens parent/child locality, and requires coordinated movement or reclamation |
+| 9 | Specialized unary record | Removes range/count overhead for the 57.08% of internal nodes with one child | Unary nodes are the dominant arity | Adds another kind branch and duplicates layout logic; lower leverage than a general specialized internal header |
+| 10 | Logical handle table | Stores `u32 NodeId` values in child ranges; `handle_array[NodeId]` is an 8-byte inline-leaf-or-arena-index value | Stable child identity permits heap-record movement by updating one handle-table entry; inline leaves still fit in one table slot | Adds a dependent `NodeId -> handle -> heap` load for full/internal children and does not itself eliminate temporary child-buffer duplication |
+
+An 8-byte global-child-range experiment is explicitly excluded as a standalone
+candidate. Current children are already coallocated with accurate sizing, and
+their bytes are a small fraction of internal allocation traffic. Keeping
+8-byte child handles would add `child_start`, a second bump domain, and an
+extra dependent lookup while recovering little space or copy bandwidth.
+
+The logical-handle-table variant has three explicit domains:
+
+```text
+parent {child_start, child_count}
+    -> children_indices[child_start..][u32 NodeId]
+    -> handle_array[NodeId][8-byte inline leaf or arena index]
+    -> arena[arena index][full leaf/internal record]
+```
+
+This is primarily an identity and movement design, not a free throughput
+optimization. Relative to Candidate D, compact children retain the same
+four-byte references but full/internal access gains another dependent load.
+It also leaves the failed global-range construction issue unchanged: if a
+temporary arena-backed child buffer is copied into `children_indices`, both
+allocations remain until arena rewind. A throughput experiment must first build
+the final child-index range directly, or use genuinely reusable scratch
+storage. Only then can the handle table be layered independently to price its
+movement benefit.
+
+The preferred general exploration order is: scanner-capacity reduction,
+kind-specialized internal records, fused child-copy/summarization, counter
+packing, Candidate D, and only then global child ranges. For the next requested
+experiment the order is intentionally different: measure Candidate D first,
+then layer global child ranges on that exact endpoint. This establishes whether
+four-byte uniform references pay for out-of-line leaves before attributing any
+additional result to separated child storage.

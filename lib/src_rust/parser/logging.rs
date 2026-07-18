@@ -102,7 +102,12 @@ pub(super) unsafe fn parser_log_stack(self_: &TSParser) {
 
 pub(super) unsafe fn parser_log_tree(self_: &TSParser, tree: Subtree) {
     if !self_.dot_graph_file.is_null() {
-        subtree_print_dot_graph(tree, self_.language, self_.dot_graph_file);
+        subtree_print_dot_graph(
+            tree,
+            self_.tree_pool.arena(),
+            self_.language,
+            self_.dot_graph_file,
+        );
         fputs(c"\n".as_ptr().cast::<i8>(), self_.dot_graph_file);
     }
 }
@@ -114,8 +119,12 @@ pub(super) unsafe fn parser_symbol_name(
     ts_language_symbol_name(language, symbol)
 }
 
-pub(super) unsafe fn parser_tree_name(language: *const TSLanguage, tree: Subtree) -> *const c_char {
-    parser_symbol_name(language, tree.symbol())
+pub(super) unsafe fn parser_tree_name(
+    language: *const TSLanguage,
+    arena: *mut super::super::subtree::SubtreeArena,
+    tree: Subtree,
+) -> *const c_char {
+    parser_symbol_name(language, tree.symbol(arena))
 }
 
 pub(super) unsafe fn parser_log_lookahead(self_: &mut TSParser, symbol: *const c_char, size: u32) {

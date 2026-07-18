@@ -25,7 +25,7 @@ unsafe fn realloc_default(buffer: *mut c_void, size: usize) -> *mut c_void {
     result
 }
 
-fn alloc_failed(action: &str, size: usize) -> ! {
+pub fn alloc_failed(action: &str, size: usize) -> ! {
     #[cfg(feature = "std")]
     std::eprintln!("tree-sitter failed to {action} {size} bytes");
     #[cfg(not(feature = "std"))]

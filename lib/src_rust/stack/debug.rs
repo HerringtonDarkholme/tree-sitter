@@ -11,6 +11,7 @@ use crate::ffi::TSLanguage;
 
 use super::super::error_costs::ERROR_STATE;
 use super::super::language::language_write_symbol_as_dot_string;
+use super::super::subtree::SubtreeArray;
 use super::super::utils::Array;
 use super::{fprintf, stderr_file, Stack, StackIterator, StackNode, StackStatus};
 
@@ -21,6 +22,7 @@ pub unsafe fn stack_print_dot_graph(
     mut f: *mut c_void,
 ) -> bool {
     stack.materialize_window();
+    let arena = stack.arena();
     stack.iterators.reserve(32);
     if f.is_null() {
         f = stderr_file();
@@ -75,7 +77,7 @@ pub unsafe fn stack_print_dot_graph(
         }
 
         if !head.last_external_token.is_null() {
-            let state = head.last_external_token.external_scanner_state();
+            let state = head.last_external_token.external_scanner_state(arena);
             fprintf(f, c"\nexternal_scanner_state:".as_ptr().cast::<i8>());
             for &byte in state.as_bytes() {
                 fprintf(f, c" %2X".as_ptr().cast::<i8>(), u32::from(byte));
@@ -86,7 +88,7 @@ pub unsafe fn stack_print_dot_graph(
 
         let iter = StackIterator {
             node: head.node,
-            subtrees: Array::new(),
+            subtrees: SubtreeArray::new(),
             subtree_count: 0,
         };
         stack.iterators.push(iter);
@@ -114,7 +116,7 @@ pub unsafe fn stack_print_dot_graph(
                 fprintf(f, c"label=\"?\"".as_ptr().cast::<i8>());
             } else if node_ref.link_count == 1
                 && !node_ref.links[0].subtree.is_null()
-                && node_ref.links[0].subtree.extra()
+                && node_ref.links[0].subtree.extra(arena)
             {
                 fprintf(f, c"shape=point margin=0 label=\"\"".as_ptr().cast::<i8>());
             } else {
@@ -144,7 +146,7 @@ pub unsafe fn stack_print_dot_graph(
                     link.node.as_ptr().cast::<c_void>(),
                 );
                 let subtree = link.subtree;
-                if !subtree.is_null() && subtree.extra() {
+                if !subtree.is_null() && subtree.extra(arena) {
                     fprintf(f, c"fontcolor=gray ".as_ptr().cast::<i8>());
                 }
 
@@ -152,11 +154,11 @@ pub unsafe fn stack_print_dot_graph(
                     fprintf(f, c"color=red".as_ptr().cast::<i8>());
                 } else {
                     fprintf(f, c"label=\"".as_ptr().cast::<i8>());
-                    let quoted = subtree.visible() && !subtree.named();
+                    let quoted = subtree.visible(arena) && !subtree.named(arena);
                     if quoted {
                         fprintf(f, c"'".as_ptr().cast::<i8>());
                     }
-                    language_write_symbol_as_dot_string(language, f, subtree.symbol());
+                    language_write_symbol_as_dot_string(language, f, subtree.symbol(arena));
                     if quoted {
                         fprintf(f, c"'".as_ptr().cast::<i8>());
                     }
@@ -166,8 +168,8 @@ pub unsafe fn stack_print_dot_graph(
                         c"labeltooltip=\"error_cost: %u\ndynamic_precedence: %d\""
                             .as_ptr()
                             .cast::<i8>(),
-                        subtree.error_cost(),
-                        subtree.dynamic_precedence(),
+                        subtree.error_cost(arena),
+                        subtree.dynamic_precedence(arena),
                     );
                 }
 

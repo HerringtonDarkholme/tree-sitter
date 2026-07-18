@@ -75,6 +75,11 @@ use range::range_array_add;
 pub use range::{range_array_intersects_ref, range_edit_ref};
 
 impl DiffIterator {
+    #[inline]
+    const unsafe fn arena(&self) -> *mut super::subtree::SubtreeArena {
+        (*self.cursor.tree).arena
+    }
+
     /// Create a diff iterator rooted at a subtree.
     unsafe fn new(cursor: &mut TreeCursor, tree: &Subtree, language: *const TSLanguage) -> Self {
         cursor.stack.clear();
@@ -108,18 +113,18 @@ impl DiffIterator {
         if self.in_padding {
             entry.position
         } else {
-            length_add(entry.position, (*entry.subtree).padding())
+            length_add(entry.position, (*entry.subtree).padding(self.arena()))
         }
     }
 
     /// Return the current item's end position.
     unsafe fn end_position(&self) -> Length {
         let entry = self.cursor.stack.as_slice().last().unwrap_unchecked();
-        let result = length_add(entry.position, (*entry.subtree).padding());
+        let result = length_add(entry.position, (*entry.subtree).padding(self.arena()));
         if self.in_padding {
             result
         } else {
-            length_add(result, (*entry.subtree).size())
+            length_add(result, (*entry.subtree).size(self.arena()))
         }
     }
 
@@ -130,7 +135,7 @@ impl DiffIterator {
     unsafe fn tree_is_visible(&self) -> bool {
         let entries = self.cursor.stack.as_slice();
         let entry = entries.last().unwrap_unchecked();
-        if (*entry.subtree).visible() {
+        if (*entry.subtree).visible(self.arena()) {
             return true;
         }
         if self.cursor.stack.size > 1 {
@@ -138,7 +143,7 @@ impl DiffIterator {
             let parent = *parent_entry.subtree;
             return language_alias_at(
                 self.language,
-                u32::from(parent.heap_data().children().production_id),
+                u32::from(parent.heap_data(self.arena()).children().production_id),
                 entry.structural_child_index,
             ) != 0;
         }
@@ -169,12 +174,12 @@ impl DiffIterator {
                 let parent = entries.get_unchecked((i - 1) as usize).subtree;
                 result.alias_symbol = language_alias_at(
                     self.language,
-                    u32::from((*parent).heap_data().children().production_id),
+                    u32::from((*parent).heap_data(self.arena()).children().production_id),
                     entry.structural_child_index,
                 );
             }
 
-            if (*entry.subtree).visible() || result.alias_symbol != 0 {
+            if (*entry.subtree).visible(self.arena()) || result.alias_symbol != 0 {
                 result.tree = *entry.subtree;
                 result.start_byte = entry.position.bytes;
                 break;
@@ -226,11 +231,12 @@ impl DiffIterator {
             let entry = *self.cursor.stack.as_slice().last().unwrap_unchecked();
             let mut position = entry.position;
             let mut structural_child_index: u32 = 0;
-            let n = (*entry.subtree).child_count();
+            let arena = self.arena();
+            let n = (*entry.subtree).child_count(arena);
             for i in 0..n {
-                let child = (*entry.subtree).child(i);
-                let child_left = length_add(position, (*child).padding());
-                let child_right = length_add(child_left, (*child).size());
+                let child = (*entry.subtree).child(arena, i);
+                let child_left = length_add(position, (*child).padding(arena));
+                let child_right = length_add(child_left, (*child).size(arena));
 
                 if child_right.bytes > goal_position {
                     self.cursor.stack.push(TreeCursorEntry {
@@ -255,10 +261,10 @@ impl DiffIterator {
                 }
 
                 position = child_right;
-                if !(*child).extra() {
+                if !(*child).extra(arena) {
                     structural_child_index += 1;
                 }
-                let last_external_token = (*child).last_external_token();
+                let last_external_token = (*child).last_external_token(arena);
                 if !last_external_token.is_null() {
                     self.prev_external_token = last_external_token;
                 }
@@ -300,17 +306,18 @@ impl DiffIterator {
                 .unwrap_unchecked()
                 .subtree;
             let child_index = entry.child_index + 1;
-            let last_external_token = (*entry.subtree).last_external_token();
+            let arena = self.arena();
+            let last_external_token = (*entry.subtree).last_external_token(arena);
             if !last_external_token.is_null() {
                 self.prev_external_token = last_external_token;
             }
-            if (*parent).child_count() > child_index {
-                let position = length_add(entry.position, (*entry.subtree).total_size());
+            if (*parent).child_count(arena) > child_index {
+                let position = length_add(entry.position, (*entry.subtree).total_size(arena));
                 let mut structural_child_index = entry.structural_child_index;
-                if !(*entry.subtree).extra() {
+                if !(*entry.subtree).extra(arena) {
                     structural_child_index += 1;
                 }
-                let next_child = (*parent).child(child_index);
+                let next_child = (*parent).child(arena, child_index);
 
                 self.cursor.stack.push(TreeCursorEntry {
                     subtree: core::ptr::from_ref::<Subtree>(next_child),
@@ -321,7 +328,7 @@ impl DiffIterator {
                 });
 
                 if self.tree_is_visible() {
-                    if (*next_child).padding().bytes > 0 {
+                    if (*next_child).padding(arena).bytes > 0 {
                         self.in_padding = true;
                     } else {
                         self.visible_depth += 1;
@@ -344,8 +351,10 @@ impl DiffIterator {
         let new_visible = new_iter.visible_state();
         let old_tree = old_visible.tree;
         let new_tree = new_visible.tree;
-        let old_symbol = old_tree.symbol();
-        let new_symbol = new_tree.symbol();
+        let old_arena = self.arena();
+        let new_arena = new_iter.arena();
+        let old_symbol = old_tree.symbol(old_arena);
+        let new_symbol = new_tree.symbol(new_arena);
 
         if old_tree.is_null() && new_tree.is_null() {
             return IteratorComparison::Matches;
@@ -357,14 +366,14 @@ impl DiffIterator {
             return IteratorComparison::Differs;
         }
 
-        let old_size = old_tree.size().bytes;
-        let new_size = new_tree.size().bytes;
-        let old_state = old_tree.parse_state();
-        let new_state = new_tree.parse_state();
-        let old_has_external_tokens = old_tree.has_external_tokens();
-        let new_has_external_tokens = new_tree.has_external_tokens();
-        let old_error_cost = old_tree.error_cost();
-        let new_error_cost = new_tree.error_cost();
+        let old_size = old_tree.size(old_arena).bytes;
+        let new_size = new_tree.size(new_arena).bytes;
+        let old_state = old_tree.parse_state(old_arena);
+        let new_state = new_tree.parse_state(new_arena);
+        let old_has_external_tokens = old_tree.has_external_tokens(old_arena);
+        let new_has_external_tokens = new_tree.has_external_tokens(new_arena);
+        let old_error_cost = old_tree.error_cost(old_arena);
+        let new_error_cost = new_tree.error_cost(new_arena);
 
         if old_visible.start_byte != new_visible.start_byte
             || old_symbol == TS_BUILTIN_SYM_ERROR
@@ -374,11 +383,13 @@ impl DiffIterator {
             || (old_state == ERROR_STATE) != (new_state == ERROR_STATE)
             || old_error_cost != new_error_cost
             || old_has_external_tokens != new_has_external_tokens
-            || old_tree.has_changes()
+            || old_tree.has_changes(old_arena)
             || (old_has_external_tokens
-                && !self
-                    .prev_external_token
-                    .has_same_external_scanner_state(new_iter.prev_external_token))
+                && !self.prev_external_token.has_same_external_scanner_state(
+                    new_iter.prev_external_token,
+                    old_arena,
+                    new_arena,
+                ))
         {
             return IteratorComparison::MayDiffer;
         }
@@ -606,8 +617,8 @@ pub unsafe fn subtree_get_changed_ranges_ref(
         }
     }
 
-    let old_size = (*old_tree).total_size();
-    let new_size = (*new_tree).total_size();
+    let old_size = (*old_tree).total_size(old_iter.arena());
+    let new_size = (*new_tree).total_size(new_iter.arena());
     if old_size.bytes < new_size.bytes {
         range_array_add(&mut results, old_size, new_size);
     } else if new_size.bytes < old_size.bytes {

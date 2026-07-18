@@ -1,18 +1,20 @@
 //! Memory layouts stored behind compact subtree handles.
 //!
-//! Small leaves use [`SubtreeInlineData`] and fit entirely inside one
-//! pointer-sized handle. Larger leaves and all internal nodes use
+//! Small leaves use the legacy-named [`SubtreeInlineData`] as a compact
+//! eight-byte arena record. Larger leaves and all internal nodes use
 //! [`SubtreeHeapData`], whose content is either leaf metadata or an owned child
-//! allocation. This module also defines the inline-or-heap storage for
-//! serialized external-scanner state.
+//! allocation. Parser-facing subtree handles are four-byte tagged arena
+//! indexes. This module also defines the inline-or-heap storage for serialized
+//! external-scanner state.
 //!
 //! These types describe representation only. Handle discrimination and
-//! ref-count operations belong to `handle`, while allocation belongs to
+//! sharing operations belong to `handle`, while allocation belongs to
 //! `storage`.
 
 use core::{
+    cell::Cell,
     ptr::NonNull,
-    sync::atomic::{AtomicU32, Ordering},
+    sync::atomic::{AtomicBool, Ordering},
 };
 
 use crate::ffi::{TSStateId, TSSymbol};
@@ -44,11 +46,11 @@ pub(super) enum ExternalScannerStateData {
 // SubtreeInlineData — bitfield-packed inline node
 // ---------------------------------------------------------------------------
 
-/// Compact inline representation of a subtree (fits in a pointer-sized word).
+/// Compact eight-byte leaf record addressed by a tagged arena index.
 ///
-/// The first bit overlaps the low bit of the union's pointer arm. Allocator
-/// alignment keeps that bit clear for heap subtrees, so it distinguishes an
-/// inline subtree without making the handle larger than a pointer.
+/// `INLINE_IS_INLINE` remains part of the record for compatibility with the
+/// former hybrid-handle layout. The four-byte handle now uses its own low-bit
+/// tag to distinguish this record from a full heap record.
 #[repr(C)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct SubtreeInlineData {
@@ -82,16 +84,6 @@ fn set_u8_flag(flags: &mut u8, mask: u8, value: bool) {
 }
 
 impl SubtreeInlineData {
-    pub(super) const fn is_zero(self) -> bool {
-        self.flags == 0
-            && self.symbol == 0
-            && self.parse_state == 0
-            && self.padding_columns == 0
-            && self.rows_and_lookahead == 0
-            && self.padding_bytes == 0
-            && self.size_bytes == 0
-    }
-
     #[inline(always)]
     pub const fn is_inline(self) -> bool {
         self.flags & INLINE_IS_INLINE != 0
@@ -160,8 +152,12 @@ impl SubtreeInlineData {
 // ---------------------------------------------------------------------------
 
 pub struct SubtreeHeapData {
-    /// Intrusive reference count for heap-owned subtrees.
-    pub ref_count: AtomicU32,
+    /// Conservative parser-private copy-on-write oracle.
+    pub parser_shared: Cell<bool>,
+    /// Concurrent copy-on-write oracle after arena publication.
+    pub published_shared: AtomicBool,
+    /// Parser-private mark used to rebuild exact accepted-DAG counts.
+    pub parser_visited: Cell<bool>,
     /// Leading padding before this subtree's content.
     pub padding: Length,
     /// Content size excluding padding and lookahead bytes.
@@ -190,6 +186,11 @@ pub struct SubtreeHeapData {
     pub data: SubtreeHeapDataContent,
 }
 
+// SAFETY: `parser_shared` and `parser_visited` are mutated only while the arena
+// is exclusively parser-owned. They are frozen before the arena is published;
+// published ownership changes use only `published_shared`.
+unsafe impl Sync for SubtreeHeapData {}
+
 // Bit positions in SubtreeHeapData.flags
 const HEAP_VISIBLE: u16 = 1 << 0;
 const HEAP_NAMED: u16 = 1 << 1;
@@ -212,8 +213,33 @@ fn set_u16_flag(flags: &mut u16, mask: u16, value: bool) {
 
 impl SubtreeHeapData {
     #[inline(always)]
-    pub fn ref_count(&self) -> u32 {
-        self.ref_count.load(Ordering::Relaxed)
+    pub fn parser_shared(&self) -> bool {
+        self.parser_shared.get()
+    }
+
+    #[inline(always)]
+    pub fn mark_parser_shared(&self) {
+        self.parser_shared.set(true);
+    }
+
+    #[inline(always)]
+    pub fn parser_visited(&self) -> bool {
+        self.parser_visited.get()
+    }
+
+    #[inline(always)]
+    pub fn set_parser_visited(&self, value: bool) {
+        self.parser_visited.set(value);
+    }
+
+    #[inline(always)]
+    pub fn published_shared(&self) -> bool {
+        self.published_shared.load(Ordering::Relaxed)
+    }
+
+    #[inline(always)]
+    pub fn mark_published_shared(&self) {
+        self.published_shared.store(true, Ordering::Relaxed);
     }
 
     #[inline(always)]
@@ -333,13 +359,6 @@ impl SubtreeHeapData {
 
     pub const fn external_scanner_state(&self) -> &ExternalScannerState {
         let SubtreeHeapDataContent::ExternalScannerState(state) = &self.data else {
-            panic!("external-token leaf must contain scanner state")
-        };
-        state
-    }
-
-    pub fn external_scanner_state_mut(&mut self) -> &mut ExternalScannerState {
-        let SubtreeHeapDataContent::ExternalScannerState(state) = &mut self.data else {
             panic!("external-token leaf must contain scanner state")
         };
         state

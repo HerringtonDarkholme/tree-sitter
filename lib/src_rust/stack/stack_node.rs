@@ -13,7 +13,9 @@ use crate::ffi::TSStateId;
 
 use super::super::alloc::{free, malloc};
 use super::super::length::{length_add, length_zero, Length};
-use super::super::subtree::{Subtree, SubtreePool, NULL_SUBTREE, TS_BUILTIN_SYM_ERROR_REPEAT};
+use super::super::subtree::{
+    Subtree, SubtreeArena, SubtreePool, NULL_SUBTREE, TS_BUILTIN_SYM_ERROR_REPEAT,
+};
 use super::{StackHead, StackLink, StackNodeArray, MAX_LINK_COUNT, MAX_NODE_POOL_SIZE};
 
 /// Node in the persistent GLR stack graph.
@@ -95,12 +97,12 @@ pub(super) unsafe fn stack_node_release(
     }
 }
 
-pub(super) unsafe fn stack_subtree_node_count(subtree: Subtree) -> u32 {
-    let mut count = subtree.visible_descendant_count();
-    if subtree.visible() {
+pub(super) unsafe fn stack_subtree_node_count(subtree: Subtree, arena: *mut SubtreeArena) -> u32 {
+    let mut count = subtree.visible_descendant_count(arena);
+    if subtree.visible(arena) {
         count += 1;
     }
-    if subtree.symbol() == TS_BUILTIN_SYM_ERROR_REPEAT {
+    if subtree.symbol(arena) == TS_BUILTIN_SYM_ERROR_REPEAT {
         count += 1;
     }
     count
@@ -111,6 +113,7 @@ pub(super) unsafe fn stack_node_new(
     previous_node: Option<NonNull<StackNode>>,
     subtree: Subtree,
     state: TSStateId,
+    arena: *mut SubtreeArena,
     pool: &mut StackNodeArray,
 ) -> NonNull<StackNode> {
     let mut node = if pool.size > 0 {
@@ -151,17 +154,21 @@ pub(super) unsafe fn stack_node_new(
         node_data.node_count = previous.node_count;
 
         if !subtree.is_null() {
-            node_data.error_cost += subtree.error_cost();
-            node_data.position = length_add(node_data.position, subtree.total_size());
-            node_data.node_count += stack_subtree_node_count(subtree);
-            node_data.dynamic_precedence += subtree.dynamic_precedence();
+            node_data.error_cost += subtree.error_cost(arena);
+            node_data.position = length_add(node_data.position, subtree.total_size(arena));
+            node_data.node_count += stack_subtree_node_count(subtree, arena);
+            node_data.dynamic_precedence += subtree.dynamic_precedence(arena);
         }
     }
 
     node
 }
 
-unsafe fn stack_subtree_is_equivalent(left: Subtree, right: Subtree) -> bool {
+unsafe fn stack_subtree_is_equivalent(
+    left: Subtree,
+    right: Subtree,
+    arena: *mut SubtreeArena,
+) -> bool {
     if left == right {
         return true;
     }
@@ -169,25 +176,25 @@ unsafe fn stack_subtree_is_equivalent(left: Subtree, right: Subtree) -> bool {
         return false;
     }
 
-    let left_symbol = left.symbol();
-    let right_symbol = right.symbol();
+    let left_symbol = left.symbol(arena);
+    let right_symbol = right.symbol(arena);
     if left_symbol != right_symbol {
         return false;
     }
 
-    let left_error_cost = left.error_cost();
-    let right_error_cost = right.error_cost();
+    let left_error_cost = left.error_cost(arena);
+    let right_error_cost = right.error_cost(arena);
     if left_error_cost > 0 && right_error_cost > 0 {
         return true;
     }
 
-    let left_child_count = left.child_count();
-    let right_child_count = right.child_count();
-    left.padding().bytes == right.padding().bytes
-        && left.size().bytes == right.size().bytes
+    let left_child_count = left.child_count(arena);
+    let right_child_count = right.child_count(arena);
+    left.padding(arena).bytes == right.padding(arena).bytes
+        && left.size(arena).bytes == right.size(arena).bytes
         && left_child_count == right_child_count
-        && left.extra() == right.extra()
-        && left.has_same_external_scanner_state(right)
+        && left.extra(arena) == right.extra(arena)
+        && left.has_same_external_scanner_state(right, arena, arena)
 }
 
 /// Add one alternative predecessor to an existing parser configuration.
@@ -202,6 +209,7 @@ pub(super) unsafe fn stack_node_add_link(
     link: StackLink,
     subtree_pool: &mut SubtreePool,
 ) {
+    let arena = subtree_pool.arena();
     let node_ptr = NonNull::from(&mut *node);
     if link.node == node_ptr {
         return;
@@ -209,14 +217,16 @@ pub(super) unsafe fn stack_node_add_link(
 
     for i in 0..node.link_count as usize {
         let existing_link = &mut node.links[i];
-        if stack_subtree_is_equivalent(existing_link.subtree, link.subtree) {
+        if stack_subtree_is_equivalent(existing_link.subtree, link.subtree, arena) {
             if existing_link.node == link.node {
-                if link.subtree.dynamic_precedence() > existing_link.subtree.dynamic_precedence() {
-                    link.subtree.retain();
+                if link.subtree.dynamic_precedence(arena)
+                    > existing_link.subtree.dynamic_precedence(arena)
+                {
+                    link.subtree.retain(arena);
                     existing_link.subtree.release(subtree_pool);
                     existing_link.subtree = link.subtree;
-                    node.dynamic_precedence =
-                        link.node.as_ref().dynamic_precedence + link.subtree.dynamic_precedence();
+                    node.dynamic_precedence = link.node.as_ref().dynamic_precedence
+                        + link.subtree.dynamic_precedence(arena);
                 }
                 return;
             }
@@ -236,7 +246,7 @@ pub(super) unsafe fn stack_node_add_link(
                 }
                 let mut dynamic_precedence = link_node.dynamic_precedence;
                 if !link.subtree.is_null() {
-                    dynamic_precedence += link.subtree.dynamic_precedence();
+                    dynamic_precedence += link.subtree.dynamic_precedence(arena);
                 }
                 if dynamic_precedence > node.dynamic_precedence {
                     node.dynamic_precedence = dynamic_precedence;
@@ -258,9 +268,9 @@ pub(super) unsafe fn stack_node_add_link(
     node.link_count += 1;
 
     if !link.subtree.is_null() {
-        link.subtree.retain();
-        node_count += stack_subtree_node_count(link.subtree);
-        dynamic_precedence += link.subtree.dynamic_precedence();
+        link.subtree.retain(arena);
+        node_count += stack_subtree_node_count(link.subtree, arena);
+        dynamic_precedence += link.subtree.dynamic_precedence(arena);
     }
 
     if node_count > node.node_count {
