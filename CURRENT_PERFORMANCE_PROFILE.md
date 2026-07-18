@@ -434,6 +434,30 @@ not sufficient evidence: moving the direct summary loop and final allocation
 into a new helper changed code placement and dependency chains without
 reliably improving the reduction-heavy languages.
 
+A July 2026 reimplementation independently reproduced that decision after the
+retained ASCII lexer fast path. Its short five-sample, 200 ms Rust A/B/A gate
+again looked positive at +1.42%. A 500 ms whole-suite confirmation was also
+positive but unstable, with maximum CV above 7%. The decisive 500 ms run then
+bracketed each language separately to limit cross-language thermal drift:
+
+| Language | Fixtures | Interleaved retry |
+| --- | ---: | ---: |
+| C++ | 4 | +0.25% |
+| Go | 5 | +0.41% |
+| Java | 4 | **-1.64%** |
+| JavaScript | 2 | +2.99% |
+| Python | 12 | -0.05% |
+| Rust | 2 | +1.97% |
+| TypeScript | 11 | +3.18% |
+| **All fixtures** | **40** | **+1.01%** |
+
+All source lengths and hashes matched, and RSS remained neutral. Java crossed
+the -1.0% regression guard, while Python's candidate and final-control maximum
+CV values were 7.27% and 5.17%. The retry is therefore rejected too. The
+direct-final family should not be reopened merely because another short run
+looks positive; it needs a materially different dependency chain or removal
+of more work.
+
 ### 3. Accepted-DAG balancing worklist reuse
 
 `subtree_prepare_for_balancing` must already traverse the accepted DAG to turn

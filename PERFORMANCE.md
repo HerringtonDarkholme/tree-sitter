@@ -146,6 +146,12 @@ branch was reverted to `fe2605c1`, so these are candidates, not current wins.
 | Direct-final deterministic reducer | +1.09% in the short current-Rust A/B/A run, but only +0.58% in the longer confirmation; C++ -2.39%, Go -1.43%, and Rust -1.33%; RSS neutral | Reject the combined outlining/direct-builder change; the smaller frame did not produce a stable cross-language win |
 | Post-finalization column shrinking | Increased peak RSS by 346% because old and new allocations coexisted | Do not shrink by reallocating after construction |
 
+The direct-final reducer was independently reimplemented after the retained
+ASCII lexer change. It again passed a short gate (+1.42%), but the decisive
+per-language 500 ms A/B/A retry was only +1.01% overall, regressed Java by
+1.64%, and retained Python CV outliers above 5%. This confirms the rejection;
+short-run positives are not sufficient evidence to reopen this family.
+
 ### Repeatedly unproductive categories
 
 The following families were tried in multiple forms and either regressed,
