@@ -11,7 +11,8 @@ the code is being changed.
 
 The plan is intentionally limited to subtree storage. Stack nodes and generic
 runtime arrays remain under their current allocation policies. The deterministic
-stack window is compatible with this work but is not part of the arena itself.
+stack window is compatible with this work but is not part of the arena itself;
+its independent invariants are recorded in `DETERMINISTIC_WINDOW.md`.
 
 ## Goals
 
