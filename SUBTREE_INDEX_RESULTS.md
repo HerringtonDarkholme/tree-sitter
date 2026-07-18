@@ -707,6 +707,37 @@ removes fresh-parse work, clears the overall throughput gate, and preserves
 the cold public edit behavior that still exists even though incremental parse
 reuse does not.
 
+### Packed direct-child counters
+
+The counter-packing prototype narrowed only `visible_child_count` and
+`named_child_count` from `u32` to `u16`. `visible_descendant_count` and dynamic
+precedence remained 32-bit, while repeat depth and production id were already
+16-bit. This reduced the specialized internal record from 72 to exactly 64
+bytes. Every addition used a checked conversion, so the measurement included
+the branch needed before a production implementation could divert rare
+overflows into an extended record.
+
+The prototype passed focused core, ABI, and clippy checks, then ran against the
+retained lazy-column baseline over all 40 fixtures. Maximum CV was 1.76% /
+1.83% / 1.45%.
+
+| Language | Fixtures | 64-byte packed counters | Control RSS | Candidate RSS |
+|---|---:|---:|---:|---:|
+| C++ | 4 | -1.24% | 10.29 MiB | 10.30 MiB |
+| Go | 5 | -0.76% | 10.92 MiB | 10.73 MiB |
+| Java | 4 | +0.03% | 8.22 MiB | 8.28 MiB |
+| JavaScript | 2 | -0.51% | 19.50 MiB | 18.46 MiB |
+| Python | 12 | +0.92% | 10.12 MiB | 9.92 MiB |
+| Rust | 2 | +0.14% | 11.88 MiB | 11.48 MiB |
+| TypeScript | 11 | +0.10% | 16.07 MiB | 15.50 MiB |
+| **All fixtures** | **40** | **+0.07%** |  |  |
+
+The smaller record improved RSS in several larger languages but was
+throughput-neutral overall and crossed the -1% guard on C++. The prototype was
+reverted without implementing an extended overflow record: the safety branch
+already prices the common-path cost, and the result provides no throughput
+budget for the additional rare-shape machinery.
+
 ### Every-parse live-tree copying collection
 
 The GC endpoint retained normal atomic refcounts during parsing and performed
