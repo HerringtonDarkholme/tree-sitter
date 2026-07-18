@@ -637,6 +637,39 @@ and the larger JavaScript/TypeScript fixtures show the expected RSS reduction.
 The specialized record is retained as the baseline for subsequent throughput
 experiments.
 
+### Deterministic-window child-move and summarization fusion
+
+The next candidate accumulated every parent-summary field while
+`stack_pop_count_from_window` moved child handles into their final arena-backed
+array. Trailing extras were identified at the top of the window and excluded
+from the accumulator, and the resulting parent skipped
+`subtree_summarize_children` entirely. The accumulator mirrored padding, size,
+lookahead, error cost, visible/named counts, precedence, external-token flags,
+column dependence, aliases, parse state, and repeat depth. All 15 core-parity
+samples and four ast-grep packages passed.
+
+The candidate was compared directly with the retained 72-byte internal-record
+implementation in an all-language A/B/A run. Maximum CV was 2.35% / 3.75% /
+1.41% for control, candidate, and control respectively.
+
+| Language | Fixtures | Fused move and summary |
+|---|---:|---:|
+| C++ | 4 | -2.13% |
+| Go | 5 | -0.61% |
+| Java | 4 | -1.48% |
+| JavaScript | 2 | -1.51% |
+| Python | 12 | -0.70% |
+| Rust | 2 | -1.70% |
+| TypeScript | 11 | -1.38% |
+| **All fixtures** | **40** | **-1.19%** |
+
+RSS was neutral. Although this removes the second traversal, it replaces the
+existing compact loop that writes directly into the new parent with a large
+stack-resident accumulator and its own per-child state traffic. Every language
+regressed, so this formulation was reverted. A future retry would need to
+initialize the final parent record before copying and update it directly;
+merely moving the same arithmetic into an accumulator is closed.
+
 ### Every-parse live-tree copying collection
 
 The GC endpoint retained normal atomic refcounts during parsing and performed
