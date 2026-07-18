@@ -670,6 +670,43 @@ regressed, so this formulation was reverted. A future retry would need to
 initialize the final parent record before copying and update it directly;
 merely moving the same arithmetic into an accumulator is closed.
 
+### Lazy internal column-dependence reconstruction
+
+With old-tree parsing removed, `depends_on_column` remained on the hot
+reduction path solely to support later `ts_tree_edit` bookkeeping and debug
+output. Leaves still need to remember whether their lexer called
+`get_column`, but every internal node was clearing, reading, conditionally
+setting, and propagating that bit across every child during fresh parsing.
+
+The retained candidate keeps the leaf bit and removes internal propagation
+from `subtree_summarize_children`. When edit/debug code asks whether an
+internal subtree depends on its starting column, the accessor reconstructs the
+same value recursively from leaf facts and child geometry. The two
+column-sensitive edit tests and the changed-range test pass, so this moves work
+off fresh parsing without removing the public edit behavior.
+
+The candidate was compared with the retained 72-byte internal-record baseline
+in an all-language A/B/A run. One TypeScript control row exceeded 5% CV and the
+two Rust rows initially crossed the -1% language guard; those three rows were
+repeated in the same A/B/A order with one-second samples and replaced. Final
+maximum CV was 3.34% / 3.94% / 3.69%.
+
+| Language | Fixtures | Lazy column dependence | Control RSS | Candidate RSS |
+|---|---:|---:|---:|---:|
+| C++ | 4 | +3.08% | 10.37 MiB | 10.31 MiB |
+| Go | 5 | +3.82% | 11.01 MiB | 11.02 MiB |
+| Java | 4 | +2.97% | 8.32 MiB | 8.25 MiB |
+| JavaScript | 2 | +2.85% | 19.51 MiB | 19.51 MiB |
+| Python | 12 | -0.05% | 9.54 MiB | 9.00 MiB |
+| Rust | 2 | +0.82% | 11.85 MiB | 11.93 MiB |
+| TypeScript | 11 | -0.15% | 15.87 MiB | 15.97 MiB |
+| **All fixtures** | **40** | **+1.20%** |  |  |
+
+RSS is neutral within run variation. The candidate is retained because it
+removes fresh-parse work, clears the overall throughput gate, and preserves
+the cold public edit behavior that still exists even though incremental parse
+reuse does not.
+
 ### Every-parse live-tree copying collection
 
 The GC endpoint retained normal atomic refcounts during parsing and performed

@@ -405,8 +405,28 @@ impl Subtree {
     }
 
     #[inline]
-    pub const unsafe fn depends_on_column(self, arena: *mut SubtreeArena) -> bool {
-        !self.is_inline() && !self.is_null() && self.heap_data(arena).depends_on_column()
+    pub unsafe fn depends_on_column(self, arena: *mut SubtreeArena) -> bool {
+        if self.is_inline() || self.is_null() {
+            return false;
+        }
+
+        let data = self.heap_data(arena);
+        if !data.is_internal() {
+            return data.depends_on_column();
+        }
+
+        let mut size = length_zero();
+        for (i, child) in self.children(arena).iter().copied().enumerate() {
+            if size.extent.row == 0 && child.depends_on_column(arena) {
+                return true;
+            }
+            if i == 0 {
+                size = child.size(arena);
+            } else {
+                size = length_add(size, length_add(child.padding(arena), child.size(arena)));
+            }
+        }
+        false
     }
 
     #[inline]

@@ -272,7 +272,6 @@ struct ReductionSubtreeSummary {
     extra: bool,
     has_external_tokens: bool,
     has_external_scanner_state_change: bool,
-    depends_on_column: bool,
 }
 
 #[inline]
@@ -315,7 +314,6 @@ unsafe fn subtree_resolve_for_reduction(
             extra: data.extra(),
             has_external_tokens: false,
             has_external_scanner_state_change: false,
-            depends_on_column: false,
         }
     } else {
         let data = tree.heap_data(arena);
@@ -351,7 +349,6 @@ unsafe fn subtree_resolve_for_reduction(
             extra: data.extra(),
             has_external_tokens: data.has_external_tokens(),
             has_external_scanner_state_change: data.has_external_scanner_state_change(),
-            depends_on_column: data.depends_on_column(),
         }
     }
 }
@@ -709,7 +706,6 @@ pub unsafe fn subtree_summarize_children(
     data.children_mut().repeat_depth = 0;
     data.children_mut().visible_descendant_count = 0;
     data.set_has_external_tokens(false);
-    data.set_depends_on_column(false);
     data.set_has_external_scanner_state_change(false);
     data.children_mut().dynamic_precedence = 0;
 
@@ -721,10 +717,6 @@ pub unsafe fn subtree_summarize_children(
     for (i, child) in children.iter().copied().enumerate() {
         let i = i as u32;
         let child = subtree_resolve_for_reduction(child, arena);
-
-        if data.size.extent.row == 0 && child.depends_on_column {
-            data.set_depends_on_column(true);
-        }
 
         if child.has_external_scanner_state_change {
             data.set_has_external_scanner_state_change(true);
