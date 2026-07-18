@@ -10,11 +10,18 @@ This is a living summary, not a chronological experiment log. It records:
 Old measurements are included only when they still inform a decision. They are
 clearly marked when the measured implementation is no longer present.
 
-## Current status
+## Latest Rust-versus-C checkpoint
 
 Measured on 2026-07-16 at `325ece7b`. The Rust runtime is based on
 `fe2605c1`; the comparison C core is
 `c9f80282ad355a88a389d75173d918de84ef3e79`.
+
+This table predates the retained deterministic-window and subtree-arena work
+on the current branch. It is the latest complete cross-core checkpoint, not a
+measurement of current HEAD. Use same-session Rust control/candidate pairs to
+attribute the later representation changes; see
+[CURRENT_PERFORMANCE_PROFILE.md](CURRENT_PERFORMANCE_PROFILE.md) for the exact
+current-runtime profile.
 
 ```sh
 cargo xtask perf-gate --offline
@@ -178,47 +185,49 @@ Keep only its general lessons:
 - do not introduce a second node representation merely to satisfy an arbitrary
   RSS target.
 
-## Profiling status and next targets
+## Current profiling result and next targets
 
-There is no post-reset flamegraph of the exact current runtime. The detailed
-NodeTable/S8 flamegraphs from the reverted branch are historical and should not
-drive a new patch directly.
+The exact Rust runtime at `3155a36006b9` was profiled on 2026-07-18 with
+seven-language CPU sampling, Instruments Time Profiler and CPU Counters,
+Samply, malloc stack logging, `heap`, `vmmap`, `leaks`, `cargo-bloat`,
+`cargo-llvm-lines`, and source-correlated assembly. The complete evidence and
+ranked designs are in [CURRENT_PERFORMANCE_PROFILE.md](CURRENT_PERFORMANCE_PROFILE.md).
 
-The last profile on an ancestor of the current runtime showed:
+The current phase split is workload-dependent:
 
-- generated lexer work as the largest C++ and Java leaf cost;
-- approximately one third of time in the complete reduction/stack lifecycle;
-  and
-- child collection, parent construction, metadata summarization, and stack
-  push/release as a connected pipeline rather than isolated bottlenecks.
+- reduction and stack work consume 29-46% of exclusive samples;
+- lexer runtime consumes 17-33%;
+- generated lexer code consumes 8-35%; and
+- balancing consumes 3-7%.
 
-The next optimization cycle should:
+Hardware counters add an important distinction. C++ and TypeScript lose 27.7%
+and 23.9% of sustainable instruction bandwidth to delivery, while Go has the
+largest reduction-oriented processing/dependency loss. C++'s generated
+`ts_lex` is 92 KiB and has hot addresses spread across most of that function.
 
-1. profile current Python and TypeScript fixtures;
-2. separate generated lexer, external scanner, reusable lexer plumbing,
-   reduction, stack traversal, subtree construction, and finalization;
-3. choose a target only if it is large in both a flamegraph and the stable
-   throughput corpus; and
-4. use a same-session control/candidate comparison.
+The next experiments, in order, are:
 
-Example profile:
+1. restore the previously measured conservative UTF-8 ASCII advance fast path;
+2. split deterministic reduction from GLR reduction, then build a direct-final
+   deterministic parent if assembly proves the fast-path frame shrinks;
+3. price a hot/cold generated lexer with a PGO layout control; and
+4. only afterward consider accepted-DAG balancing worklist reuse,
+   single-action dispatch, or parser-private arena bumping.
 
-```sh
-CARGO_PROFILE_BENCH_DEBUG=true \
-TREE_SITTER_CORE_IMPL=rust \
-TREE_SITTER_BENCHMARK_LANGUAGE_FILTER=python \
-TREE_SITTER_BENCHMARK_EXAMPLE_FILTER=python3-grammar.py \
-TREE_SITTER_BENCHMARK_KIND_FILTER=normal \
-TREE_SITTER_BENCHMARK_REPETITION_COUNT=20 \
-TREE_SITTER_BENCHMARK_MIN_SAMPLE_TIME_MS=500 \
-cargo flamegraph -p tree-sitter-cli --bench benchmark \
-  --output /tmp/tree-sitter-python.svg --deterministic
-```
+Allocator/GC tuning is not the next throughput target. A Python snapshot had
+about 7.2 MiB physical footprint and 2.1 MiB resident/dirty arena pages despite
+an 8 GiB virtual reservation, with no leaks. Profiler-run throughput remains
+context only; use same-session current-Rust control/candidate
+`cargo xtask perf-gate` runs for performance decisions.
 
-Profiler-run throughput is context only; use `cargo xtask perf-gate` for
-performance decisions.
+## Historical pre-arena allocation and data-layout audit (2026-07-16)
 
-## Allocation and data-layout audit (2026-07-16)
+This audit describes the pointer-backed runtime at its recorded checkpoint. Its
+event shapes still explain the motivation for the deterministic window and
+arena work, but the layout table below is not the current Candidate D layout.
+The current parser-facing `Subtree` is a four-byte tagged arena index; current
+storage is documented in `SUBTREE_ARENA_PLAN.md`, `SUBTREE_INDEX_RESULTS.md`,
+and `docs/src/5-runtime-memory.md`.
 
 Temporary atomic counters instrumented `stack.rs`, `stack/stack_node.rs`,
 `stack/pop.rs`, and subtree construction/storage. The counters were removed
@@ -231,7 +240,7 @@ two passes; percentages and maxima are the useful results. A focused Ruby
 corpus run covered scanner states and ambiguous/recovery behavior absent from
 the normal performance corpus.
 
-Current 64-bit layouts:
+64-bit layouts at that checkpoint:
 
 | Type | Bytes | Important contents |
 | --- | ---: | --- |
