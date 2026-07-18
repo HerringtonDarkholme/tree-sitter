@@ -341,6 +341,29 @@ inside the normal regression bound, and at least +0.8% overall current-Rust
 throughput. This is intentionally lower than the historical +1.26 points
 because the runtime and subtree representation have changed.
 
+Implemented result, measured against immediate Rust parent `0e98e639` in an
+interleaved A/B/A run with five 200 ms CPU-time samples per fixture:
+
+| Language | Fixtures | Throughput change |
+| --- | ---: | ---: |
+| C++ | 4 | +2.55% |
+| Go | 5 | +1.33% |
+| Java | 4 | +1.21% |
+| JavaScript | 2 | +2.85% |
+| Python | 12 | +1.91% |
+| Rust | 2 | +1.83% |
+| TypeScript | 11 | +4.94% |
+| **All fixtures** | **40** | **+2.70%** |
+
+Each fixture compares the candidate median with the geometric mean of its two
+bracketing Rust controls; the final rows are geometric means. Source byte
+lengths and hashes matched for every comparison. Maximum CV was 4.60%, 3.75%,
+and 1.65% for control, candidate, and control. Peak RSS was neutral: the
+largest per-language increase was 0.15 MiB, while five of seven candidate peaks
+were lower. Five focused path witnesses, the Rust core tests, ABI test, Clippy,
+core parity, and the four-package ast-grep gate passed. The candidate clears
+the throughput and per-language gates and is retained.
+
 ### 2. Direct-final deterministic reducer
 
 This should be one coherent fast path, not another accumulator layered over
@@ -491,7 +514,7 @@ to existing parser artifacts.
 
 ## Recommended experiment order
 
-1. Reintroduce the conservative ASCII advance fast path.
+1. Retain the completed conservative ASCII advance fast path.
 2. Split deterministic and GLR reduction and inspect the resulting assembly.
 3. If the frame shrinks, implement the direct-final deterministic builder.
 4. Gate accepted-DAG balancing reuse with edge and worklist counts.

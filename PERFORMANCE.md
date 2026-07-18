@@ -116,6 +116,7 @@ cargo xtask perf-gate --min-sample-time-ms 1000 --offline
 | Compact `Subtree` handles | An explicit 16-byte Rust enum increased parse time by 19.74%; the compact handle is 8 bytes | Keep the compact private representation |
 | One-pass parsing and compact stack links | Removed stale incremental/reuse machinery and shrank `StackLink` from 24 to 16 bytes and `StackNode` from 232 to 168 bytes | Keep; old speed figures were noisy, so claim simplicity/layout rather than a precise gain |
 | Focused ownership and module cleanup | Behavior remained green and direct throughput changes stayed within measurement noise | Keep for readability |
+| Conservative UTF-8 ASCII lexer advance | +2.70% current-Rust throughput across 40 fixtures; all seven languages positive; RSS neutral | Keep the guarded in-chunk/in-range fast path |
 
 The `Subtree` result is the strongest representation lesson. A readable API
 should hide the compact tagged representation, not double every hot subtree
@@ -128,7 +129,6 @@ branch was reverted to `fe2605c1`, so these are candidates, not current wins.
 
 | Experiment | Result | Reuse condition |
 | --- | --- | --- |
-| ASCII fast path in `lexer_do_advance` | 95.85% hit rate; +1.26 Rust/C percentage points in a paired run | Reimplement only after a fresh current-core profile identifies the same hot path |
 | Stack-history compaction | About 6 MiB lower peak RSS for large fixtures at roughly -0.12 throughput points | Relevant only to an append-only indexed stack |
 | Bounded publish-in-place | Avoided a final compacting copy for low-waste trees | Relevant only if a flat NodeTable design returns |
 
