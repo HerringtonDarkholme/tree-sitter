@@ -20,6 +20,7 @@ pub unsafe fn stack_print_dot_graph(
     language: *const TSLanguage,
     mut f: *mut c_void,
 ) -> bool {
+    stack.materialize_window();
     stack.iterators.reserve(32);
     if f.is_null() {
         f = stderr_file();

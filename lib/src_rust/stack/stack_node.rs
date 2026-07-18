@@ -95,7 +95,7 @@ pub(super) unsafe fn stack_node_release(
     }
 }
 
-unsafe fn stack_subtree_node_count(subtree: Subtree) -> u32 {
+pub(super) unsafe fn stack_subtree_node_count(subtree: Subtree) -> u32 {
     let mut count = subtree.visible_descendant_count();
     if subtree.visible() {
         count += 1;

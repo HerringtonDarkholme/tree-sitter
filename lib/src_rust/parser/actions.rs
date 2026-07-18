@@ -15,8 +15,8 @@ use crate::ffi::{TSStateId, TSSymbol};
 use super::super::language::{language_full, language_lookup, ts_language_next_state};
 use super::super::reduce_action::ReduceAction;
 use super::super::stack::{
-    stack_merge, stack_pop_all, stack_pop_count, stack_push, stack_remove_version, StackVersion,
-    STACK_VERSION_NONE,
+    stack_materialize, stack_merge, stack_pop_all, stack_pop_count, stack_pop_count_from_window,
+    stack_push, stack_remove_version, StackVersion, STACK_VERSION_NONE,
 };
 use super::super::subtree::{
     subtree_array_clear, subtree_array_delete, subtree_array_remove_trailing_extras,
@@ -212,6 +212,24 @@ pub(super) unsafe fn parser_reduce(
     end_of_non_terminal_extra: bool,
 ) -> StackVersion {
     let initial_version_count = ptr_ref(parser.stack).version_count();
+    if initial_version_count == 1 && !invalidate_parse_state && !end_of_non_terminal_extra {
+        if let Some(mut children) =
+            stack_pop_count_from_window(ptr_mut(parser.stack), version, action.count)
+        {
+            subtree_array_remove_trailing_extras(&mut children, &mut parser.trailing_extras);
+            let parent = parser_new_node(
+                parser,
+                action.symbol,
+                children,
+                u32::from(action.production_id),
+            );
+            let state = ptr_ref(parser.stack).head(version).state();
+            parser_finish_reduction(parser, version, parent, state, action, false, state);
+            return version;
+        }
+    }
+
+    stack_materialize(ptr_mut(parser.stack));
     let pop = stack_pop_count(ptr_mut(parser.stack), version, action.count);
     let stack = ptr_mut(parser.stack);
     let halted_version_count = stack.halted_version_count();

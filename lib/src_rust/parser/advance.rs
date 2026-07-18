@@ -20,8 +20,8 @@ use super::super::language::{
 };
 use super::super::reduce_action::ReduceAction;
 use super::super::stack::{
-    stack_can_merge, stack_merge, stack_remove_version, stack_renumber_version,
-    stack_swap_versions, StackVersion, STACK_VERSION_NONE,
+    stack_can_merge, stack_materialize, stack_merge, stack_remove_version, stack_renumber_version,
+    stack_swap_versions, stack_try_enable_window, StackVersion, STACK_VERSION_NONE,
 };
 use super::super::subtree::Subtree;
 use super::super::utils::{ptr_mut, ptr_ref};
@@ -86,7 +86,7 @@ pub(super) unsafe fn parser_version_status(
     let mut cost = stack.error_cost(version);
     let head = stack.head(version);
     let is_paused = head.is_paused();
-    let dynamic_precedence = head.dynamic_precedence();
+    let dynamic_precedence = stack.dynamic_precedence(version);
     let state = head.state();
     if is_paused {
         cost += ERROR_COST_PER_SKIPPED_TREE;
@@ -112,7 +112,7 @@ pub(super) unsafe fn parser_better_version_exists(
     let stack = ptr_mut(self_.stack);
     let head = stack.head(version);
     let position = head.position();
-    let dynamic_precedence = head.dynamic_precedence();
+    let dynamic_precedence = stack.dynamic_precedence(version);
     let status = ErrorStatus {
         cost,
         is_in_error,
@@ -222,6 +222,9 @@ unsafe fn parser_apply_parse_actions(
     lookahead: &mut Subtree,
     table_entry: &TableEntry,
 ) -> ParseActionsResult {
+    if table_entry.action_count > 1 {
+        stack_materialize(ptr_mut(self_.stack));
+    }
     let mut did_reduce = false;
     let mut last_reduction_version = STACK_VERSION_NONE;
 
@@ -377,6 +380,9 @@ unsafe fn parser_pause_with_error(self_: &mut TSParser, version: StackVersion, l
 /// same lookahead and continue in the new goto state; shifts consume the
 /// lookahead and return to the outer parse loop.
 pub(super) unsafe fn parser_advance(self_: &mut TSParser, version: StackVersion) -> bool {
+    if self_.lexer.logger.log.is_some() || !self_.dot_graph_file.is_null() {
+        stack_materialize(ptr_mut(self_.stack));
+    }
     let stack = ptr_ref(self_.stack);
     let head = stack.head(version);
     let mut state = head.state();
@@ -553,6 +559,10 @@ pub(super) unsafe fn parser_condense_stack(self_: &mut TSParser) -> u32 {
     if made_changes {
         parser_log(self_, |_, log| log.write_str("condense"));
         parser_log_stack(self_);
+    }
+
+    if self_.lexer.logger.log.is_none() && self_.dot_graph_file.is_null() {
+        stack_try_enable_window(ptr_mut(self_.stack));
     }
 
     min_error_cost

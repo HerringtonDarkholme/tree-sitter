@@ -23,9 +23,9 @@ use super::super::length::{length_sub, Length};
 use super::super::lexer::{lexer_mark_end, lexer_reset};
 use super::super::reduce_action::ReduceAction;
 use super::super::stack::{
-    stack_copy_version, stack_get_summary, stack_merge, stack_pop_count, stack_pop_error,
-    stack_push, stack_record_summary, stack_remove_version, stack_renumber_version, StackVersion,
-    STACK_VERSION_NONE,
+    stack_copy_version, stack_get_summary, stack_materialize, stack_merge, stack_pop_count,
+    stack_pop_error, stack_push, stack_record_summary, stack_remove_version,
+    stack_renumber_version, StackVersion, STACK_VERSION_NONE,
 };
 use super::super::subtree::{
     subtree_array_delete, subtree_array_remove_trailing_extras, subtree_new_error_node,
@@ -207,6 +207,7 @@ pub(super) unsafe fn parser_recover(
     version: StackVersion,
     mut lookahead: Subtree,
 ) {
+    stack_materialize(ptr_mut(self_.stack));
     let mut did_recover = false;
     let stack = ptr_mut(self_.stack);
     let previous_version_count = stack.version_count();
@@ -441,6 +442,7 @@ pub(super) unsafe fn parser_handle_error(
     version: StackVersion,
     lookahead: Subtree,
 ) {
+    stack_materialize(ptr_mut(self_.stack));
     let previous_version_count = ptr_ref(self_.stack).version_count();
 
     // Perform any reductions that can happen in this state, regardless of the lookahead. After

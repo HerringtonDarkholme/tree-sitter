@@ -16,8 +16,8 @@ use crate::ffi::TSStateId;
 
 use super::alloc::{free, malloc};
 use super::error_costs::{ERROR_COST_PER_RECOVERY, ERROR_STATE};
-use super::length::Length;
-use super::subtree::{Subtree, SubtreeArray, SubtreePool, NULL_SUBTREE};
+use super::length::{length_add, Length};
+use super::subtree::{subtree_alloc_size, Subtree, SubtreeArray, SubtreePool, NULL_SUBTREE};
 use super::utils::ptr_mut;
 use super::utils::Array;
 
@@ -90,10 +90,32 @@ pub struct StackSummaryEntry {
 
 pub type StackSummary = Array<StackSummaryEntry>;
 
+/// One unmaterialized step in the deterministic suffix of the parse stack.
+///
+/// The cumulative fields deliberately mirror [`StackNode`]. This makes
+/// materialization a field-for-field conversion while avoiding a 160-byte
+/// graph node and its unused alternate-link slots for ordinary LR steps.
+#[derive(Clone, Copy)]
+struct WindowEntry {
+    state: TSStateId,
+    position: Length,
+    error_cost: u32,
+    node_count: u32,
+    dynamic_precedence: i32,
+    subtree: Subtree,
+}
+
 /// Current parser configuration and per-version recovery state.
 pub(super) struct StackHead {
     /// Current top node for this parser version.
     node: NonNull<StackNode>,
+    /// Cached logical top fields. While the deterministic window is nonempty,
+    /// these describe its last entry; otherwise they match `node`.
+    state: TSStateId,
+    position: Length,
+    error_cost: u32,
+    node_count: u32,
+    dynamic_precedence: i32,
     /// Optional recovery summary, recorded lazily.
     summary: Option<NonNull<StackSummary>>,
     /// Node-count checkpoint used by recovery progress heuristics.
@@ -109,19 +131,15 @@ pub(super) struct StackHead {
 
 impl StackHead {
     pub(super) const fn state(&self) -> TSStateId {
-        unsafe { self.node.as_ref().state }
+        self.state
     }
 
     pub(super) const fn position(&self) -> Length {
-        unsafe { self.node.as_ref().position }
+        self.position
     }
 
     pub(super) const fn last_external_token(&self) -> Subtree {
         self.last_external_token
-    }
-
-    pub(super) const fn dynamic_precedence(&self) -> i32 {
-        unsafe { self.node.as_ref().dynamic_precedence }
     }
 
     pub(super) const fn is_active(&self) -> bool {
@@ -146,6 +164,11 @@ pub struct Stack {
     iterators: Array<StackIterator>,
     /// Free list for recently released stack nodes.
     node_pool: StackNodeArray,
+    /// Linear suffix used while there is exactly one deterministic version.
+    window: Array<WindowEntry>,
+    /// Whether pushes and reductions may use `window`. Materialization clears
+    /// this flag until stack condensation establishes a linear configuration.
+    window_enabled: bool,
     /// Number of heads whose status is `Halted`.
     halted_version_count: u32,
     /// Initial root node shared by all versions.
@@ -176,6 +199,55 @@ impl Stack {
         self.heads.get_unchecked_mut(version)
     }
 
+    unsafe fn materialize_window(&mut self) {
+        if !self.window_enabled {
+            return;
+        }
+        debug_assert_eq!(self.heads.size, 1);
+
+        let mut node = self.head(0).node;
+        for i in 0..self.window.size {
+            let entry = self.window.get_unchecked(i);
+            node = stack_node_new(Some(node), entry.subtree, entry.state, &mut self.node_pool);
+            let materialized = node.as_ref();
+            debug_assert_eq!(materialized.position, entry.position);
+            debug_assert_eq!(materialized.error_cost, entry.error_cost);
+            debug_assert_eq!(materialized.node_count, entry.node_count);
+            debug_assert_eq!(materialized.dynamic_precedence, entry.dynamic_precedence);
+        }
+        self.window.clear();
+        self.head_mut(0).node = node;
+        self.window_enabled = false;
+    }
+
+    unsafe fn release_window(&mut self) {
+        let subtree_pool = ptr_mut(self.subtree_pool);
+        for entry in self.window.as_slice() {
+            if !entry.subtree.is_null() {
+                entry.subtree.release(subtree_pool);
+            }
+        }
+        self.window.clear();
+        self.window_enabled = false;
+    }
+
+    unsafe fn sync_head_from_node(&mut self, version: StackVersion) {
+        let node = self.head(version).node.as_ref();
+        let (state, position, error_cost, node_count, dynamic_precedence) = (
+            node.state,
+            node.position,
+            node.error_cost,
+            node.node_count,
+            node.dynamic_precedence,
+        );
+        let head = self.head_mut(version);
+        head.state = state;
+        head.position = position;
+        head.error_cost = error_cost;
+        head.node_count = node_count;
+        head.dynamic_precedence = dynamic_precedence;
+    }
+
     pub unsafe fn set_last_external_token(&mut self, version: StackVersion, token: Subtree) {
         let subtree_pool = ptr_mut(self.subtree_pool);
         let head = self.heads.get_unchecked_mut(version);
@@ -190,27 +262,62 @@ impl Stack {
 
     pub unsafe fn error_cost(&self, version: StackVersion) -> u32 {
         let head = self.head(version);
-        let node = head.node.as_ref();
-        let mut result = node.error_cost;
+        let mut result = head.error_cost;
         if head.status == StackStatus::Paused
-            || (node.state == ERROR_STATE && node.links[0].subtree.is_null())
+            || (head.state == ERROR_STATE
+                && self.window.is_empty()
+                && head.node.as_ref().links[0].subtree.is_null())
         {
             result += ERROR_COST_PER_RECOVERY;
         }
         result
     }
 
-    pub unsafe fn node_count_since_error(&mut self, version: StackVersion) -> u32 {
-        let head = self.head_mut(version);
-        let node = head.node.as_ref();
-        if node.node_count < head.node_count_at_last_error {
-            head.node_count_at_last_error = node.node_count;
+    pub unsafe fn dynamic_precedence(&self, version: StackVersion) -> i32 {
+        if self.window_enabled {
+            debug_assert_eq!(version, 0);
+            self.head(version).dynamic_precedence
+        } else {
+            self.head(version).node.as_ref().dynamic_precedence
         }
-        node.node_count - head.node_count_at_last_error
+    }
+
+    pub unsafe fn node_count_since_error(&mut self, version: StackVersion) -> u32 {
+        let node_count = if self.window_enabled {
+            debug_assert_eq!(version, 0);
+            self.head(version).node_count
+        } else {
+            self.head(version).node.as_ref().node_count
+        };
+        let head = self.head_mut(version);
+        if node_count < head.node_count_at_last_error {
+            head.node_count_at_last_error = node_count;
+        }
+        node_count - head.node_count_at_last_error
     }
 
     pub unsafe fn has_advanced_since_error(&self, version: StackVersion) -> bool {
         let head = self.head(version);
+        if head.error_cost == 0 {
+            return true;
+        }
+
+        if self.window_enabled {
+            let mut node_count = head.node_count;
+            for entry in self.window.as_slice().iter().rev() {
+                let subtree = entry.subtree;
+                if subtree.total_bytes() > 0 {
+                    return true;
+                }
+                if node_count > head.node_count_at_last_error && subtree.error_cost() == 0 {
+                    node_count =
+                        node_count.saturating_sub(stack_node::stack_subtree_node_count(subtree));
+                    continue;
+                }
+                return false;
+            }
+        }
+
         let mut node = head.node;
         if node.as_ref().error_cost == 0 {
             return true;
@@ -242,13 +349,14 @@ impl Stack {
     }
 
     pub unsafe fn pause(&mut self, version: StackVersion, lookahead: Subtree) {
+        self.materialize_window();
         if self.head(version).is_halted() {
             self.halted_version_count -= 1;
         }
         let head = self.head_mut(version);
         head.status = StackStatus::Paused;
         head.lookahead_when_paused = lookahead;
-        head.node_count_at_last_error = head.node.as_ref().node_count;
+        head.node_count_at_last_error = head.node_count;
     }
 
     pub unsafe fn resume(&mut self, version: StackVersion) -> Subtree {
@@ -352,6 +460,8 @@ pub unsafe fn stack_new(subtree_pool: &mut SubtreePool) -> *mut Stack {
             slices: Array::new(),
             iterators: Array::new(),
             node_pool,
+            window: Array::new(),
+            window_enabled: false,
             halted_version_count: 0,
             base_node,
             subtree_pool,
@@ -362,6 +472,7 @@ pub unsafe fn stack_new(subtree_pool: &mut SubtreePool) -> *mut Stack {
     stack.heads.reserve(4);
     stack.slices.reserve(4);
     stack.iterators.reserve(4);
+    stack.window.reserve(32);
 
     stack_clear(stack);
 
@@ -370,11 +481,15 @@ pub unsafe fn stack_new(subtree_pool: &mut SubtreePool) -> *mut Stack {
 
 /// Free the parse stack.
 pub unsafe fn stack_delete(self_: &mut Stack) {
+    self_.release_window();
     if !self_.slices.contents.is_null() {
         self_.slices.delete();
     }
     if !self_.iterators.contents.is_null() {
         self_.iterators.delete();
+    }
+    if !self_.window.contents.is_null() {
+        self_.window.delete();
     }
     let subtree_pool = ptr_mut(self_.subtree_pool);
     stack_node_release(self_.base_node, &mut self_.node_pool, subtree_pool);
@@ -402,6 +517,33 @@ pub unsafe fn stack_push(
     subtree: Subtree,
     state: TSStateId,
 ) {
+    if stack.window_enabled && version == 0 && !subtree.is_null() {
+        debug_assert_eq!(stack.heads.size, 1);
+        let head = stack.head(0);
+        let mut entry = WindowEntry {
+            state,
+            position: head.position,
+            error_cost: head.error_cost,
+            node_count: head.node_count,
+            dynamic_precedence: head.dynamic_precedence,
+            subtree,
+        };
+        entry.error_cost += subtree.error_cost();
+        entry.position = length_add(entry.position, subtree.total_size());
+        entry.node_count += stack_node::stack_subtree_node_count(subtree);
+        entry.dynamic_precedence += subtree.dynamic_precedence();
+        stack.window.push(entry);
+
+        let head = stack.head_mut(0);
+        head.state = state;
+        head.position = entry.position;
+        head.error_cost = entry.error_cost;
+        head.node_count = entry.node_count;
+        head.dynamic_precedence = entry.dynamic_precedence;
+        return;
+    }
+
+    stack.materialize_window();
     let heads = &mut stack.heads;
     let node_pool = &mut stack.node_pool;
     let head = heads.get_unchecked_mut(version);
@@ -410,6 +552,77 @@ pub unsafe fn stack_push(
         head.node_count_at_last_error = new_node.as_ref().node_count;
     }
     head.node = new_node;
+    head.state = new_node.as_ref().state;
+    head.position = new_node.as_ref().position;
+    head.error_cost = new_node.as_ref().error_cost;
+    head.node_count = new_node.as_ref().node_count;
+    head.dynamic_precedence = new_node.as_ref().dynamic_precedence;
+}
+
+/// Move a deterministic suffix into a reduction child array.
+///
+/// Returns `None` when the reduction straddles the materialized base. Extras
+/// are included in the moved suffix but do not contribute to `count`, exactly
+/// matching graph-stack pop semantics.
+pub unsafe fn stack_pop_count_from_window(
+    stack: &mut Stack,
+    version: StackVersion,
+    count: u32,
+) -> Option<SubtreeArray> {
+    if !stack.window_enabled || version != 0 || stack.heads.size != 1 {
+        return None;
+    }
+
+    let mut start = stack.window.size;
+    let mut remaining = count;
+    while remaining > 0 {
+        if start == 0 {
+            return None;
+        }
+        start -= 1;
+        let subtree = stack.window.get_unchecked(start).subtree;
+        if subtree.is_null() || !subtree.extra() {
+            remaining -= 1;
+        }
+    }
+
+    let physical_count = stack.window.size - start;
+    let mut children = SubtreeArray::new();
+    let capacity = subtree_alloc_size(physical_count) / core::mem::size_of::<Subtree>();
+    children.reserve(u32::try_from(capacity).unwrap());
+    for i in start..stack.window.size {
+        children.push(stack.window.get_unchecked(i).subtree);
+    }
+    stack.window.size = start;
+
+    if let Some(&entry) = stack.window.as_slice().last() {
+        let head = stack.head_mut(0);
+        head.state = entry.state;
+        head.position = entry.position;
+        head.error_cost = entry.error_cost;
+        head.node_count = entry.node_count;
+        head.dynamic_precedence = entry.dynamic_precedence;
+    } else {
+        stack.sync_head_from_node(0);
+    }
+    Some(children)
+}
+
+/// Materialize the deterministic suffix and remain in ordinary GLR mode.
+pub unsafe fn stack_materialize(stack: &mut Stack) {
+    stack.materialize_window();
+}
+
+/// Re-enter deterministic mode after condensation leaves one active version.
+pub unsafe fn stack_try_enable_window(stack: &mut Stack) {
+    if stack.window_enabled {
+        return;
+    }
+    if stack.heads.size == 1 && stack.head(0).is_active() && stack.head(0).state != ERROR_STATE {
+        debug_assert!(stack.window.is_empty());
+        stack.sync_head_from_node(0);
+        stack.window_enabled = true;
+    }
 }
 
 /// Pop a given number of entries from a version.
@@ -418,6 +631,7 @@ pub unsafe fn stack_pop_count(
     version: StackVersion,
     count: u32,
 ) -> StackSliceArray {
+    self_.materialize_window();
     stack_iter(
         self_,
         version,
@@ -428,6 +642,7 @@ pub unsafe fn stack_pop_count(
 
 /// Pop an error from the top of a version.
 pub unsafe fn stack_pop_error(self_: &mut Stack, version: StackVersion) -> SubtreeArray {
+    self_.materialize_window();
     let node = self_.head(version).node;
     for link in &node.as_ref().links[..node.as_ref().link_count as usize] {
         let subtree = link.subtree;
@@ -453,11 +668,13 @@ pub unsafe fn stack_pop_error(self_: &mut Stack, version: StackVersion) -> Subtr
 
 /// Pop all entries from a version.
 pub unsafe fn stack_pop_all(self_: &mut Stack, version: StackVersion) -> StackSliceArray {
+    self_.materialize_window();
     stack_iter(self_, version, |iterator| pop_all_action(iterator), Some(0))
 }
 
 /// Record a summary of parse states near the top of a version.
 pub unsafe fn stack_record_summary(self_: &mut Stack, version: StackVersion, max_depth: u32) {
+    self_.materialize_window();
     let mut summary = Array::new();
     stack_iter(
         self_,
@@ -482,6 +699,7 @@ pub unsafe fn stack_get_summary(stack: &Stack, version: StackVersion) -> Option<
 
 /// Remove a version from the stack.
 pub unsafe fn stack_remove_version(self_: &mut Stack, version: StackVersion) {
+    self_.materialize_window();
     let heads = &mut self_.heads;
     let node_pool = &mut self_.node_pool;
     let subtree_pool = ptr_mut(self_.subtree_pool);
@@ -497,6 +715,7 @@ pub unsafe fn stack_renumber_version(stack: &mut Stack, v1: StackVersion, v2: St
     if v1 == v2 {
         return;
     }
+    stack.materialize_window();
     debug_assert!(v2 < v1);
     debug_assert!(v1 < stack.heads.size);
 
@@ -517,6 +736,7 @@ pub unsafe fn stack_renumber_version(stack: &mut Stack, v1: StackVersion, v2: St
 
 /// Swap two versions.
 pub unsafe fn stack_swap_versions(stack: &mut Stack, v1: StackVersion, v2: StackVersion) {
+    stack.materialize_window();
     let temp = ptr::read(stack.heads.get_unchecked(v1));
     let other = ptr::read(stack.heads.get_unchecked(v2));
     ptr::write(stack.heads.get_unchecked_mut(v1), other);
@@ -525,6 +745,7 @@ pub unsafe fn stack_swap_versions(stack: &mut Stack, v1: StackVersion, v2: Stack
 
 /// Copy a version, creating a new one.
 pub unsafe fn stack_copy_version(stack: &mut Stack, version: StackVersion) -> StackVersion {
+    stack.materialize_window();
     debug_assert!(version < stack.heads.size);
     let version_head = ptr::read(stack.heads.get_unchecked(version));
     stack.heads.push(version_head);
@@ -551,6 +772,7 @@ pub unsafe fn stack_merge(
     version1: StackVersion,
     version2: StackVersion,
 ) -> bool {
+    stack.materialize_window();
     if !stack_can_merge(stack, version1, version2) {
         return false;
     }
@@ -583,13 +805,11 @@ pub unsafe fn stack_can_merge(
 ) -> bool {
     let head1 = stack.head(version1);
     let head2 = stack.head(version2);
-    let node1 = head1.node.as_ref();
-    let node2 = head2.node.as_ref();
     head1.status == StackStatus::Active
         && head2.status == StackStatus::Active
-        && node1.state == node2.state
-        && node1.position.bytes == node2.position.bytes
-        && node1.error_cost == node2.error_cost
+        && head1.state == head2.state
+        && head1.position.bytes == head2.position.bytes
+        && head1.error_cost == head2.error_cost
         && head1
             .last_external_token
             .has_same_external_scanner_state(head2.last_external_token)
@@ -597,6 +817,7 @@ pub unsafe fn stack_can_merge(
 
 /// Clear all versions, resetting to initial state.
 pub unsafe fn stack_clear(self_: &mut Stack) {
+    self_.release_window();
     stack_node_retain(self_.base_node);
     let heads = &mut self_.heads;
     let node_pool = &mut self_.node_pool;
@@ -608,12 +829,18 @@ pub unsafe fn stack_clear(self_: &mut Stack) {
     self_.halted_version_count = 0;
     heads.push(StackHead {
         node: self_.base_node,
+        state: self_.base_node.as_ref().state,
+        position: self_.base_node.as_ref().position,
+        error_cost: self_.base_node.as_ref().error_cost,
+        node_count: self_.base_node.as_ref().node_count,
+        dynamic_precedence: self_.base_node.as_ref().dynamic_precedence,
         status: StackStatus::Active,
         last_external_token: NULL_SUBTREE,
         lookahead_when_paused: NULL_SUBTREE,
         summary: None,
         node_count_at_last_error: 0,
     });
+    self_.window_enabled = true;
 }
 
 mod debug;

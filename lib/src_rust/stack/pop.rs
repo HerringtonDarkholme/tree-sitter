@@ -29,6 +29,11 @@ unsafe fn stack_add_version(
     let original_head = self_.head(original_version);
     let head = StackHead {
         node,
+        state: node.as_ref().state,
+        position: node.as_ref().position,
+        error_cost: node.as_ref().error_cost,
+        node_count: node.as_ref().node_count,
+        dynamic_precedence: node.as_ref().dynamic_precedence,
         node_count_at_last_error: original_head.node_count_at_last_error,
         last_external_token: original_head.last_external_token,
         status: StackStatus::Active,
