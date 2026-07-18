@@ -9,6 +9,10 @@ The goal here is different: connect those ideas to concrete types, functions,
 data layouts, and ownership rules. Function and type names are written exactly
 as they appear in the Rust runtime so that they can be searched directly.
 
+For an allocation-centered view of the same runtime, including heap object
+graphs, exact ownership transfers, release cascades, pools, and the limits of
+current reuse, see [Runtime Memory, Ownership, and Reuse](./5-runtime-memory.md).
+
 The chapter follows the parse in execution order through the worked
 `1 + 2` example, then examines the stack and subtree memory representations.
 Readers investigating invalid syntax can jump directly to

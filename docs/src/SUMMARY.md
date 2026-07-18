@@ -27,6 +27,7 @@
 - [Code Navigation](./4-code-navigation.md)
 - [Implementation](./5-implementation.md)
   - [Runtime Implementation Deep Dive](./5-implementation-deep-dive.md)
+  - [Runtime Memory, Ownership, and Reuse](./5-runtime-memory.md)
 - [Contributing](./6-contributing.md)
 - [Playground](./7-playground.md)
 
