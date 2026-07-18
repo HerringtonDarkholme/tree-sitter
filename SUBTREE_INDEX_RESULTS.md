@@ -598,6 +598,45 @@ the important C++/Go paths. Because this is the throughput program, the
 crossing one eight-byte header boundary is insufficient by itself; subsequent
 record-shape experiments need a larger reduction or less initialization work.
 
+### Kind-specialized internal records
+
+The next experiment separated the common heap header from its kind-specific
+tail. Full leaves retain the existing 88-byte record and scanner-state payload,
+while internal nodes now use a 72-byte record containing the 48-byte common
+header followed directly by the 20-byte child summary and alignment padding.
+Every heap handle still resolves to the common header at offset zero, so the
+four-byte Candidate D handle and arena lookup are unchanged.
+
+`child_count` cannot discriminate these shapes: empty productions create valid
+internal nodes with zero children. The first prototype used that invalid
+assumption and ast-grep parity found three assertion failures. The corrected
+layout consumes one previously unused heap-flag bit as an explicit internal
+record-kind tag. This supports zero-child internal nodes without adding a byte
+or changing either physical record size.
+
+The corrected candidate passed the 16 core tests, the ABI surface test,
+`clippy -D warnings`, 15 core-parity samples, and all four ast-grep packages
+before measurement. It was compared with the committed parser-private sharing
+baseline in an A/B/A run over all 40 fixtures. Each fixture uses the geometric
+mean of the two bracketing controls; maximum CV was 2.61% / 1.95% / 2.03% for
+control, candidate, and control respectively.
+
+| Language | Fixtures | Specialized internal record | Control RSS | Candidate RSS |
+|---|---:|---:|---:|---:|
+| C++ | 4 | +1.79% | 10.38 MiB | 10.39 MiB |
+| Go | 5 | +0.72% | 11.50 MiB | 11.01 MiB |
+| Java | 4 | +0.18% | 8.35 MiB | 8.25 MiB |
+| JavaScript | 2 | +1.04% | 21.58 MiB | 19.58 MiB |
+| Python | 12 | +1.26% | 10.37 MiB | 10.06 MiB |
+| Rust | 2 | -0.71% | 12.43 MiB | 11.83 MiB |
+| TypeScript | 11 | +0.39% | 17.16 MiB | 15.82 MiB |
+| **All fixtures** | **40** | **+0.79%** |  |  |
+
+The throughput gain is modest but broad, no language crosses the -1% guard,
+and the larger JavaScript/TypeScript fixtures show the expected RSS reduction.
+The specialized record is retained as the baseline for subsequent throughput
+experiments.
+
 ### Every-parse live-tree copying collection
 
 The GC endpoint retained normal atomic refcounts during parsing and performed

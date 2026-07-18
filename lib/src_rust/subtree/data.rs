@@ -2,10 +2,11 @@
 //!
 //! Small leaves use the legacy-named [`SubtreeInlineData`] as a compact
 //! eight-byte arena record. Larger leaves and all internal nodes use
-//! [`SubtreeHeapData`], whose content is either leaf metadata or an owned child
-//! allocation. Parser-facing subtree handles are four-byte tagged arena
-//! indexes. This module also defines the inline-or-heap storage for serialized
-//! external-scanner state.
+//! [`SubtreeHeapData`], followed by a kind-specific payload. Internal nodes use
+//! [`SubtreeInternalData`], while full leaves use [`SubtreeLeafData`].
+//! Parser-facing subtree handles are four-byte tagged arena indexes. This
+//! module also defines the inline-or-heap storage for serialized external-
+//! scanner state.
 //!
 //! These types describe representation only. Handle discrimination and
 //! sharing operations belong to `handle`, while allocation belongs to
@@ -148,9 +149,10 @@ impl SubtreeInlineData {
 }
 
 // ---------------------------------------------------------------------------
-// SubtreeHeapData — heap-allocated node
+// SubtreeHeapData — common heap-node header
 // ---------------------------------------------------------------------------
 
+#[repr(C, align(8))]
 pub struct SubtreeHeapData {
     /// Conservative parser-private copy-on-write oracle.
     pub parser_shared: Cell<bool>,
@@ -166,7 +168,7 @@ pub struct SubtreeHeapData {
     pub lookahead_bytes: u32,
     /// Accumulated error cost for recovery comparison.
     pub error_cost: u32,
-    /// Number of direct children. Zero means leaf payload in `data`.
+    /// Number of direct children. Zero selects the full-leaf record shape.
     pub child_count: u32,
     /// Grammar symbol for this subtree.
     pub symbol: TSSymbol,
@@ -176,14 +178,12 @@ pub struct SubtreeHeapData {
     /// Packed bitfield flags.
     ///
     /// Stored as one word so flag access remains compact and explicit.
-    /// bit 0: `visible`, bit 1: `named`, bit 2: `extra`, bits 3-4: unused,
+    /// bit 0: `visible`, bit 1: `named`, bit 2: `extra`, bit 3: `internal`,
+    /// bit 4: unused,
     /// bit 5: `has_changes`, bit 6: `has_external_tokens`,
     /// bit 7: `has_external_scanner_state_change`, bit 8: `depends_on_column`,
     /// bit 9: `is_missing`, bit 10: `is_keyword`
     pub flags: u16,
-
-    /// Payload selected explicitly by node kind.
-    pub data: SubtreeHeapDataContent,
 }
 
 // SAFETY: `parser_shared` and `parser_visited` are mutated only while the arena
@@ -195,6 +195,7 @@ unsafe impl Sync for SubtreeHeapData {}
 const HEAP_VISIBLE: u16 = 1 << 0;
 const HEAP_NAMED: u16 = 1 << 1;
 const HEAP_EXTRA: u16 = 1 << 2;
+const HEAP_INTERNAL: u16 = 1 << 3;
 const HEAP_HAS_CHANGES: u16 = 1 << 5;
 const HEAP_HAS_EXTERNAL_TOKENS: u16 = 1 << 6;
 const HEAP_HAS_EXTERNAL_SCANNER_STATE_CHANGE: u16 = 1 << 7;
@@ -255,6 +256,10 @@ impl SubtreeHeapData {
         self.flags & HEAP_EXTRA != 0
     }
     #[inline(always)]
+    pub const fn is_internal(&self) -> bool {
+        self.flags & HEAP_INTERNAL != 0
+    }
+    #[inline(always)]
     pub const fn has_changes(&self) -> bool {
         self.flags & HEAP_HAS_CHANGES != 0
     }
@@ -291,6 +296,10 @@ impl SubtreeHeapData {
         set_u16_flag(&mut self.flags, HEAP_EXTRA, value);
     }
     #[inline(always)]
+    pub fn set_internal(&mut self, value: bool) {
+        set_u16_flag(&mut self.flags, HEAP_INTERNAL, value);
+    }
+    #[inline(always)]
     pub fn set_has_changes(&mut self, value: bool) {
         set_u16_flag(&mut self.flags, HEAP_HAS_CHANGES, value);
     }
@@ -320,8 +329,7 @@ impl SubtreeHeapData {
     }
 }
 
-pub enum SubtreeHeapDataContent {
-    Children(SubtreeChildrenData),
+pub enum SubtreeLeafDataContent {
     ExternalScannerState(ExternalScannerState),
     LookaheadChar(i32),
 }
@@ -342,32 +350,87 @@ pub struct SubtreeChildrenData {
     pub production_id: u16,
 }
 
+/// Common header followed by the cached metadata used only by internal nodes.
+/// The common header remains at offset zero so heap handles resolve uniformly.
+#[repr(C)]
+pub struct SubtreeInternalData {
+    pub header: SubtreeHeapData,
+    pub children: SubtreeChildrenData,
+}
+
+/// Common header followed by the payload used only by full leaves.
+#[repr(C)]
+pub struct SubtreeLeafData {
+    pub header: SubtreeHeapData,
+    pub content: SubtreeLeafDataContent,
+}
+
 impl SubtreeHeapData {
     pub const fn children(&self) -> &SubtreeChildrenData {
-        let SubtreeHeapDataContent::Children(children) = &self.data else {
-            panic!("internal subtree must contain child metadata")
-        };
-        children
+        assert!(self.is_internal());
+        // SAFETY: The internal-kind bit selects `SubtreeInternalData`, whose
+        // first field is this common header.
+        unsafe { &(*core::ptr::from_ref(self).cast::<SubtreeInternalData>()).children }
     }
 
     pub fn children_mut(&mut self) -> &mut SubtreeChildrenData {
-        let SubtreeHeapDataContent::Children(children) = &mut self.data else {
-            panic!("internal subtree must contain child metadata")
-        };
-        children
+        assert!(self.is_internal());
+        // SAFETY: See `children` above. The mutable header borrow uniquely
+        // covers its containing record.
+        unsafe { &mut (*core::ptr::from_mut(self).cast::<SubtreeInternalData>()).children }
     }
 
     pub const fn external_scanner_state(&self) -> &ExternalScannerState {
-        let SubtreeHeapDataContent::ExternalScannerState(state) = &self.data else {
+        assert!(
+            !self.is_internal(),
+            "internal subtree must not contain leaf data"
+        );
+        // SAFETY: A zero child count selects `SubtreeLeafData`, whose first
+        // field is this common header.
+        let content = unsafe { &(*core::ptr::from_ref(self).cast::<SubtreeLeafData>()).content };
+        let SubtreeLeafDataContent::ExternalScannerState(state) = content else {
             panic!("external-token leaf must contain scanner state")
         };
         state
     }
 
     pub const fn lookahead_char(&self) -> i32 {
-        let SubtreeHeapDataContent::LookaheadChar(character) = &self.data else {
+        assert!(
+            !self.is_internal(),
+            "internal subtree must not contain leaf data"
+        );
+        // SAFETY: See `external_scanner_state` above.
+        let content = unsafe { &(*core::ptr::from_ref(self).cast::<SubtreeLeafData>()).content };
+        let SubtreeLeafDataContent::LookaheadChar(character) = content else {
             panic!("error leaf must contain its lookahead character")
         };
         *character
     }
+
+    pub fn set_leaf_content(&mut self, content: SubtreeLeafDataContent) {
+        assert!(!self.is_internal());
+        // SAFETY: A clear internal-kind bit selects `SubtreeLeafData`, whose first
+        // field is this common header.
+        unsafe {
+            (*core::ptr::from_mut(self).cast::<SubtreeLeafData>()).content = content;
+        }
+    }
+
+    pub const fn leaf_content(&self) -> &SubtreeLeafDataContent {
+        assert!(
+            !self.is_internal(),
+            "internal subtree must not contain leaf data"
+        );
+        // SAFETY: See `external_scanner_state` above.
+        unsafe { &(*core::ptr::from_ref(self).cast::<SubtreeLeafData>()).content }
+    }
 }
+
+#[cfg(target_pointer_width = "64")]
+const _: () = {
+    assert!(core::mem::size_of::<SubtreeHeapData>() == 48);
+    assert!(core::mem::size_of::<SubtreeInternalData>() == 72);
+    assert!(core::mem::size_of::<SubtreeLeafData>() == 88);
+    assert!(core::mem::offset_of!(SubtreeInternalData, header) == 0);
+    assert!(core::mem::offset_of!(SubtreeLeafData, header) == 0);
+};

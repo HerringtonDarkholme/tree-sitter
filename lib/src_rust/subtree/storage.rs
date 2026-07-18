@@ -20,7 +20,7 @@ use super::super::alloc::{alloc_failed, free, malloc, realloc};
 use super::super::utils::Array;
 use super::data::{
     ExternalScannerState, ExternalScannerStateData, SubtreeHeapData, SubtreeInlineData,
-    EXTERNAL_SCANNER_STATE_INLINE_SIZE,
+    SubtreeInternalData, SubtreeLeafData, EXTERNAL_SCANNER_STATE_INLINE_SIZE,
 };
 use super::handle::Subtree;
 use super::{
@@ -628,8 +628,8 @@ pub(super) unsafe fn subtree_pool_allocate(pool: &mut SubtreePool) -> NonNull<Su
     let arena = subtree_pool_ensure_arena(pool);
     subtree_arena_allocate(
         arena,
-        core::mem::size_of::<SubtreeHeapData>(),
-        core::mem::align_of::<SubtreeHeapData>(),
+        core::mem::size_of::<SubtreeLeafData>(),
+        core::mem::align_of::<SubtreeLeafData>(),
     )
     .cast()
 }
@@ -676,10 +676,13 @@ pub(super) unsafe fn subtree_clone_allocation(
 ) -> NonNull<SubtreeHeapData> {
     let arena = subtree_pool_ensure_arena(pool);
     let child_count = tree.child_count(arena);
+    if !tree.heap_data(arena).is_internal() {
+        return subtree_pool_allocate(pool);
+    }
     let children = subtree_arena_allocate(
         arena,
         subtree_alloc_size(child_count),
-        core::mem::align_of::<SubtreeHeapData>(),
+        core::mem::align_of::<SubtreeInternalData>(),
     )
     .cast::<Subtree>();
     let copied_children = core::slice::from_raw_parts_mut(children.as_ptr(), child_count as usize);
@@ -725,9 +728,12 @@ pub(super) unsafe fn subtree_take_children(
     let required_capacity = byte_size / core::mem::size_of::<Subtree>();
     let arena = subtree_pool_ensure_arena(pool);
     if children.arena != arena || (children.capacity as usize) < required_capacity {
-        let allocation =
-            subtree_arena_allocate(arena, byte_size, core::mem::align_of::<SubtreeHeapData>())
-                .cast::<Subtree>();
+        let allocation = subtree_arena_allocate(
+            arena,
+            byte_size,
+            core::mem::align_of::<SubtreeInternalData>(),
+        )
+        .cast::<Subtree>();
         if child_count > 0 {
             allocation
                 .as_ptr()

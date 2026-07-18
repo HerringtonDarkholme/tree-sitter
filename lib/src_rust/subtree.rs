@@ -37,8 +37,9 @@ use super::utils::Array;
 mod data;
 use data::{
     ExternalScannerState, ExternalScannerStateData, SubtreeChildrenData, SubtreeHeapData,
-    SubtreeHeapDataContent, SubtreeInlineData, EXTERNAL_SCANNER_STATE_INLINE_SIZE, INLINE_EXTRA,
-    INLINE_IS_INLINE, INLINE_IS_KEYWORD, INLINE_NAMED, INLINE_VISIBLE,
+    SubtreeInlineData, SubtreeInternalData, SubtreeLeafData, SubtreeLeafDataContent,
+    EXTERNAL_SCANNER_STATE_INLINE_SIZE, INLINE_EXTRA, INLINE_IS_INLINE, INLINE_IS_KEYWORD,
+    INLINE_NAMED, INLINE_VISIBLE,
 };
 
 mod handle;
@@ -210,7 +211,7 @@ pub unsafe fn subtree_symbol(self_: Subtree, arena: *mut SubtreeArena) -> TSSymb
 /// Allocation size for a heap subtree with `child_count` preceding children.
 #[inline]
 pub const fn subtree_alloc_size(child_count: u32) -> usize {
-    subtree_child_storage_size(child_count) + core::mem::size_of::<SubtreeHeapData>()
+    subtree_child_storage_size(child_count) + core::mem::size_of::<SubtreeInternalData>()
 }
 
 /// Bytes occupied by the child prefix, including any padding required to keep
@@ -218,7 +219,7 @@ pub const fn subtree_alloc_size(child_count: u32) -> usize {
 #[inline]
 pub const fn subtree_child_storage_size(child_count: u32) -> usize {
     let bytes = child_count as usize * core::mem::size_of::<Subtree>();
-    let alignment = core::mem::align_of::<SubtreeHeapData>();
+    let alignment = core::mem::align_of::<SubtreeInternalData>();
     (bytes + alignment - 1) & !(alignment - 1)
 }
 
@@ -418,34 +419,38 @@ pub unsafe fn subtree_new_leaf(
         Subtree::from_inline(pool.arena(), data)
     } else {
         let data = subtree_pool_allocate(pool);
-        let mut heap_data = SubtreeHeapData {
-            parser_shared: Cell::new(false),
-            published_shared: AtomicBool::new(false),
-            parser_visited: Cell::new(false),
-            padding,
-            size,
-            lookahead_bytes,
-            error_cost: 0,
-            child_count: 0,
-            symbol,
-            parse_state,
-            flags: 0,
-            data: if has_external_tokens {
-                SubtreeHeapDataContent::ExternalScannerState(ExternalScannerState {
+        let mut leaf_data = SubtreeLeafData {
+            header: SubtreeHeapData {
+                parser_shared: Cell::new(false),
+                published_shared: AtomicBool::new(false),
+                parser_visited: Cell::new(false),
+                padding,
+                size,
+                lookahead_bytes,
+                error_cost: 0,
+                child_count: 0,
+                symbol,
+                parse_state,
+                flags: 0,
+            },
+            content: if has_external_tokens {
+                SubtreeLeafDataContent::ExternalScannerState(ExternalScannerState {
                     data: ExternalScannerStateData::Inline([0; EXTERNAL_SCANNER_STATE_INLINE_SIZE]),
                     length: 0,
                 })
             } else {
-                SubtreeHeapDataContent::LookaheadChar(0)
+                SubtreeLeafDataContent::LookaheadChar(0)
             },
         };
-        heap_data.set_visible(metadata.visible);
-        heap_data.set_named(metadata.named);
-        heap_data.set_extra(extra);
-        heap_data.set_has_external_tokens(has_external_tokens);
-        heap_data.set_depends_on_column(depends_on_column);
-        heap_data.set_is_keyword(is_keyword);
-        data.as_ptr().write(heap_data);
+        leaf_data.header.set_visible(metadata.visible);
+        leaf_data.header.set_named(metadata.named);
+        leaf_data.header.set_extra(extra);
+        leaf_data
+            .header
+            .set_has_external_tokens(has_external_tokens);
+        leaf_data.header.set_depends_on_column(depends_on_column);
+        leaf_data.header.set_is_keyword(is_keyword);
+        data.cast::<SubtreeLeafData>().as_ptr().write(leaf_data);
         Subtree::from_heap(pool.arena(), data)
     }
 }
@@ -473,8 +478,10 @@ pub unsafe fn subtree_new_error(
         false,
         language,
     );
-    result.into_mut().heap_data_mut(pool.arena()).data =
-        SubtreeHeapDataContent::LookaheadChar(lookahead_char);
+    result
+        .into_mut()
+        .heap_data_mut(pool.arena())
+        .set_leaf_content(SubtreeLeafDataContent::LookaheadChar(lookahead_char));
     result
 }
 
@@ -487,30 +494,35 @@ unsafe fn subtree_init_node_data(
     language: *const TSLanguage,
 ) -> MutableSubtree {
     let metadata = ts_language_symbol_metadata(language, symbol);
-    let mut heap_data = SubtreeHeapData {
-        parser_shared: Cell::new(false),
-        published_shared: AtomicBool::new(false),
-        parser_visited: Cell::new(false),
-        padding: length_zero(),
-        size: length_zero(),
-        lookahead_bytes: 0,
-        error_cost: 0,
-        child_count,
-        symbol,
-        parse_state: 0,
-        flags: 0,
-        data: SubtreeHeapDataContent::Children(SubtreeChildrenData {
+    let mut internal_data = SubtreeInternalData {
+        header: SubtreeHeapData {
+            parser_shared: Cell::new(false),
+            published_shared: AtomicBool::new(false),
+            parser_visited: Cell::new(false),
+            padding: length_zero(),
+            size: length_zero(),
+            lookahead_bytes: 0,
+            error_cost: 0,
+            child_count,
+            symbol,
+            parse_state: 0,
+            flags: 0,
+        },
+        children: SubtreeChildrenData {
             visible_child_count: 0,
             named_child_count: 0,
             visible_descendant_count: 0,
             dynamic_precedence: 0,
             repeat_depth: 0,
             production_id: production_id as u16,
-        }),
+        },
     };
-    heap_data.set_visible(metadata.visible);
-    heap_data.set_named(metadata.named);
-    data.as_ptr().write(heap_data);
+    internal_data.header.set_visible(metadata.visible);
+    internal_data.header.set_named(metadata.named);
+    internal_data.header.set_internal(true);
+    data.cast::<SubtreeInternalData>()
+        .as_ptr()
+        .write(internal_data);
     MutableSubtree::from_heap(arena, data)
 }
 

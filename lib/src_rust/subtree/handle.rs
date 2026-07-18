@@ -17,7 +17,8 @@ use super::super::error_costs::{ERROR_COST_PER_MISSING_TREE, ERROR_COST_PER_RECO
 use super::super::language::ts_language_symbol_metadata;
 use super::super::length::{length_add, length_zero, Length};
 use super::data::{
-    ExternalScannerState, SubtreeHeapData, SubtreeHeapDataContent, SubtreeInlineData,
+    ExternalScannerState, SubtreeHeapData, SubtreeInlineData, SubtreeInternalData, SubtreeLeafData,
+    SubtreeLeafDataContent,
 };
 use super::storage::{
     subtree_arena_data, subtree_arena_is_published, subtree_clone_allocation,
@@ -432,18 +433,7 @@ impl Subtree {
         }
         let data = self.heap_data(arena);
         let result = subtree_clone_allocation(pool, self);
-        let content = match &data.data {
-            SubtreeHeapDataContent::Children(children) => {
-                SubtreeHeapDataContent::Children(*children)
-            }
-            SubtreeHeapDataContent::ExternalScannerState(state) => {
-                SubtreeHeapDataContent::ExternalScannerState(state.copy(pool.arena()))
-            }
-            SubtreeHeapDataContent::LookaheadChar(character) => {
-                SubtreeHeapDataContent::LookaheadChar(*character)
-            }
-        };
-        let result_data = SubtreeHeapData {
+        let result_header = SubtreeHeapData {
             parser_shared: Cell::new(false),
             published_shared: AtomicBool::new(false),
             parser_visited: Cell::new(false),
@@ -455,9 +445,32 @@ impl Subtree {
             symbol: data.symbol,
             parse_state: data.parse_state,
             flags: data.flags,
-            data: content,
         };
-        result.as_ptr().write(result_data);
+        if !data.is_internal() {
+            let content = match data.leaf_content() {
+                SubtreeLeafDataContent::ExternalScannerState(state) => {
+                    SubtreeLeafDataContent::ExternalScannerState(state.copy(pool.arena()))
+                }
+                SubtreeLeafDataContent::LookaheadChar(character) => {
+                    SubtreeLeafDataContent::LookaheadChar(*character)
+                }
+            };
+            result
+                .cast::<SubtreeLeafData>()
+                .as_ptr()
+                .write(SubtreeLeafData {
+                    header: result_header,
+                    content,
+                });
+        } else {
+            result
+                .cast::<SubtreeInternalData>()
+                .as_ptr()
+                .write(SubtreeInternalData {
+                    header: result_header,
+                    children: *data.children(),
+                });
+        }
         MutableSubtree::from_heap(arena, result)
     }
 
@@ -659,12 +672,11 @@ impl MutableSubtree {
     }
 
     pub unsafe fn set_external_scanner_state(mut self, arena: *mut SubtreeArena, bytes: &[u8]) {
+        let state = ExternalScannerState::from_bytes(arena, bytes);
         let data = self.heap_data_mut(arena);
         debug_assert_eq!(data.child_count, 0);
         debug_assert!(data.has_external_tokens());
-        data.data = SubtreeHeapDataContent::ExternalScannerState(ExternalScannerState::from_bytes(
-            arena, bytes,
-        ));
+        data.set_leaf_content(SubtreeLeafDataContent::ExternalScannerState(state));
     }
 }
 

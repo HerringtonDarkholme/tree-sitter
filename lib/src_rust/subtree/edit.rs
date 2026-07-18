@@ -13,7 +13,7 @@ use core::{cell::Cell, ptr::NonNull, sync::atomic::AtomicBool};
 use crate::ffi::{TSInputEdit, TSSymbol};
 
 use super::super::length::{length_add, length_saturating_sub, length_sub, length_zero, Length};
-use super::data::{SubtreeHeapData, SubtreeHeapDataContent};
+use super::data::{SubtreeHeapData, SubtreeLeafData, SubtreeLeafDataContent};
 use super::handle::{MutableSubtree, Subtree};
 use super::storage::subtree_pool_allocate;
 use super::{
@@ -82,26 +82,28 @@ unsafe fn subtree_apply_edit_size(
             let inline = result.inline_data(arena).unwrap();
             let data = subtree_pool_allocate(pool);
             arena = pool.arena();
-            let mut heap_data = SubtreeHeapData {
-                parser_shared: Cell::new(false),
-                published_shared: AtomicBool::new(false),
-                parser_visited: Cell::new(false),
-                padding,
-                size,
-                lookahead_bytes,
-                error_cost: 0,
-                child_count: 0,
-                symbol: TSSymbol::from(inline.symbol),
-                parse_state: inline.parse_state,
-                flags: 0,
-                data: SubtreeHeapDataContent::LookaheadChar(0),
+            let mut leaf_data = SubtreeLeafData {
+                header: SubtreeHeapData {
+                    parser_shared: Cell::new(false),
+                    published_shared: AtomicBool::new(false),
+                    parser_visited: Cell::new(false),
+                    padding,
+                    size,
+                    lookahead_bytes,
+                    error_cost: 0,
+                    child_count: 0,
+                    symbol: TSSymbol::from(inline.symbol),
+                    parse_state: inline.parse_state,
+                    flags: 0,
+                },
+                content: SubtreeLeafDataContent::LookaheadChar(0),
             };
-            heap_data.set_visible(inline.visible());
-            heap_data.set_named(inline.named());
-            heap_data.set_extra(inline.extra());
-            heap_data.set_is_missing(inline.is_missing());
-            heap_data.set_is_keyword(inline.is_keyword());
-            data.as_ptr().write(heap_data);
+            leaf_data.header.set_visible(inline.visible());
+            leaf_data.header.set_named(inline.named());
+            leaf_data.header.set_extra(inline.extra());
+            leaf_data.header.set_is_missing(inline.is_missing());
+            leaf_data.header.set_is_keyword(inline.is_keyword());
+            data.cast::<SubtreeLeafData>().as_ptr().write(leaf_data);
             result = MutableSubtree::from_heap(arena, data);
         }
     } else {
