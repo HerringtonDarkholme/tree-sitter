@@ -1,588 +1,586 @@
-# Subtree Arena and Compacting GC Implementation Plan
+# Subtree Arena Architecture Decision Space
 
 ## Status
 
-This document records both the architecture decision space and the implementation
-contract for replacing independently allocated subtrees in `lib/src_rust` with
-arena storage. Subtree value representation is deliberately decided before the
-arena and collector implementation so that representation, ownership,
-collector safety, public identity, and performance decisions do not drift while
-the code is being changed.
+This document explains the representation choices for replacing independent
+subtree allocations with arena storage. It is a design comparison, not an
+implementation plan. It deliberately stops before choosing a final candidate,
+specifying a collector algorithm, listing code changes, or defining an
+implementation schedule.
 
-The plan is intentionally limited to subtree storage. Stack nodes and generic
-runtime arrays remain under their current allocation policies. The deterministic
-stack window is compatible with this work but is not part of the arena itself;
-its independent invariants are recorded in `DETERMINISTIC_WINDOW.md`.
+The scope is syntax-subtree storage in `lib/src_rust`. Stack nodes, generic
+runtime arrays, lexer buffers, query storage, and generated language tables are
+separate allocation domains. The deterministic stack window is described in
+`DETERMINISTIC_WINDOW.md`.
 
-## Goals
+## Why this decision has several layers
 
-1. Keep the value copied through stack links and child arrays at most eight
-   bytes; explicitly compare the current eight-byte inline/reference union with
-   a four-byte uniform node index.
-2. Store arena-backed node records in contiguous storage rather than in one
-   allocator block per node.
-3. Treat pointer versus physical index versus logical ID as an explicit
-   representation decision rather than an incidental allocator detail.
-4. Preserve intrusive reference counts and copy-on-write behavior for heap
-   subtrees.
-5. Stop calling `malloc` and `free` for individual internal subtree nodes.
-6. Reclaim rejected GLR subtrees and other dead parser-private nodes with a
-   routine, in-place mark-and-slide collection.
-7. Preserve public C ABI layouts and public node/cursor behavior.
-8. Compare a pointer-stable paged arena with an index-addressed contiguous arena
-   before selecting the final storage policy.
+“Put subtrees in an arena” sounds like one decision, but it is at least four:
 
-## Non-goals
+1. **What value does the parser copy?** Today an eight-byte `Subtree` is either
+   a complete small leaf or a pointer to a heap record.
+2. **What does an out-of-line node record contain?** The record may be uniform
+   for every node or specialized for compact leaves, full leaves, and internal
+   nodes.
+3. **Where are records stored and how are they addressed?** A record can live
+   in an independent allocation, a stable page, a contiguous byte arena, a
+   fixed slab, or a kind-specific table.
+4. **What identity escapes through the public API?** `TSNode` identifies a
+   particular occurrence in a tree. That identity is not necessarily the same
+   thing as the reference used internally to reach the node record.
 
-- This is not an arena conversion for `StackNode`, `StackHead`, or generic
-  `Array<T>` buffers.
-- This does not remove subtree reference counts.
-- This does not change subtree summarization, balancing, recovery, or parse
-  selection semantics.
-- This does not add incremental reuse to the active Rust parser. The current
-  parser does not import `old_tree` subtrees.
-- This does not permit unsynchronized collection while callers are reading a
-  published `TSTree`.
-- This does not introduce a 16-byte `{arena, index}` subtree handle.
+These decisions interact, but they are not interchangeable. For example, an
+arena does not imply indexes: a paged arena can preserve pointers. An index does
+not imply compaction: it can address an append-only buffer. A tracing collector
+does not imply removing refcounts: refcounts can continue to govern sharing and
+copy-on-write while tracing reclaims arena space in batches.
 
-## Architecture decision space
+## Current representation, from parser value to public node
 
-The word `Subtree` currently combines two concepts:
+The current runtime is easiest to understand as four layers.
 
-1. the small value copied through stack links, child arrays, parser caches, and
-   public-tree roots; and
-2. for inline leaves, the syntax-node data itself.
+### 1. `Subtree` handle
 
-Those concepts do not have to remain combined. Even when every syntax node is
-stored out of line, the runtime still needs a small copyable reference value,
-but that value can be only a pointer or index.
+`Subtree` is the hot value copied through stack links, child arrays, token
+caches, reduction arrays, and `TSTree.root`. It is eight bytes:
 
-### Independent design axes
+```text
+small leaf                         heap-backed node
++-------------------------+        +-------------------------+
+| SubtreeInlineData       |        | *const SubtreeHeapData |
+| complete leaf metadata  |        | low tag bit is clear    |
++-------------------------+        +-------------------------+
+```
 
-| Axis | Principal options |
-| --- | --- |
-| Subtree value model | inline-or-reference, uniform reference, direct embedded value |
-| Reference encoding | raw pointer, physical arena index, stable logical ID, tagged table index |
-| Reference width | four-byte index, eight-byte index, native pointer |
-| Record uniformity | current full heap record, variable-sized per-kind records, fixed node slab, separate kind tables |
-| Node storage | per-node heap, pointer-stable paged arena, contiguous byte arena, fixed-record slab |
-| Child storage | coallocated tail, fixed inline capacity, global child range, separate child block, sibling links |
-| Leaf ownership | inline/no ownership, refcounted arena record, tracing-only arena record |
-| Internal ownership | intrusive refcount, tracing, refcount plus tracing GC |
-| Reclamation | bulk-only, free list, mark-sweep, semispace, mark-compact |
-| Public identity | address, physical slot index, stable occurrence ID, frozen index after publication |
+The handle therefore has two jobs:
 
-Pointer versus index, storage shape, reclamation, and child representation are
-orthogonal. A pointer normally favors pages because growth must not move existing
-addresses. An index normally favors one reallocatable buffer because moving its
-base does not invalidate relative indexes. Neither relationship is mandatory:
-an index can address pages, and a pointer can address a reserved non-moving
-virtual region.
+- store a qualifying leaf directly; or
+- refer to an out-of-line record.
 
-### Subtree value models
+Copying the eight bytes does not by itself create ownership. Callers explicitly
+retain a referenced heap node when the copy becomes another owner.
 
-| Model | Value copied by the parser | Leaf storage | Internal storage | Main tradeoff |
-| --- | --- | --- | --- | --- |
-| Hybrid inline/reference | inline leaf bits or pointer/index | qualifying leaves inside the handle | out-of-line record | avoids many leaf allocations but has two access paths |
-| Uniform pointer | `*const NodeRecord` | every leaf allocated | every internal allocated | simple and direct, but requires stable addresses |
-| Uniform physical index | four- or eight-byte offset | every leaf in arena | every internal in arena | compact and movable, but every access needs arena context |
-| Uniform logical ID | ID resolved through a location table | every leaf in storage | every internal in storage | stable movement with a permanent extra lookup |
-| Tagged table index | kind plus table index | specialized leaf table | specialized internal table | dense per-kind records but multiple storage domains |
-| Direct full value | complete node record | embedded | cannot naturally embed recursive/shared children | unsuitable as the universal tree edge value |
+### 2. Heap record
 
-The direct-value model cannot remove references from a shared recursive tree.
-Parents, stack links, and GLR alternatives must still refer to independently
-owned or shared descendants. The meaningful alternative is therefore not “no
-`Subtree` type”; it is “`Subtree` becomes only a `NodeRef`.”
+Every internal syntax node and the minority of leaves that do not fit inline
+use `SubtreeHeapData`. An internal allocation currently looks like:
 
-### Handle width
+```text
+[child Subtree handles...][SubtreeHeapData]
+```
 
-Removing inline payload means the reference no longer intrinsically requires
-eight bytes:
+The heap record stores measurements and flags used by parsing, recovery,
+incremental comparison, and public navigation. Its atomic refcount belongs to
+the node record, not to the eight-byte handle.
 
-| Reference | Capacity | Consequence |
+### 3. Allocation and ownership
+
+Each internal node owns one variable-sized allocator block containing its child
+handles and heap record. A parent owns its child handles; stack links and tree
+roots can also own handles. The resulting object graph is a directed acyclic
+graph rather than necessarily a unique tree because GLR paths and tree copies
+can share subtrees.
+
+When a refcount reaches zero, release recursively decrements children and frees
+the allocation. The proposed arena work is motivated by the frequency of these
+independent allocation and deallocation operations, especially for internal
+nodes built on paths later rejected by GLR.
+
+### 4. Public occurrence identity
+
+`TSNode.id` currently points to a `Subtree` **slot**: either `TSTree.root` or one
+element of a parent's child array. It does not simply point to
+`SubtreeHeapData`.
+
+That distinction is necessary because:
+
+- an inline leaf has no separate record address;
+- the same shared heap record can occur in two different child slots; and
+- public equality distinguishes occurrences using `(tree, slot identity)`.
+
+Any moving design must therefore answer two different questions:
+
+1. How does an internal `Subtree` find its record after movement?
+2. How does a caller-held `TSNode` continue to identify its child occurrence?
+
+Solving only the first question is insufficient.
+
+## Vocabulary used in the comparisons
+
+| Term | Meaning | Example |
 | --- | --- | --- |
-| `u32` word index | about 32 GiB at eight-byte granularity | halves child-reference storage and remains ample for one tree arena |
-| `u32` byte index | 4 GiB | simpler arithmetic but a lower arena limit |
-| `u64` index | effectively unlimited | same width as the current handle |
-| native pointer | platform address space | direct lookup and non-moving records |
+| Handle or parser value | Small value copied throughout the parser | current eight-byte `Subtree` |
+| Node record | Out-of-line metadata and optional children for one syntax node | `SubtreeHeapData` plus child handles |
+| Child slot | One occurrence of a child handle inside a parent | `parent.children()[i]` |
+| Physical address | Process address of a record or slot | current heap pointer |
+| Physical index | Offset into a particular storage buffer | byte, word, node, or slot index |
+| Logical ID | Stable name resolved through a table to the current physical location | `locations[id] -> offset` |
+| Record identity | Identity of shared syntax data | heap allocation, physical index, or logical ID |
+| Occurrence identity | Identity of one position within one public tree | current `TSNode.id` child-slot address |
+| Storage domain | Allocation whose base and lifetime give meaning to an index | one arena, page set, node slab, or child array |
 
-The performance ledger rejects a 16-byte `Subtree`, which regressed parse time
-by 19.74%. It does not reject a four-byte uniform index. The invariant to carry
-forward is that the value copied through the parser must remain very small, not
-that it must always contain inline syntax data.
+A physical index is only meaningful together with its storage domain. The
+number `42` does not identify a subtree unless the parser or tree also tells us
+which arena contains word, byte, node, or slot 42.
 
-### Uniform reference does not require uniform record size
-
-Using the current approximately 88-byte `SubtreeHeapData` literally for every
-leaf would be simple but likely wasteful. The allocation audit measured about
-59.09% internal nodes, 3.21% heap leaves, and therefore about 37.70% currently
-inline leaves. Literal unification would turn that last group from eight-byte
-values into full arena records.
-
-Three physical models keep a uniform reference without requiring identical
-record sizes:
-
-| Record model | Layout | Benefit | Cost |
-| --- | --- | --- | --- |
-| Variable-sized arena records | small compact-leaf, full-leaf, and internal block kinds | one reference and one arena while keeping leaves small | block-kind branch and variable-size GC scan |
-| Fixed node slab plus child array | `NodeRecord[]` and separate `ChildRef[]` | true fixed-index slab and easy node compaction | separate child lifetime/compaction and additional lookup |
-| Separate kind tables | compact-leaf, full-leaf, and internal arrays | densest record for each kind | tagged references and coordinated multi-table collection |
-
-The strongest uniform-reference candidate is a four-byte physical index into a
-variable-sized arena:
+A logical ID adds a level of indirection:
 
 ```text
-Subtree = u32 arena word index
-
-compact leaf:  [GC header][packed leaf record]
-full leaf:     [GC header][full metadata][scanner bytes]
-internal:      [GC header][full metadata][children...]
+logical ID 42 -> location table entry -> current physical index -> record
 ```
 
-This representation pays an arena lookup for every leaf, but it halves stored
-child references, removes the inline/heap union, and makes every syntax node
-relocatable.
+Compaction changes the location-table entry without changing ID 42. A direct
+physical-index design instead updates every reference that contains the old
+index.
 
-### Refcount implications of removing inline leaves
+## Constraints that every candidate must confront
 
-| Policy | Internal records | Leaf records | Tradeoff |
-| --- | ---: | ---: | --- |
-| Refcount every node | yes | yes | uniform ownership but many new leaf atomics |
-| Refcount only internals | yes | no | preserves internal DAG/COW ownership; tracing determines leaf liveness |
-| Pure tracing | no | no | simplest collector graph but a much larger ownership rewrite |
-| Refcount for sharing plus tracing for reclamation | yes | optional | likely final hybrid; policy can differ by record kind |
+### Hot handle size
 
-The requirement that internal nodes remain refcounted does not require every
-compact leaf to gain a refcount. A uniform index may address an immutable,
-tracing-only compact leaf record while internal nodes retain intrusive counts.
+The handle is copied far more often than a public `TSNode` is created. The
+performance ledger measured a 19.74% parse-time regression from a 16-byte
+`Subtree`. A candidate must therefore use a native pointer, an index no wider
+than eight bytes, or the existing eight-byte inline/reference union. A
+16-byte `{arena, reference}` pair is not a useful baseline.
 
-### Children representation
+### Inline leaves are common
 
-| Model | Node fields/layout | Locality | Reclamation/compaction consequence |
-| --- | --- | --- | --- |
-| Coallocated tail | `[record][child handles...]` | best parent/child-array locality | variable-sized node blocks move together |
-| Fixed inline capacity | fixed child slots plus overflow | excellent for small arities | every node pays capacity; two access paths |
-| Global child range | `{child_start, child_count}` into `ChildRef[]` | dense sequential children | nodes and child array compact separately |
-| Separate child block | pointer/index to variable block | extra indirection | two block kinds and two ownership paths |
-| First-child/next-sibling | two references per record | good sequential walk | indexed child lookup becomes linear |
+The allocation audit found approximately:
 
-The existing coallocated child representation is the correct control for the
-first pointer and index experiments. Externalizing children at the same time as
-changing references would prevent attributing the result to either decision.
+- 59.09% internal nodes;
+- 3.21% existing heap leaves; and
+- 37.70% inline leaves.
 
-### Architecture candidates
+Turning every inline leaf into a full 88-byte heap-shaped record would remove a
+branch from accessors but greatly increase live storage and writes. A uniform
+reference is plausible only if its leaf records are substantially smaller than
+the current full heap record or its narrower child references compensate.
 
-| Candidate | Subtree value | Node storage | Children | Reclamation | Question answered |
-| --- | --- | --- | --- | --- | --- |
-| A | current inline-or-pointer, 8 B | pointer-stable paged arena | coallocated | bulk-only | value of removing per-node allocation alone |
-| B | uniform pointer | variable leaf/internal records in pages | coallocated | bulk-only | cost of removing inline leaves while retaining direct access |
-| C | current inline-or-index, 8 B | contiguous byte arena | coallocated | bulk-only, then compact | cost of arena-aware indexed heap access |
-| D | uniform physical index, 4 B | variable compact-leaf/full-leaf/internal records | coallocated | bulk-only, then compact | benefit of one small reference representation |
-| E | uniform physical index, 4 B | fixed `NodeRecord[]` | global `ChildRef[]` | compact both arrays | fully flattened slab architecture |
-| F | uniform logical ID | movable arena through location table | either | moving GC | cost/benefit of stable IDs and post-publication movement |
+### Internal nodes remain refcounted
 
-The experiments should proceed A, C, then D. A isolates allocator removal. C
-isolates indexed access without allocating current inline leaves. D tests the
-more radical uniform model only after the index plumbing exists. B is optional,
-and E/F are follow-up architectures rather than first implementations.
+Internal refcounts currently answer two questions:
 
-## Current contiguous-arena candidate
+- is another owner keeping this node alive? and
+- is the node uniquely owned and therefore safe to mutate in place?
 
-The rest of this document describes candidate C, the conservative indexed
-arena. It remains an implementation candidate rather than a final decision
-until the representation gate compares it with A and D.
+Arena reclamation may batch physical space recovery, but it must not silently
+remove this sharing and copy-on-write contract. Whether compact leaf records
+also need refcounts is a separate choice.
 
-### One contiguous arena
+### The graph is shared but acyclic
 
-Each parser result is built in one growable byte buffer. Allocations bump an
-arena cursor. Growing the buffer may move its base allocation, but relative
-indexes remain valid. There are no pages and no per-node free lists.
+Refcounts are sufficient to discover logical death because subtree edges point
+from parent to child and do not form cycles. A collector is useful here mainly
+to reclaim arena holes, relocate live blocks, and replace many allocator calls;
+it is not needed to break reference cycles.
 
-The parser transfers the arena to the resulting `TSTree`. Tree copies share the
-arena through an arena-level owner count. The final owner releases the entire
-buffer at once.
+### Published identities can escape
 
-### Candidate C: eight-byte indexed subtree handle
+Parser-private handles can be enumerated at a controlled safepoint. Public
+`TSNode` values can be copied into arbitrary caller memory and cannot be found
+or rewritten by the runtime. A candidate must either:
 
-`SubtreeInlineData` remains byte-for-byte unchanged. The other union arm changes
-from a heap pointer to an encoded arena word index:
+- keep the referenced public slot stable after publication;
+- encode a stable occurrence ID and resolve it through the tree; or
+- freeze movement once the tree becomes public.
 
-```text
-Subtree: 8 bytes
+### “One arena” has a precise meaning
 
-inline value                    arena value
-+------------------------+      +------------------------+
-| SubtreeInlineData      |      | encoded word index     |
-| first-byte bit 0 = 1   |      | first-byte bit 0 = 0   |
-+------------------------+      +------------------------+
+A strict contiguous-arena design has one growable record buffer. A paged arena
+is one logical owner but multiple physical allocations. A fixed node slab plus
+child array has two storage domains. Separate kind tables have several storage
+domains. These designs can still be useful controls, but they are not all
+equivalent to the requested single contiguous block.
 
-zero non-inline value = NULL_SUBTREE
-```
+## How the design axes depend on one another
 
-Indexes count eight-byte words. The encoding must reserve the existing inline
-tag and must be defined explicitly for every supported endianness. Compile-time
-size/alignment assertions remain mandatory.
-
-An arena index is a physical location, not a stable logical node ID. Collection
-moves live blocks and rewrites every registered owning handle to its forwarded
-index. This avoids a permanent `NodeId -> offset` lookup on every subtree field
-access.
-
-### Arena block layout
-
-The target block layout is:
+The main dependency chain is:
 
 ```text
-arena index
+handle model
     |
-    v
-+-------------------------------+
-| GcHeader                      | 8 bytes
-|   size_words: u32             |
-|   mark_or_forward: u32        |
-+-------------------------------+
-| SubtreeHeapData               | current common heap data
-+-------------------------------+
-| child Subtree handles         | 8 bytes * child_count
-+-------------------------------+
-| optional scanner-state bytes  | variable tail payload
-+-------------------------------+
-| alignment padding             |
-+-------------------------------+
+    +--> reference encoding and width
+             |
+             +--> storage can move or must stay stable
+                      |
+                      +--> reclamation choices
+                               |
+                               +--> public occurrence identity policy
+
+record shape ---------> object size, scan rules, and leaf overhead
+child representation --> locality and number of storage domains
+ownership policy ------> retain/release and copy-on-write semantics
 ```
 
-`SubtreeHeapData` precedes the variable child array so resolving common fields
-does not require reading duplicated child-count metadata. Children are found at
-a constant offset after the heap header.
+The top chain contains forcing relationships. A raw pointer requires the target
+address to stay stable. A physical index permits the arena base to move, but
+compaction changes the index and therefore requires reference rewriting. A
+logical ID permits compaction without changing handles, but adds a location
+lookup.
 
-Large serialized external-scanner state should be stored in the block tail and
-addressed relative to the block. Leaving it behind a separately allocated
-pointer would preserve a significant class of per-leaf allocation and would
-complicate relocation cleanup.
+The bottom three axes are more independent. For example, both pointer and index
+handles can refer to variable-sized records with coallocated children. Changing
+child layout while changing handle encoding makes a benchmark difficult to
+interpret because either change could explain the result.
 
-### Refcounts remain authoritative between collections
+## Subtree value models
 
-Heap subtree handles retain and release exactly as they do now:
+| Model | Value copied by parser | Where leaves live | Where internals live | Essential property |
+| --- | --- | --- | --- | --- |
+| Hybrid inline/reference | inline bits or pointer/index | qualifying leaves in handle; others out of line | out-of-line record | preserves cheap common leaves |
+| Uniform pointer | `*const NodeRecord` | every leaf out of line | every internal out of line | one access path, stable addresses |
+| Uniform physical index | byte/word/node offset | every leaf in indexed storage | every internal in indexed storage | small references and relocatable base |
+| Uniform logical ID | stable ID resolved through table | every leaf in managed storage | every internal in managed storage | movement without rewriting handles |
+| Tagged table index | kind tag plus per-kind index | specialized leaf table | specialized internal table | dense records specialized by kind |
+| Direct full value | complete record embedded in parser value | leaf can be embedded | recursive/shared children still require references | conceptual value-semantics extreme |
 
-- `retain` atomically increments the resolved heap header;
-- `release` atomically decrements it;
-- a transition to zero recursively releases owned heap children; and
-- zero-reference blocks become dead arena bytes instead of being individually
-  freed.
+### Hybrid inline/reference
 
-Keeping the release cascade preserves accurate copy-on-write decisions and
-prevents descendants of a dead parent from carrying stale elevated counts.
-Collection does not change refcounts because moving a block does not change its
-ownership graph.
+This is the current value model. Its primary advantage is that the common small
+leaf requires no record allocation, refcount, or arena lookup. Its costs are a
+tag branch in accessors and an eight-byte handle even when the reference arm
+could fit in four bytes.
 
-Debug collection will independently count incoming live references and assert
-that they agree with intrusive counts. This is a witness, not the release-build
-ownership mechanism.
+Changing the reference arm from pointer to index does not require removing the
+inline arm. That distinction separates candidate C from candidate D below.
 
-### In-place mark and slide, not semispace
+### Uniform pointer
 
-A semispace collector is deliberately rejected for the first implementation.
-It would make evacuation simple, but it makes only about half of a fixed arena
-capacity usable and copies the mostly-live successful syntax tree at every
-collection.
+Every node becomes an out-of-line record and the parser copies only a pointer.
+Access is direct and code paths become more uniform, but every former inline
+leaf now consumes record storage and must have a lifetime policy. Pointers also
+prevent moving records, so storage must use independent allocations, stable
+pages, a non-moving reserved region, or another stable-address scheme.
 
-Stable relative indexes already make arena `realloc` safe. At a collection
-safepoint, a four-pass in-place collector is sufficiently direct:
+This model answers whether inline leaves themselves are worth their two-path
+complexity when direct pointer access is retained.
 
-1. Mark all heap blocks reachable from registered roots.
-2. Scan blocks and store each live block's compacted destination in its old
-   `GcHeader`.
-3. Rewrite registered roots and every live child handle through those
-   forwarding indexes.
-4. Scan from low to high and `memmove` live blocks to their destinations, then
-   truncate the arena cursor.
+### Uniform physical index
 
-The sweep is folded into the final scan. Dead tail resources are destroyed as
-their blocks are skipped. Destinations never exceed sources, so ascending
-movement cannot overwrite an unvisited block.
+Every parser value is an offset interpreted relative to an arena or table.
+Four-byte indexes can halve child arrays and stack-held subtree values, while an
+eight-byte index can preserve the current handle width and capacity.
 
-## Collector safety model
+An arena `realloc` may change the base pointer without changing indexes. True
+compaction is different: if a record moves from index 100 to index 60, every
+handle containing 100 must be rewritten. This is straightforward for
+registered parser roots and in-arena children, but not for unregistered stack
+locals or escaped public occurrence identities.
 
-### Collection is never implicit in allocation
+### Uniform logical ID
 
-An arbitrary Rust stack local can contain a copied `Subtree` handle. A moving
-collector cannot discover or rewrite such a local. Therefore arena allocation
-may grow the buffer but must never initiate collection itself.
+The handle contains a stable ID rather than a physical location. A location
+table supplies the current offset. Compaction changes the table, not the
+handles.
 
-Collection occurs only at explicit parser safepoints after operation-local
-handles have been transferred into registered runtime state. The initial
-safepoint is the outer parser-advance boundary, not `subtree_new_node` or a
-general-purpose reserve call.
-
-### Parser-private root set
-
-The root audit must include at least:
-
-- all `StackLink` subtree handles;
-- all deterministic-window entries;
-- token-cache subtree handles;
-- the parser's finished-tree candidate;
-- reusable-node state that owns subtrees;
-- persistent pop/reduction arrays whose elements own subtrees;
-- recovery-owned subtree arrays; and
-- every other parser field that can retain a heap subtree across the chosen
-  safepoint.
-
-Scratch values borrowed only within an operation must be gone before the
-safepoint. A debug root/count witness will fail collection if an unregistered
-live owner exists.
-
-### Trigger policy
-
-The first implementation uses a conservative routine trigger:
+This simplifies relocation and permits stable internal identity, but every
+access becomes at least:
 
 ```text
-collect when dead_words >= max(used_words / 4, 1 MiB)
+arena -> location table[id] -> arena base + offset -> record
 ```
 
-Collection also runs immediately before the successful result is published as
-a `TSTree`. Thresholds are policy rather than representation and may be tuned
-only after correctness and paired perf-gate results exist.
+The location table also consumes memory, needs its own growth policy, and does
+not by itself solve public occurrence identity: two parent slots containing the
+same logical node ID are still two different public nodes.
 
-## Public tree, node, and cursor boundary
+### Tagged table index
 
-### `TSTree`
+The handle encodes both a record kind and an index into that kind's table. A
+compact leaf can therefore use a dense small record without forcing internal
+nodes into the same shape.
 
-`TSTree` gains an arena owner alongside its root handle. Its public type is
-opaque, so this does not change the C layout contract exposed in `api.h`.
+The tradeoff is multiple storage domains and more tag dispatch. Collection,
+tree copying, and public-slot resolution must coordinate all tables. This is
+closer to a compact node database than to one contiguous arena.
 
-```text
-TSTree
-  root: Subtree
-  arena: shared SubtreeArena owner
-  language
-  included ranges
-```
+### Direct full value
 
-The successful parse performs a final collection and then changes the arena
-from `ParserPrivate` to `PublishedFrozen`.
+Direct values work for leaves because leaves do not recursively contain
+children. They cannot be the universal edge value in a shared recursive tree:
+an internal value would need to embed descendants recursively, duplicate them,
+or reintroduce references for children.
 
-### `TSNode.id`
+This row remains useful because it explains what inline leaves already are: a
+limited direct-value optimization. It is not a complete replacement for
+`Subtree`; the real design question is where the boundary lies between direct
+leaf values and referenced node records.
 
-Today `TSNode.id` points to a `Subtree` slot in the root or a parent's child
-array. Arena relocation makes that raw address invalid even if the subtree
-handle itself has been rewritten.
+## Reference width and units
 
-The ABI field remains `const void *`, but its opaque value becomes an encoded
-arena index for the child-handle slot. The tree pointer supplies the arena
-context. A reserved non-null value identifies the root slot stored directly in
-`TSTree`.
-
-This preserves occurrence identity: two child slots that happen to contain the
-same shared heap subtree still produce distinct public nodes. `ts_node_eq`
-continues to compare `(tree, id)`.
-
-`TreeCursorEntry` likewise stores a subtree-slot index rather than
-`*const Subtree`. The public `TSTreeCursor` layout remains unchanged.
-
-### Published arenas do not compact
-
-The runtime cannot enumerate `TSNode` values copied into caller memory. The
-first implementation therefore never changes physical indexes after a tree is
-published. The buffer base may move only during an operation that has exclusive
-arena ownership, because even a base-pointer update would race concurrent
-readers.
-
-Supporting post-publication compaction would require stable logical occurrence
-IDs plus an ID-to-index table, or a read barrier on every node access. That is a
-separate design with permanent memory and lookup costs and is not included here.
-
-### Tree copy and edit
-
-- `ts_tree_copy` retains the root and arena owner without copying the buffer.
-- deleting a copy releases its root and arena owner;
-- deleting the final copy destroys the complete arena;
-- editing a uniquely owned tree may append replacement blocks but does not
-  compact published indexes; and
-- editing a shared tree first detaches by copying the arena at identical
-  indexes, then recomputes ownership for the detached root and applies the edit.
-
-Preserving indexes during detach keeps existing `TSNode.id` values associated
-with the edited tree meaningful. Whole-arena detach is a real cost compared
-with today's path-level copy-on-write and must be measured on edit workloads.
-
-## Scratch-node representation
-
-The current scratch-node path writes a temporary `SubtreeHeapData` after a
-generic child-array buffer and returns a normal pointer-backed `Subtree`. An
-indexed arena handle must never refer to storage outside the arena.
-
-Scratch summarization will therefore use a distinct borrowed view, for example:
-
-```rust
-struct ScratchSubtree<'a> {
-    data: &'a SubtreeHeapData,
-    children: &'a [Subtree],
-}
-```
-
-Only the small set of summarization and stack-state helpers that consume the
-scratch node should accept this view. Scratch nodes are never retained,
-released, placed in the arena, or exposed through public APIs.
-
-## Expected code changes
-
-| Area | Planned change |
-| --- | --- |
-| `subtree/data.rs` | Add GC header/tail layout support and replace scanner-state pointers with arena-relative storage |
-| `subtree/handle.rs` | Replace pointer union arm with encoded index; make heap access arena-aware; retain/release no longer free blocks |
-| `subtree/storage.rs` | Replace leaf pool and per-node allocation with bump allocation, block iteration, forwarding, and collection |
-| `subtree.rs` | Move child handles into arena blocks; split scratch-node view from owned subtree representation |
-| `subtree/edit.rs` | Resolve mutable nodes through an arena and preserve indexes across published edits |
-| `stack.rs` and stack modules | Supply arena context for subtree reads and ownership operations; expose stack roots to GC |
-| parser modules | Own the private arena, register complete roots, and invoke collection only at parser safepoints |
-| `tree.rs` | Transfer/share/detach/destroy arenas with public trees |
-| `node.rs` | Resolve opaque slot indexes through the node's tree arena |
-| `tree_cursor.rs` | Store and resolve slot indexes instead of subtree pointers |
-| changed-range traversal | Carry the arena corresponding to each compared tree |
-
-All `Subtree` methods that currently dereference themselves without context
-must become arena-aware. To keep call sites readable, the implementation may
-introduce short-lived views such as `SubtreeRef { arena, handle }`, but those
-views must not be stored across a collection.
-
-## Implementation stages
-
-### 0. Representation gate
-
-1. Implement or prototype candidate A far enough to measure pointer-stable
-   paged allocation with the current eight-byte `Subtree` and coallocated
-   children.
-2. Record allocation-call elimination, peak RSS, retained dead bytes, and paired
-   perf-gate results.
-3. Implement candidate C initially without movement and measure the cost of
-   adding arena context and index decoding while preserving inline leaves.
-4. Once C is correct, prototype candidate D's four-byte uniform index and
-   compact per-kind records without changing the collector policy.
-5. Select the representation before implementing routine GC. Do not select
-   semispace versus mark-compact based on a representation that has already
-   failed its non-moving performance gate.
-
-Gate: choose A, C, or D with an explicit ledger entry. Record handle width,
-record sizes, child-reference bytes, allocations, throughput, and peak RSS.
-
-### A. Representation and non-moving arena
-
-1. Introduce `ArenaIndex`, `GcHeader`, and `SubtreeArena`.
-2. Apply the representation selected by stage 0 and enforce its width/tag with
-   compile-time assertions.
-3. Convert heap accessors to resolve through an arena.
-4. Allocate leaf and internal heap data by bumping the arena.
-5. Keep collection disabled; grow the arena as needed.
-6. Replace per-node frees with refcount-zero accounting.
-
-Gate: full parity and ABI tests pass before adding movement.
-
-### B. Parser ownership integration
-
-1. Give parser, stack, subtree-array helpers, recovery, and edit paths explicit
-   arena context.
-2. Replace scratch fake-subtree storage with the borrowed scratch view.
-3. Transfer the arena into `TSTree` on acceptance.
-4. Implement arena sharing, final destruction, and detach-on-edit.
-5. Convert `TSNode.id` and tree-cursor internals to slot indexes.
-
-Gate: full fixtures, node/cursor APIs, tree copy/edit, changed ranges, and ABI
-tests are byte-for-byte compatible.
-
-### C. Collector
-
-1. Add block scanning and mark bits.
-2. Implement the audited parser root visitor.
-3. Compute forwarding indexes.
-4. Rewrite roots and child handles.
-5. Slide live blocks and clean dead tail payloads.
-6. Add debug incoming-reference and post-move field witnesses.
-7. Enable final pre-publication collection.
-8. Enable the routine dead-byte threshold at parser safepoints.
-
-Gate: forced collection after every eligible parser boundary must pass before
-using the routine threshold.
-
-### D. Performance and policy
-
-1. Run paired same-session perf-gate measurements across all seven languages.
-2. Measure peak RSS and arena high-water/live/dead bytes.
-3. Compare candidate A/C/D representation evidence, then compare normal
-   threshold, final-only collection, and collection disabled for the selected
-   indexed candidate.
-4. Tune only the threshold; do not add pages, size classes, or a second arena
-   during this stage.
-5. Remove temporary counters after the policy is selected and record results in
-   `PERFORMANCE.md`.
-
-## Validation gates
-
-Correctness is required before performance evaluation:
-
-```bash
-cargo fmt --check --all
-cargo clippy -p tree-sitter --lib --tests -- -D warnings
-cargo test -p tree-sitter --test abi_surface
-cargo test -p tree-sitter --lib
-cargo test --all
-```
-
-The repository's corpus/parity and ast-grep gates must also remain green.
-Collector-specific tests must cover:
-
-- null handles and, when selected, inline handles across collection;
-- four-byte index capacity, alignment, and overflow checks when candidate D is
-  selected;
-- shared child DAGs and exact refcounts;
-- dead parent cascades;
-- scanner-state tail relocation;
-- copy-on-write before and after movement;
-- forced movement with every block changing index;
-- stack, token-cache, recovery, and deterministic-window roots;
-- public root/child/sibling equality;
-- tree cursor traversal after arena base relocation;
-- `ts_tree_copy`, edit, changed ranges, and deletion in both orders; and
-- 32-bit-compatible handle and `TSNode.id` encodings.
-
-## Performance acceptance
-
-This architecture is justified only if removing allocator traffic outweighs
-arena-context access, child copying, GC headers, and collection work.
-
-The initial acceptance rule is:
-
-- no language below -1.0 normalized perf-gate point;
-- overall geometric-mean throughput is not worse than noise;
-- internal-node `malloc/free` calls are eliminated;
-- peak RSS does not regress materially on the largest fixtures; and
-- edit/copy benchmarks disclose the detach cost rather than hiding it in the
-  parse-only headline.
-
-A neutral throughput result may be retained if allocator-call elimination and
-peak-memory behavior are substantial and the implementation remains within the
-complexity budget. A clear throughput or RSS regression closes the design
-without adding paging or multiple arena variants.
-
-## Known risks
-
-| Risk | Consequence | Mitigation |
+| Reference | Approximate capacity | Important consequence |
 | --- | --- | --- |
-| Missing parser root | Use-after-move or premature reclamation | Explicit safepoints, forced-GC tests, debug refcount witness |
-| Arena context on hot accessors | Parse throughput regression | Keep 8-byte handle, inline fast path, inspect generated code and perf gate |
-| Moving atomics | Undefined concurrent access | Move only in parser-private/exclusive phase |
-| Child copy into arena | More bytes copied during reductions | Move handles without retain/release and reuse source scratch buffers |
-| Eight-byte GC header | Higher live-node size | Keep header minimal and measure RSS |
-| Published node identity | Stale caller-held `TSNode` | Freeze physical layout after publication |
-| Shared-tree edit detach | O(tree size) copy | Lazy detach only on edit; benchmark explicitly |
-| Future old-tree reuse | Cross-arena handles do not fit local index model | Import into the new arena or revisit the one-arena constraint as a separate project |
-| Complexity growth | Hard-to-maintain runtime | Stage gates; do not add pages, semispaces, or stable-ID tables in v1 |
+| `u32` byte index | 4 GiB per storage domain | simple units but lowest limit |
+| `u32` eight-byte-word index | about 32 GiB per storage domain | four-byte handle with natural record alignment |
+| `u64` index | effectively unlimited for one tree | current handle width, no child-array shrink |
+| native pointer | platform address space | direct access but target address cannot move |
 
-## Rollback boundary
+The unit is part of the representation. A word index needs a scale operation
+but extends the range of `u32`; a node index works only if records are fixed
+size or a location table maps node numbers to variable records.
 
-Stages A and B must keep arena access behind `subtree/handle.rs` and allocation
-behind `subtree/storage.rs`. The collector must remain a policy of
-`SubtreeArena`, not leak forwarding logic into parser actions. If the design is
-rejected at a gate, these boundaries make it possible to restore pointer-backed
-storage without undoing unrelated deterministic-stack work.
+On a 64-bit target, changing an eight-byte pointer or hybrid handle to an
+eight-byte index does not reduce copied bytes. Its benefit would come from arena
+growth and relocation. A four-byte index additionally changes cache density,
+child-array size, stack-link layout, null/tag encoding, and possibly alignment.
+Those effects make it a different candidate rather than a small variation.
+
+## Record shape and node storage
+
+Handle uniformity does not require record uniformity. These are separate
+questions.
+
+| Record/storage model | Physical organization | What is easy | What becomes difficult |
+| --- | --- | --- | --- |
+| Independent variable blocks | one allocation per node | direct pointers, individual free | allocator traffic and fragmentation |
+| Pointer-stable pages | variable records packed into non-moving pages | pointers and bulk page ownership | reclaiming holes; page list traversal |
+| Contiguous variable records | compact leaf/full leaf/internal blocks in one byte arena | one buffer, dense packing, sliding compaction | record-kind scan and index rewriting |
+| Fixed node slab plus child array | `NodeRecord[]` and `ChildRef[]` | arithmetic node lookup, dense fixed records | second child domain and coordinated compaction |
+| Separate kind tables | one array per leaf/internal kind | minimum record size for each kind | tags, several domains, cross-table collection |
+
+### Variable-sized records
+
+A uniform index can address several record shapes in the same byte arena:
+
+```text
+compact leaf: [kind/size][packed leaf fields]
+full leaf:    [kind/size][full metadata][scanner bytes]
+internal:     [kind/size][metadata][child handles...]
+```
+
+This avoids paying the current full heap-record size for every former inline
+leaf. The arena must be able to scan from one record to the next, so each record
+needs enough kind and size information to interpret its tail.
+
+### Fixed node slab
+
+A node index directly selects `NodeRecord[index]`, which makes lookup and node
+movement simple. Variable child counts no longer fit inside the record, so
+children must live in a separate `ChildRef[]` range or block. The apparent
+simplicity of node lookup therefore moves complexity into child storage and
+coordinated reclamation.
+
+### Separate kind tables
+
+This produces the densest records but changes “one arena” into a collection of
+tables. A handle needs tag bits, and movement or growth of one table must not
+invalidate interpretation of the others. It is valuable as an architectural
+extreme, not equivalent to a single contiguous record buffer.
+
+## Child representation
+
+| Model | Parent representation | Strength | Cost |
+| --- | --- | --- | --- |
+| Coallocated tail | record followed by `child_count` handles | best current locality; parent and children move together | variable-sized records |
+| Fixed inline capacity | record contains N slots plus overflow | excellent for nodes within N | unused capacity and overflow path |
+| Global child range | `{child_start, child_count}` into one child array | dense sequential child storage | separate lifetime and compaction domain |
+| Separate child block | pointer/index to variable block | record size independent of arity | extra allocation or arena block and lookup |
+| First-child/next-sibling | references form a sibling chain | fixed fields per record | public indexed-child lookup becomes linear |
+
+Coallocated children are the current control and isolate changes to handle and
+record allocation. Global child ranges pair naturally with a fixed node slab,
+but then node and child indexes have different domains. Fixed inline capacity
+is attractive only if the arity distribution justifies paying unused slots;
+otherwise it repeats the same space-for-branch tradeoff already seen in stack
+node link arrays.
+
+## Ownership and reclamation are separate decisions
+
+Reference counting determines logical ownership and copy-on-write eligibility.
+Reclamation determines when dead bytes become available for new allocations.
+They can be combined in several ways:
+
+| Policy | Internal refcount | Leaf refcount | When physical space returns |
+| --- | ---: | ---: | --- |
+| Current immediate free | yes | heap leaves only | zero-count cascade frees each block |
+| Refcount plus bulk arena lifetime | yes | configurable | only when entire arena dies |
+| Refcount plus free list | yes | configurable | zero-count blocks enter size-aware holes |
+| Refcount plus mark-sweep | yes | configurable | collector identifies/reuses dead blocks without moving live ones |
+| Refcount plus semispace copy | yes | configurable | live blocks copied to alternate space |
+| Refcount plus mark-compact | yes | configurable | live blocks packed and references or locations updated |
+| Pure tracing | no | no | collector alone determines liveness |
+
+Pure tracing conflicts with the requirement that internal nodes remain
+refcounted and would change copy-on-write semantics. It is included to show the
+boundary of the design space, not because an arena forces it.
+
+With exact cascading refcounts in an acyclic graph, a collector can mark from
+roots as a safety authority or use zero-count state to identify garbage. Marking
+still helps validate ownership and distinguish reachable nodes if releases are
+ever deferred. The choice does not require changing the handle representation.
+
+### Bulk-only arena
+
+This removes individual `free` calls but retains every rejected path until the
+arena dies. It is a useful allocation-throughput control, but may increase peak
+memory substantially during GLR-heavy parses.
+
+### Free list or non-moving mark-sweep
+
+These preserve physical addresses or indexes. Variable record sizes make reuse
+policy important: exact-size holes are simple but may reuse little; splitting
+and coalescing recreate allocator-like complexity inside the arena.
+
+### Semispace
+
+Semispace collection copies reachable records into an alternate region and
+then swaps spaces. It makes destination allocation simple, but requires enough
+room for both the old live graph and its copy. Tree-sitter's successful syntax
+tree has a high survival rate, so copying bandwidth and peak capacity are
+material concerns.
+
+### Mark-compact
+
+Mark-compact packs live variable-sized records within one storage domain. With
+physical indexes, roots and child handles must be rewritten. With logical IDs,
+only the location table changes. Neither version can safely run while public
+readers concurrently resolve the same mutable storage without an additional
+synchronization scheme.
+
+## Public occurrence identity choices
+
+Internal record addressing and public node identity must be evaluated
+separately.
+
+| Public identity model | What `TSNode.id` means | Movement consequence |
+| --- | --- | --- |
+| Raw child-slot address | address of root/parent child handle | child storage must remain at that address |
+| Physical child-slot index | offset of child handle in tree storage | arena base may move; compaction changes identity unless frozen |
+| Stable occurrence ID | ID resolved to parent/slot location | occurrence table updated on movement; permanent lookup/metadata |
+| Frozen post-publication index | physical slot index fixed after parse | parser-private compaction allowed; published compaction forbidden |
+
+A record ID alone cannot serve as occurrence identity. If two parents share the
+same heap record, the public nodes are different occurrences even though their
+record identity is equal. A stable public scheme therefore needs a child-slot
+ID, a parent-plus-child key, or another occurrence mapping.
+
+Tree copying and editing add another constraint. Current tree copies share
+immutable records and edits use path-level copy-on-write. Arena-local physical
+indexes cannot refer into another arena unless the handle also carries an arena
+identity. Avoiding a wider handle may require sharing the entire arena,
+importing reused nodes, freezing storage, or copying more data during detach.
+This tradeoff exists independently of the collector chosen during parsing.
+
+## Architecture candidates
+
+The candidates combine the axes into coherent systems. They are comparison
+points, not an implementation sequence.
+
+| Candidate | Parser value | Record storage | Children | Reclamation | Central question |
+| --- | --- | --- | --- | --- | --- |
+| A | current 8 B inline-or-pointer | pointer-stable pages | coallocated | bulk/page policy | What is gained by removing per-node allocator calls while preserving current access? |
+| B | uniform pointer | variable leaf/internal records in stable pages | coallocated | bulk/page policy | What do uniform access and loss of inline leaves cost when pointer lookup remains direct? |
+| C | 8 B inline-or-physical-index | one contiguous variable-record arena | coallocated | bulk, sweep, or compact | What does indexed heap access cost while preserving inline leaves? |
+| D | 4 B uniform physical index | compact leaf/full leaf/internal records in one arena | coallocated | sweep or compact | Can denser references offset putting every leaf out of line? |
+| E | 4 B uniform physical index | fixed `NodeRecord[]` plus `ChildRef[]` | global ranges | compact both domains | Does a fully flattened node database outperform variable records? |
+| F | uniform logical ID | movable records plus location table | coallocated or global | moving collector | Is post-publication/stable movement worth permanent indirection? |
+
+### Candidate A: allocation control
+
+Candidate A changes storage ownership but deliberately preserves the current
+hot representation: inline leaves remain inline, heap handles remain pointers,
+and children remain coallocated. Stable pages are required because existing
+pointers and public slot addresses cannot survive page movement.
+
+Its result isolates the value of removing individual allocator calls. It does
+not test one contiguous block or compaction. If A is slow, the cost is likely
+page policy or arena bookkeeping rather than index decoding.
+
+### Candidate B: uniform direct access
+
+Candidate B keeps direct pointers but moves all leaves out of line into
+kind-sized stable records. Compared with A, it measures the cost or benefit of
+removing the inline/reference split while retaining direct dereference.
+
+Its risk is clear from the audit: roughly 37.70% of created subtrees currently
+fit entirely inside the handle. Candidate B adds record writes, storage, and
+lifetime bookkeeping for all of them without gaining smaller child handles or
+movability.
+
+### Candidate C: conservative contiguous index
+
+Candidate C preserves the current inline leaf format and eight-byte handle. It
+changes only the heap arm from pointer to physical index and places heap records
+in one contiguous arena.
+
+This is the cleanest comparison for arena-aware indexed access because inline
+leaf frequency, handle width, and internal record semantics remain familiar.
+It permits the arena base to move, but record compaction still requires
+rewriting indexes. Public identities must be indexed separately or frozen after
+publication.
+
+### Candidate D: dense uniform index
+
+Candidate D replaces both arms of `Subtree` with one four-byte physical index.
+Every node receives a record, but compact leaves use a small specialized shape
+rather than the current full heap record. Child arrays and any stack fields that
+store `Subtree` become denser.
+
+This candidate mixes two major effects intentionally: loss of direct inline
+leaves and halving of reference width. It answers whether one uniform,
+relocatable representation produces a better total layout, not whether either
+individual change wins alone.
+
+### Candidate E: flattened node and child arrays
+
+Candidate E uses fixed-size node records and a separate global child array.
+Node lookup becomes arithmetic and node records compact uniformly, but child
+ranges have their own offsets, lifetime, and compaction.
+
+This is substantially more than an allocator replacement. It resembles the
+reverted NodeTable family and must be judged against that history: dense layouts
+can benchmark well while introducing broad identity and memory-policy
+complexity.
+
+### Candidate F: stable logical identity
+
+Candidate F separates stable identity from physical position. Handles name
+logical records; a table finds their current locations. This removes widespread
+handle rewriting during compaction and is the natural basis for moving records
+after publication.
+
+The costs are permanent: another memory table, an additional dependent load on
+record access, ID allocation/reuse rules, and a still-separate solution for
+public occurrence identity. It is justified only if movement across long-lived
+tree/edit lifetimes is important enough to pay those costs on every parse.
+
+## Candidate comparison at a glance
+
+| Property | A | B | C | D | E | F |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Preserves inline leaves | yes | no | yes | no | no | configurable |
+| Parser reference width | 8 B | pointer | 8 B | 4 B | 4 B | 4 or 8 B |
+| Direct record dereference | yes | yes | arena base + index | arena base + index | array index | table then location |
+| Strict one contiguous record arena | no | no | yes | yes | no, node + child domains | record arena plus metadata table |
+| Coallocated children | yes | yes | yes | yes | no | either |
+| Arena base may move | no | no | yes | yes | each array may move | yes |
+| Record compaction without stable-ID table | no | no | parser-private rewrite | parser-private rewrite | rewrite both domains | yes |
+| Preserves current ownership most directly | yes | partial | yes | partial | partial | partial |
+| Public identity complexity | lowest | low | medium | medium | high | high |
+| Architectural change size | small | medium | medium | large | very large | large |
+
+“Arena base may move” means relocation of the whole allocation while preserving
+relative positions. It does not mean individual records may change indexes
+without updating references.
+
+## What the comparison should decide
+
+The architecture discussion ultimately needs answers to these questions:
+
+1. Is allocator-call removal valuable when the current handle and inline leaves
+   are otherwise preserved? Candidate A isolates that effect.
+2. Is one contiguous indexed arena affordable on hot subtree accessors?
+   Candidate C isolates that effect without forcing leaves out of line.
+3. If indexed access is affordable, does a four-byte uniform index improve the
+   total layout enough to compensate for allocating compact leaf records?
+   Candidate D answers that combined question.
+4. Is a second child-storage domain justified? Candidate E should be considered
+   only if variable-record packing is the demonstrated limitation.
+5. Is movement after publication actually required? Candidate F should be
+   considered only if frozen physical indexes or whole-arena sharing make tree
+   copy/edit behavior unacceptable.
+6. Does any reclamation policy reduce allocator traffic only by replacing it
+   with comparable internal fragmentation, copying, or bookkeeping?
+
+No collector or detailed code plan should be selected before the handle,
+record, storage-domain, and public-identity choices are understood together.
