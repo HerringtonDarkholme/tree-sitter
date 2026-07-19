@@ -1,13 +1,57 @@
 # Tree traversal and node-read performance streak
 
-## Result
+## Streak 2: current arena endpoint and accessor attribution
 
-The compact indexed subtree arena improves parser construction throughput, but
-it does **not** improve syntax-tree consumer throughput. Against the last Rust
-implementation before the arena, the current implementation was slower in all
-seven measured languages when performing a preorder tree walk and reading
-common node metadata. The equal-language geometric-mean regression was
-**2.40%**.
+A fresh matched Rust-to-Rust run at `610deea2` reverses the earlier result. The
+current arena endpoint is **1.71% faster** by equal-language geometric mean for
+the complete traversal kernel than the pre-arena `fa33cd20` control. The
+harness, corpus, and benchmark code were identical at both endpoints; three
+samples of at least 150 ms were collected for each of 40 fixtures.
+
+| Language | Pre-arena nodes/ms | Current nodes/ms | Change |
+| --- | ---: | ---: | ---: |
+| C++ | 20,514 | 20,885 | +1.81% |
+| Go | 20,809 | 20,868 | +0.28% |
+| Java | 20,289 | 20,964 | +3.33% |
+| JavaScript | 18,841 | 19,542 | +3.72% |
+| Python | 20,187 | 20,369 | +0.90% |
+| Rust | 18,860 | 18,994 | +0.71% |
+| TypeScript | 20,222 | 20,474 | +1.25% |
+| Equal-language geometric mean | — | — | **+1.71%** |
+
+The committed `traversal-attribution` mode incrementally adds one public read
+set to the same preorder cursor walk. Aggregated across the 40 fixtures, the
+current endpoint measured:
+
+| Kernel | Nodes/ms | ns/node | Increment over navigation |
+| --- | ---: | ---: | ---: |
+| navigation only | 23,382 | 42.77 | — |
+| + kind ID | 22,420 | 44.60 | 1.83 ns |
+| + byte range | 22,257 | 44.93 | 2.16 ns |
+| + named/error flags | 21,832 | 45.80 | 3.03 ns |
+| complete read set | 20,461 | 48.87 | 6.10 ns |
+
+The pre-arena control measured 20,183 nodes/ms for the complete kernel, so the
+current result is +1.38% when fixtures are averaged directly. Navigation,
+kind, range, flags, and the complete kernel were all faster than the control.
+Later arena changes—especially kind-specialized headers and deferred column
+summaries—therefore recovered the indexed-handle traversal loss measured in
+the first streak. A parser/published-tree representation split is not justified
+by current traversal data; application profiling should now focus on the rule
+engine and arena high-water behavior.
+
+## Streak 1: initial Candidate D endpoint
+
+At the initial Candidate D endpoint, the compact indexed subtree arena improved
+parser construction throughput but did **not** improve syntax-tree consumer
+throughput. Against the last Rust implementation before the arena, revision
+`77ac1d5e` was slower in all seven measured languages when performing a
+preorder tree walk and reading common node metadata. The equal-language
+geometric-mean regression was **2.40%**.
+
+This result is retained as historical evidence for revision `77ac1d5e`; it is
+not a description of the current endpoint. Streak 2 above supersedes it for
+current design decisions.
 
 This is a separate performance axis from parsing. Candidate D remains a parser
 throughput win because four-byte handles reduce parser-stack and child-array

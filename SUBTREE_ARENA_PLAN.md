@@ -356,9 +356,15 @@ generations made peak RSS far exceed live-tree bytes.
 
 The retained-generation design was removed after an application-level memory
 gate exposed its cost. On TypeScript's `tests/baselines` corpus with one
-ast-grep worker, the retired-chain endpoint reached about **1.04 GiB RSS**. The
-replacement endpoint reached **78,938,112 bytes (75.3 MiB)**, below the
-pre-registered 150 MiB ceiling and close to the normal build's reported 79 MiB.
+ast-grep worker, the retired-chain endpoint reached about **1.04 GiB RSS**.
+Removing the chain reduced the correctly Rust-linked endpoint to **516,079,616
+bytes (492.2 MiB)**, but did **not** meet the pre-registered 150 MiB ceiling.
+
+An earlier 75.3 MiB result was invalid: the standalone ast-grep build had
+silently resolved the crates.io C-backed `tree-sitter` crate after the
+compatibility patch was restored. The corrected binary was checked for Rust
+`tree_sitter::core_impl` symbols and arena-specific assertion strings before
+measurement. This provenance check is now required for application gates.
 
 The parser-private arena now grows with `realloc`; there is no `retired` link
 and arena release frees exactly one allocation. Arena-backed `SubtreeArray`
@@ -400,6 +406,24 @@ an explicit memory-for-throughput tradeoff retained to eliminate the
 application-level gigabyte regression. Follow-up throughput work should cache
 resolved child slices within reduction/cursor operations without reintroducing
 arena-relative pointers that survive growth.
+
+Parse-boundary instrumentation explains why the RSS gate still fails. All
+18,042 observed large-arena boundaries had an arena owner count of one, ruling
+out retained trees as the remaining cause. The 273,957-byte
+`reference/tsserver/moduleResolution/alternateResult.js` fixture alone advanced
+the arena bump cursor to **474,329,448 bytes**, forcing a 512 MiB capacity. Its
+dead records arise within one parse epoch; freeing or shrinking the arena at
+the next file can reduce retained high-water memory, but cannot reduce that
+file's peak.
+
+A pressure-triggered LIFO rewind was also priced and discarded. It attempted
+to rewind uniquely owned, non-shared heap nodes only when the released record
+was exactly at the bump cursor. The pathological fixture still peaked at
+496,844,800 bytes, so rejected records are not released in a sufficiently
+stack-like order for this mechanism. Meeting the 150 MiB application target
+therefore requires in-parse non-LIFO reuse: exact reference counts plus a
+size-aware free list, or a pressure-triggered non-moving mark/sweep pass. Arena
+growth policy alone cannot satisfy the target.
 
 The discarded VM implementation reserved 4 GiB and committed 64 KiB chunks.
 That was acceptable in parser-reuse microbenchmarks but pathological for
