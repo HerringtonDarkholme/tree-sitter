@@ -321,6 +321,7 @@ the experiment ledger in `PERFORMANCE.md` and `SUBTREE_ARENA_PLAN.md`.
 | Rejected | Small parse-table group rejection | Scans of terminal groups during goto lookup and nonterminal groups during token lookup | +0.56% longer confirmation; JavaScript -2.51%, TypeScript -1.22% | The safe kind branch helps reduction-heavy languages but hurts other lookup distributions |
 | Rejected | Parser-private nonterminal goto cache | Repeated compressed-row scans for identical `(state, symbol)` reductions | -0.22% overall; JavaScript -2.65%, Rust -1.34% | Cache probes and direct-map replacement cost more than the avoided scans on the mixed corpus |
 | Rejected | Outline materialized `stack_push` | Shared code footprint between deterministic-window and graph-stack pushes | -0.18% overall; Go -1.29% | The extra call on materialized pushes costs more than isolating the deterministic path saves |
+| Rejected | Commit subtree summaries after the child loop | Repeated parent-header writes during reduction summarization | +0.32% overall; JavaScript -2.66% | Scalar aggregates enlarged the hot function and frame enough to offset fewer arena stores |
 | 1 | Versioned external-scanner snapshot ABI | Repeated deserialize and grammar-owned malloc/free | Python external scanner is 5.7%, allocation 4.8% | ABI and grammar complexity; identity cache already had low reuse |
 
 ### 1. UTF-8 ASCII advance
@@ -674,7 +675,27 @@ runtime source was reverted. Simple outlining is therefore closed: Go confirms
 that materialized pushes are common enough for the forced call boundary to
 cost more than the reduced deterministic-path footprint saves.
 
-### 9. External-scanner snapshots
+### 9. Deferred subtree-summary commits
+
+The linked accepted-head assembly showed `subtree_summarize_children` storing
+parent size, error cost, flags, and child counters during each child iteration.
+A behavior-preserving prototype accumulated those fields in scalar locals and
+committed the completed parent header once after the loop. Child handle
+resolution, alias lookup, error accounting, repeat-depth logic, allocation,
+and persistent layout were unchanged. Core tests, the ABI surface test, and
+Clippy passed.
+
+The store count fell, but linked code generation exposed the tradeoff before
+timing: the function grew from 1,444 to 2,452 machine-code bytes and its frame
+grew from 160 to 208 bytes. Against accepted Rust head `0edf2a5e`, the
+five-sample 200 ms A/B/A gate was +0.32% overall: C++ +1.28%, Go +0.04%, Java
++1.02%, JavaScript -2.66%, Python +1.22%, Rust +1.39%, and TypeScript +0.04%.
+Maximum CV was 5.12%, all source hashes matched, and peak RSS was neutral. The
+runtime source was reverted. Broad parent-summary accumulation is therefore
+closed: it reproduces the earlier accumulator experiment's register-pressure
+failure even when it is confined to the existing summarization pass.
+
+### 10. External-scanner snapshots
 
 The current scanner ABI exposes one mutable grammar-owned object plus serialized
 bytes. The runtime must deserialize a stack version's bytes before scanning,
@@ -748,7 +769,8 @@ to existing parser artifacts.
 6. Keep small parse-table group rejection rejected.
 7. Keep parser-private nonterminal goto caching rejected.
 8. Keep simple `stack_push` hot/cold outlining rejected.
-9. Continue from the accepted-head runtime profile; leave the external-scanner
+9. Keep broad deferred subtree-summary commits rejected.
+10. Continue from the accepted-head runtime profile; leave the external-scanner
    ABI unscheduled until its ecosystem cost is explicitly approved.
 
 This order records the retained low-complexity win and the rejected reducer

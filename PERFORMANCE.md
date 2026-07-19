@@ -226,8 +226,11 @@ The current experiment order is:
 3. retain the single-action dispatch fast path;
 4. keep parser-private arena bumping rejected; and
 5. keep small parse-table group rejection, parser-private goto caching, and
-   simple `stack_push` hot/cold splitting rejected, and use the refreshed
-   accepted-head profile to select another runtime-owned candidate.
+   simple `stack_push` hot/cold splitting rejected;
+6. keep broad deferred subtree-summary commits rejected because their register
+   pressure outweighs the removed parent stores; and
+7. use the refreshed accepted-head profile to select another runtime-owned
+   candidate.
 
 Allocator/GC tuning is not the next throughput target. A Python snapshot had
 about 7.2 MiB physical footprint and 2.1 MiB resident/dirty arena pages despite
