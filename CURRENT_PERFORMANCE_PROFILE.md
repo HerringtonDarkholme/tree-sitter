@@ -306,6 +306,42 @@ The conclusions are narrow but strong:
 - External-scanner allocation is a Python-specific ABI/design question, not a
   reason to redesign all subtree storage.
 
+## Application-level outline update after parser caching
+
+An ast-grep `outline` profile over opencode on 2026-07-19 changes the weighting
+but not the experiment history. Parser reuse reduced `set_language` from a
+former 15.8% to 0.11%, exposing the steady-state parser and consumer costs:
+
+| Exclusive area | CPU | Ledger cross-check | Decision |
+| --- | ---: | --- | --- |
+| Parser action interpreter | 17.5% | The retained sparse goto index removes only **nonterminal** scans; terminal/action lookup remains unchanged | Explore a sparse parser-private terminal/action index, not another direct-mapped cache |
+| Lexing | 15.7% | The conservative runtime ASCII advance is already retained; direct inlining into generated C lexers changes generated artifacts and was explicitly deferred | Keep generated-lexer work deferred; require a distinct runtime-only mechanism before another lexer trial |
+| Subtree construction | 13.6% | Kind-specialized headers and lazy column summaries are retained; accumulator-based summary fusion regressed all seven languages; equivalent balancing reuse regressed | Only the still-distinct preallocated-final-parent summary writer remains open, behind action lookup |
+| Tree-cursor traversal | 11.6% | The fresh generic traversal streak is +1.71% versus the pre-arena Rust control, so the old indexed-handle traversal regression is no longer present | Optimize ast-grep's amount of outline work or design a deliberately narrower consumer API; do not reopen a representation split from this profile alone |
+| Parser stack operations | 10.4% | The deterministic window and single-action dispatch are already retained; direct-final deterministic reduction and simple stack outlining were rejected | First attribute the remaining samples to window versus materialized GLR paths; “add a single-version fast path” is not a new design |
+| Reduction functions | 5.2% | Same deterministic-reducer and summary-fusion families above | Do not count this as an independent untouched pool |
+| Arena allocation | 0.58% direct | Arena/index changes are retained for layout and RSS; allocator tuning is repeatedly below the throughput threshold | Keep allocator work out of the throughput queue |
+
+The clearest new core experiment is therefore a **sparse terminal/action
+index**. It differs from the rejected 128-entry goto cache in both domain and
+mechanism: it expands each real small-state terminal mapping once during
+`set_language`, then performs a row-local lookup without replacement or
+history-dependent misses. Large states keep the generated dense table. The
+existing sparse goto index proves parser-private projection can amortize when
+the parser is reused, but it does not prove the terminal projection will win:
+terminal rows may be wider, and binary/linear row search plus extra memory can
+still cost more than the compressed grouping. Acceptance therefore requires
+the seven-language current-Rust gate **and** the parser-cached opencode outline
+gate; a TypeScript-only improvement is insufficient.
+
+The suggested parser-local `(state, symbol)` cache is not ranked first because
+the corresponding nonterminal direct-map experiment already demonstrated the
+probe/replacement failure mode. A complete sparse projection removes work
+deterministically and is independent of benchmark access history. It also
+belongs in parser-owned state initially: changing generated `TSLanguage`
+layout would alter ABI and require regenerated grammars before the mechanism
+has proved useful.
+
 ## Ranked optimization designs
 
 The ranks combine profile size, hardware evidence, implementation scope, and
