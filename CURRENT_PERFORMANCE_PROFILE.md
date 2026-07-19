@@ -321,7 +321,7 @@ the experiment ledger in `PERFORMANCE.md` and `SUBTREE_ARENA_PLAN.md`.
 | Rejected | Small parse-table group rejection | Scans of terminal groups during goto lookup and nonterminal groups during token lookup | +0.56% longer confirmation; JavaScript -2.51%, TypeScript -1.22% | The safe kind branch helps reduction-heavy languages but hurts other lookup distributions |
 | Rejected | Parser-private nonterminal goto cache | Repeated compressed-row scans for identical `(state, symbol)` reductions | -0.22% overall; JavaScript -2.65%, Rust -1.34% | Cache probes and direct-map replacement cost more than the avoided scans on the mixed corpus |
 | Rejected | Outline materialized `stack_push` | Shared code footprint between deterministic-window and graph-stack pushes | -0.18% overall; Go -1.29% | The extra call on materialized pushes costs more than isolating the deterministic path saves |
-| Rejected | Commit subtree summaries after the child loop | Repeated parent-header writes during reduction summarization | +0.32% overall; JavaScript -2.66% | Scalar aggregates enlarged the hot function and frame enough to offset fewer arena stores |
+| Rejected | Commit subtree summaries after the child loop | Repeated parent-header writes during reduction summarization | Counter-only retry -0.02% overall; Python -1.42%, TypeScript -2.31% | Even controlled scalar aggregation changes the mixed-workload dependency chain unfavorably |
 | 1 | Versioned external-scanner snapshot ABI | Repeated deserialize and grammar-owned malloc/free | Python external scanner is 5.7%, allocation 4.8% | ABI and grammar complexity; identity cache already had low reuse |
 
 ### 1. UTF-8 ASCII advance
@@ -694,6 +694,17 @@ Maximum CV was 5.12%, all source hashes matched, and peak RSS was neutral. The
 runtime source was reverted. Broad parent-summary accumulation is therefore
 closed: it reproduces the earlier accumulator experiment's register-pressure
 failure even when it is confined to the existing summarization pass.
+
+A narrower retry deferred only `named_child_count`, `visible_child_count`,
+`visible_descendant_count`, and `dynamic_precedence`. This kept the original
+160-byte frame and grew linked text by only 64 bytes. Its five-sample 200 ms
+A/B/A result was -0.02% overall: C++ +1.74%, Go +0.79%, Java +1.06%,
+JavaScript +0.37%, Python -1.42%, Rust -0.28%, and TypeScript -2.31%. Maximum
+CV was 2.83%, source hashes matched, and RSS was neutral. It too was reverted.
+The retry shows that register pressure is not the only issue: changing when
+these summary dependencies reach the parent helps reduction-heavy languages
+but harms lexer/front-end-heavy workloads enough to fail the mixed-language
+gate. The deferred-summary-write family is closed.
 
 ### 10. External-scanner snapshots
 

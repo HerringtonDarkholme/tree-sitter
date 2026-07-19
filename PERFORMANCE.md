@@ -227,8 +227,9 @@ The current experiment order is:
 4. keep parser-private arena bumping rejected; and
 5. keep small parse-table group rejection, parser-private goto caching, and
    simple `stack_push` hot/cold splitting rejected;
-6. keep broad deferred subtree-summary commits rejected because their register
-   pressure outweighs the removed parent stores; and
+6. keep deferred subtree-summary commits rejected: broad aggregation increases
+   register pressure, while a counter-only retry was throughput-neutral and
+   regressed Python and TypeScript; and
 7. use the refreshed accepted-head profile to select another runtime-owned
    candidate.
 
