@@ -1,5 +1,34 @@
 # Tree traversal and node-read performance streak
 
+## Streak 5: narrow parent setup snapshot is rejected
+
+A narrower follow-up kept the retained operation-local child pointer but tried
+to produce it more cheaply. One helper resolved the parent header once and
+returned only `{child_pointer, child_count, production_id}` for iterator setup.
+It replaced the separate `child_count`, `children`, and production-ID accessor
+sequence and passed the focused cursor tests and Clippy.
+
+The complete three-sample, 200 ms A/B/A traversal screen against immediate
+Rust parent `342cb0b6` was negative in every language:
+
+| Language | Traversal throughput change |
+| --- | ---: |
+| C++ | -2.02% |
+| Go | -1.48% |
+| Java | -0.57% |
+| JavaScript | -0.43% |
+| Python | -0.46% |
+| Rust | -0.71% |
+| TypeScript | -2.72% |
+| **Equal-language geometric mean** | **-1.20%** |
+
+All 40 fixture lengths, hashes, and node counts matched. The implementation
+was removed. The accessors are inlined in the same setup function, so LLVM can
+already common the useful parent resolution; forcing a returned aggregate and
+manual pointer derivation only worsened code shape. The retained implementation
+should cache the slice for repeated iteration but leave setup expressed through
+the existing narrow accessors.
+
 ## Streak 4: batched child metadata is rejected
 
 After retaining the parent child-slice cache, a separate candidate resolved
