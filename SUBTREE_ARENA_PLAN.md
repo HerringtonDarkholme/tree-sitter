@@ -342,15 +342,64 @@ even, so the otherwise-unused low offset bit carries the compact/full tag. The
 remaining values address almost the full 4 GiB byte-offset domain (subject to
 the null sentinel and enough space for the final record).
 
-The current endpoint does **not** reserve a 4 GiB virtual mapping. A parser
+The `24feca70` endpoint did **not** reserve a 4 GiB virtual mapping. A parser
 starts with only the arena header. Its first payload allocation obtains a
 256 KiB malloc block; later growth rounds the required end offset up to the
-next power of two, capped by the `u32` byte-index domain. Growth allocates a new
-block, copies the used prefix, and retains the old parser-private block until
-the arena family is released so outstanding scratch-array pointers remain
-valid. A reused parser rewinds the bump cursor and keeps its high-water
-capacity. This policy is on-demand in physical memory, but geometric capacity
-and retained growth blocks can make peak RSS exceed live-tree bytes.
+next power of two, capped by the `u32` byte-index domain. Its first malloc
+growth implementation allocated and copied a replacement block, then retained
+the old parser-private block so outstanding `SubtreeArray.contents` pointers
+remained valid. A reused parser rewound the bump cursor and kept its high-water
+capacity. Although physical allocation was on demand, retained geometric
+generations made peak RSS far exceed live-tree bytes.
+
+### Retired-generation removal
+
+The retained-generation design was removed after an application-level memory
+gate exposed its cost. On TypeScript's `tests/baselines` corpus with one
+ast-grep worker, the retired-chain endpoint reached about **1.04 GiB RSS**. The
+replacement endpoint reached **78,938,112 bytes (75.3 MiB)**, below the
+pre-registered 150 MiB ceiling and close to the normal build's reported 79 MiB.
+
+The parser-private arena now grows with `realloc`; there is no `retired` link
+and arena release frees exactly one allocation. Arena-backed `SubtreeArray`
+values no longer retain payload pointers. They store a `u32` byte offset and a
+stable pointer to the owning `SubtreePool`, then resolve the current arena base
+when accessed. This preserves the reduction path's zero-copy transfer from a
+temporary child array to `[children][internal header]`. Converting every child
+array to malloc storage would have been simpler, but would add an allocation
+and child copy to the common reduction path.
+
+The two reusable trailing-extra arrays remain ordinary malloc/realloc buffers
+outside the arena. `scratch_trees` remains arena-backed because
+`parser_select_children` temporarily turns its trailing header into a genuine
+indexed `Subtree`; an ordinary heap pointer cannot be represented by the
+four-byte arena handle. A forced-relocation unit test moves a live arena to a
+guaranteed different address while a subtree handle, external-scanner byte
+range, and child array survive. The ast-grep gate additionally exercises heap
+scratch spliced into arena-backed child storage.
+
+This memory correction has a measured parsing cost. A same-session,
+matched-corpus Rust-to-Rust gate compared it with `24feca70`, using five samples
+and a 250 ms minimum per fixture. The values below compare each language's
+reported average throughput; the equal-language geometric mean is **-2.14%**.
+
+| Language | Throughput change |
+| --- | ---: |
+| C++ | +0.34% |
+| Go | -1.71% |
+| Java | -3.46% |
+| JavaScript | -3.60% |
+| Python | -1.84% |
+| Rust | -3.09% |
+| TypeScript | -1.58% |
+
+The benchmark process's final peak RSS fell from 47.0 MiB to 29.7 MiB. The
+throughput loss is attributed to resolving movable array offsets on hot reduce
+paths; it is not evidence against indexed subtree handles themselves. This is
+an explicit memory-for-throughput tradeoff retained to eliminate the
+application-level gigabyte regression. Follow-up throughput work should cache
+resolved child slices within reduction/cursor operations without reintroducing
+arena-relative pointers that survive growth.
 
 The discarded VM implementation reserved 4 GiB and committed 64 KiB chunks.
 That was acceptable in parser-reuse microbenchmarks but pathological for

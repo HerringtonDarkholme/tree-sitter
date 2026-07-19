@@ -44,7 +44,6 @@ unsafe fn subtree_arena_new() -> *mut SubtreeArena {
         // its low inline-tag bit remains clear.
         offset: AtomicUsize::new(core::mem::align_of::<SubtreeHeapData>()),
         capacity: 0,
-        retired: ptr::null_mut(),
         generation: AtomicU32::new(1),
         published: false,
     });
@@ -78,19 +77,37 @@ unsafe fn subtree_arena_grow(pool: &mut SubtreePool, end: usize) {
         let allocation_size = ARENA_DATA_OFFSET
             .checked_add(new_capacity)
             .unwrap_or_else(|| alloc_failed("grow subtree arena", new_capacity));
-        let new_arena = malloc(allocation_size).cast::<SubtreeArena>();
-        let used = (*arena).offset.load(Ordering::Relaxed);
-        new_arena.write(SubtreeArena {
-            ref_count: AtomicU32::new(1),
-            offset: AtomicUsize::new(used),
-            capacity: new_capacity,
-            retired: arena,
-            generation: AtomicU32::new((*arena).generation.load(Ordering::Relaxed)),
-            published: false,
-        });
-        subtree_arena_data(new_arena).copy_from_nonoverlapping(subtree_arena_data(arena), used);
+        debug_assert_eq!((*arena).ref_count.load(Ordering::Relaxed), 1);
+        let new_arena = realloc(arena.cast::<c_void>(), allocation_size).cast::<SubtreeArena>();
+        if new_arena.is_null() {
+            alloc_failed("grow subtree arena", new_capacity);
+        }
         pool.arena = new_arena;
+        (*new_arena).capacity = new_capacity;
     }
+}
+
+#[cfg(test)]
+pub(super) unsafe fn subtree_arena_force_relocation(pool: &mut SubtreePool) {
+    let arena = subtree_pool_ensure_arena(pool);
+    debug_assert_eq!((*arena).ref_count.load(Ordering::Relaxed), 1);
+    let capacity = (*arena).capacity.max(ARENA_INITIAL_CAPACITY);
+    let allocation_size = ARENA_DATA_OFFSET + capacity;
+    // Allocate before freeing so the replacement is guaranteed to have a
+    // different address. This exercises the same offset-resolution invariant
+    // as a moving realloc without replacing the process-global allocator.
+    let replacement = malloc(allocation_size).cast::<SubtreeArena>();
+    let used = (*arena).offset.load(Ordering::Relaxed);
+    replacement.write(SubtreeArena {
+        ref_count: AtomicU32::new(1),
+        offset: AtomicUsize::new(used),
+        capacity,
+        generation: AtomicU32::new((*arena).generation.load(Ordering::Relaxed)),
+        published: false,
+    });
+    subtree_arena_data(replacement).copy_from_nonoverlapping(subtree_arena_data(arena), used);
+    pool.arena = replacement;
+    free(arena.cast::<c_void>());
 }
 
 unsafe fn subtree_arena_allocate(
@@ -135,12 +152,7 @@ pub unsafe fn subtree_arena_release(arena: *mut SubtreeArena) {
     let previous = (*arena).ref_count.fetch_sub(1, Ordering::SeqCst);
     debug_assert!(previous > 0);
     if previous == 1 {
-        let mut current = arena;
-        while !current.is_null() {
-            let retired = (*current).retired;
-            free(current.cast::<c_void>());
-            current = retired;
-        }
+        free(arena.cast::<c_void>());
     }
 }
 
@@ -203,7 +215,6 @@ pub unsafe fn subtree_pool_clone_arena(arena: *mut SubtreeArena) -> SubtreePool 
         ref_count: AtomicU32::new(1),
         offset: AtomicUsize::new(used),
         capacity,
-        retired: ptr::null_mut(),
         generation: AtomicU32::new((*arena).generation.load(Ordering::Acquire)),
         published: false,
     });
@@ -220,7 +231,7 @@ impl SubtreeArray {
             contents: ptr::null_mut(),
             size: 0,
             capacity: 0,
-            arena: ptr::null_mut(),
+            arena_offset: 0,
             pool: ptr::null_mut(),
             arena_generation: 0,
         }
@@ -229,7 +240,6 @@ impl SubtreeArray {
     unsafe fn new_in(pool: &mut SubtreePool) -> Self {
         let arena = subtree_pool_ensure_arena(pool);
         Self {
-            arena,
             pool,
             arena_generation: (*arena).generation.load(Ordering::Acquire),
             ..Self::new()
@@ -240,14 +250,22 @@ impl SubtreeArray {
     /// The parser only rewinds after releasing its parse state, so stale arrays
     /// must be logically empty even though their cached address is obsolete.
     unsafe fn refresh_arena_generation(&mut self) {
-        if self.arena.is_null() {
+        if self.pool.is_null() {
             return;
         }
 
-        let generation = (*self.arena).generation.load(Ordering::Acquire);
-        if self.arena_generation != generation {
+        let arena = (*self.pool).arena;
+        let allocation_is_stale = arena.is_null()
+            || self.arena_offset as usize >= (*arena).offset.load(Ordering::Acquire);
+        let generation = if arena.is_null() {
+            0
+        } else {
+            (*arena).generation.load(Ordering::Acquire)
+        };
+        if self.arena_generation != generation || allocation_is_stale {
             debug_assert_eq!(self.size, 0);
             self.contents = ptr::null_mut();
+            self.arena_offset = 0;
             self.size = 0;
             self.capacity = 0;
             self.arena_generation = generation;
@@ -267,18 +285,32 @@ impl SubtreeArray {
     #[inline]
     unsafe fn current_arena(&self) -> *mut SubtreeArena {
         if self.pool.is_null() {
-            self.arena
+            ptr::null_mut()
         } else {
             (*self.pool).arena
         }
     }
 
     #[inline]
-    pub const fn as_slice(&self) -> &[Subtree] {
+    #[allow(clippy::cast_ptr_alignment)]
+    unsafe fn resolved_contents(&self) -> *mut Subtree {
+        if self.pool.is_null() {
+            self.contents
+        } else if self.arena_offset == 0 {
+            ptr::null_mut()
+        } else {
+            subtree_arena_data((*self.pool).arena)
+                .add(self.arena_offset as usize)
+                .cast::<Subtree>()
+        }
+    }
+
+    #[inline]
+    pub fn as_slice(&self) -> &[Subtree] {
         if self.is_empty() {
             &[]
         } else {
-            unsafe { core::slice::from_raw_parts(self.contents, self.len()) }
+            unsafe { core::slice::from_raw_parts(self.resolved_contents(), self.len()) }
         }
     }
 
@@ -287,12 +319,12 @@ impl SubtreeArray {
         if self.is_empty() {
             &mut []
         } else {
-            unsafe { core::slice::from_raw_parts_mut(self.contents, self.len()) }
+            unsafe { core::slice::from_raw_parts_mut(self.resolved_contents(), self.len()) }
         }
     }
 
     pub unsafe fn delete(&mut self) {
-        if self.arena.is_null() && !self.contents.is_null() {
+        if self.pool.is_null() && !self.contents.is_null() {
             free(self.contents.cast::<c_void>());
         }
         *self = Self::new();
@@ -304,19 +336,22 @@ impl SubtreeArray {
     }
 
     #[inline]
+    #[allow(clippy::cast_ptr_alignment)]
     pub unsafe fn reserve(&mut self, new_capacity: u32) {
         self.refresh_arena_generation();
         if new_capacity <= self.capacity {
             return;
         }
         let byte_count = new_capacity as usize * core::mem::size_of::<Subtree>();
-        let new_contents = if self.arena.is_null() {
+        if self.pool.is_null() {
             if self.contents.is_null() {
-                malloc(byte_count).cast::<Subtree>()
+                self.contents = malloc(byte_count).cast::<Subtree>();
             } else {
-                realloc(self.contents.cast::<c_void>(), byte_count).cast::<Subtree>()
+                self.contents =
+                    realloc(self.contents.cast::<c_void>(), byte_count).cast::<Subtree>();
             }
         } else {
+            let old_offset = self.arena_offset;
             let allocation = subtree_arena_allocate(
                 &mut *self.pool,
                 byte_count,
@@ -324,14 +359,19 @@ impl SubtreeArray {
             )
             .cast::<Subtree>()
             .as_ptr();
-            self.arena = (*self.pool).arena;
-            self.arena_generation = (*self.arena).generation.load(Ordering::Acquire);
+            let arena = (*self.pool).arena;
+            self.arena_generation = (*arena).generation.load(Ordering::Acquire);
             if !self.is_empty() {
-                allocation.copy_from_nonoverlapping(self.contents, self.len());
+                let source = subtree_arena_data(arena)
+                    .add(old_offset as usize)
+                    .cast::<Subtree>();
+                allocation.copy_from_nonoverlapping(source, self.len());
             }
-            allocation
-        };
-        self.contents = new_contents;
+            self.arena_offset = u32::try_from(
+                allocation.cast::<u8>() as usize - subtree_arena_data(arena) as usize,
+            )
+            .expect("subtree array arena offset fits in u32");
+        }
         self.capacity = new_capacity;
     }
 
@@ -347,10 +387,13 @@ impl SubtreeArray {
     #[inline]
     pub unsafe fn push(&mut self, element: Subtree) {
         self.grow(1);
-        self.contents.add(self.size as usize).write(element);
+        self.resolved_contents()
+            .add(self.size as usize)
+            .write(element);
         self.size += 1;
     }
 
+    #[allow(clippy::cast_ptr_alignment)]
     pub unsafe fn splice(
         &mut self,
         index: u32,
@@ -364,19 +407,37 @@ impl SubtreeArray {
         let new_end = index + new_count;
         debug_assert!(old_end <= self.size);
 
+        let arena_source_offset = if !self.pool.is_null() && !new_contents.is_null() {
+            let arena = (*self.pool).arena;
+            let base = subtree_arena_data(arena) as usize;
+            let address = new_contents as usize;
+            if address >= base && address < base + (*arena).capacity {
+                Some(address - base)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
         self.reserve(new_size);
+        let contents = self.resolved_contents();
+        let new_contents = arena_source_offset.map_or(new_contents, |offset| {
+            subtree_arena_data((*self.pool).arena)
+                .add(offset)
+                .cast::<Subtree>()
+        });
         let trailing_count = (self.size - old_end) as usize;
         if trailing_count > 0 {
             ptr::copy(
-                self.contents.add(old_end as usize),
-                self.contents.add(new_end as usize),
+                contents.add(old_end as usize),
+                contents.add(new_end as usize),
                 trailing_count,
             );
         }
         if new_count > 0 && !new_contents.is_null() {
             ptr::copy(
                 new_contents,
-                self.contents.add(index as usize),
+                contents.add(index as usize),
                 new_count as usize,
             );
         }
@@ -388,8 +449,7 @@ impl SubtreeArray {
         self.reserve(source.size);
         self.size = source.size;
         if !source.is_empty() {
-            self.contents
-                .copy_from_nonoverlapping(source.contents, source.len());
+            self.as_mut_slice().copy_from_slice(source.as_slice());
         }
     }
 }
@@ -404,7 +464,9 @@ pub unsafe fn subtree_array_new(pool: &mut SubtreePool) -> SubtreeArray {
 pub unsafe fn subtree_array_prepare_scratch(pool: &mut SubtreePool, array: &mut SubtreeArray) {
     let arena = subtree_pool_ensure_arena(pool);
     let generation = (*arena).generation.load(Ordering::Acquire);
-    if array.arena != arena || array.arena_generation != generation {
+    let allocation_is_stale =
+        array.arena_offset as usize >= (*arena).offset.load(Ordering::Acquire);
+    if array.pool != pool || array.arena_generation != generation || allocation_is_stale {
         debug_assert!(array.is_empty());
         array.delete();
         *array = SubtreeArray::new_in(pool);
@@ -470,8 +532,8 @@ impl ExternalScannerState {
 
 pub unsafe fn subtree_array_copy(source: &SubtreeArray, destination: &mut SubtreeArray) {
     *destination = SubtreeArray {
-        arena: source.arena,
         pool: source.pool,
+        arena_offset: 0,
         arena_generation: source.arena_generation,
         ..SubtreeArray::new()
     };
@@ -620,7 +682,7 @@ unsafe fn subtree_reserve_header(children: &mut SubtreeArray) -> NonNull<Subtree
     }
     NonNull::new_unchecked(
         children
-            .contents
+            .resolved_contents()
             .cast::<u8>()
             .add(subtree_child_storage_size(children.size))
             .cast::<SubtreeHeapData>(),
@@ -637,8 +699,8 @@ pub(super) unsafe fn subtree_take_children(
     let child_count = children.size;
     let byte_size = subtree_alloc_size(child_count);
     let required_capacity = byte_size / core::mem::size_of::<Subtree>();
-    let arena = subtree_pool_ensure_arena(pool);
-    if children.arena != arena || (children.capacity as usize) < required_capacity {
+    subtree_pool_ensure_arena(pool);
+    if children.pool != pool || (children.capacity as usize) < required_capacity {
         let allocation = subtree_arena_allocate(
             pool,
             byte_size,
@@ -649,7 +711,7 @@ pub(super) unsafe fn subtree_take_children(
         if child_count > 0 {
             allocation
                 .as_ptr()
-                .copy_from_nonoverlapping(children.contents, child_count as usize);
+                .copy_from_nonoverlapping(children.resolved_contents(), child_count as usize);
         }
         children.delete();
         let data = NonNull::new_unchecked(

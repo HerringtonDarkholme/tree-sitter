@@ -103,14 +103,18 @@ pub type MutableSubtreeArray = Array<MutableSubtree>;
 
 /// Contiguous child-handle buffer.
 ///
-/// A null `arena` uses the ordinary generic-array allocator. A non-null arena
-/// means capacity comes from the subtree slab and is abandoned, rather than
-/// individually freed, when the array grows or is deleted.
+/// A null `pool` uses the ordinary allocator and stores a raw pointer in
+/// `contents`. A non-null `pool` stores an arena-relative byte offset instead;
+/// this lets the parser's private arena move when it grows.
 pub struct SubtreeArray {
+    /// Heap allocation for ordinary scratch arrays. Always null for
+    /// arena-backed arrays.
     pub contents: *mut Subtree,
     pub size: u32,
     pub capacity: u32,
-    arena: *mut SubtreeArena,
+    /// Byte offset from the current arena payload base. Zero means no arena
+    /// capacity has been allocated yet.
+    arena_offset: u32,
     /// Stable owner slot used for arena-backed capacity growth.
     pool: *mut SubtreePool,
     /// Arena rewind epoch in which `contents` was allocated. Persistent parser
@@ -132,9 +136,6 @@ pub struct SubtreeArena {
     offset: AtomicUsize,
     /// Usable payload bytes following this header.
     capacity: usize,
-    /// Older parser-private arena blocks retained so scratch-array pointers
-    /// allocated before growth remain valid until they are rebound or copied.
-    retired: *mut Self,
     /// Incremented whenever the bump cursor is rewound. This invalidates
     /// cached scratch-array pointers without touching published tree records.
     generation: AtomicU32,
@@ -1036,7 +1037,7 @@ mod tests {
     }
 
     #[test]
-    fn arena_indexes_survive_malloc_buffer_growth() {
+    fn arena_indexes_and_arrays_survive_relocation_and_growth() {
         unsafe {
             let mut pool = subtree_pool_new(0);
             let first = inline_leaf(&mut pool, 7);
@@ -1046,6 +1047,23 @@ mod tests {
             let mut children = subtree_array_new(&mut pool);
             children.push(first);
             children.push(inline_leaf(&mut pool, 9));
+
+            // Heap-backed parser scratch may be spliced into an arena-backed
+            // transferable child array. Source detection must not perform
+            // arena-relative arithmetic for this ordinary pointer.
+            let mut heap_source = SubtreeArray::new();
+            heap_source.push(first);
+            children.splice(1, 0, 1, heap_source.as_slice().as_ptr());
+            assert!(children.as_slice()[1] == first);
+            heap_source.delete();
+
+            let original_arena = pool.arena();
+            storage::subtree_arena_force_relocation(&mut pool);
+            assert_ne!(pool.arena(), original_arena);
+            let arena = pool.arena();
+            assert_eq!(first.size(arena).bytes, 7);
+            assert_eq!(scanner_state.as_bytes(arena), scanner_bytes);
+            assert_eq!(children.as_slice()[2].size(arena).bytes, 9);
 
             // Cross at least one geometric capacity boundary after all three
             // persistent references above have been created. Derive the
@@ -1062,7 +1080,7 @@ mod tests {
             assert_eq!(first.size(arena).bytes, 7);
             assert_eq!(scanner_state.as_bytes(arena), scanner_bytes);
             assert!(children.as_slice()[0] == first);
-            assert_eq!(children.as_slice()[1].size(arena).bytes, 9);
+            assert_eq!(children.as_slice()[2].size(arena).bytes, 9);
 
             children.delete();
             subtree_pool_delete(&mut pool);

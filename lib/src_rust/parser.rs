@@ -646,8 +646,6 @@ pub unsafe extern "C-unwind" fn ts_parser_parse(
         }
     } else {
         subtree_pool_prepare_for_parse(&mut parser.tree_pool);
-        subtree_array_prepare_scratch(&mut parser.tree_pool, &mut parser.trailing_extras);
-        subtree_array_prepare_scratch(&mut parser.tree_pool, &mut parser.trailing_extras2);
         subtree_array_prepare_scratch(&mut parser.tree_pool, &mut parser.scratch_trees);
         parser_external_scanner_create(parser);
         parser_log(parser, |_, log| log.write_str("new_parse"));
