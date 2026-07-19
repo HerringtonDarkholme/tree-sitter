@@ -74,7 +74,8 @@ struct Benchmark {
     /// Calibrate each sample to at least this duration.
     #[arg(long, default_value = "0")]
     min_sample_time_ms: u64,
-    /// Benchmark case kind to run: query, normal, error, traversal, or all.
+    /// Benchmark case kind to run: query, normal, error, traversal,
+    /// traversal-attribution, or all.
     #[arg(long, default_value = "all")]
     kind: String,
     /// Whether to run the benchmarks in debug mode.

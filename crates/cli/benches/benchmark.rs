@@ -15,7 +15,7 @@ use std::time::Instant;
 use anyhow::Context;
 use log::info;
 use serde_json::json;
-use tree_sitter::{Language, Parser, Query, Tree};
+use tree_sitter::{Language, Node, Parser, Query, Tree};
 use tree_sitter_loader::{CompileConfig, Loader};
 
 include!("../src/tests/helpers/dirs.rs");
@@ -147,7 +147,7 @@ fn main() {
     let mut parser = Parser::new();
     let mut all_normal_speeds = Vec::new();
     let mut all_error_speeds = Vec::new();
-    let mut all_traversal_speeds = Vec::new();
+    let mut all_traversal_speeds: BTreeMap<&'static str, Vec<usize>> = BTreeMap::new();
 
     for (language_path, (example_paths, query_paths)) in
         EXAMPLE_AND_QUERY_PATHS_BY_LANGUAGE_DIR.iter()
@@ -210,9 +210,10 @@ fn main() {
             }
         }
 
-        let mut traversal_speeds = Vec::new();
-        if should_run_kind("traversal") {
-            info!("  Traversing Trees and Reading Node Metadata:");
+        let mut traversal_speeds: BTreeMap<&'static str, Vec<usize>> = BTreeMap::new();
+        let traversal_modes = requested_traversal_modes();
+        if !traversal_modes.is_empty() {
+            info!("  Traversing Trees:");
             for example_path in example_paths {
                 if !should_run_example(example_path) {
                     continue;
@@ -229,13 +230,19 @@ fn main() {
                     tree.root_node().to_sexp()
                 );
 
-                traversal_speeds.push(traverse(
-                    language_name,
-                    example_path,
-                    max_path_length,
-                    &source,
-                    &tree,
-                ));
+                for &mode in &traversal_modes {
+                    traversal_speeds
+                        .entry(mode.kind())
+                        .or_default()
+                        .push(traverse(
+                            language_name,
+                            example_path,
+                            max_path_length,
+                            &source,
+                            &tree,
+                            mode,
+                        ));
+                }
             }
         }
 
@@ -278,14 +285,18 @@ fn main() {
             info!("  Worst Speed (errors):   {worst_error} bytes/ms");
         }
 
-        if let Some((average_traversal, worst_traversal)) = aggregate(&traversal_speeds) {
-            info!("  Average Speed (traversal): {average_traversal} nodes/ms");
-            info!("  Worst Speed (traversal):   {worst_traversal} nodes/ms");
+        for (kind, speeds) in &traversal_speeds {
+            if let Some((average_traversal, worst_traversal)) = aggregate(speeds) {
+                info!("  Average Speed ({kind}): {average_traversal} nodes/ms");
+                info!("  Worst Speed ({kind}):   {worst_traversal} nodes/ms");
+            }
         }
 
         all_normal_speeds.extend(normal_speeds);
         all_error_speeds.extend(error_speeds);
-        all_traversal_speeds.extend(traversal_speeds);
+        for (kind, speeds) in traversal_speeds {
+            all_traversal_speeds.entry(kind).or_default().extend(speeds);
+        }
     }
 
     info!("\n  Overall");
@@ -298,9 +309,11 @@ fn main() {
         info!("  Average Speed (errors): {average_error} bytes/ms");
         info!("  Worst Speed (errors):   {worst_error} bytes/ms");
     }
-    if let Some((average_traversal, worst_traversal)) = aggregate(&all_traversal_speeds) {
-        info!("  Average Speed (traversal): {average_traversal} nodes/ms");
-        info!("  Worst Speed (traversal):   {worst_traversal} nodes/ms");
+    for (kind, speeds) in &all_traversal_speeds {
+        if let Some((average_traversal, worst_traversal)) = aggregate(speeds) {
+            info!("  Average Speed ({kind}): {average_traversal} nodes/ms");
+            info!("  Worst Speed ({kind}):   {worst_traversal} nodes/ms");
+        }
     }
     info!("");
 }
@@ -310,6 +323,26 @@ fn should_run_kind(kind: &str) -> bool {
         Some(filter) => filter.iter().any(|item| item == kind || item == "all"),
         None => true,
     }
+}
+
+fn requested_traversal_modes() -> Vec<TraversalMode> {
+    let run_full = should_run_kind("traversal");
+    let run_attribution = KIND_FILTER
+        .as_ref()
+        .is_some_and(|filter| filter.iter().any(|item| item == "traversal-attribution"));
+    let mut result = Vec::new();
+    if run_attribution {
+        result.extend([
+            TraversalMode::Navigation,
+            TraversalMode::Kind,
+            TraversalMode::Range,
+            TraversalMode::Flags,
+        ]);
+    }
+    if run_full || run_attribution {
+        result.push(TraversalMode::Full);
+    }
+    result
 }
 
 fn aggregate(speeds: &[usize]) -> Option<(usize, usize)> {
@@ -380,25 +413,48 @@ fn parse(
     speed as usize
 }
 
+#[derive(Clone, Copy)]
+enum TraversalMode {
+    Navigation,
+    Kind,
+    Range,
+    Flags,
+    Full,
+}
+
+impl TraversalMode {
+    const fn kind(self) -> &'static str {
+        match self {
+            Self::Navigation => "traversal-navigation",
+            Self::Kind => "traversal-kind",
+            Self::Range => "traversal-range",
+            Self::Flags => "traversal-flags",
+            Self::Full => "traversal",
+        }
+    }
+}
+
 fn traverse(
     language: &str,
     path: &Path,
     max_path_length: usize,
     source: &[u8],
     tree: &Tree,
+    mode: TraversalMode,
 ) -> usize {
     let source_hash = source_hash(source);
-    let (nodes_per_traversal, warmup_checksum) = traverse_and_read(tree);
+    let (nodes_per_traversal, warmup_checksum) = traverse_and_read(tree, mode);
     assert_ne!(nodes_per_traversal, 0, "tree must contain its root node");
     black_box(warmup_checksum);
 
-    let traversals_per_repetition = calibrated_traversals_per_repetition(tree, *MIN_SAMPLE_TIME);
+    let traversals_per_repetition =
+        calibrated_traversals_per_repetition(tree, mode, *MIN_SAMPLE_TIME);
     let mut sample_duration_ns = Vec::with_capacity(*REPETITION_COUNT);
     let mut checksum = 0_u64;
     for _ in 0..*REPETITION_COUNT {
         let time = BenchmarkTimer::start();
         for _ in 0..traversals_per_repetition {
-            let (node_count, traversal_checksum) = traverse_and_read(tree);
+            let (node_count, traversal_checksum) = traverse_and_read(tree, mode);
             debug_assert_eq!(node_count, nodes_per_traversal);
             checksum = checksum.wrapping_add(traversal_checksum);
         }
@@ -426,7 +482,7 @@ fn traverse(
         "BENCHMARK_RESULT {}",
         json!({
             "language": language,
-            "kind": "traversal",
+            "kind": mode.kind(),
             "path": path.display().to_string(),
             "source_bytes": source.len() as u64,
             "source_hash": source_hash,
@@ -446,7 +502,29 @@ fn traverse(
 
 /// Match ast-grep's preorder cursor walk and consume common node metadata.
 /// Parsing, file I/O, and tree construction remain outside the timed region.
-fn traverse_and_read(tree: &Tree) -> (u64, u64) {
+fn traverse_and_read(tree: &Tree, mode: TraversalMode) -> (u64, u64) {
+    match mode {
+        TraversalMode::Navigation => traverse_with_read(tree, |_| 0),
+        TraversalMode::Kind => {
+            traverse_with_read(tree, |node| u64::from(black_box(node.kind_id())))
+        }
+        TraversalMode::Range => traverse_with_read(tree, |node| {
+            (black_box(node.start_byte()) as u64).wrapping_add(black_box(node.end_byte()) as u64)
+        }),
+        TraversalMode::Flags => traverse_with_read(tree, |node| {
+            (black_box(node.is_named()) as u64).wrapping_add(black_box(node.is_error()) as u64)
+        }),
+        TraversalMode::Full => traverse_with_read(tree, |node| {
+            u64::from(black_box(node.kind_id()))
+                .wrapping_add(black_box(node.start_byte()) as u64)
+                .wrapping_add(black_box(node.end_byte()) as u64)
+                .wrapping_add(black_box(node.is_named()) as u64)
+                .wrapping_add(black_box(node.is_error()) as u64)
+        }),
+    }
+}
+
+fn traverse_with_read(tree: &Tree, mut read: impl FnMut(Node<'_>) -> u64) -> (u64, u64) {
     let root = tree.root_node();
     let root_id = root.id();
     let mut cursor = root.walk();
@@ -456,12 +534,7 @@ fn traverse_and_read(tree: &Tree) -> (u64, u64) {
     loop {
         let node = cursor.node();
         node_count += 1;
-        checksum = checksum
-            .wrapping_add(u64::from(black_box(node.kind_id())))
-            .wrapping_add(black_box(node.start_byte()) as u64)
-            .wrapping_add(black_box(node.end_byte()) as u64)
-            .wrapping_add(black_box(node.is_named()) as u64)
-            .wrapping_add(black_box(node.is_error()) as u64);
+        checksum = checksum.wrapping_add(read(node));
 
         if cursor.goto_first_child() {
             continue;
@@ -479,20 +552,24 @@ fn traverse_and_read(tree: &Tree) -> (u64, u64) {
     }
 }
 
-fn calibrated_traversals_per_repetition(tree: &Tree, minimum_sample_time: Duration) -> usize {
+fn calibrated_traversals_per_repetition(
+    tree: &Tree,
+    mode: TraversalMode,
+    minimum_sample_time: Duration,
+) -> usize {
     if minimum_sample_time.is_zero() {
         return 1;
     }
 
     const WARMUP_TRAVERSALS: usize = 3;
     for _ in 0..WARMUP_TRAVERSALS {
-        black_box(traverse_and_read(tree));
+        black_box(traverse_and_read(tree, mode));
     }
 
     const CALIBRATION_TRAVERSALS: usize = 3;
     let started = BenchmarkTimer::start();
     for _ in 0..CALIBRATION_TRAVERSALS {
-        black_box(traverse_and_read(tree));
+        black_box(traverse_and_read(tree, mode));
     }
     let nanos_per_traversal = started.elapsed().as_nanos().max(1) / CALIBRATION_TRAVERSALS as u128;
     minimum_sample_time
