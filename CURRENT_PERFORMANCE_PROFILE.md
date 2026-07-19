@@ -628,6 +628,14 @@ Python +2.10%, Rust -0.06%, and TypeScript -1.22%. Candidate maximum CV was
 fixtures, and RSS had no consistent increase. The candidate fails the overall
 and per-language gates, so the original pointer scan remains.
 
+A narrower retry applied the group-kind skip only to known nonterminal goto
+lookups, leaving terminal token/action lookup byte-for-byte unchanged. Its
+five-sample 200 ms A/B/A result was +0.52% overall: C++ +0.39%, Go +2.01%,
+Java -0.12%, JavaScript -0.62%, Python +0.98%, Rust -2.33%, and TypeScript
++0.35%. RSS was neutral, but candidate CV reached 8.69%. It fails both the
+overall and per-language gates, so the whole runtime-only group-skip family is
+closed.
+
 ### 7. External-scanner snapshots
 
 The current scanner ABI exposes one mutable grammar-owned object plus serialized
