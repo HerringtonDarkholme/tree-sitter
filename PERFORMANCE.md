@@ -146,6 +146,7 @@ branch was reverted to `fe2605c1`, so these are candidates, not current wins.
 | Incremental reduction summaries | Regressed the normalized gate by about 4.2 points; paid an 88-byte payload on discarded paths | Do not attach broad summaries to every pop path |
 | Direct-final deterministic reducer | +1.09% in the short current-Rust A/B/A run, but only +0.58% in the longer confirmation; C++ -2.39%, Go -1.43%, and Rust -1.33%; RSS neutral | Reject the combined outlining/direct-builder change; the smaller frame did not produce a stable cross-language win |
 | Accepted-DAG balancing worklist reuse | An unsafe form appeared +2.01%, but it could mutate descendants through shared ancestors; preserving the old skip invariant produced -0.18% overall, C++ -1.49%, and Python -1.39% | Do not cache bare candidates without also representing shared-ancestor exclusion; the safe propagation pass recreates the removed traversal |
+| Parser-private arena bump cursor | +0.52% current-Rust throughput overall, but JavaScript -3.01%; CV stable and RSS neutral | Keep the single atomic allocator path; its CAS loop is too small a fraction to justify phase-specialized allocator code |
 | Post-finalization column shrinking | Increased peak RSS by 346% because old and new allocations coexisted | Do not shrink by reallocating after construction |
 
 The direct-final reducer was independently reimplemented after the retained
@@ -221,8 +222,10 @@ The current experiment order is:
 
 1. retain the conservative UTF-8 ASCII advance fast path;
 2. keep the direct-final reducer and accepted-DAG balancing worklist rejected;
-3. measure single-action dispatch coverage; and
-4. only afterward consider parser-private arena bumping.
+3. retain the single-action dispatch fast path;
+4. keep parser-private arena bumping rejected; and
+5. refresh the accepted Rust profile before selecting another runtime-owned
+   candidate.
 
 Allocator/GC tuning is not the next throughput target. A Python snapshot had
 about 7.2 MiB physical footprint and 2.1 MiB resident/dirty arena pages despite

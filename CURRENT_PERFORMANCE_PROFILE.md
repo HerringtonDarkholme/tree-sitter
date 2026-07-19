@@ -317,8 +317,8 @@ the experiment ledger in `PERFORMANCE.md` and `SUBTREE_ARENA_PLAN.md`.
 | Rejected | Dedicated direct-final deterministic reducer | Large shared frame, temporary child-array lifecycle, trailing-extra pass, and separate child-summary pass | +0.58% longer confirmation; three languages below -1% | Code placement and dependency chains offset removed work |
 | Rejected | Reuse accepted-DAG discovery for balancing | Second child-edge discovery traversal and its work stack | Invariant-preserving form was -0.18% overall | Shared ancestors invalidate bare descendant candidates |
 | Retained | Single-action parser interpreter fast path | Generic action loop and multi-action bookkeeping for the common one-action entry | +2.78% current-Rust throughput, all languages positive | Duplicated action dispatch code |
-| 1 | Parser-private arena bump cursor with published atomic fallback | CAS loop on allocations made before publication | Arena allocation is 1.5% exclusive in Go | Published tree copies may allocate concurrently in the same arena |
-| 2 | Versioned external-scanner snapshot ABI | Repeated deserialize and grammar-owned malloc/free | Python external scanner is 5.7%, allocation 4.8% | ABI and grammar complexity; identity cache already had low reuse |
+| Rejected | Parser-private arena bump cursor with published atomic fallback | CAS loop on allocations made before publication | +0.52% overall; JavaScript -3.01% | Phase branch and duplicated allocator code offset the small CAS saving |
+| 1 | Versioned external-scanner snapshot ABI | Repeated deserialize and grammar-owned malloc/free | Python external scanner is 5.7%, allocation 4.8% | ABI and grammar complexity; identity cache already had low reuse |
 
 ### 1. UTF-8 ASCII advance
 
@@ -592,6 +592,19 @@ deterministic-reducer work, and reject it if routing every `SubtreeArray`
 growth through the private cursor expands the change beyond a focused
 allocation layer.
 
+Implemented result: **rejected**. The prototype used the arena's existing
+`published` phase flag instead of adding duplicate pool cursors. Before
+publication, `AtomicUsize::get_mut` updated the offset and committed watermark
+with ordinary loads and stores; after publication, copied-tree allocation kept
+the unchanged CAS path. Core tests, Clippy, and core parity passed.
+
+Against immediate Rust parent `4575f375`, the five-sample 200 ms A/B/A gate was
++0.52% overall. C++ was +0.46%, Go +0.16%, Java -0.08%, JavaScript -3.01%,
+Python +0.58%, Rust +2.14%, and TypeScript +1.23%. Maximum CV was 3.86%, 3.33%,
+and 3.57% for control, candidate, and control; RSS was neutral. The candidate
+fails both the +1% overall threshold and per-language regression floor, so the
+runtime retains one atomic allocation path.
+
 ### 6. External-scanner snapshots
 
 The current scanner ABI exposes one mutable grammar-owned object plus serialized
@@ -662,7 +675,10 @@ to existing parser artifacts.
 3. Keep accepted-DAG balancing worklist reuse rejected unless a design can
    represent shared-ancestor exclusion without another traversal.
 4. Retain the single-action dispatch fast path.
-5. Next consider the small-ceiling parser-private arena cursor.
+5. Keep the parser-private arena cursor rejected.
+6. Refresh the accepted Rust profile before selecting another runtime-owned
+   candidate; leave the external-scanner ABI unscheduled until its ecosystem
+   cost is explicitly approved.
 
 This order records the retained low-complexity win and the rejected reducer
 experiment before moving to the next measured runtime phases. It stays within
