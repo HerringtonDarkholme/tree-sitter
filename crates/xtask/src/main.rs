@@ -68,10 +68,13 @@ struct Benchmark {
     /// The example file to run the benchmarks for.
     #[arg(long, short)]
     example_file_name: Option<String>,
-    /// The number of times to parse each sample (default is 5).
+    /// The number of measured samples (default is 5).
     #[arg(long, short, default_value = "5")]
     repetition_count: u32,
-    /// Benchmark case kind to run: query, normal, error, or all.
+    /// Calibrate each sample to at least this duration.
+    #[arg(long, default_value = "0")]
+    min_sample_time_ms: u64,
+    /// Benchmark case kind to run: query, normal, error, traversal, or all.
     #[arg(long, default_value = "all")]
     kind: String,
     /// Whether to run the benchmarks in debug mode.

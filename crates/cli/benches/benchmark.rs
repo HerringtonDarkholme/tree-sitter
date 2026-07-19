@@ -1,6 +1,7 @@
 use std::{
     collections::BTreeMap,
     env, fs,
+    hint::black_box,
     mem::MaybeUninit,
     path::{Path, PathBuf},
     str,
@@ -14,7 +15,7 @@ use std::time::Instant;
 use anyhow::Context;
 use log::info;
 use serde_json::json;
-use tree_sitter::{Language, Parser, Query};
+use tree_sitter::{Language, Parser, Query, Tree};
 use tree_sitter_loader::{CompileConfig, Loader};
 
 include!("../src/tests/helpers/dirs.rs");
@@ -146,6 +147,7 @@ fn main() {
     let mut parser = Parser::new();
     let mut all_normal_speeds = Vec::new();
     let mut all_error_speeds = Vec::new();
+    let mut all_traversal_speeds = Vec::new();
 
     for (language_path, (example_paths, query_paths)) in
         EXAMPLE_AND_QUERY_PATHS_BY_LANGUAGE_DIR.iter()
@@ -208,6 +210,35 @@ fn main() {
             }
         }
 
+        let mut traversal_speeds = Vec::new();
+        if should_run_kind("traversal") {
+            info!("  Traversing Trees and Reading Node Metadata:");
+            for example_path in example_paths {
+                if !should_run_example(example_path) {
+                    continue;
+                }
+
+                let source = fs::read(example_path)
+                    .with_context(|| format!("Failed to read {}", example_path.display()))
+                    .unwrap();
+                let tree = parser.parse(&source, None).expect("Failed to parse");
+                assert!(
+                    !tree.root_node().has_error(),
+                    "traversal benchmark fixture has parse errors: {}\n{}",
+                    example_path.display(),
+                    tree.root_node().to_sexp()
+                );
+
+                traversal_speeds.push(traverse(
+                    language_name,
+                    example_path,
+                    max_path_length,
+                    &source,
+                    &tree,
+                ));
+            }
+        }
+
         let mut error_speeds = Vec::new();
         if should_run_kind("error") {
             info!("  Parsing Invalid Code (mismatched languages):");
@@ -247,8 +278,14 @@ fn main() {
             info!("  Worst Speed (errors):   {worst_error} bytes/ms");
         }
 
+        if let Some((average_traversal, worst_traversal)) = aggregate(&traversal_speeds) {
+            info!("  Average Speed (traversal): {average_traversal} nodes/ms");
+            info!("  Worst Speed (traversal):   {worst_traversal} nodes/ms");
+        }
+
         all_normal_speeds.extend(normal_speeds);
         all_error_speeds.extend(error_speeds);
+        all_traversal_speeds.extend(traversal_speeds);
     }
 
     info!("\n  Overall");
@@ -260,6 +297,10 @@ fn main() {
     if let Some((average_error, worst_error)) = aggregate(&all_error_speeds) {
         info!("  Average Speed (errors): {average_error} bytes/ms");
         info!("  Worst Speed (errors):   {worst_error} bytes/ms");
+    }
+    if let Some((average_traversal, worst_traversal)) = aggregate(&all_traversal_speeds) {
+        info!("  Average Speed (traversal): {average_traversal} nodes/ms");
+        info!("  Worst Speed (traversal):   {worst_traversal} nodes/ms");
     }
     info!("");
 }
@@ -339,10 +380,131 @@ fn parse(
     speed as usize
 }
 
+fn traverse(
+    language: &str,
+    path: &Path,
+    max_path_length: usize,
+    source: &[u8],
+    tree: &Tree,
+) -> usize {
+    let source_hash = source_hash(source);
+    let (nodes_per_traversal, warmup_checksum) = traverse_and_read(tree);
+    assert_ne!(nodes_per_traversal, 0, "tree must contain its root node");
+    black_box(warmup_checksum);
+
+    let traversals_per_repetition = calibrated_traversals_per_repetition(tree, *MIN_SAMPLE_TIME);
+    let mut sample_duration_ns = Vec::with_capacity(*REPETITION_COUNT);
+    let mut checksum = 0_u64;
+    for _ in 0..*REPETITION_COUNT {
+        let time = BenchmarkTimer::start();
+        for _ in 0..traversals_per_repetition {
+            let (node_count, traversal_checksum) = traverse_and_read(tree);
+            debug_assert_eq!(node_count, nodes_per_traversal);
+            checksum = checksum.wrapping_add(traversal_checksum);
+        }
+        sample_duration_ns.push(
+            u64::try_from(time.elapsed().as_nanos())
+                .unwrap_or(u64::MAX)
+                .max(1),
+        );
+    }
+    black_box(checksum);
+
+    let duration_ns =
+        sample_duration_ns.iter().sum::<u64>() / u64::try_from(sample_duration_ns.len()).unwrap();
+    let visited_nodes = nodes_per_traversal * traversals_per_repetition as u64;
+    let measured_bytes = source.len() as u64 * traversals_per_repetition as u64;
+    let speed = (visited_nodes * 1_000_000) / duration_ns;
+    let ns_per_node = duration_ns as f64 / visited_nodes as f64;
+    let peak_rss_bytes = peak_rss_bytes();
+    info!(
+        "    {:max_path_length$}\ttime {:>7.2} ms\t\tspeed {speed:>6} nodes/ms",
+        path.file_name().unwrap().to_str().unwrap(),
+        (duration_ns as f64) / 1e6,
+    );
+    println!(
+        "BENCHMARK_RESULT {}",
+        json!({
+            "language": language,
+            "kind": "traversal",
+            "path": path.display().to_string(),
+            "source_bytes": source.len() as u64,
+            "source_hash": source_hash,
+            "bytes": measured_bytes,
+            "nodes_per_traversal": nodes_per_traversal,
+            "traversals": traversals_per_repetition as u64,
+            "nodes": visited_nodes,
+            "duration_ns": duration_ns,
+            "sample_duration_ns": sample_duration_ns,
+            "peak_rss_bytes": peak_rss_bytes,
+            "speed_nodes_per_ms": speed,
+            "ns_per_node": ns_per_node,
+        })
+    );
+    speed as usize
+}
+
+/// Match ast-grep's preorder cursor walk and consume common node metadata.
+/// Parsing, file I/O, and tree construction remain outside the timed region.
+fn traverse_and_read(tree: &Tree) -> (u64, u64) {
+    let root = tree.root_node();
+    let root_id = root.id();
+    let mut cursor = root.walk();
+    let mut node_count = 0_u64;
+    let mut checksum = 0_u64;
+
+    loop {
+        let node = cursor.node();
+        node_count += 1;
+        checksum = checksum
+            .wrapping_add(u64::from(black_box(node.kind_id())))
+            .wrapping_add(black_box(node.start_byte()) as u64)
+            .wrapping_add(black_box(node.end_byte()) as u64)
+            .wrapping_add(black_box(node.is_named()) as u64)
+            .wrapping_add(black_box(node.is_error()) as u64);
+
+        if cursor.goto_first_child() {
+            continue;
+        }
+
+        loop {
+            if cursor.node().id() == root_id {
+                return (node_count, checksum);
+            }
+            if cursor.goto_next_sibling() {
+                break;
+            }
+            assert!(cursor.goto_parent(), "tree cursor must return to its root");
+        }
+    }
+}
+
+fn calibrated_traversals_per_repetition(tree: &Tree, minimum_sample_time: Duration) -> usize {
+    if minimum_sample_time.is_zero() {
+        return 1;
+    }
+
+    const WARMUP_TRAVERSALS: usize = 3;
+    for _ in 0..WARMUP_TRAVERSALS {
+        black_box(traverse_and_read(tree));
+    }
+
+    const CALIBRATION_TRAVERSALS: usize = 3;
+    let started = BenchmarkTimer::start();
+    for _ in 0..CALIBRATION_TRAVERSALS {
+        black_box(traverse_and_read(tree));
+    }
+    let nanos_per_traversal = started.elapsed().as_nanos().max(1) / CALIBRATION_TRAVERSALS as u128;
+    minimum_sample_time
+        .as_nanos()
+        .div_ceil(nanos_per_traversal)
+        .min(usize::MAX as u128) as usize
+}
+
 /// Stable FNV-1a fingerprint used to reject stale performance baselines.
 fn source_hash(source: &[u8]) -> u64 {
-    source.iter().fold(0xcbf29ce484222325, |hash, byte| {
-        (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3)
+    source.iter().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
+        (hash ^ u64::from(*byte)).wrapping_mul(0x0100_0000_01b3)
     })
 }
 

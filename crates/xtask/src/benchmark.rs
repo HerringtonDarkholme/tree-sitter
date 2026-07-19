@@ -24,6 +24,15 @@ pub fn run(args: &Benchmark) -> Result<()> {
         };
     }
 
+    if args.min_sample_time_ms != 0 {
+        unsafe {
+            std::env::set_var(
+                "TREE_SITTER_BENCHMARK_MIN_SAMPLE_TIME_MS",
+                args.min_sample_time_ms.to_string(),
+            );
+        };
+    }
+
     unsafe { std::env::set_var("TREE_SITTER_BENCHMARK_KIND_FILTER", &args.kind) };
 
     if args.debug {
