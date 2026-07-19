@@ -155,6 +155,7 @@ branch was reverted to `fe2605c1`, so these are candidates, not current wins.
 | Post-finalization column shrinking | Increased peak RSS by 346% because old and new allocations coexisted | Do not shrink by reallocating after construction |
 | Exact subtree counts plus node-record free lists | Pathological RSS remained roughly 494 MiB; instrumentation attributed 468.2 MiB of 470.1 MiB bump progress to temporary child-array capacities | Do not add ownership/release work to reclaim the wrong allocation class; reuse child-array blocks under pressure instead |
 | Cached ASCII chunk/range boundary | -0.89% current-Rust throughput in a complete 40-fixture A/B/A screen; Go -2.08%, Java -1.54%, Python -3.55% | Keep the existing two comparisons; refreshing a derived boundary on chunk/range transitions did not pay for itself |
+| Batched cursor child metadata | -1.71% traversal throughput after the parent-slice cache; JavaScript -11.21%, Python -10.81%, Rust -4.59% | Keep child accessors narrow and inlined; do not return a 36-byte metadata aggregate through each iterator step |
 
 The direct-final reducer was independently reimplemented after the retained
 ASCII lexer change. It again passed a short gate (+1.42%), but the decisive

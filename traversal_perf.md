@@ -1,5 +1,34 @@
 # Tree traversal and node-read performance streak
 
+## Streak 4: batched child metadata is rejected
+
+After retaining the parent child-slice cache, a separate candidate resolved
+each compact or heap child once into a 36-byte cursor summary containing
+padding, size, visibility counts, and flags. The iterator returned size and
+visible-child count to its callers so they would not resolve the child again.
+Focused forward, reverse, alias, and point-navigation tests passed.
+
+The complete three-sample, 200 ms A/B/A traversal screen against immediate
+Rust parent `342cb0b6` was a broad regression:
+
+| Language | Traversal throughput change |
+| --- | ---: |
+| C++ | +2.07% |
+| Go | +1.38% |
+| Java | +6.43% |
+| JavaScript | -11.21% |
+| Python | -10.81% |
+| Rust | -4.59% |
+| TypeScript | +6.53% |
+| **Equal-language geometric mean** | **-1.71%** |
+
+All 40 fixture lengths, hashes, and node counts matched. The implementation
+was removed. Unlike the retained four-byte parent handle replacement, this
+form widens the per-child value flow and forces a large aggregate through the
+iterator/caller boundary. Existing inlined accessors let LLVM keep only the
+fields required by each control path. Future cursor work should cache narrow
+addresses or scalars, not materialize a broad metadata snapshot.
+
 ## Streak 3: resolve each parent child slice once
 
 The current cursor now resolves an internal parent's arena-backed child slice
