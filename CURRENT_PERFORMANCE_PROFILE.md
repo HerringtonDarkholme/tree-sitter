@@ -320,6 +320,7 @@ the experiment ledger in `PERFORMANCE.md` and `SUBTREE_ARENA_PLAN.md`.
 | Rejected | Parser-private arena bump cursor with published atomic fallback | CAS loop on allocations made before publication | +0.52% overall; JavaScript -3.01% | Phase branch and duplicated allocator code offset the small CAS saving |
 | Rejected | Small parse-table group rejection | Scans of terminal groups during goto lookup and nonterminal groups during token lookup | +0.56% longer confirmation; JavaScript -2.51%, TypeScript -1.22% | The safe kind branch helps reduction-heavy languages but hurts other lookup distributions |
 | Rejected | Parser-private nonterminal goto cache | Repeated compressed-row scans for identical `(state, symbol)` reductions | -0.22% overall; JavaScript -2.65%, Rust -1.34% | Cache probes and direct-map replacement cost more than the avoided scans on the mixed corpus |
+| Retained | Sparse parser-private goto index | All compressed-row scans for small-state nonterminal transitions | +2.18% confirmed overall; all seven languages positive, Go +7.09% | One-time language installation work and a small sparse allocation per parser |
 | Rejected | Outline materialized `stack_push` | Shared code footprint between deterministic-window and graph-stack pushes | -0.18% overall; Go -1.29% | The extra call on materialized pushes costs more than isolating the deterministic path saves |
 | Rejected | Commit subtree summaries after the child loop | Repeated parent-header writes during reduction summarization | Counter-only retry -0.02% overall; Python -1.42%, TypeScript -2.31% | Even controlled scalar aggregation changes the mixed-workload dependency chain unfavorably |
 | 1 | Versioned external-scanner snapshot ABI | Repeated deserialize and grammar-owned malloc/free | Python external scanner is 5.7%, allocation 4.8% | ABI and grammar complexity; identity cache already had low reuse |
@@ -658,7 +659,58 @@ reverted. The result closes small parser-local goto caches: even though some
 reduction-heavy languages benefit, every reduction pays the probe and direct
 mapping cannot preserve enough useful pairs across the mixed workload.
 
-### 8. Materialized `stack_push` outlining
+### 8. Sparse parser-private nonterminal goto index
+
+The retained design removes the scan rather than trying to predict repeated
+pairs. When `ts_parser_set_language` installs a language, it projects each
+compressed small-state row into only its actual nonterminal transitions. Each
+parser-owned row stores a `{start, length}` pair and each sorted transition is
+one four-byte `{symbol, next_state}` pair. Rows of at most eight entries use a
+linear search; larger rows use binary search. Large generated states continue
+to use their existing dense parse table, while terminal/action lookup remains
+byte-for-byte unchanged.
+
+This is deliberately sparse. A dense small-state/nonterminal matrix would add
+roughly 4 MiB for the benchmark C++ grammar alone. The retained index allocates
+only one entry per real goto plus eight bytes per small state, and it is freed
+with the parser or rebuilt when the language changes. It changes no generated
+parser, public ABI, subtree representation, or parse result.
+
+The decisive five-sample 500 ms A/B/A confirmation against accepted Rust head
+`0da87b25` was:
+
+| Language | Fixtures | Throughput change |
+| --- | ---: | ---: |
+| C++ | 4 | +2.19% |
+| Go | 5 | +7.09% |
+| Java | 4 | +1.04% |
+| JavaScript | 2 | +1.38% |
+| Python | 12 | +1.85% |
+| Rust | 2 | +0.56% |
+| TypeScript | 11 | +1.30% |
+| **All fixtures** | **40** | **+2.20%** |
+
+The equal-language geometric mean was +2.18%. Maximum CV was 2.85%, all source
+hashes matched, and the largest per-language peak RSS increase was 0.19 MiB;
+Go and TypeScript used less peak RSS than their bracketing controls. After
+extracting direct reconstruction tests, a fresh seven-language 200 ms gate
+remained +2.27% by equal language / +2.52% across all fixtures, with every
+language positive and maximum CV 3.42%.
+
+Focused tests cover mixed groups, unsorted symbols, range filtering, misses,
+large-state fallback, and both search strategies. This result does not reopen
+the rejected direct-mapped cache or group-skip branch: those retained the
+underlying scan on a miss or matching group, whereas the sparse index removes
+the compressed nonterminal scan from parsing entirely.
+
+The exhaustive available core-parity run matched the C core on all 123
+TypeScript/TSX corpus and source samples, including the edit witness. The
+four-package ast-grep consumer gate passed. All non-CLI workspace tests, the
+ABI surface test, and Clippy passed; `cargo test --all` reached only the four
+known language-detection fixture failures that are unchanged from the accepted
+control branch, while its other 265 CLI tests passed.
+
+### 9. Materialized `stack_push` outlining
 
 The accepted-head profile showed both deterministic-window and materialized
 graph-stack work in one large `stack_push` function. A minimal prototype kept
@@ -675,7 +727,7 @@ runtime source was reverted. Simple outlining is therefore closed: Go confirms
 that materialized pushes are common enough for the forced call boundary to
 cost more than the reduced deterministic-path footprint saves.
 
-### 9. Deferred subtree-summary commits
+### 10. Deferred subtree-summary commits
 
 The linked accepted-head assembly showed `subtree_summarize_children` storing
 parent size, error cost, flags, and child counters during each child iteration.
@@ -706,7 +758,7 @@ these summary dependencies reach the parent helps reduction-heavy languages
 but harms lexer/front-end-heavy workloads enough to fail the mixed-language
 gate. The deferred-summary-write family is closed.
 
-### 10. External-scanner snapshots
+### 11. External-scanner snapshots
 
 The current scanner ABI exposes one mutable grammar-owned object plus serialized
 bytes. The runtime must deserialize a stack version's bytes before scanning,
@@ -779,9 +831,10 @@ to existing parser artifacts.
 5. Keep the parser-private arena cursor rejected.
 6. Keep small parse-table group rejection rejected.
 7. Keep parser-private nonterminal goto caching rejected.
-8. Keep simple `stack_push` hot/cold outlining rejected.
-9. Keep broad deferred subtree-summary commits rejected.
-10. Continue from the accepted-head runtime profile; leave the external-scanner
+8. Retain the sparse parser-private nonterminal goto index.
+9. Keep simple `stack_push` hot/cold outlining rejected.
+10. Keep broad deferred subtree-summary commits rejected.
+11. Continue from the accepted-head runtime profile; leave the external-scanner
    ABI unscheduled until its ecosystem cost is explicitly approved.
 
 This order records the retained low-complexity win and the rejected reducer

@@ -118,6 +118,7 @@ cargo xtask perf-gate --min-sample-time-ms 1000 --offline
 | Focused ownership and module cleanup | Behavior remained green and direct throughput changes stayed within measurement noise | Keep for readability |
 | Conservative UTF-8 ASCII lexer advance | +2.70% current-Rust throughput across 40 fixtures; all seven languages positive; RSS neutral | Keep the guarded in-chunk/in-range fast path |
 | Single-action parser dispatch | +2.78% current-Rust throughput across 40 fixtures; all seven languages positive; maximum CV 4.04%; RSS neutral | Keep the direct one-action interpreter and outline generalized action iteration |
+| Sparse parser-private goto index | +2.18% confirmed current-Rust throughput; all seven languages positive, Go +7.09%; maximum CV 2.85%; at most +0.19 MiB peak RSS | Keep a sorted four-byte entry per actual small-state nonterminal transition; leave terminal/action lookup unchanged |
 
 The `Subtree` result is the strongest representation lesson. A readable API
 should hide the compact tagged representation, not double every hot subtree
@@ -147,7 +148,7 @@ branch was reverted to `fe2605c1`, so these are candidates, not current wins.
 | Direct-final deterministic reducer | +1.09% in the short current-Rust A/B/A run, but only +0.58% in the longer confirmation; C++ -2.39%, Go -1.43%, and Rust -1.33%; RSS neutral | Reject the combined outlining/direct-builder change; the smaller frame did not produce a stable cross-language win |
 | Accepted-DAG balancing worklist reuse | An unsafe form appeared +2.01%, but it could mutate descendants through shared ancestors; preserving the old skip invariant produced -0.18% overall, C++ -1.49%, and Python -1.39% | Do not cache bare candidates without also representing shared-ancestor exclusion; the safe propagation pass recreates the removed traversal |
 | Parser-private arena bump cursor | +0.52% current-Rust throughput overall, but JavaScript -3.01%; CV stable and RSS neutral | Keep the single atomic allocator path; its CAS loop is too small a fraction to justify phase-specialized allocator code |
-| Small parse-table group rejection | A safe terminal/nonterminal group skip was +1.17% in the short gate but only +0.56% in the 500 ms confirmation; JavaScript -2.51% and TypeScript -1.22%. A nonterminal-only retry was +0.52% overall and Rust -2.33% | Keep the compact pointer scan; rendered symbol IDs are not ordered within groups, and neither safe kind-check scope is a cross-language win |
+| Small parse-table group rejection | A safe terminal/nonterminal group skip was +1.17% in the short gate but only +0.56% in the 500 ms confirmation; JavaScript -2.51% and TypeScript -1.22%. A nonterminal-only retry was +0.52% overall and Rust -2.33% | Do not add kind branches to the generated-table scan; rendered symbol IDs are not ordered within groups |
 | Post-finalization column shrinking | Increased peak RSS by 346% because old and new allocations coexisted | Do not shrink by reallocating after construction |
 
 The direct-final reducer was independently reimplemented after the retained
@@ -230,7 +231,8 @@ The current experiment order is:
 6. keep deferred subtree-summary commits rejected: broad aggregation increases
    register pressure, while a counter-only retry was throughput-neutral and
    regressed Python and TypeScript; and
-7. use the refreshed accepted-head profile to select another runtime-owned
+7. retain the sparse parser-private nonterminal goto index; and
+8. use the refreshed accepted-head profile to select another runtime-owned
    candidate.
 
 Allocator/GC tuning is not the next throughput target. A Python snapshot had

@@ -197,7 +197,10 @@ unsafe fn parser_finish_reduction(
         && action.symbol != TS_BUILTIN_SYM_ERROR_REPEAT
         && u32::from(action.symbol) >= language_full(parser.language).token_count
     {
-        language_lookup(parser.language, state, action.symbol)
+        parser
+            .goto_table
+            .lookup(state, action.symbol)
+            .unwrap_or_else(|| language_lookup(parser.language, state, action.symbol))
     } else {
         ts_language_next_state(parser.language, state, action.symbol)
     };

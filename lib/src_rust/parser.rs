@@ -25,7 +25,7 @@ use core::ptr;
 
 use crate::ffi::{
     TSInput, TSInputEncoding, TSInputEncodingUTF8, TSLanguage, TSLogger, TSParseOptions,
-    TSParseState, TSPoint, TSRange, TREE_SITTER_LANGUAGE_VERSION,
+    TSParseState, TSPoint, TSRange, TSStateId, TSSymbol, TREE_SITTER_LANGUAGE_VERSION,
     TREE_SITTER_MIN_COMPATIBLE_LANGUAGE_VERSION,
 };
 
@@ -92,6 +92,187 @@ struct TokenCache {
     byte_index: u32,
 }
 
+#[derive(Clone, Copy)]
+struct GotoRow {
+    start: u32,
+    length: u32,
+}
+
+#[derive(Clone, Copy)]
+struct GotoEntry {
+    symbol: TSSymbol,
+    state: TSStateId,
+}
+
+/// Parser-owned projection of compressed small-state nonterminal transitions.
+///
+/// Generated small parse tables interleave terminal actions and nonterminal
+/// gotos. Reductions need only the latter, so this index is built once when a
+/// language is installed and avoids rescanning unrelated groups during every
+/// reduction. Entries remain sparse: one four-byte pair per actual goto.
+struct GotoTable {
+    rows: Array<GotoRow>,
+    entries: Array<GotoEntry>,
+    large_state_count: u32,
+}
+
+impl GotoTable {
+    const fn new() -> Self {
+        Self {
+            rows: Array::new(),
+            entries: Array::new(),
+            large_state_count: 0,
+        }
+    }
+
+    unsafe fn clear(&mut self) {
+        self.rows.clear();
+        self.entries.clear();
+        self.large_state_count = 0;
+    }
+
+    unsafe fn delete(&mut self) {
+        if !self.rows.contents.is_null() {
+            self.rows.delete();
+        }
+        if !self.entries.contents.is_null() {
+            self.entries.delete();
+        }
+    }
+
+    unsafe fn rebuild(&mut self, language: *const TSLanguage) {
+        self.clear();
+        if language.is_null() {
+            return;
+        }
+
+        let language = language_full(language);
+        self.large_state_count = language.large_state_count;
+        self.rows
+            .reserve(language.state_count - language.large_state_count);
+
+        for state in language.large_state_count..language.state_count {
+            let table_index = *language
+                .small_parse_table_map
+                .add((state - language.large_state_count) as usize);
+            self.append_small_row(
+                language.small_parse_table.add(table_index as usize),
+                language.token_count,
+                language.symbol_count,
+            );
+        }
+    }
+
+    unsafe fn append_small_row(
+        &mut self,
+        mut data: *const u16,
+        token_count: u32,
+        symbol_count: u32,
+    ) {
+        let row_start = self.entries.size;
+        let group_count = u32::from(*data);
+        data = data.add(1);
+
+        for _ in 0..group_count {
+            let section_value = *data;
+            let group_symbol_count = u32::from(*data.add(1));
+            data = data.add(2);
+            for _ in 0..group_symbol_count {
+                let symbol = *data;
+                if u32::from(symbol) >= token_count && u32::from(symbol) < symbol_count {
+                    self.entries.push(GotoEntry {
+                        symbol,
+                        state: section_value,
+                    });
+                }
+                data = data.add(1);
+            }
+        }
+
+        let row_length = self.entries.size - row_start;
+        let row =
+            &mut self.entries.as_mut_slice()[row_start as usize..(row_start + row_length) as usize];
+        for i in 1..row.len() {
+            let entry = row[i];
+            let mut j = i;
+            while j > 0 && row[j - 1].symbol > entry.symbol {
+                row[j] = row[j - 1];
+                j -= 1;
+            }
+            row[j] = entry;
+        }
+        self.rows.push(GotoRow {
+            start: row_start,
+            length: row_length,
+        });
+    }
+
+    #[inline]
+    unsafe fn lookup(&self, state: TSStateId, symbol: TSSymbol) -> Option<TSStateId> {
+        if u32::from(state) < self.large_state_count {
+            return None;
+        }
+        let row_index = u32::from(state) - self.large_state_count;
+        let row = self.rows.get_unchecked(row_index);
+        let entries =
+            &self.entries.as_slice()[row.start as usize..(row.start + row.length) as usize];
+
+        if entries.len() <= 8 {
+            return Some(
+                entries
+                    .iter()
+                    .find(|entry| entry.symbol == symbol)
+                    .map_or(0, |entry| entry.state),
+            );
+        }
+
+        Some(
+            entries
+                .binary_search_by_key(&symbol, |entry| entry.symbol)
+                .map_or(0, |index| entries[index].state),
+        )
+    }
+}
+
+#[cfg(test)]
+mod goto_table_tests {
+    use super::GotoTable;
+
+    #[test]
+    fn projects_and_sorts_nonterminal_entries() {
+        unsafe {
+            let compressed_row = [4, 7, 2, 1, 2, 42, 3, 12, 9, 10, 99, 2, 15, 11, 77, 1, 13];
+            let mut table = GotoTable::new();
+            table.large_state_count = 4;
+            table.append_small_row(compressed_row.as_ptr(), 10, 14);
+
+            assert_eq!(table.lookup(3, 10), None);
+            assert_eq!(table.lookup(4, 10), Some(42));
+            assert_eq!(table.lookup(4, 11), Some(99));
+            assert_eq!(table.lookup(4, 12), Some(42));
+            assert_eq!(table.lookup(4, 13), Some(77));
+            assert_eq!(table.lookup(4, 14), Some(0));
+            table.delete();
+        }
+    }
+
+    #[test]
+    fn searches_large_sparse_rows() {
+        unsafe {
+            let compressed_row = [1, 5, 9, 18, 10, 17, 11, 16, 12, 15, 13, 14];
+            let mut table = GotoTable::new();
+            table.large_state_count = 8;
+            table.append_small_row(compressed_row.as_ptr(), 10, 19);
+
+            for symbol in 10..=18 {
+                assert_eq!(table.lookup(8, symbol), Some(5));
+            }
+            assert_eq!(table.lookup(8, 9), Some(0));
+            table.delete();
+        }
+    }
+}
+
 /// Summary used to compare and prune stack versions.
 #[derive(Clone, Copy)]
 struct ErrorStatus {
@@ -147,6 +328,8 @@ pub struct TSParser {
     scratch_trees: SubtreeArray,
     /// Cached lexer result for repeated same-position lookups.
     token_cache: TokenCache,
+    /// Sparse nonterminal transitions for compressed small parse states.
+    goto_table: GotoTable,
     /// Language-owned external scanner payload.
     external_scanner_payload: *mut c_void,
     /// Optional parse debug graph output.
@@ -263,6 +446,7 @@ pub unsafe extern "C" fn ts_parser_new() -> *mut TSParser {
                 last_external_token: NULL_SUBTREE,
                 byte_index: 0,
             },
+            goto_table: GotoTable::new(),
             external_scanner_payload: ptr::null_mut(),
             dot_graph_file: ptr::null_mut(),
             accept_count: 0,
@@ -298,6 +482,7 @@ pub unsafe extern "C" fn ts_parser_delete(self_: *mut TSParser) {
     parser.trailing_extras.delete();
     parser.trailing_extras2.delete();
     parser.scratch_trees.delete();
+    parser.goto_table.delete();
     free(self_.cast::<c_void>());
 }
 
@@ -319,6 +504,7 @@ pub unsafe extern "C" fn ts_parser_set_language(
     ts_parser_reset(self_);
     let parser = ptr_mut(self_);
     parser.language = ptr::null();
+    parser.goto_table.clear();
     if !language.is_null() {
         let language_data = language_full(language);
         if language_data.abi_version > TREE_SITTER_LANGUAGE_VERSION
@@ -329,6 +515,7 @@ pub unsafe extern "C" fn ts_parser_set_language(
     }
 
     parser.language = language;
+    parser.goto_table.rebuild(language);
     true
 }
 
