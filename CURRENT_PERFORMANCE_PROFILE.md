@@ -345,6 +345,7 @@ the experiment ledger in `PERFORMANCE.md` and `SUBTREE_ARENA_PLAN.md`.
 | Priority/status | Design | Work removed | Main evidence | Main risk |
 | --- | --- | --- | --- | --- |
 | Retained | UTF-8 ASCII advance fast path | Decoder, range-seek, and callback work for an ordinary in-chunk ASCII byte | +2.70% current-Rust throughput, all languages positive | Boundary/newline/included-range parity |
+| Rejected | Cached ASCII chunk/range boundary | One included-range load and one comparison on the retained ASCII fast path | -0.89% current-Rust throughput; Go -2.08%, Java -1.54%, Python -3.55% | Maintaining the derived bound on chunk/range transitions costs more than the saved hot-path work |
 | Rejected | Dedicated direct-final deterministic reducer | Large shared frame, temporary child-array lifecycle, trailing-extra pass, and separate child-summary pass | +0.58% longer confirmation; three languages below -1% | Code placement and dependency chains offset removed work |
 | Rejected | Reuse accepted-DAG discovery for balancing | Second child-edge discovery traversal and its work stack | Invariant-preserving form was -0.18% overall | Shared ancestors invalidate bare descendant candidates |
 | Retained | Single-action parser interpreter fast path | Generic action loop and multi-action bookkeeping for the common one-action entry | +2.78% current-Rust throughput, all languages positive | Duplicated action dispatch code |
@@ -400,6 +401,29 @@ largest per-language increase was 0.15 MiB, while five of seven candidate peaks
 were lower. Five focused path witnesses, the Rust core tests, ABI test, Clippy,
 core parity, and the four-package ast-grep gate passed. The candidate clears
 the throughput and per-language gates and is retained.
+
+A runtime-only follow-up cached `min(chunk_end, included_range_end)` in
+`Lexer`, refreshed it whenever the chunk or included range changed, and
+replaced the two fast-path boundary comparisons with one scalar comparison.
+The focused lexer tests passed, but a complete three-sample, 200 ms A/B/A
+screen against immediate Rust parent `a3f7da6f` regressed the equal-language
+geometric mean by 0.89%:
+
+| Language | Throughput change |
+| --- | ---: |
+| C++ | +1.52% |
+| Go | -2.08% |
+| Java | -1.54% |
+| JavaScript | -0.77% |
+| Python | -3.55% |
+| Rust | -0.39% |
+| TypeScript | +0.66% |
+
+All 40 fixture lengths and hashes matched. The implementation was removed.
+The retained direct ASCII path already keeps the range pointer and chunk
+fields close enough that maintaining another derived invariant is a net loss.
+This rejects the cached-bound variant, not a future mechanism that removes a
+larger unit of callback or boundary work.
 
 ### 2. Direct-final deterministic reducer
 

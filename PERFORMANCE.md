@@ -153,6 +153,7 @@ branch was reverted to `fe2605c1`, so these are candidates, not current wins.
 | Small parse-table group rejection | A safe terminal/nonterminal group skip was +1.17% in the short gate but only +0.56% in the 500 ms confirmation; JavaScript -2.51% and TypeScript -1.22%. A nonterminal-only retry was +0.52% overall and Rust -2.33% | Do not add kind branches to the generated-table scan; rendered symbol IDs are not ordered within groups |
 | Post-finalization column shrinking | Increased peak RSS by 346% because old and new allocations coexisted | Do not shrink by reallocating after construction |
 | Exact subtree counts plus node-record free lists | Pathological RSS remained roughly 494 MiB; instrumentation attributed 468.2 MiB of 470.1 MiB bump progress to temporary child-array capacities | Do not add ownership/release work to reclaim the wrong allocation class; reuse child-array blocks under pressure instead |
+| Cached ASCII chunk/range boundary | -0.89% current-Rust throughput in a complete 40-fixture A/B/A screen; Go -2.08%, Java -1.54%, Python -3.55% | Keep the existing two comparisons; refreshing a derived boundary on chunk/range transitions did not pay for itself |
 
 The direct-final reducer was independently reimplemented after the retained
 ASCII lexer change. It again passed a short gate (+1.42%), but the decisive
