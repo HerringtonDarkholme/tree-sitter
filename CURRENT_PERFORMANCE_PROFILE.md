@@ -320,6 +320,7 @@ the experiment ledger in `PERFORMANCE.md` and `SUBTREE_ARENA_PLAN.md`.
 | Rejected | Parser-private arena bump cursor with published atomic fallback | CAS loop on allocations made before publication | +0.52% overall; JavaScript -3.01% | Phase branch and duplicated allocator code offset the small CAS saving |
 | Rejected | Small parse-table group rejection | Scans of terminal groups during goto lookup and nonterminal groups during token lookup | +0.56% longer confirmation; JavaScript -2.51%, TypeScript -1.22% | The safe kind branch helps reduction-heavy languages but hurts other lookup distributions |
 | Rejected | Parser-private nonterminal goto cache | Repeated compressed-row scans for identical `(state, symbol)` reductions | -0.22% overall; JavaScript -2.65%, Rust -1.34% | Cache probes and direct-map replacement cost more than the avoided scans on the mixed corpus |
+| Rejected | Outline materialized `stack_push` | Shared code footprint between deterministic-window and graph-stack pushes | -0.18% overall; Go -1.29% | The extra call on materialized pushes costs more than isolating the deterministic path saves |
 | 1 | Versioned external-scanner snapshot ABI | Repeated deserialize and grammar-owned malloc/free | Python external scanner is 5.7%, allocation 4.8% | ABI and grammar complexity; identity cache already had low reuse |
 
 ### 1. UTF-8 ASCII advance
@@ -656,7 +657,24 @@ reverted. The result closes small parser-local goto caches: even though some
 reduction-heavy languages benefit, every reduction pays the probe and direct
 mapping cannot preserve enough useful pairs across the mixed workload.
 
-### 8. External-scanner snapshots
+### 8. Materialized `stack_push` outlining
+
+The accepted-head profile showed both deterministic-window and materialized
+graph-stack work in one large `stack_push` function. A minimal prototype kept
+the window path in place and moved only window materialization, stack-node
+allocation, and head updates into a separate `#[inline(never)]` function. The
+goal was to reduce the hot deterministic function's frame and code footprint
+without changing either representation or operation.
+
+Against accepted Rust head `853ec424` (runtime-identical to `f6ff85ac`), the
+five-sample 200 ms A/B/A gate was -0.18% overall: C++ -0.50%, Go -1.29%, Java
++0.14%, JavaScript -0.24%, Python +0.32%, Rust +0.60%, and TypeScript -0.28%.
+Maximum CV was 2.90%, all source hashes matched, and peak RSS was neutral. The
+runtime source was reverted. Simple outlining is therefore closed: Go confirms
+that materialized pushes are common enough for the forced call boundary to
+cost more than the reduced deterministic-path footprint saves.
+
+### 9. External-scanner snapshots
 
 The current scanner ABI exposes one mutable grammar-owned object plus serialized
 bytes. The runtime must deserialize a stack version's bytes before scanning,
@@ -729,7 +747,8 @@ to existing parser artifacts.
 5. Keep the parser-private arena cursor rejected.
 6. Keep small parse-table group rejection rejected.
 7. Keep parser-private nonterminal goto caching rejected.
-8. Continue from the accepted-head runtime profile; leave the external-scanner
+8. Keep simple `stack_push` hot/cold outlining rejected.
+9. Continue from the accepted-head runtime profile; leave the external-scanner
    ABI unscheduled until its ecosystem cost is explicitly approved.
 
 This order records the retained low-complexity win and the rejected reducer

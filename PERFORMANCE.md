@@ -225,8 +225,8 @@ The current experiment order is:
 2. keep the direct-final reducer and accepted-DAG balancing worklist rejected;
 3. retain the single-action dispatch fast path;
 4. keep parser-private arena bumping rejected; and
-5. keep small parse-table group rejection and parser-private goto caching
-   rejected, and use the refreshed
+5. keep small parse-table group rejection, parser-private goto caching, and
+   simple `stack_push` hot/cold splitting rejected, and use the refreshed
    accepted-head profile to select another runtime-owned candidate.
 
 Allocator/GC tuning is not the next throughput target. A Python snapshot had
