@@ -14,7 +14,6 @@
 
 use core::{
     cell::Cell,
-    ptr::NonNull,
     sync::atomic::{AtomicBool, Ordering},
 };
 
@@ -27,6 +26,7 @@ use super::super::length::Length;
 
 pub(super) const EXTERNAL_SCANNER_STATE_INLINE_SIZE: usize = 24;
 
+#[derive(Clone, Copy)]
 pub struct ExternalScannerState {
     /// Owned serialized scanner bytes.
     pub(super) data: ExternalScannerStateData,
@@ -38,9 +38,11 @@ pub struct ExternalScannerState {
 // variant owns its allocation and exposes it only as read-only bytes.
 unsafe impl Sync for ExternalScannerState {}
 
+#[derive(Clone, Copy)]
 pub(super) enum ExternalScannerStateData {
     Inline([u8; EXTERNAL_SCANNER_STATE_INLINE_SIZE]),
-    Heap(NonNull<u8>),
+    /// Byte offset in the owning subtree arena.
+    Heap(u32),
 }
 
 // ---------------------------------------------------------------------------
@@ -430,7 +432,7 @@ impl SubtreeHeapData {
 const _: () = {
     assert!(core::mem::size_of::<SubtreeHeapData>() == 48);
     assert!(core::mem::size_of::<SubtreeInternalData>() == 72);
-    assert!(core::mem::size_of::<SubtreeLeafData>() == 88);
+    assert!(core::mem::size_of::<SubtreeLeafData>() == 80);
     assert!(core::mem::offset_of!(SubtreeInternalData, header) == 0);
     assert!(core::mem::offset_of!(SubtreeLeafData, header) == 0);
 };

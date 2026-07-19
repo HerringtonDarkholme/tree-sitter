@@ -81,7 +81,7 @@ unsafe fn parser_external_scanner_deserialize(parser: &mut TSParser, external_to
     let arena = parser.tree_pool.arena();
     let (data, length) = if !external_token.is_null() {
         let state = external_token.external_scanner_state(arena);
-        (state.as_bytes().as_ptr(), state.length)
+        (state.as_bytes(arena).as_ptr(), state.length)
     } else {
         (ptr::null(), 0)
     };
@@ -255,14 +255,13 @@ unsafe fn parser_new_leaf_lookahead(
     );
 
     if found_external_token {
-        let arena = self_.tree_pool.arena();
         let mut mut_result = result.into_mut();
         mut_result.set_external_scanner_state(
-            arena,
+            &mut self_.tree_pool,
             &self_.lexer.debug_buffer[..external_scanner_state_len as usize],
         );
         mut_result
-            .heap_data_mut(arena)
+            .heap_data_mut(self_.tree_pool.arena())
             .set_has_external_scanner_state_change(external_scanner_state_changed);
     }
 
@@ -330,7 +329,8 @@ unsafe fn parser_lex(
                 external_scanner_state_len = parser_external_scanner_serialize(self_);
                 let external_scanner_state =
                     external_token.external_scanner_state(self_.tree_pool.arena());
-                external_scanner_state_changed = external_scanner_state.as_bytes()
+                external_scanner_state_changed = external_scanner_state
+                    .as_bytes(self_.tree_pool.arena())
                     != &self_.lexer.debug_buffer[..external_scanner_state_len as usize];
 
                 if self_.lexer.token_end_position.bytes <= current_position.bytes

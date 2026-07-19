@@ -51,12 +51,8 @@ pub use handle::{MutableSubtree, Subtree, NULL_SUBTREE};
 
 pub const TS_TREE_STATE_NONE: TSStateId = u16::MAX;
 const TS_MAX_INLINE_TREE_LENGTH: u8 = u8::MAX;
-/// Virtual address-space capacity of one pointer-stable subtree slab.
-///
-/// This branch is an upper-bound experiment: one parse/tree family receives a
-/// single contiguous virtual range, records are bump-allocated, and dead
-/// records are not reused. Pages are enabled on demand, so unused capacity does
-/// not contribute to RSS.
+/// Maximum byte offset representable by one subtree arena's indexed handles.
+/// The malloc-backed payload starts small and grows on demand up to this bound.
 #[cfg(target_pointer_width = "64")]
 const TS_SUBTREE_SLAB_CAPACITY: usize = 1usize << 32;
 #[cfg(target_pointer_width = "32")]
@@ -115,6 +111,8 @@ pub struct SubtreeArray {
     pub size: u32,
     pub capacity: u32,
     arena: *mut SubtreeArena,
+    /// Stable owner slot used for arena-backed capacity growth.
+    pool: *mut SubtreePool,
     /// Arena rewind epoch in which `contents` was allocated. Persistent parser
     /// scratch arrays lazily discard stale capacity after a completed tree is
     /// deleted and the arena is rewound for the next parse.
@@ -132,8 +130,11 @@ pub struct SubtreeArena {
     /// different threads, so bumping is atomic even though parsing itself is
     /// single-threaded.
     offset: AtomicUsize,
-    /// Payload bytes whose virtual pages have been made readable/writable.
-    committed: AtomicUsize,
+    /// Usable payload bytes following this header.
+    capacity: usize,
+    /// Older parser-private arena blocks retained so scratch-array pointers
+    /// allocated before growth remain valid until they are rebound or copied.
+    retired: *mut Self,
     /// Incremented whenever the bump cursor is rewound. This invalidates
     /// cached scratch-array pointers without touching published tree records.
     generation: AtomicU32,
@@ -188,7 +189,7 @@ static EMPTY_EXTERNAL_SCANNER_STATE: ExternalScannerState = ExternalScannerState
 mod storage;
 pub(super) use storage::subtree_array_prepare_scratch;
 pub(super) use storage::{
-    subtree_arena_release, subtree_arena_retain, subtree_pool_from_arena,
+    subtree_arena_release, subtree_arena_retain, subtree_pool_clone_arena, subtree_pool_from_arena,
     subtree_pool_prepare_for_parse, subtree_pool_retain_arena,
 };
 pub use storage::{
@@ -960,16 +961,17 @@ mod tests {
         unsafe {
             let mut pool = subtree_pool_new(0);
             let mut children = subtree_array_new(&mut pool);
-            let arena = pool.arena();
             children.push(inline_leaf(&mut pool, 2));
             children.push(inline_leaf(&mut pool, 3));
 
+            let arena = pool.arena();
             let first =
                 subtree_new_scratch_node(arena, TS_BUILTIN_SYM_ERROR, &mut children, ptr::null());
             assert_eq!(first.child_count(arena), 2);
 
             children.clear();
             children.push(inline_leaf(&mut pool, 4));
+            let arena = pool.arena();
             let second =
                 subtree_new_scratch_node(arena, TS_BUILTIN_SYM_ERROR, &mut children, ptr::null());
             assert_eq!(second.child_count(arena), 1);
@@ -1029,6 +1031,40 @@ mod tests {
             );
 
             parent_tree.release(&mut pool);
+            subtree_pool_delete(&mut pool);
+        }
+    }
+
+    #[test]
+    fn arena_indexes_survive_malloc_buffer_growth() {
+        unsafe {
+            let mut pool = subtree_pool_new(0);
+            let first = inline_leaf(&mut pool, 7);
+            let scanner_bytes = [0x5a; 96];
+            let scanner_state = ExternalScannerState::from_bytes(&mut pool, &scanner_bytes);
+
+            let mut children = subtree_array_new(&mut pool);
+            children.push(first);
+            children.push(inline_leaf(&mut pool, 9));
+
+            // Cross at least one geometric capacity boundary after all three
+            // persistent references above have been created. Derive the
+            // count from the configured initial capacity so this remains a
+            // growth test when that allocation quantum changes.
+            let allocation_count =
+                2 * storage::ARENA_INITIAL_CAPACITY / core::mem::size_of::<SubtreeInlineData>();
+            for size in 0..allocation_count {
+                let _ = inline_leaf(&mut pool, (size % 200) as u8);
+            }
+
+            let arena = pool.arena();
+            assert!((*arena).capacity > storage::ARENA_INITIAL_CAPACITY);
+            assert_eq!(first.size(arena).bytes, 7);
+            assert_eq!(scanner_state.as_bytes(arena), scanner_bytes);
+            assert!(children.as_slice()[0] == first);
+            assert_eq!(children.as_slice()[1].size(arena).bytes, 9);
+
+            children.delete();
             subtree_pool_delete(&mut pool);
         }
     }

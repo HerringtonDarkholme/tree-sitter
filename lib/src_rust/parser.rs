@@ -40,8 +40,9 @@ use super::lexer::{
 use super::reduce_action::ReduceActionSet;
 use super::stack::{stack_clear, stack_delete, stack_new, Stack, StackVersion};
 use super::subtree::{
-    subtree_pool_delete, subtree_pool_new, subtree_pool_prepare_for_parse,
-    subtree_pool_retain_arena, subtree_publish, Subtree, SubtreeArray, SubtreePool, NULL_SUBTREE,
+    subtree_array_prepare_scratch, subtree_pool_delete, subtree_pool_new,
+    subtree_pool_prepare_for_parse, subtree_pool_retain_arena, subtree_publish, Subtree,
+    SubtreeArray, SubtreePool, NULL_SUBTREE,
 };
 use super::tree::TSTree;
 use super::utils::Array;
@@ -581,6 +582,9 @@ pub unsafe extern "C" fn ts_parser_reset(self_: *mut TSParser) {
 
     lexer_reset(&mut parser.lexer, length_zero());
     stack_clear(ptr_mut(parser.stack));
+    parser.trailing_extras.clear();
+    parser.trailing_extras2.clear();
+    parser.scratch_trees.clear();
     parser_set_cached_token(parser, 0, NULL_SUBTREE, NULL_SUBTREE);
     if !parser.finished_tree.is_null() {
         parser.finished_tree.release(&mut parser.tree_pool);
@@ -642,6 +646,9 @@ pub unsafe extern "C-unwind" fn ts_parser_parse(
         }
     } else {
         subtree_pool_prepare_for_parse(&mut parser.tree_pool);
+        subtree_array_prepare_scratch(&mut parser.tree_pool, &mut parser.trailing_extras);
+        subtree_array_prepare_scratch(&mut parser.tree_pool, &mut parser.trailing_extras2);
+        subtree_array_prepare_scratch(&mut parser.tree_pool, &mut parser.scratch_trees);
         parser_external_scanner_create(parser);
         parser_log(parser, |_, log| log.write_str("new_parse"));
     }

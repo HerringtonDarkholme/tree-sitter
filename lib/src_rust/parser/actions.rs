@@ -133,8 +133,8 @@ unsafe fn parser_select_children(
     children: &SubtreeArray,
 ) -> bool {
     subtree_array_prepare_scratch(&mut parser.tree_pool, &mut parser.scratch_trees);
-    let arena = parser.tree_pool.arena();
     parser.scratch_trees.assign(children);
+    let arena = parser.tree_pool.arena();
     let scratch_tree = subtree_new_scratch_node(
         arena,
         left.symbol(arena),
@@ -166,10 +166,11 @@ pub(super) unsafe fn parser_shift(
     lookahead: Subtree,
     extra: bool,
 ) {
-    let arena = parser.tree_pool.arena();
+    let mut arena = parser.tree_pool.arena();
     let is_leaf = lookahead.child_count(arena) == 0;
     let subtree_to_push = if extra != lookahead.extra(arena) && is_leaf {
         let mut result = lookahead.make_mut(&mut parser.tree_pool);
+        arena = parser.tree_pool.arena();
         result.set_extra(arena, extra);
         result.into_immutable()
     } else {
@@ -232,7 +233,7 @@ pub(super) unsafe fn parser_reduce(
     invalidate_parse_state: bool,
     end_of_non_terminal_extra: bool,
 ) -> StackVersion {
-    let arena = parser.tree_pool.arena();
+    let mut arena = parser.tree_pool.arena();
     let initial_version_count = ptr_ref(parser.stack).version_count();
     if initial_version_count == 1 && !invalidate_parse_state && !end_of_non_terminal_extra {
         if let Some(mut children) =
@@ -288,6 +289,7 @@ pub(super) unsafe fn parser_reduce(
             children,
             u32::from(action.production_id),
         );
+        arena = parser.tree_pool.arena();
 
         while i + 1 < pop.size {
             let next_slice = ptr::read(pop.get_unchecked(i + 1));
@@ -312,7 +314,9 @@ pub(super) unsafe fn parser_reduce(
                     next_children,
                     u32::from(action.production_id),
                 );
+                arena = parser.tree_pool.arena();
             } else {
+                arena = parser.tree_pool.arena();
                 subtree_array_clear(&mut parser.tree_pool, &mut parser.trailing_extras2);
                 subtree_array_delete(&mut parser.tree_pool, &mut next_children);
             }
@@ -356,7 +360,7 @@ pub(super) unsafe fn parser_accept(
     version: StackVersion,
     lookahead: Subtree,
 ) {
-    let arena = parser.tree_pool.arena();
+    let mut arena = parser.tree_pool.arena();
     debug_assert!(lookahead.is_eof(arena));
     let stack = ptr_mut(parser.stack);
     stack_push(stack, version, lookahead, 1);
@@ -376,13 +380,10 @@ pub(super) unsafe fn parser_accept(
                     child.retain(arena);
                 }
                 trees.splice(index as u32, 1, children.len() as u32, children.as_ptr());
-                root = parser_new_node(
-                    parser,
-                    tree.symbol(arena),
-                    trees,
-                    u32::from(tree.heap_data(arena).children().production_id),
-                )
-                .into_immutable();
+                arena = parser.tree_pool.arena();
+                let symbol = tree.symbol(arena);
+                let production_id = u32::from(tree.heap_data(arena).children().production_id);
+                root = parser_new_node(parser, symbol, trees, production_id).into_immutable();
                 tree.release(&mut parser.tree_pool);
                 break;
             }

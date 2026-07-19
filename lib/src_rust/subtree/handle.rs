@@ -452,7 +452,6 @@ impl Subtree {
             return MutableSubtree::from_inline(pool.arena(), result);
         }
         let data = self.heap_data(arena);
-        let result = subtree_clone_allocation(pool, self);
         let result_header = SubtreeHeapData {
             parser_shared: Cell::new(false),
             published_shared: AtomicBool::new(false),
@@ -466,16 +465,33 @@ impl Subtree {
             parse_state: data.parse_state,
             flags: data.flags,
         };
-        if !data.is_internal() {
-            let content = match data.leaf_content() {
+        let internal_children = data.is_internal().then(|| *data.children());
+        let leaf_content = if data.is_internal() {
+            None
+        } else {
+            Some(match data.leaf_content() {
                 SubtreeLeafDataContent::ExternalScannerState(state) => {
-                    SubtreeLeafDataContent::ExternalScannerState(state.copy(pool.arena()))
+                    SubtreeLeafDataContent::ExternalScannerState(*state)
                 }
                 SubtreeLeafDataContent::LookaheadChar(character) => {
                     SubtreeLeafDataContent::LookaheadChar(*character)
                 }
+            })
+        };
+
+        let result = subtree_clone_allocation(pool, self);
+        let result_tree = MutableSubtree::from_heap(pool.arena(), result);
+        if let Some(content) = leaf_content {
+            let content = match content {
+                SubtreeLeafDataContent::ExternalScannerState(state) => {
+                    SubtreeLeafDataContent::ExternalScannerState(state.copy(pool))
+                }
+                SubtreeLeafDataContent::LookaheadChar(character) => {
+                    SubtreeLeafDataContent::LookaheadChar(character)
+                }
             };
-            result
+            result_tree
+                .heap_ptr(pool.arena())
                 .cast::<SubtreeLeafData>()
                 .as_ptr()
                 .write(SubtreeLeafData {
@@ -483,15 +499,16 @@ impl Subtree {
                     content,
                 });
         } else {
-            result
+            result_tree
+                .heap_ptr(pool.arena())
                 .cast::<SubtreeInternalData>()
                 .as_ptr()
                 .write(SubtreeInternalData {
                     header: result_header,
-                    children: *data.children(),
+                    children: internal_children.unwrap(),
                 });
         }
-        MutableSubtree::from_heap(arena, result)
+        result_tree
     }
 
     pub unsafe fn make_mut(self, pool: &mut SubtreePool) -> MutableSubtree {
@@ -561,8 +578,10 @@ impl Subtree {
         arena: *mut SubtreeArena,
         other_arena: *mut SubtreeArena,
     ) -> bool {
-        self.external_scanner_state(arena).as_bytes()
-            == other.external_scanner_state(other_arena).as_bytes()
+        self.external_scanner_state(arena).as_bytes(arena)
+            == other
+                .external_scanner_state(other_arena)
+                .as_bytes(other_arena)
     }
 }
 
@@ -691,9 +710,9 @@ impl MutableSubtree {
         }
     }
 
-    pub unsafe fn set_external_scanner_state(mut self, arena: *mut SubtreeArena, bytes: &[u8]) {
-        let state = ExternalScannerState::from_bytes(arena, bytes);
-        let data = self.heap_data_mut(arena);
+    pub unsafe fn set_external_scanner_state(mut self, pool: &mut SubtreePool, bytes: &[u8]) {
+        let state = ExternalScannerState::from_bytes(pool, bytes);
+        let data = self.heap_data_mut(pool.arena());
         debug_assert_eq!(data.child_count, 0);
         debug_assert!(data.has_external_tokens());
         data.set_leaf_content(SubtreeLeafDataContent::ExternalScannerState(state));

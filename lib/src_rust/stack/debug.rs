@@ -79,7 +79,7 @@ pub unsafe fn stack_print_dot_graph(
         if !head.last_external_token.is_null() {
             let state = head.last_external_token.external_scanner_state(arena);
             fprintf(f, c"\nexternal_scanner_state:".as_ptr().cast::<i8>());
-            for &byte in state.as_bytes() {
+            for &byte in state.as_bytes(arena) {
                 fprintf(f, c" %2X".as_ptr().cast::<i8>(), u32::from(byte));
             }
         }

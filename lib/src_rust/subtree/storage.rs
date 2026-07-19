@@ -1,7 +1,7 @@
 //! Allocation, pooling, and owned-array operations for subtrees.
 //!
-//! Heap subtree allocations use a pointer-stable, demand-backed contiguous
-//! arena. This module centralizes arena ownership, bump allocation, cloning,
+//! Heap subtree allocations use an on-demand malloc-backed contiguous arena.
+//! This module centralizes arena ownership, bump allocation, cloning,
 //! and child-buffer transfer. Subtree records and long external-scanner byte
 //! buffers remain in the arena until its whole generation is rewound or
 //! released. It also provides the explicit
@@ -28,178 +28,23 @@ use super::{
     TS_SUBTREE_SLAB_CAPACITY,
 };
 
-/// Commit in chunks that are multiples of both common 4 KiB pages and macOS's
-/// 16 KiB pages. The first chunk contains only the arena header, so payload
-/// commits can always begin at a page boundary.
-const ARENA_COMMIT_GRANULARITY: usize = 64 * 1024;
-const ARENA_DATA_OFFSET: usize = ARENA_COMMIT_GRANULARITY;
-
-#[cfg(any(
-    target_os = "android",
-    target_os = "dragonfly",
-    target_os = "freebsd",
-    target_os = "ios",
-    target_os = "linux",
-    target_os = "macos",
-    target_os = "netbsd",
-    target_os = "openbsd",
-    target_os = "solaris",
-    target_os = "illumos",
-))]
-mod virtual_memory {
-    use core::ffi::{c_int, c_void};
-    use core::ptr;
-
-    const PROT_NONE: c_int = 0;
-    const PROT_READ: c_int = 1;
-    const PROT_WRITE: c_int = 2;
-    const MAP_PRIVATE: c_int = 2;
-    #[cfg(any(target_os = "android", target_os = "linux"))]
-    const MAP_ANONYMOUS: c_int = 0x20;
-    #[cfg(any(
-        target_os = "dragonfly",
-        target_os = "freebsd",
-        target_os = "ios",
-        target_os = "macos",
-        target_os = "netbsd",
-        target_os = "openbsd",
-    ))]
-    const MAP_ANONYMOUS: c_int = 0x1000;
-    #[cfg(any(target_os = "solaris", target_os = "illumos"))]
-    const MAP_ANONYMOUS: c_int = 0x100;
-
-    extern "C" {
-        fn mmap(
-            address: *mut c_void,
-            length: usize,
-            protection: c_int,
-            flags: c_int,
-            file_descriptor: c_int,
-            offset: i64,
-        ) -> *mut c_void;
-        fn mprotect(address: *mut c_void, length: usize, protection: c_int) -> c_int;
-        fn munmap(address: *mut c_void, length: usize) -> c_int;
-    }
-
-    pub unsafe fn reserve(byte_count: usize) -> *mut u8 {
-        let result = mmap(
-            ptr::null_mut(),
-            byte_count,
-            PROT_NONE,
-            MAP_PRIVATE | MAP_ANONYMOUS,
-            -1,
-            0,
-        );
-        if result as isize == -1 {
-            ptr::null_mut()
-        } else {
-            result.cast::<u8>()
-        }
-    }
-
-    pub unsafe fn commit(address: *mut u8, byte_count: usize) -> bool {
-        mprotect(address.cast::<c_void>(), byte_count, PROT_READ | PROT_WRITE) == 0
-    }
-
-    pub unsafe fn release(address: *mut u8, byte_count: usize) {
-        let result = munmap(address.cast::<c_void>(), byte_count);
-        debug_assert_eq!(result, 0);
-    }
-}
-
-#[cfg(target_os = "windows")]
-mod virtual_memory {
-    use core::ffi::c_void;
-    use core::ptr;
-
-    const MEM_COMMIT: u32 = 0x1000;
-    const MEM_RESERVE: u32 = 0x2000;
-    const MEM_RELEASE: u32 = 0x8000;
-    const PAGE_NOACCESS: u32 = 0x01;
-    const PAGE_READWRITE: u32 = 0x04;
-
-    extern "system" {
-        fn VirtualAlloc(
-            address: *mut c_void,
-            size: usize,
-            allocation_type: u32,
-            protection: u32,
-        ) -> *mut c_void;
-        fn VirtualFree(address: *mut c_void, size: usize, free_type: u32) -> i32;
-    }
-
-    pub unsafe fn reserve(byte_count: usize) -> *mut u8 {
-        VirtualAlloc(ptr::null_mut(), byte_count, MEM_RESERVE, PAGE_NOACCESS).cast::<u8>()
-    }
-
-    pub unsafe fn commit(address: *mut u8, byte_count: usize) -> bool {
-        !VirtualAlloc(
-            address.cast::<c_void>(),
-            byte_count,
-            MEM_COMMIT,
-            PAGE_READWRITE,
-        )
-        .is_null()
-    }
-
-    pub unsafe fn release(address: *mut u8, _byte_count: usize) {
-        let result = VirtualFree(address.cast::<c_void>(), 0, MEM_RELEASE);
-        debug_assert_ne!(result, 0);
-    }
-}
-
-/// Platforms without page-reservation APIs retain the same stable-pointer
-/// semantics, but their allocator decides how eagerly the address range is
-/// backed. Native Unix and Windows builds use the demand-paged paths above.
-#[cfg(not(any(
-    target_os = "android",
-    target_os = "dragonfly",
-    target_os = "freebsd",
-    target_os = "ios",
-    target_os = "linux",
-    target_os = "macos",
-    target_os = "netbsd",
-    target_os = "openbsd",
-    target_os = "solaris",
-    target_os = "illumos",
-    target_os = "windows",
-)))]
-mod virtual_memory {
-    use super::{free, malloc};
-    use core::ffi::c_void;
-
-    pub unsafe fn reserve(byte_count: usize) -> *mut u8 {
-        malloc(byte_count).cast::<u8>()
-    }
-
-    pub const unsafe fn commit(_address: *mut u8, _byte_count: usize) -> bool {
-        true
-    }
-
-    pub unsafe fn release(address: *mut u8, _byte_count: usize) {
-        free(address.cast::<c_void>());
-    }
-}
+pub(super) const ARENA_INITIAL_CAPACITY: usize = 256 * 1024;
+const ARENA_DATA_OFFSET: usize = {
+    let size = core::mem::size_of::<SubtreeArena>();
+    let alignment = core::mem::align_of::<SubtreeInternalData>();
+    (size + alignment - 1) & !(alignment - 1)
+};
 
 unsafe fn subtree_arena_new() -> *mut SubtreeArena {
-    let allocation_size = ARENA_DATA_OFFSET + TS_SUBTREE_SLAB_CAPACITY;
-    let Some(arena) =
-        NonNull::new(virtual_memory::reserve(allocation_size)).map(NonNull::cast::<SubtreeArena>)
-    else {
-        alloc_failed("reserve subtree slab address space", allocation_size);
-    };
-    let arena = arena.as_ptr();
-    if !virtual_memory::commit(arena.cast::<u8>(), ARENA_DATA_OFFSET) {
-        virtual_memory::release(arena.cast::<u8>(), allocation_size);
-        alloc_failed("commit subtree slab header", ARENA_DATA_OFFSET);
-    }
+    let arena = malloc(core::mem::size_of::<SubtreeArena>()).cast::<SubtreeArena>();
     arena.write(SubtreeArena {
         ref_count: AtomicU32::new(1),
         // Index zero is the null-subtree sentinel. Keep the first aligned word
         // unused so every heap record has a nonzero arena-relative index and
         // its low inline-tag bit remains clear.
         offset: AtomicUsize::new(core::mem::align_of::<SubtreeHeapData>()),
-        committed: AtomicUsize::new(0),
+        capacity: 0,
+        retired: ptr::null_mut(),
         generation: AtomicU32::new(1),
         published: false,
     });
@@ -221,61 +66,57 @@ pub(super) unsafe fn subtree_arena_publish(arena: *mut SubtreeArena) {
     (*arena).published = true;
 }
 
-unsafe fn subtree_arena_commit_through(arena: *mut SubtreeArena, end: usize) {
-    let arena_ref = &*arena;
-    let mut committed = arena_ref.committed.load(Ordering::Acquire);
-    while committed < end {
-        let desired = end
-            .next_multiple_of(ARENA_COMMIT_GRANULARITY)
-            .min(TS_SUBTREE_SLAB_CAPACITY);
-        let address = subtree_arena_data(arena).add(committed);
-        if !virtual_memory::commit(address, desired - committed) {
-            alloc_failed("commit subtree slab pages", desired - committed);
-        }
-
-        match arena_ref.committed.compare_exchange(
-            committed,
-            desired,
-            Ordering::Release,
-            Ordering::Acquire,
-        ) {
-            Ok(_) => return,
-            Err(actual) if actual >= end => return,
-            Err(actual) => committed = actual,
-        }
+unsafe fn subtree_arena_grow(pool: &mut SubtreePool, end: usize) {
+    let arena = pool.arena;
+    debug_assert!(!(*arena).published);
+    let old_capacity = (*arena).capacity;
+    if old_capacity < end {
+        let new_capacity = end
+            .checked_next_power_of_two()
+            .unwrap_or(TS_SUBTREE_SLAB_CAPACITY)
+            .clamp(ARENA_INITIAL_CAPACITY, TS_SUBTREE_SLAB_CAPACITY);
+        let allocation_size = ARENA_DATA_OFFSET
+            .checked_add(new_capacity)
+            .unwrap_or_else(|| alloc_failed("grow subtree arena", new_capacity));
+        let new_arena = malloc(allocation_size).cast::<SubtreeArena>();
+        let used = (*arena).offset.load(Ordering::Relaxed);
+        new_arena.write(SubtreeArena {
+            ref_count: AtomicU32::new(1),
+            offset: AtomicUsize::new(used),
+            capacity: new_capacity,
+            retired: arena,
+            generation: AtomicU32::new((*arena).generation.load(Ordering::Relaxed)),
+            published: false,
+        });
+        subtree_arena_data(new_arena).copy_from_nonoverlapping(subtree_arena_data(arena), used);
+        pool.arena = new_arena;
     }
 }
 
 unsafe fn subtree_arena_allocate(
-    arena: *mut SubtreeArena,
+    pool: &mut SubtreePool,
     byte_count: usize,
     alignment: usize,
 ) -> NonNull<u8> {
+    let mut arena = subtree_pool_ensure_arena(pool);
     debug_assert!(!arena.is_null());
     debug_assert!(alignment.is_power_of_two());
-    let arena_ref = &*arena;
-    let mut current = arena_ref.offset.load(Ordering::Relaxed);
-    loop {
-        let start = current.next_multiple_of(alignment);
-        let Some(end) = start.checked_add(byte_count) else {
-            alloc_failed("allocate subtree slab block", byte_count);
-        };
-        if end > TS_SUBTREE_SLAB_CAPACITY {
-            alloc_failed("allocate subtree slab block", byte_count);
-        }
-        match arena_ref.offset.compare_exchange_weak(
-            current,
-            end,
-            Ordering::Relaxed,
-            Ordering::Relaxed,
-        ) {
-            Ok(_) => {
-                subtree_arena_commit_through(arena, end);
-                return NonNull::new_unchecked(subtree_arena_data(arena).add(start));
-            }
-            Err(actual) => current = actual,
-        }
+    let start = (*arena)
+        .offset
+        .load(Ordering::Relaxed)
+        .next_multiple_of(alignment);
+    let Some(end) = start.checked_add(byte_count) else {
+        alloc_failed("allocate subtree arena block", byte_count);
+    };
+    if end > TS_SUBTREE_SLAB_CAPACITY {
+        alloc_failed("allocate subtree arena block", byte_count);
     }
+    if (*arena).capacity < end {
+        subtree_arena_grow(pool, end);
+        arena = pool.arena;
+    }
+    (*arena).offset.store(end, Ordering::Relaxed);
+    NonNull::new_unchecked(subtree_arena_data(arena).add(start))
 }
 
 pub unsafe fn subtree_arena_retain(arena: *mut SubtreeArena) {
@@ -294,10 +135,12 @@ pub unsafe fn subtree_arena_release(arena: *mut SubtreeArena) {
     let previous = (*arena).ref_count.fetch_sub(1, Ordering::SeqCst);
     debug_assert!(previous > 0);
     if previous == 1 {
-        virtual_memory::release(
-            arena.cast::<u8>(),
-            ARENA_DATA_OFFSET + TS_SUBTREE_SLAB_CAPACITY,
-        );
+        let mut current = arena;
+        while !current.is_null() {
+            let retired = (*current).retired;
+            free(current.cast::<c_void>());
+            current = retired;
+        }
     }
 }
 
@@ -345,6 +188,32 @@ pub unsafe fn subtree_pool_from_arena(arena: *mut SubtreeArena) -> SubtreePool {
     }
 }
 
+/// Create a parser-private byte-for-byte arena copy for cold tree mutation.
+/// Published arenas never move; detaching first preserves nodes and cursors in
+/// other tree copies while allowing the edit's private arena to grow.
+pub unsafe fn subtree_pool_clone_arena(arena: *mut SubtreeArena) -> SubtreePool {
+    debug_assert!(!arena.is_null());
+    let capacity = (*arena).capacity;
+    let allocation_size = ARENA_DATA_OFFSET
+        .checked_add(capacity)
+        .unwrap_or_else(|| alloc_failed("clone subtree arena", capacity));
+    let copy = malloc(allocation_size).cast::<SubtreeArena>();
+    let used = (*arena).offset.load(Ordering::Acquire);
+    copy.write(SubtreeArena {
+        ref_count: AtomicU32::new(1),
+        offset: AtomicUsize::new(used),
+        capacity,
+        retired: ptr::null_mut(),
+        generation: AtomicU32::new((*arena).generation.load(Ordering::Acquire)),
+        published: false,
+    });
+    subtree_arena_data(copy).copy_from_nonoverlapping(subtree_arena_data(arena), used);
+    SubtreePool {
+        arena: copy,
+        tree_stack: Array::new(),
+    }
+}
+
 impl SubtreeArray {
     pub const fn new() -> Self {
         Self {
@@ -352,6 +221,7 @@ impl SubtreeArray {
             size: 0,
             capacity: 0,
             arena: ptr::null_mut(),
+            pool: ptr::null_mut(),
             arena_generation: 0,
         }
     }
@@ -360,6 +230,7 @@ impl SubtreeArray {
         let arena = subtree_pool_ensure_arena(pool);
         Self {
             arena,
+            pool,
             arena_generation: (*arena).generation.load(Ordering::Acquire),
             ..Self::new()
         }
@@ -372,6 +243,7 @@ impl SubtreeArray {
         if self.arena.is_null() {
             return;
         }
+
         let generation = (*self.arena).generation.load(Ordering::Acquire);
         if self.arena_generation != generation {
             debug_assert_eq!(self.size, 0);
@@ -390,6 +262,15 @@ impl SubtreeArray {
     #[inline]
     pub const fn is_empty(&self) -> bool {
         self.size == 0
+    }
+
+    #[inline]
+    unsafe fn current_arena(&self) -> *mut SubtreeArena {
+        if self.pool.is_null() {
+            self.arena
+        } else {
+            (*self.pool).arena
+        }
     }
 
     #[inline]
@@ -437,12 +318,14 @@ impl SubtreeArray {
             }
         } else {
             let allocation = subtree_arena_allocate(
-                self.arena,
+                &mut *self.pool,
                 byte_count,
                 core::mem::align_of::<SubtreeHeapData>(),
             )
             .cast::<Subtree>()
             .as_ptr();
+            self.arena = (*self.pool).arena;
+            self.arena_generation = (*self.arena).generation.load(Ordering::Acquire);
             if !self.is_empty() {
                 allocation.copy_from_nonoverlapping(self.contents, self.len());
             }
@@ -520,20 +403,26 @@ pub unsafe fn subtree_array_new(pool: &mut SubtreePool) -> SubtreeArray {
 /// old capacity without releasing elements.
 pub unsafe fn subtree_array_prepare_scratch(pool: &mut SubtreePool, array: &mut SubtreeArray) {
     let arena = subtree_pool_ensure_arena(pool);
-    if array.arena != arena {
+    let generation = (*arena).generation.load(Ordering::Acquire);
+    if array.arena != arena || array.arena_generation != generation {
+        debug_assert!(array.is_empty());
         array.delete();
         *array = SubtreeArray::new_in(pool);
     }
 }
 
 impl ExternalScannerState {
-    pub unsafe fn from_bytes(arena: *mut SubtreeArena, bytes: &[u8]) -> Self {
+    pub unsafe fn from_bytes(pool: &mut SubtreePool, bytes: &[u8]) -> Self {
         let length = u32::try_from(bytes.len()).unwrap();
         let data = if bytes.len() > EXTERNAL_SCANNER_STATE_INLINE_SIZE {
-            let copy = subtree_arena_allocate(arena, bytes.len(), 1);
+            let copy = subtree_arena_allocate(pool, bytes.len(), 1);
+            let arena = pool.arena();
             copy.as_ptr()
                 .copy_from_nonoverlapping(bytes.as_ptr(), bytes.len());
-            ExternalScannerStateData::Heap(copy)
+            ExternalScannerStateData::Heap(
+                u32::try_from(copy.as_ptr() as usize - subtree_arena_data(arena) as usize)
+                    .expect("external scanner state arena offset fits in u32"),
+            )
         } else {
             let mut copy = [0; EXTERNAL_SCANNER_STATE_INLINE_SIZE];
             copy[..bytes.len()].copy_from_slice(bytes);
@@ -542,17 +431,39 @@ impl ExternalScannerState {
         Self { data, length }
     }
 
-    pub unsafe fn copy(&self, arena: *mut SubtreeArena) -> Self {
-        Self::from_bytes(arena, self.as_bytes())
+    pub unsafe fn copy(&self, pool: &mut SubtreePool) -> Self {
+        let source = *self;
+        let length = source.length as usize;
+        match source.data {
+            ExternalScannerStateData::Inline(bytes) => Self {
+                data: ExternalScannerStateData::Inline(bytes),
+                length: source.length,
+            },
+            ExternalScannerStateData::Heap(offset) => {
+                let copy = subtree_arena_allocate(pool, length, 1);
+                let arena = pool.arena();
+                copy.as_ptr().copy_from_nonoverlapping(
+                    subtree_arena_data(arena).add(offset as usize),
+                    length,
+                );
+                Self {
+                    data: ExternalScannerStateData::Heap(
+                        u32::try_from(copy.as_ptr() as usize - subtree_arena_data(arena) as usize)
+                            .expect("external scanner state arena offset fits in u32"),
+                    ),
+                    length: source.length,
+                }
+            }
+        }
     }
 
-    pub fn as_bytes(&self) -> &[u8] {
+    pub unsafe fn as_bytes(&self, arena: *mut SubtreeArena) -> &[u8] {
         let length = self.length as usize;
         match &self.data {
             ExternalScannerStateData::Inline(bytes) => &bytes[..length],
-            ExternalScannerStateData::Heap(bytes) => unsafe {
-                core::slice::from_raw_parts(bytes.as_ptr(), length)
-            },
+            ExternalScannerStateData::Heap(offset) => {
+                core::slice::from_raw_parts(subtree_arena_data(arena).add(*offset as usize), length)
+            }
         }
     }
 }
@@ -560,6 +471,7 @@ impl ExternalScannerState {
 pub unsafe fn subtree_array_copy(source: &SubtreeArray, destination: &mut SubtreeArray) {
     *destination = SubtreeArray {
         arena: source.arena,
+        pool: source.pool,
         arena_generation: source.arena_generation,
         ..SubtreeArray::new()
     };
@@ -570,7 +482,7 @@ pub unsafe fn subtree_array_copy(source: &SubtreeArray, destination: &mut Subtre
             .as_mut_slice()
             .copy_from_slice(source.as_slice());
         for &tree in destination.as_slice() {
-            tree.retain(source.arena);
+            tree.retain(source.current_arena());
         }
     }
 }
@@ -625,9 +537,8 @@ pub unsafe fn subtree_pool_delete(pool: &mut SubtreePool) {
 }
 
 pub(super) unsafe fn subtree_pool_allocate(pool: &mut SubtreePool) -> NonNull<SubtreeHeapData> {
-    let arena = subtree_pool_ensure_arena(pool);
     subtree_arena_allocate(
-        arena,
+        pool,
         core::mem::size_of::<SubtreeLeafData>(),
         core::mem::align_of::<SubtreeLeafData>(),
     )
@@ -637,9 +548,8 @@ pub(super) unsafe fn subtree_pool_allocate(pool: &mut SubtreePool) -> NonNull<Su
 pub(super) unsafe fn subtree_pool_allocate_inline(
     pool: &mut SubtreePool,
 ) -> NonNull<SubtreeInlineData> {
-    let arena = subtree_pool_ensure_arena(pool);
     subtree_arena_allocate(
-        arena,
+        pool,
         core::mem::size_of::<SubtreeInlineData>(),
         core::mem::align_of::<SubtreeInlineData>(),
     )
@@ -680,11 +590,12 @@ pub(super) unsafe fn subtree_clone_allocation(
         return subtree_pool_allocate(pool);
     }
     let children = subtree_arena_allocate(
-        arena,
+        pool,
         subtree_alloc_size(child_count),
         core::mem::align_of::<SubtreeInternalData>(),
     )
     .cast::<Subtree>();
+    let arena = pool.arena();
     let copied_children = core::slice::from_raw_parts_mut(children.as_ptr(), child_count as usize);
     copied_children.copy_from_slice(tree.children(arena));
     for child in copied_children {
@@ -729,11 +640,12 @@ pub(super) unsafe fn subtree_take_children(
     let arena = subtree_pool_ensure_arena(pool);
     if children.arena != arena || (children.capacity as usize) < required_capacity {
         let allocation = subtree_arena_allocate(
-            arena,
+            pool,
             byte_size,
             core::mem::align_of::<SubtreeInternalData>(),
         )
         .cast::<Subtree>();
+        children.refresh_arena_generation();
         if child_count > 0 {
             allocation
                 .as_ptr()

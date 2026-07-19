@@ -141,7 +141,6 @@ unsafe fn parser_recover_to_state(
     depth: u32,
     goal_state: TSStateId,
 ) -> bool {
-    let arena = self_.tree_pool.arena();
     let stack = ptr_mut(self_.stack);
     let mut pop = stack_pop_count(stack, version, depth);
     let mut previous_version = STACK_VERSION_NONE;
@@ -164,6 +163,7 @@ unsafe fn parser_recover_to_state(
         }
 
         let mut error_trees = stack_pop_error(stack, slice.version);
+        let mut arena = self_.tree_pool.arena();
         if let Some(&error_tree) = error_trees.as_slice().first() {
             debug_assert_eq!(error_trees.len(), 1);
             let error_child_count = error_tree.child_count(arena);
@@ -172,8 +172,9 @@ unsafe fn parser_recover_to_state(
                 slice
                     .subtrees
                     .splice(0, 0, error_child_count, error_children.as_ptr());
-                for child in error_children {
-                    (*child).retain(arena);
+                arena = self_.tree_pool.arena();
+                for &child in &slice.subtrees.as_slice()[..error_child_count as usize] {
+                    child.retain(arena);
                 }
             }
             subtree_array_delete(&mut self_.tree_pool, &mut error_trees);
@@ -214,7 +215,7 @@ pub(super) unsafe fn parser_recover(
     version: StackVersion,
     mut lookahead: Subtree,
 ) {
-    let arena = self_.tree_pool.arena();
+    let mut arena = self_.tree_pool.arena();
     stack_materialize(ptr_mut(self_.stack));
     let mut did_recover = false;
     let stack = ptr_mut(self_.stack);
@@ -263,6 +264,7 @@ pub(super) unsafe fn parser_recover(
             if language_has_actions(self_.language, entry.state, lookahead.symbol(arena))
                 && parser_recover_to_state(self_, version, depth, entry.state)
             {
+                arena = self_.tree_pool.arena();
                 did_recover = true;
                 parser_log(self_, |_, log| {
                     write!(
@@ -324,6 +326,7 @@ pub(super) unsafe fn parser_recover(
     };
     if marks_extra {
         let mut mutable_lookahead = lookahead.make_mut(&mut self_.tree_pool);
+        arena = self_.tree_pool.arena();
         mutable_lookahead.set_extra(arena, true);
         lookahead = mutable_lookahead.into_immutable();
     }
@@ -343,6 +346,7 @@ pub(super) unsafe fn parser_recover(
     children.reserve(1);
     children.push(lookahead);
     let mut error_repeat = parser_new_node(self_, TS_BUILTIN_SYM_ERROR_REPEAT, children, 0);
+    arena = self_.tree_pool.arena();
 
     // Merge with existing error on top of stack
     if node_count_since_error > 0 {
@@ -365,6 +369,7 @@ pub(super) unsafe fn parser_recover(
         slot.push(error_repeat.into_immutable());
         let children = core::mem::replace(slot, SubtreeArray::new());
         error_repeat = parser_new_node(self_, TS_BUILTIN_SYM_ERROR_REPEAT, children, 0);
+        arena = self_.tree_pool.arena();
     }
 
     // Push the ERROR
@@ -391,7 +396,7 @@ unsafe fn parser_try_insert_missing_token(
     lookahead: Subtree,
     position: Length,
 ) -> bool {
-    let arena = self_.tree_pool.arena();
+    let mut arena = self_.tree_pool.arena();
     let state = ptr_ref(self_.stack).head(version).state();
     let language = language_full(self_.language);
     let mut missing_symbol: TSSymbol = 1;
@@ -425,6 +430,7 @@ unsafe fn parser_try_insert_missing_token(
             lookahead_bytes,
             self_.language,
         );
+        arena = self_.tree_pool.arena();
         stack_push(
             ptr_mut(self_.stack),
             candidate,

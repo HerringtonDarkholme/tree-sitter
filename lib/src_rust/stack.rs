@@ -654,7 +654,7 @@ pub unsafe fn stack_pop_count(
     stack_iter(
         self_,
         version,
-        |iterator| pop_count_action(iterator, count),
+        |iterator, _| pop_count_action(iterator, count),
         Some(count),
     )
 }
@@ -671,7 +671,9 @@ pub unsafe fn stack_pop_error(self_: &mut Stack, version: StackVersion) -> Subtr
             let pop = stack_iter(
                 self_,
                 version,
-                |iterator| pop_error_action(iterator, arena, &mut found_error),
+                |iterator, current_arena| {
+                    pop_error_action(iterator, current_arena, &mut found_error)
+                },
                 Some(1),
             );
             if pop.size > 0 {
@@ -689,7 +691,12 @@ pub unsafe fn stack_pop_error(self_: &mut Stack, version: StackVersion) -> Subtr
 /// Pop all entries from a version.
 pub unsafe fn stack_pop_all(self_: &mut Stack, version: StackVersion) -> StackSliceArray {
     self_.materialize_window();
-    stack_iter(self_, version, |iterator| pop_all_action(iterator), Some(0))
+    stack_iter(
+        self_,
+        version,
+        |iterator, _| pop_all_action(iterator),
+        Some(0),
+    )
 }
 
 /// Record a summary of parse states near the top of a version.
@@ -699,7 +706,7 @@ pub unsafe fn stack_record_summary(self_: &mut Stack, version: StackVersion, max
     stack_iter(
         self_,
         version,
-        |iterator| summarize_stack_action(iterator, &mut summary, max_depth),
+        |iterator, _| summarize_stack_action(iterator, &mut summary, max_depth),
         None,
     );
     let summary_ptr =

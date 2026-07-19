@@ -407,7 +407,7 @@ unsafe fn parser_try_keyword_fallback(
     table_entry: &mut TableEntry,
 ) -> bool {
     let keyword_capture_token = language_full(self_.language).keyword_capture_token;
-    let arena = self_.tree_pool.arena();
+    let mut arena = self_.tree_pool.arena();
     if !(*lookahead).is_keyword(arena)
         || (*lookahead).symbol(arena) == keyword_capture_token
         || language_is_reserved_word(self_.language, state, (*lookahead).symbol(arena))
@@ -430,6 +430,7 @@ unsafe fn parser_try_keyword_fallback(
     });
 
     let mut mutable_lookahead = (*lookahead).make_mut(&mut self_.tree_pool);
+    arena = self_.tree_pool.arena();
     mutable_lookahead.set_symbol(arena, keyword_capture_token, self_.language);
     *lookahead = mutable_lookahead.into_immutable();
     true

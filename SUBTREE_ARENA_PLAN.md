@@ -342,10 +342,22 @@ even, so the otherwise-unused low offset bit carries the compact/full tag. The
 remaining values address almost the full 4 GiB byte-offset domain (subject to
 the null sentinel and enough space for the final record).
 
-The 4 GiB reservation is virtual address space, not eagerly resident memory.
-Supported native targets commit payload pages on demand in 64 KiB increments,
-so a small parse does not acquire 4 GiB of RSS. On 32-bit targets the prototype
-uses a smaller 512 MiB reservation because address space itself is scarce.
+The current endpoint does **not** reserve a 4 GiB virtual mapping. A parser
+starts with only the arena header. Its first payload allocation obtains a
+256 KiB malloc block; later growth rounds the required end offset up to the
+next power of two, capped by the `u32` byte-index domain. Growth allocates a new
+block, copies the used prefix, and retains the old parser-private block until
+the arena family is released so outstanding scratch-array pointers remain
+valid. A reused parser rewinds the bump cursor and keeps its high-water
+capacity. This policy is on-demand in physical memory, but geometric capacity
+and retained growth blocks can make peak RSS exceed live-tree bytes.
+
+The discarded VM implementation reserved 4 GiB and committed 64 KiB chunks.
+That was acceptable in parser-reuse microbenchmarks but pathological for
+ast-grep's parser-per-file lifecycle: repository scans performed one large
+reserve/commit/release sequence per parsed file. The syscall and VM-management
+cost dominated the small user-space parsing benefit, so VM reservation is not
+part of the current design.
 
 The important limit is neither compressed file size nor final live-tree size.
 It is the **cumulative number of arena bytes allocated in one parse epoch**.
@@ -367,7 +379,7 @@ throughput optimization. It adds scaling on hot resolution paths, may add
 padding to compact records, changes overflow and layout checks, and still does
 nothing to reduce RSS or reclaim dead bump allocations.
 
-Do not revisit the scaled-index variant merely because a large virtual maximum
+Do not revisit the scaled-index variant merely because a large index maximum
 sounds safer. Revisit it when arena high-water measurements from an actual
 large/minified or conflict-heavy corpus show meaningful pressure on the current
 limit. Those measurements must report cumulative allocated bytes and record

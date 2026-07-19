@@ -21,8 +21,9 @@ use super::get_changed_ranges::{
 use super::length::{length_add, Length};
 use super::node::node_new;
 use super::subtree::{
-    subtree_arena_release, subtree_arena_retain, subtree_edit, subtree_pool_delete,
-    subtree_pool_from_arena, subtree_pool_retain_arena, Subtree, SubtreeArena,
+    subtree_arena_release, subtree_arena_retain, subtree_edit, subtree_pool_clone_arena,
+    subtree_pool_delete, subtree_pool_from_arena, subtree_pool_retain_arena, subtree_publish,
+    Subtree, SubtreeArena,
 };
 // Only used by `TSTree::print_dot_graph`, which is unavailable on wasm.
 #[cfg(not(target_family = "wasm"))]
@@ -182,12 +183,13 @@ impl TSTree {
         for range in self.included_ranges_mut() {
             range_edit_ref(range, edit);
         }
-        let mut pool = subtree_pool_from_arena(self.arena);
+        let old_arena = self.arena;
+        let mut pool = subtree_pool_clone_arena(old_arena);
         self.root = subtree_edit(self.root, edit, &mut pool);
-        if self.arena.is_null() {
-            self.arena = subtree_pool_retain_arena(&mut pool);
-        }
+        subtree_publish(pool.arena());
+        self.arena = subtree_pool_retain_arena(&mut pool);
         subtree_pool_delete(&mut pool);
+        subtree_arena_release(old_arena);
     }
 
     #[cfg(not(target_family = "wasm"))]

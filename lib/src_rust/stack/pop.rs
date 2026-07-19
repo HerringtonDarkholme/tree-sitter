@@ -85,9 +85,10 @@ pub(super) unsafe fn stack_iter<F>(
     goal_subtree_count: Option<u32>,
 ) -> StackSliceArray
 where
-    F: FnMut(&StackIterator) -> StackIterationAction,
+    F: FnMut(&StackIterator, *mut SubtreeArena) -> StackIterationAction,
 {
-    let arena = stack.arena();
+    let subtree_pool = stack.subtree_pool;
+    let mut arena = stack.arena();
     stack.slices.clear();
     stack.iterators.clear();
 
@@ -103,6 +104,7 @@ where
             subtree_alloc_size(goal_subtree_count) / core::mem::size_of::<Subtree>();
         let subtrees = &mut new_iterator.subtrees;
         subtrees.reserve(u32::try_from(reserve_count).unwrap());
+        arena = stack.arena();
     }
     let include_subtrees = goal_subtree_count.is_some();
 
@@ -115,7 +117,7 @@ where
             let iterator = stack.iterators.get_unchecked(i);
             let node = iterator.node;
 
-            let (should_pop, should_stop) = match action_for(iterator) {
+            let (should_pop, should_stop) = match action_for(iterator, stack.arena()) {
                 StackIterationAction::Continue => (false, node.as_ref().link_count == 0),
                 StackIterationAction::Stop => (false, true),
                 StackIterationAction::Pop => (true, node.as_ref().link_count == 0),
@@ -161,6 +163,7 @@ where
                     next_iterator = stack.iterators.last_unchecked_mut();
                     let source_subtrees = ptr::read(&next_iterator.subtrees);
                     subtree_array_copy(&source_subtrees, &mut next_iterator.subtrees);
+                    arena = ptr_mut(subtree_pool).arena();
                 }
 
                 next_iterator.node = link.node;
@@ -171,6 +174,7 @@ where
                     if include_subtrees {
                         let subtrees = &mut next_iterator.subtrees;
                         subtrees.push(subtree);
+                        arena = ptr_mut(subtree_pool).arena();
                         subtree.retain(arena);
                     }
 

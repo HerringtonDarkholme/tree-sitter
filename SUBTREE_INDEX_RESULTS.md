@@ -32,9 +32,18 @@ heap record address = arena_data_base + index
 
 Arena allocation begins at `align_of::<SubtreeHeapData>()`, leaving index zero
 as a permanent null sentinel and ensuring every real heap index has a clear low
-tag bit. The arena remains demand-backed: virtual capacity is reserved up front,
-while physical memory is committed in 64 KiB increments as the bump cursor
-advances.
+tag bit. The arena is malloc-backed and on-demand: parser creation allocates
+only the header, the first payload allocation uses a 256 KiB floor, and later
+growth rounds the required end offset to the next power of two. Growth copies
+the used prefix into the larger current block and retains older parser-private
+blocks until the arena family is released.
+
+This replaced the earlier 4 GiB virtual reservation. On an ast-grep outline of
+2,311 TypeScript files, that endpoint issued 2,329 `mmap`, 10,086 `mprotect`,
+and 2,305 `munmap` calls, including 2,291 real reserve/release pairs. ast-grep
+constructs a parser per file, so the VM lifecycle erased the small parsing-CPU
+gain that parser-reuse microbenchmarks had shown. The malloc endpoint removes
+that per-file virtual-memory tax.
 
 Internal nodes preserve the existing variable-record layout:
 
@@ -832,7 +841,7 @@ Passed:
 
 - `cargo fmt --check --all`
 - `cargo clippy -p tree-sitter --lib --tests -- -D warnings`
-- `cargo test -p tree-sitter --lib` (16/16)
+- `cargo test -p tree-sitter --lib` (26/26)
 - `cargo test -p tree-sitter --test abi_surface`
 - `CARGO_NET_OFFLINE=true cargo xtask core-parity` (15/15 samples)
 - `CARGO_NET_OFFLINE=true cargo xtask ast-grep-gate` (4/4 packages)
