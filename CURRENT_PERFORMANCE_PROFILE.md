@@ -315,10 +315,10 @@ the experiment ledger in `PERFORMANCE.md` and `SUBTREE_ARENA_PLAN.md`.
 | --- | --- | --- | --- | --- |
 | Retained | UTF-8 ASCII advance fast path | Decoder, range-seek, and callback work for an ordinary in-chunk ASCII byte | +2.70% current-Rust throughput, all languages positive | Boundary/newline/included-range parity |
 | Rejected | Dedicated direct-final deterministic reducer | Large shared frame, temporary child-array lifecycle, trailing-extra pass, and separate child-summary pass | +0.58% longer confirmation; three languages below -1% | Code placement and dependency chains offset removed work |
-| 1 | Reuse accepted-DAG discovery for balancing | Second child-edge discovery traversal and its work stack | Balance is 3-7%; exact sharing already requires one accepted-DAG scan | Candidate writes may cost more than the saved traversal |
-| 2 | Single-action parser interpreter fast path | Generic action loop and multi-action bookkeeping for the common one-action entry | Dispatch is 10-16%; discarded bandwidth is 10-14% | A branch-only optimization may remain below noise |
-| 3 | Parser-private arena bump cursor with published atomic fallback | CAS loop on allocations made before publication | Arena allocation is 1.5% exclusive in Go | Published tree copies may allocate concurrently in the same arena |
-| 4 | Versioned external-scanner snapshot ABI | Repeated deserialize and grammar-owned malloc/free | Python external scanner is 5.7%, allocation 4.8% | ABI and grammar complexity; identity cache already had low reuse |
+| Rejected | Reuse accepted-DAG discovery for balancing | Second child-edge discovery traversal and its work stack | Invariant-preserving form was -0.18% overall | Shared ancestors invalidate bare descendant candidates |
+| 1 | Single-action parser interpreter fast path | Generic action loop and multi-action bookkeeping for the common one-action entry | Dispatch is 10-16%; discarded bandwidth is 10-14% | A branch-only optimization may remain below noise |
+| 2 | Parser-private arena bump cursor with published atomic fallback | CAS loop on allocations made before publication | Arena allocation is 1.5% exclusive in Go | Published tree copies may allocate concurrently in the same arena |
+| 3 | Versioned external-scanner snapshot ABI | Repeated deserialize and grammar-owned malloc/free | Python external scanner is 5.7%, allocation 4.8% | ABI and grammar complexity; identity cache already had low reuse |
 
 ### 1. UTF-8 ASCII advance
 
@@ -476,6 +476,66 @@ volume is comparable to the edge scan it replaces, do not implement it. Any
 prototype must preserve progress-callback resume behavior and exact sharing
 before mutation.
 
+Implemented result: **rejected**. The accepted-DAG walk kept its original
+depth-first order and appended each first-visited internal node to a separate
+on-demand `balance_stack`. Reversing that array let balancing pop parents
+before descendants, preserve cancellation/resume state, and use the existing
+`tree_stack` independently as compression scratch.
+
+An earlier single-array form was rejected before this final layout. It kept
+the entire breadth-style scan frontier, including heap leaves and duplicate
+occurrences, until balancing. Its short gate was +1.75% overall but regressed
+JavaScript by 3.67% and increased peak RSS by about 2 MiB. Keeping the original
+DFS locality and recording only internal candidates removed that failure mode.
+
+That form produced a compelling but invalid performance result. A decisive
+current-Rust gate bracketed each language separately with five CPU-time samples
+of at least 500 ms per fixture (TypeScript used 1,000 ms):
+
+| Language | Fixtures | Throughput change |
+| --- | ---: | ---: |
+| C++ | 4 | +1.20% |
+| Go | 5 | +1.90% |
+| Java | 4 | +1.17% |
+| JavaScript | 2 | +2.88% |
+| Python | 12 | +2.43% |
+| Rust | 2 | +1.71% |
+| TypeScript | 11 | +2.10% |
+| **All fixtures** | **40** | **+2.01%** |
+
+All 40 source hashes and byte lengths matched. Maximum CV was 2.49%, 1.80%,
+and 2.81% for control, candidate, and control. Per-language peak RSS was
+neutral; the largest candidate increase over its bracketing controls was about
+0.30 MiB for JavaScript.
+
+Source review then found the missing invariant: the old balancing walk skips
+an entire subgraph when its root is shared. Exact accepted-DAG counting can
+leave a descendant apparently unshared even though it is reachable only
+through that shared ancestor. A bare pre-recorded list would later mutate that
+descendant, so the +2.01% form was not correct and was never committed.
+
+The corrected prototype propagated the exclusion mark through shared accepted
+subgraphs using the now-empty traversal scratch. Focused tests witnessed both
+parent-before-descendant order and shared-ancestor exclusion; Rust core tests,
+Clippy, and core parity passed. Its new current-Rust A/B/A result was:
+
+| Language | Corrected throughput change |
+| --- | ---: |
+| C++ | -1.49% |
+| Go | +0.05% |
+| Java | +1.06% |
+| JavaScript | +2.09% |
+| Python | -1.39% |
+| Rust | +2.67% |
+| TypeScript | +0.16% |
+| **All fixtures** | **-0.18%** |
+
+All 40 source hashes matched. The candidate maximum CV was 3.56%; one baseline
+fixture exceeded 5%, but the corrected candidate already fails the overall and
+per-language acceptance gates. Peak RSS also rose about 0.7 MiB in that run.
+The safe propagation walk recreates enough of the traversal the candidate was
+meant to remove, so this design is rejected.
+
 ### 4. Single-action dispatch
 
 The action interpreter dynamically loops over `action_count` and carries GLR
@@ -573,7 +633,8 @@ to existing parser artifacts.
 1. Retain the completed conservative ASCII advance fast path.
 2. Keep the direct-final deterministic reducer rejected unless a materially
    different design removes more work than the measured candidate.
-3. Gate accepted-DAG balancing reuse with edge and worklist counts.
+3. Keep accepted-DAG balancing worklist reuse rejected unless a design can
+   represent shared-ancestor exclusion without another traversal.
 4. Measure single-action coverage before attempting a dispatch fast path.
 5. Only then consider the small-ceiling parser-private arena cursor.
 

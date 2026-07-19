@@ -144,6 +144,7 @@ branch was reverted to `fe2605c1`, so these are candidates, not current wins.
 | External-scanner state reuse by token identity | Only 8.11% overall would-be hit rate; Python 19.94% was the best | Do not add this cache |
 | Incremental reduction summaries | Regressed the normalized gate by about 4.2 points; paid an 88-byte payload on discarded paths | Do not attach broad summaries to every pop path |
 | Direct-final deterministic reducer | +1.09% in the short current-Rust A/B/A run, but only +0.58% in the longer confirmation; C++ -2.39%, Go -1.43%, and Rust -1.33%; RSS neutral | Reject the combined outlining/direct-builder change; the smaller frame did not produce a stable cross-language win |
+| Accepted-DAG balancing worklist reuse | An unsafe form appeared +2.01%, but it could mutate descendants through shared ancestors; preserving the old skip invariant produced -0.18% overall, C++ -1.49%, and Python -1.39% | Do not cache bare candidates without also representing shared-ancestor exclusion; the safe propagation pass recreates the removed traversal |
 | Post-finalization column shrinking | Increased peak RSS by 346% because old and new allocations coexisted | Do not shrink by reallocating after construction |
 
 The direct-final reducer was independently reimplemented after the retained
@@ -215,14 +216,12 @@ Generated-lexer layout remains a valid diagnosis but is deferred: the runtime
 cannot assume that the repository corpus represents the state graphs, token
 distributions, compiler choices, or regeneration practices of user grammars.
 
-The next experiments, in order, are:
+The current experiment order is:
 
-1. restore the previously measured conservative UTF-8 ASCII advance fast path;
-2. split deterministic reduction from GLR reduction, then build a direct-final
-   deterministic parent if assembly proves the fast-path frame shrinks;
-3. gate accepted-DAG balancing worklist reuse with traversal counts; and
-4. only afterward consider single-action dispatch or parser-private arena
-   bumping.
+1. retain the conservative UTF-8 ASCII advance fast path;
+2. keep the direct-final reducer and accepted-DAG balancing worklist rejected;
+3. measure single-action dispatch coverage; and
+4. only afterward consider parser-private arena bumping.
 
 Allocator/GC tuning is not the next throughput target. A Python snapshot had
 about 7.2 MiB physical footprint and 2.1 MiB resident/dirty arena pages despite
