@@ -318,6 +318,7 @@ the experiment ledger in `PERFORMANCE.md` and `SUBTREE_ARENA_PLAN.md`.
 | Rejected | Reuse accepted-DAG discovery for balancing | Second child-edge discovery traversal and its work stack | Invariant-preserving form was -0.18% overall | Shared ancestors invalidate bare descendant candidates |
 | Retained | Single-action parser interpreter fast path | Generic action loop and multi-action bookkeeping for the common one-action entry | +2.78% current-Rust throughput, all languages positive | Duplicated action dispatch code |
 | Rejected | Parser-private arena bump cursor with published atomic fallback | CAS loop on allocations made before publication | +0.52% overall; JavaScript -3.01% | Phase branch and duplicated allocator code offset the small CAS saving |
+| Rejected | Small parse-table group rejection | Scans of terminal groups during goto lookup and nonterminal groups during token lookup | +0.56% longer confirmation; JavaScript -2.51%, TypeScript -1.22% | The safe kind branch helps reduction-heavy languages but hurts other lookup distributions |
 | 1 | Versioned external-scanner snapshot ABI | Repeated deserialize and grammar-owned malloc/free | Python external scanner is 5.7%, allocation 4.8% | ABI and grammar complexity; identity cache already had low reuse |
 
 ### 1. UTF-8 ASCII advance
@@ -605,7 +606,29 @@ and 3.57% for control, candidate, and control; RSS was neutral. The candidate
 fails both the +1% overall threshold and per-language regression floor, so the
 runtime retains one atomic allocation path.
 
-### 6. External-scanner snapshots
+### 6. Small parse-table group rejection
+
+The accepted-head Go profile still placed substantial exclusive samples in
+the compressed small-state lookup used by both reduction gotos and token
+dispatch. The first prototype attempted endpoint rejection within each
+generated symbol group. Corpus parsing immediately disproved its premise:
+generator-side `Symbol` ordering does not guarantee monotonically increasing
+rendered numeric IDs. That form was discarded before performance measurement.
+
+The corrected prototype used the actual stable invariant: one compressed group
+contains only terminals or only nonterminals. It skipped opposite-kind groups
+and retained the original pointer scan within matching groups. A focused
+unsorted-group test, C++ and Go corpus witnesses, and Clippy passed.
+
+The five-sample 200 ms A/B/A gate was +1.17% overall, but Rust was -1.00% and a
+control CV reached 11.89%. The decisive five-sample 500 ms per-language gate
+was +0.56% overall: C++ +0.89%, Go +2.60%, Java -0.11%, JavaScript -2.51%,
+Python +2.10%, Rust -0.06%, and TypeScript -1.22%. Candidate maximum CV was
+3.47%; source hashes matched after byte-normalizing the temporary control
+fixtures, and RSS had no consistent increase. The candidate fails the overall
+and per-language gates, so the original pointer scan remains.
+
+### 7. External-scanner snapshots
 
 The current scanner ABI exposes one mutable grammar-owned object plus serialized
 bytes. The runtime must deserialize a stack version's bytes before scanning,
@@ -676,9 +699,9 @@ to existing parser artifacts.
    represent shared-ancestor exclusion without another traversal.
 4. Retain the single-action dispatch fast path.
 5. Keep the parser-private arena cursor rejected.
-6. Refresh the accepted Rust profile before selecting another runtime-owned
-   candidate; leave the external-scanner ABI unscheduled until its ecosystem
-   cost is explicitly approved.
+6. Keep small parse-table group rejection rejected.
+7. Continue from the accepted-head runtime profile; leave the external-scanner
+   ABI unscheduled until its ecosystem cost is explicitly approved.
 
 This order records the retained low-complexity win and the rejected reducer
 experiment before moving to the next measured runtime phases. It stays within
