@@ -29,6 +29,12 @@ use super::{
 };
 
 pub(super) const ARENA_INITIAL_CAPACITY: usize = 256 * 1024;
+/// Exact-size child-array bins, covering the capacities used by ordinary GLR
+/// pop paths without turning the subtree arena into a general allocator.
+pub(super) const ARENA_FREE_LIST_COUNT: usize = 64;
+/// Preserve the bump-only fast path for ordinary files. Large parses start
+/// recycling temporary child buffers after arena growth exposes memory pressure.
+pub(super) const ARENA_REUSE_THRESHOLD: usize = 16 * 1024 * 1024;
 const ARENA_DATA_OFFSET: usize = {
     let size = core::mem::size_of::<SubtreeArena>();
     let alignment = core::mem::align_of::<SubtreeInternalData>();
@@ -46,6 +52,7 @@ unsafe fn subtree_arena_new() -> *mut SubtreeArena {
         capacity: 0,
         generation: AtomicU32::new(1),
         published: false,
+        free_lists: [0; ARENA_FREE_LIST_COUNT],
     });
     arena
 }
@@ -104,6 +111,7 @@ pub(super) unsafe fn subtree_arena_force_relocation(pool: &mut SubtreePool) {
         capacity,
         generation: AtomicU32::new((*arena).generation.load(Ordering::Relaxed)),
         published: false,
+        free_lists: (*arena).free_lists,
     });
     subtree_arena_data(replacement).copy_from_nonoverlapping(subtree_arena_data(arena), used);
     pool.arena = replacement;
@@ -134,6 +142,31 @@ unsafe fn subtree_arena_allocate(
     }
     (*arena).offset.store(end, Ordering::Relaxed);
     NonNull::new_unchecked(subtree_arena_data(arena).add(start))
+}
+
+unsafe fn subtree_arena_allocate_reusable(
+    pool: &mut SubtreePool,
+    byte_count: usize,
+    alignment: usize,
+) -> NonNull<u8> {
+    let arena = subtree_pool_ensure_arena(pool);
+    if (*arena).capacity <= ARENA_REUSE_THRESHOLD {
+        return subtree_arena_allocate(pool, byte_count, alignment);
+    }
+    if alignment <= core::mem::align_of::<SubtreeInternalData>()
+        && byte_count % core::mem::align_of::<SubtreeInternalData>() == 0
+    {
+        let list_index = byte_count / core::mem::align_of::<SubtreeInternalData>();
+        if list_index > 0 && list_index <= ARENA_FREE_LIST_COUNT {
+            let head = (*arena).free_lists[list_index - 1];
+            if head != 0 {
+                let block = subtree_arena_data(arena).add(head as usize);
+                (*arena).free_lists[list_index - 1] = block.cast::<u32>().read_unaligned();
+                return NonNull::new_unchecked(block);
+            }
+        }
+    }
+    subtree_arena_allocate(pool, byte_count, alignment)
 }
 
 pub unsafe fn subtree_arena_retain(arena: *mut SubtreeArena) {
@@ -178,6 +211,7 @@ pub unsafe fn subtree_pool_prepare_for_parse(pool: &mut SubtreePool) {
             .store(core::mem::align_of::<SubtreeHeapData>(), Ordering::SeqCst);
         (*pool.arena).generation.fetch_add(1, Ordering::SeqCst);
         (*pool.arena).published = false;
+        (*pool.arena).free_lists.fill(0);
     } else {
         subtree_arena_release(pool.arena);
         pool.arena = ptr::null_mut();
@@ -217,6 +251,7 @@ pub unsafe fn subtree_pool_clone_arena(arena: *mut SubtreeArena) -> SubtreePool 
         capacity,
         generation: AtomicU32::new((*arena).generation.load(Ordering::Acquire)),
         published: false,
+        free_lists: (*arena).free_lists,
     });
     subtree_arena_data(copy).copy_from_nonoverlapping(subtree_arena_data(arena), used);
     SubtreePool {
@@ -326,6 +361,15 @@ impl SubtreeArray {
     pub unsafe fn delete(&mut self) {
         if self.pool.is_null() && !self.contents.is_null() {
             free(self.contents.cast::<c_void>());
+        } else if !self.pool.is_null() && self.arena_offset != 0 {
+            self.refresh_arena_generation();
+            if self.arena_offset != 0 {
+                subtree_pool_free_block(
+                    &mut *self.pool,
+                    self.arena_offset,
+                    self.capacity as usize * core::mem::size_of::<Subtree>(),
+                );
+            }
         }
         *self = Self::new();
     }
@@ -338,6 +382,12 @@ impl SubtreeArray {
     #[inline]
     #[allow(clippy::cast_ptr_alignment)]
     pub unsafe fn reserve(&mut self, new_capacity: u32) {
+        self.reserve_with_recycling(new_capacity, true);
+    }
+
+    #[inline]
+    #[allow(clippy::cast_ptr_alignment)]
+    unsafe fn reserve_with_recycling(&mut self, new_capacity: u32, recycle_old: bool) {
         self.refresh_arena_generation();
         if new_capacity <= self.capacity {
             return;
@@ -352,7 +402,7 @@ impl SubtreeArray {
             }
         } else {
             let old_offset = self.arena_offset;
-            let allocation = subtree_arena_allocate(
+            let allocation = subtree_arena_allocate_reusable(
                 &mut *self.pool,
                 byte_count,
                 core::mem::align_of::<SubtreeHeapData>(),
@@ -366,6 +416,13 @@ impl SubtreeArray {
                     .add(old_offset as usize)
                     .cast::<Subtree>();
                 allocation.copy_from_nonoverlapping(source, self.len());
+            }
+            if recycle_old && old_offset != 0 {
+                subtree_pool_free_block(
+                    &mut *self.pool,
+                    old_offset,
+                    self.capacity as usize * core::mem::size_of::<Subtree>(),
+                );
             }
             self.arena_offset = u32::try_from(
                 allocation.cast::<u8>() as usize - subtree_arena_data(arena) as usize,
@@ -419,7 +476,21 @@ impl SubtreeArray {
         } else {
             None
         };
-        self.reserve(new_size);
+        let source_uses_current_allocation = arena_source_offset.is_some_and(|offset| {
+            let allocation_start = self.arena_offset as usize;
+            let allocation_end =
+                allocation_start + self.capacity as usize * core::mem::size_of::<Subtree>();
+            allocation_start != 0 && (allocation_start..allocation_end).contains(&offset)
+        });
+        let deferred_free = if source_uses_current_allocation && new_size > self.capacity {
+            Some((
+                self.arena_offset,
+                self.capacity as usize * core::mem::size_of::<Subtree>(),
+            ))
+        } else {
+            None
+        };
+        self.reserve_with_recycling(new_size, !source_uses_current_allocation);
         let contents = self.resolved_contents();
         let new_contents = arena_source_offset.map_or(new_contents, |offset| {
             subtree_arena_data((*self.pool).arena)
@@ -442,6 +513,9 @@ impl SubtreeArray {
             );
         }
         self.size = new_size;
+        if let Some((offset, byte_count)) = deferred_free {
+            subtree_pool_free_block(&mut *self.pool, offset, byte_count);
+        }
     }
 
     pub unsafe fn assign(&mut self, source: &Self) {
@@ -616,6 +690,28 @@ pub(super) unsafe fn subtree_pool_allocate_inline(
         core::mem::align_of::<SubtreeInlineData>(),
     )
     .cast()
+}
+
+unsafe fn subtree_pool_free_block(pool: &mut SubtreePool, offset: u32, byte_count: usize) {
+    let arena = pool.arena;
+    debug_assert!(!arena.is_null());
+    debug_assert!(!(*arena).published);
+    if (*arena).capacity <= ARENA_REUSE_THRESHOLD {
+        return;
+    }
+    let alignment = core::mem::align_of::<SubtreeInternalData>();
+    if byte_count % alignment != 0 {
+        return;
+    }
+    let list_index = byte_count / alignment;
+    if list_index == 0 || list_index > ARENA_FREE_LIST_COUNT {
+        return;
+    }
+    subtree_arena_data(arena)
+        .add(offset as usize)
+        .cast::<u32>()
+        .write_unaligned((*arena).free_lists[list_index - 1]);
+    (*arena).free_lists[list_index - 1] = offset;
 }
 
 #[cfg(test)]

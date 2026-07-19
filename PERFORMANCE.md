@@ -119,6 +119,7 @@ cargo xtask perf-gate --min-sample-time-ms 1000 --offline
 | Conservative UTF-8 ASCII lexer advance | +2.70% current-Rust throughput across 40 fixtures; all seven languages positive; RSS neutral | Keep the guarded in-chunk/in-range fast path |
 | Single-action parser dispatch | +2.78% current-Rust throughput across 40 fixtures; all seven languages positive; maximum CV 4.04%; RSS neutral | Keep the direct one-action interpreter and outline generalized action iteration |
 | Sparse parser-private goto index | +2.18% confirmed current-Rust throughput; all seven languages positive, Go +7.09%; maximum CV 2.85%; at most +0.19 MiB peak RSS | Keep a sorted four-byte entry per actual small-state nonterminal transition; leave terminal/action lookup unchanged |
+| Pressure-triggered arena child-array reuse | Reduced one-worker ast-grep TypeScript-baseline peak RSS from 492.2 MiB after retired-generation removal to 91.2 MiB; current-Rust parse throughput -1.10% | Keep the 16 MiB pressure gate and exact-size small-buffer bins as an explicit memory-for-throughput tradeoff |
 
 The `Subtree` result is the strongest representation lesson. A readable API
 should hide the compact tagged representation, not double every hot subtree
@@ -150,6 +151,7 @@ branch was reverted to `fe2605c1`, so these are candidates, not current wins.
 | Parser-private arena bump cursor | +0.52% current-Rust throughput overall, but JavaScript -3.01%; CV stable and RSS neutral | Keep the single atomic allocator path; its CAS loop is too small a fraction to justify phase-specialized allocator code |
 | Small parse-table group rejection | A safe terminal/nonterminal group skip was +1.17% in the short gate but only +0.56% in the 500 ms confirmation; JavaScript -2.51% and TypeScript -1.22%. A nonterminal-only retry was +0.52% overall and Rust -2.33% | Do not add kind branches to the generated-table scan; rendered symbol IDs are not ordered within groups |
 | Post-finalization column shrinking | Increased peak RSS by 346% because old and new allocations coexisted | Do not shrink by reallocating after construction |
+| Exact subtree counts plus node-record free lists | Pathological RSS remained roughly 494 MiB; instrumentation attributed 468.2 MiB of 470.1 MiB bump progress to temporary child-array capacities | Do not add ownership/release work to reclaim the wrong allocation class; reuse child-array blocks under pressure instead |
 
 The direct-final reducer was independently reimplemented after the retained
 ASCII lexer change. It again passed a short gate (+1.42%), but the decisive

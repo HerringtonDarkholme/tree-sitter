@@ -142,6 +142,10 @@ pub struct SubtreeArena {
     /// False while subtree ownership is parser-private; true after accepted
     /// counts have been rebuilt for publication.
     published: bool,
+    /// Heads of exact-size reusable child-array blocks, classified in internal
+    /// record-alignment units. Each freed block stores the next arena offset in
+    /// its first four bytes.
+    free_lists: [u32; storage::ARENA_FREE_LIST_COUNT],
 }
 
 pub struct SubtreePool {
@@ -1180,6 +1184,61 @@ mod tests {
             second.release(&mut pool);
             subtree_pool_prepare_for_parse(&mut pool);
             assert_eq!(storage::subtree_pool_used_bytes(&pool), 0);
+            subtree_pool_delete(&mut pool);
+        }
+    }
+
+    #[test]
+    fn arena_child_arrays_reuse_superseded_capacity() {
+        unsafe {
+            let mut pool = subtree_pool_new(0);
+            let mut first = subtree_array_new(&mut pool);
+            first.reserve(8);
+            let used_after_first = storage::subtree_pool_used_bytes(&pool);
+
+            first
+                .reserve((storage::ARENA_REUSE_THRESHOLD / core::mem::size_of::<Subtree>()) as u32);
+            let used_after_growth = storage::subtree_pool_used_bytes(&pool);
+            assert!(used_after_growth > used_after_first);
+
+            let mut second = subtree_array_new(&mut pool);
+            second.reserve(8);
+            assert_eq!(storage::subtree_pool_used_bytes(&pool), used_after_growth);
+
+            second.delete();
+            let mut third = subtree_array_new(&mut pool);
+            third.reserve(8);
+            assert_eq!(storage::subtree_pool_used_bytes(&pool), used_after_growth);
+
+            first.delete();
+            third.delete();
+            subtree_pool_delete(&mut pool);
+        }
+    }
+
+    #[test]
+    fn arena_child_array_self_splice_defers_block_reuse() {
+        unsafe {
+            let mut pool = subtree_pool_new(0);
+            let mut pressure = subtree_array_new(&mut pool);
+            pressure
+                .reserve((storage::ARENA_REUSE_THRESHOLD / core::mem::size_of::<Subtree>()) as u32);
+
+            let mut children = subtree_array_new(&mut pool);
+            for size in 1..=8 {
+                children.push(inline_leaf(&mut pool, size));
+            }
+            let source = children.as_slice().as_ptr();
+            children.splice(0, 0, 8, source);
+
+            let arena = pool.arena();
+            let expected = [1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8];
+            for (child, expected_size) in children.as_slice().iter().zip(expected) {
+                assert_eq!(child.size(arena).bytes, expected_size);
+            }
+
+            pressure.delete();
+            children.delete();
             subtree_pool_delete(&mut pool);
         }
     }

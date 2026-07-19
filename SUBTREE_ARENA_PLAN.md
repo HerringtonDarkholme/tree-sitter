@@ -420,10 +420,62 @@ A pressure-triggered LIFO rewind was also priced and discarded. It attempted
 to rewind uniquely owned, non-shared heap nodes only when the released record
 was exactly at the bump cursor. The pathological fixture still peaked at
 496,844,800 bytes, so rejected records are not released in a sufficiently
-stack-like order for this mechanism. Meeting the 150 MiB application target
-therefore requires in-parse non-LIFO reuse: exact reference counts plus a
-size-aware free list, or a pressure-triggered non-moving mark/sweep pass. Arena
-growth policy alone cannot satisfy the target.
+stack-like order for this mechanism.
+
+The next prototype restored exact parser-private subtree counts, cascading
+release, and exact-size node-record free lists. It also failed to change the
+pathological fixture's roughly 494 MiB peak. Allocation counters then corrected
+the diagnosis: of 470.1 MB of bump progress, **468.2 MB** came from
+arena-backed `SubtreeArray` capacities. All other bump allocation combined was
+only about 1.9 MB; the node-record free lists separately serviced about 4.2 MB
+without affecting the dominant array traffic. The refcount and node-free-list
+prototype was therefore removed; it added ownership work while targeting the
+wrong allocation class.
+
+### Pressure-triggered child-array reuse
+
+The retained correction reuses the allocation class that actually dominates
+the bad parse. `SubtreeArray` continues to store an arena-relative offset, so
+arena growth remains movable and the reduction path still transfers a final
+child buffer directly into its parent. When an array grows or is deleted, its
+superseded capacity may enter one of 64 exact-size free lists. The block stores
+the next arena offset in its first four bytes; no side allocation or live
+pointer is introduced.
+
+Reuse begins only after the arena has grown beyond **16 MiB**. Files below that
+pressure threshold retain the old bump-only allocation path. The bins cover
+the small child-capacity classes used by ordinary GLR pops; oversized or
+misaligned buffers remain bump allocated. All lists are parser-private, are
+copied as arena-relative offsets if a private arena moves, and are cleared when
+the parser rewinds for a new parse. Published arenas are never mutated.
+
+On the correctly Rust-linked ast-grep outline of TypeScript's complete
+`tests/baselines` corpus with one worker, peak RSS became **95,649,792 bytes
+(91.2 MiB)**, below the pre-registered 150 MiB ceiling. This is a targeted
+scratch-lifetime correction rather than subtree GC: node records retain the
+existing phase-split ownership policy and are not individually reclaimed.
+
+The memory win has a small parse-throughput cost. An interleaved per-language
+Rust-to-Rust comparison against immediate parent `3994bc2b`, with three 200 ms
+samples in `B, C, C, B` order, measured an equal-language geometric mean of
+**-1.10%**:
+
+| Language | Throughput change |
+| --- | ---: |
+| C++ | -0.42% |
+| Go | -2.20% |
+| Java | -0.61% |
+| JavaScript | -1.93% |
+| Python | -0.41% |
+| Rust | -2.26% |
+| TypeScript | +0.18% |
+
+This endpoint is retained for its order-of-magnitude application RSS
+improvement, not as a throughput optimization. It also closes exact subtree
+refcounting and general node-record free lists as remedies for this memory
+case. A future collector must first demonstrate node-record pressure separate
+from temporary child-array pressure; the current end-to-end profile attributes
+only 0.58% exclusive CPU to direct arena allocation.
 
 The discarded VM implementation reserved 4 GiB and committed 64 KiB chunks.
 That was acceptable in parser-reuse microbenchmarks but pathological for
