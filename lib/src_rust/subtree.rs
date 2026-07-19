@@ -1034,6 +1034,61 @@ mod tests {
     }
 
     #[test]
+    fn exact_sharing_does_not_imply_shared_descendants() {
+        unsafe {
+            let mut pool = subtree_pool_new(0);
+            let mut descendant_children = SubtreeArray::new();
+            descendant_children.push(inline_leaf(&mut pool, 2));
+            let descendant = subtree_new_node(
+                &mut pool,
+                TS_BUILTIN_SYM_ERROR_REPEAT,
+                descendant_children,
+                0,
+                ptr::null(),
+            )
+            .into_immutable();
+
+            let mut shared_children = SubtreeArray::new();
+            shared_children.push(descendant);
+            let shared = subtree_new_node(
+                &mut pool,
+                TS_BUILTIN_SYM_ERROR_REPEAT,
+                shared_children,
+                0,
+                ptr::null(),
+            )
+            .into_immutable();
+            shared.retain(pool.arena());
+
+            let mut root_children = SubtreeArray::new();
+            root_children.push(shared);
+            root_children.push(shared);
+            let root = subtree_new_node(
+                &mut pool,
+                TS_BUILTIN_SYM_ERROR_REPEAT,
+                root_children,
+                0,
+                ptr::null(),
+            )
+            .into_immutable();
+
+            let mut traversal = MutableSubtreeArray::new();
+            subtree_prepare_for_balancing(root, pool.arena(), &mut traversal);
+
+            // The shared parent owns one physical child edge even though the
+            // parent itself is reachable twice. Balancing must therefore skip
+            // the whole shared subgraph instead of treating this child's own
+            // exact-sharing flag as permission to mutate it.
+            assert!(shared.shared(pool.arena()));
+            assert!(!descendant.shared(pool.arena()));
+
+            traversal.delete();
+            root.release(&mut pool);
+            subtree_pool_delete(&mut pool);
+        }
+    }
+
+    #[test]
     fn released_heap_nodes_remain_in_the_slab_until_rewind() {
         unsafe {
             let mut pool = subtree_pool_new(0);

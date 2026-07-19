@@ -224,6 +224,94 @@ unsafe fn parser_apply_parse_actions(
     lookahead: &mut Subtree,
     table_entry: &TableEntry,
 ) -> ParseActionsResult {
+    if table_entry.action_count == 1 {
+        return parser_apply_single_parse_action(
+            self_,
+            version,
+            state,
+            lookahead,
+            *table_entry.actions,
+        );
+    }
+
+    parser_apply_multiple_parse_actions(self_, version, state, lookahead, table_entry)
+}
+
+unsafe fn parser_reduce_for_action(
+    self_: &mut TSParser,
+    version: StackVersion,
+    lookahead: Subtree,
+    action: TSParseAction,
+    invalidate_parse_state: bool,
+) -> StackVersion {
+    let reduce = action.reduce;
+    let reduce_action = ReduceAction {
+        symbol: reduce.symbol,
+        count: u32::from(reduce.child_count),
+        dynamic_precedence: i32::from(reduce.dynamic_precedence),
+        production_id: reduce.production_id,
+    };
+    parser_log(self_, |context, log| {
+        write!(
+            log,
+            "reduce sym:{}, child_count:{}",
+            DisplayCStr(parser_symbol_name(context.language, reduce.symbol)),
+            u32::from(reduce.child_count)
+        )
+    });
+    parser_reduce(
+        self_,
+        version,
+        reduce_action,
+        invalidate_parse_state,
+        lookahead.is_null(),
+    )
+}
+
+unsafe fn parser_apply_single_parse_action(
+    self_: &mut TSParser,
+    version: StackVersion,
+    state: TSStateId,
+    lookahead: &mut Subtree,
+    action: TSParseAction,
+) -> ParseActionsResult {
+    match action.type_ {
+        TSPARSE_ACTION_TYPE_SHIFT if !action.shift.repetition => {
+            parser_shift_for_action(self_, version, state, lookahead, action);
+            ParseActionsResult::Done
+        }
+        TSPARSE_ACTION_TYPE_REDUCE => {
+            let reduction_version =
+                parser_reduce_for_action(self_, version, *lookahead, action, false);
+            ParseActionsResult::Reductions {
+                did_reduce: true,
+                last_reduction_version: reduction_version,
+            }
+        }
+        TSPARSE_ACTION_TYPE_ACCEPT => {
+            parser_log(self_, |_, log| log.write_str("accept"));
+            parser_accept(self_, version, *lookahead);
+            ParseActionsResult::Done
+        }
+        TSPARSE_ACTION_TYPE_RECOVER => {
+            parser_recover(self_, version, *lookahead);
+            ParseActionsResult::Done
+        }
+        _ => ParseActionsResult::Reductions {
+            did_reduce: false,
+            last_reduction_version: STACK_VERSION_NONE,
+        },
+    }
+}
+
+#[inline(never)]
+unsafe fn parser_apply_multiple_parse_actions(
+    self_: &mut TSParser,
+    version: StackVersion,
+    state: TSStateId,
+    lookahead: &mut Subtree,
+    table_entry: &TableEntry,
+) -> ParseActionsResult {
     if table_entry.action_count > 1 {
         stack_materialize(ptr_mut(self_.stack));
     }
@@ -243,30 +331,8 @@ unsafe fn parser_apply_parse_actions(
             }
 
             TSPARSE_ACTION_TYPE_REDUCE => {
-                let reduce = action.reduce;
-                let reduce_action = ReduceAction {
-                    symbol: reduce.symbol,
-                    count: u32::from(reduce.child_count),
-                    dynamic_precedence: i32::from(reduce.dynamic_precedence),
-                    production_id: reduce.production_id,
-                };
-                let invalidate_parse_state = table_entry.action_count > 1;
-                let end_of_non_terminal_extra = lookahead.is_null();
-                parser_log(self_, |context, log| {
-                    write!(
-                        log,
-                        "reduce sym:{}, child_count:{}",
-                        DisplayCStr(parser_symbol_name(context.language, reduce.symbol)),
-                        u32::from(reduce.child_count)
-                    )
-                });
-                let reduction_version = parser_reduce(
-                    self_,
-                    version,
-                    reduce_action,
-                    invalidate_parse_state,
-                    end_of_non_terminal_extra,
-                );
+                let reduction_version =
+                    parser_reduce_for_action(self_, version, *lookahead, action, true);
                 did_reduce = true;
                 if reduction_version != STACK_VERSION_NONE {
                     last_reduction_version = reduction_version;

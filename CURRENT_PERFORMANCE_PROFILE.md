@@ -316,9 +316,9 @@ the experiment ledger in `PERFORMANCE.md` and `SUBTREE_ARENA_PLAN.md`.
 | Retained | UTF-8 ASCII advance fast path | Decoder, range-seek, and callback work for an ordinary in-chunk ASCII byte | +2.70% current-Rust throughput, all languages positive | Boundary/newline/included-range parity |
 | Rejected | Dedicated direct-final deterministic reducer | Large shared frame, temporary child-array lifecycle, trailing-extra pass, and separate child-summary pass | +0.58% longer confirmation; three languages below -1% | Code placement and dependency chains offset removed work |
 | Rejected | Reuse accepted-DAG discovery for balancing | Second child-edge discovery traversal and its work stack | Invariant-preserving form was -0.18% overall | Shared ancestors invalidate bare descendant candidates |
-| 1 | Single-action parser interpreter fast path | Generic action loop and multi-action bookkeeping for the common one-action entry | Dispatch is 10-16%; discarded bandwidth is 10-14% | A branch-only optimization may remain below noise |
-| 2 | Parser-private arena bump cursor with published atomic fallback | CAS loop on allocations made before publication | Arena allocation is 1.5% exclusive in Go | Published tree copies may allocate concurrently in the same arena |
-| 3 | Versioned external-scanner snapshot ABI | Repeated deserialize and grammar-owned malloc/free | Python external scanner is 5.7%, allocation 4.8% | ABI and grammar complexity; identity cache already had low reuse |
+| Retained | Single-action parser interpreter fast path | Generic action loop and multi-action bookkeeping for the common one-action entry | +2.78% current-Rust throughput, all languages positive | Duplicated action dispatch code |
+| 1 | Parser-private arena bump cursor with published atomic fallback | CAS loop on allocations made before publication | Arena allocation is 1.5% exclusive in Go | Published tree copies may allocate concurrently in the same arena |
+| 2 | Versioned external-scanner snapshot ABI | Repeated deserialize and grammar-owned malloc/free | Python external scanner is 5.7%, allocation 4.8% | ABI and grammar complexity; identity cache already had low reuse |
 
 ### 1. UTF-8 ASCII advance
 
@@ -548,6 +548,32 @@ usually noise. Count dynamic action-entry shapes first; require at least 95%
 single-action coverage before building it. Inspect the resulting
 `parser_advance` frame and text size before benchmarking.
 
+Implemented result: **retained**. `parser_apply_parse_actions` directly
+dispatches a one-action entry, shares reduction construction/logging through a
+small helper, and sends zero- or multi-action entries to an out-of-line loop.
+Shift repetition, reduce invalidation, null-lookahead reductions, accept, and
+recover preserve the existing branches.
+
+The decisive current-Rust gate bracketed each language separately with five
+500 ms CPU-time samples per fixture:
+
+| Language | Fixtures | Throughput change |
+| --- | ---: | ---: |
+| C++ | 4 | +2.82% |
+| Go | 5 | +3.91% |
+| Java | 4 | +3.02% |
+| JavaScript | 2 | +3.09% |
+| Python | 12 | +1.95% |
+| Rust | 2 | +3.35% |
+| TypeScript | 11 | +2.91% |
+| **All fixtures** | **40** | **+2.78%** |
+
+All 40 source hashes and byte lengths matched. Maximum CV was 2.82%, 2.33%,
+and 4.04% for control, candidate, and control. Every language and all but one
+individual fixture improved; the remaining fixture was -0.20%. Per-language
+peak RSS was neutral. Rust core tests, Clippy, core parity, and the four-package
+ast-grep gate passed.
+
 ### 5. Parser-private arena bumping
 
 The arena's atomic cursor is required after publication because separate tree
@@ -635,8 +661,8 @@ to existing parser artifacts.
    different design removes more work than the measured candidate.
 3. Keep accepted-DAG balancing worklist reuse rejected unless a design can
    represent shared-ancestor exclusion without another traversal.
-4. Measure single-action coverage before attempting a dispatch fast path.
-5. Only then consider the small-ceiling parser-private arena cursor.
+4. Retain the single-action dispatch fast path.
+5. Next consider the small-ceiling parser-private arena cursor.
 
 This order records the retained low-complexity win and the rejected reducer
 experiment before moving to the next measured runtime phases. It stays within

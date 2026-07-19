@@ -117,6 +117,7 @@ cargo xtask perf-gate --min-sample-time-ms 1000 --offline
 | One-pass parsing and compact stack links | Removed stale incremental/reuse machinery and shrank `StackLink` from 24 to 16 bytes and `StackNode` from 232 to 168 bytes | Keep; old speed figures were noisy, so claim simplicity/layout rather than a precise gain |
 | Focused ownership and module cleanup | Behavior remained green and direct throughput changes stayed within measurement noise | Keep for readability |
 | Conservative UTF-8 ASCII lexer advance | +2.70% current-Rust throughput across 40 fixtures; all seven languages positive; RSS neutral | Keep the guarded in-chunk/in-range fast path |
+| Single-action parser dispatch | +2.78% current-Rust throughput across 40 fixtures; all seven languages positive; maximum CV 4.04%; RSS neutral | Keep the direct one-action interpreter and outline generalized action iteration |
 
 The `Subtree` result is the strongest representation lesson. A readable API
 should hide the compact tagged representation, not double every hot subtree
