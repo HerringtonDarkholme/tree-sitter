@@ -317,7 +317,7 @@ former 15.8% to 0.11%, exposing the steady-state parser and consumer costs:
 | Parser action interpreter | 17.5% | The sparse goto index removed only **nonterminal** scans; the new terminal/action projection removes the corresponding compressed-row scans | Retain the sparse parser-private terminal/action index: +1.42% parse throughput and about 5.0% less opencode outline user CPU |
 | Lexing | 15.7% | The conservative runtime ASCII advance is already retained; direct inlining into generated C lexers changes generated artifacts and was explicitly deferred | Keep generated-lexer work deferred; require a distinct runtime-only mechanism before another lexer trial |
 | Subtree construction | 13.6% | Kind-specialized headers and lazy column summaries are retained; accumulator-based summary fusion regressed all seven languages; equivalent balancing reuse regressed | Only the still-distinct preallocated-final-parent summary writer remains open, behind action lookup |
-| Tree-cursor traversal | 11.6% | The fresh generic traversal streak is +1.71% versus the pre-arena Rust control, so the old indexed-handle traversal regression is no longer present | Optimize ast-grep's amount of outline work or design a deliberately narrower consumer API; do not reopen a representation split from this profile alone |
+| Tree-cursor traversal | 11.6% | Resolving each parent child slice once is retained: +5.43% traversal throughput and 1.12% less parser-cached opencode outline user CPU | Keep the operation-local resolved slice; optimize ast-grep's amount of outline work next rather than reopening a representation split |
 | Parser stack operations | 10.4% | The deterministic window and single-action dispatch are already retained; direct-final deterministic reduction and simple stack outlining were rejected | First attribute the remaining samples to window versus materialized GLR paths; “add a single-version fast path” is not a new design |
 | Reduction functions | 5.2% | Same deterministic-reducer and summary-fusion families above | Do not count this as an independent untouched pool |
 | Arena allocation | 0.58% direct | Arena/index changes are retained for layout and RSS; allocator tuning is repeatedly below the throughput threshold | Keep allocator work out of the throughput queue |
@@ -354,6 +354,7 @@ the experiment ledger in `PERFORMANCE.md` and `SUBTREE_ARENA_PLAN.md`.
 | Rejected | Parser-private nonterminal goto cache | Repeated compressed-row scans for identical `(state, symbol)` reductions | -0.22% overall; JavaScript -2.65%, Rust -1.34% | Cache probes and direct-map replacement cost more than the avoided scans on the mixed corpus |
 | Retained | Sparse parser-private goto index | All compressed-row scans for small-state nonterminal transitions | +2.18% confirmed overall; all seven languages positive, Go +7.09% | One-time language installation work and a small sparse allocation per parser |
 | Retained | Sparse parser-private terminal/action index | Compressed group and symbol scans for small-state token dispatch | +1.42% confirmed parse throughput; all seven languages positive; about 5.0% less opencode outline user CPU | Parser-cached opencode RSS +5.88 MiB from expanded terminal mappings |
+| Retained | Cursor-local resolved child slice | Repeated parent arena-index resolution for iterator end, current-child, and next-padding access | +5.43% traversal throughput; all seven languages positive; 1.12% less opencode outline user CPU | Raw slice pointer is valid only while the published arena is immutable |
 | Rejected | Outline materialized `stack_push` | Shared code footprint between deterministic-window and graph-stack pushes | -0.18% overall; Go -1.29% | The extra call on materialized pushes costs more than isolating the deterministic path saves |
 | Rejected | Commit subtree summaries after the child loop | Repeated parent-header writes during reduction summarization | Counter-only retry -0.02% overall; Python -1.42%, TypeScript -2.31% | Even controlled scalar aggregation changes the mixed-workload dependency chain unfavorably |
 | 1 | Versioned external-scanner snapshot ABI | Repeated deserialize and grammar-owned malloc/free | Python external scanner is 5.7%, allocation 4.8% | ABI and grammar complexity; identity cache already had low reuse |
@@ -933,9 +934,10 @@ to existing parser artifacts.
 7. Keep parser-private nonterminal goto caching rejected.
 8. Retain the sparse parser-private nonterminal goto index.
 9. Retain the sparse parser-private terminal/action index.
-10. Keep simple `stack_push` hot/cold outlining rejected.
-11. Keep broad deferred subtree-summary commits rejected.
-12. Continue from the accepted-head runtime profile; leave the external-scanner
+10. Retain the cursor-local resolved child slice.
+11. Keep simple `stack_push` hot/cold outlining rejected.
+12. Keep broad deferred subtree-summary commits rejected.
+13. Continue from the accepted-head runtime profile; leave the external-scanner
    ABI unscheduled until its ecosystem cost is explicitly approved.
 
 This order records the retained low-complexity win and the rejected reducer

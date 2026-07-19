@@ -1,5 +1,46 @@
 # Tree traversal and node-read performance streak
 
+## Streak 3: resolve each parent child slice once
+
+The current cursor now resolves an internal parent's arena-backed child slice
+once in `tree_cursor_iterate_children` and keeps that pointer only in the
+operation-local `CursorChildIterator`. Published tree arenas are immutable and
+cannot move, so the borrowed pointer remains valid for that iterator. The old
+loop re-resolved the same parent handle for its end check, current-child lookup,
+and next-child padding lookup.
+
+The decisive current-Rust A/B/A comparison used five 500 ms CPU-time samples
+per fixture and immediate parent `1dca0be6` as the control. All 40 fixture
+lengths, hashes, and node counts matched:
+
+| Language | Fixtures | Traversal throughput change |
+| --- | ---: | ---: |
+| C++ | 4 | +5.19% |
+| Go | 5 | +5.14% |
+| Java | 4 | +5.11% |
+| JavaScript | 2 | +6.13% |
+| Python | 12 | +5.34% |
+| Rust | 2 | +6.30% |
+| TypeScript | 11 | +4.80% |
+| **Equal-language geometric mean** | **40** | **+5.43%** |
+
+Maximum control/candidate/control CV was 3.37%, 5.58%, and 3.62%. The broad,
+uniform result also reproduced in the shorter screen (+5.22%). A separate long
+normal-parse guard found no regression: C++ was -0.18%, TypeScript -0.47%, and
+the other five languages were positive. Because cursor iteration is not on the
+fresh parse path, those parse movements are treated as link-layout/run-order
+sensitivity rather than attributed parser gains.
+
+The parser-cached application gate linked both endpoints into the same local
+ast-grep source and ran `ast-grep outline` over opencode with one worker. Three
+interleaved `B, C, C, B` cycles averaged 1.1933 s control versus 1.1800 s
+candidate user CPU, **1.12% less user CPU**. Output was byte-identical at
+253,174 bytes with SHA-256
+`91dd98a31a6263396ce56b658ce3c641aa6eb3b11f92942a0c6961d5206a2872`.
+Paired peak RSS averaged 43.35 MiB control and 43.97 MiB candidate, a noise-sized
++0.62 MiB difference. Full 123-sample core parity, the ABI tripwire, all seven
+ast-grep gate packages, and focused forward/reverse/alias cursor tests passed.
+
 ## Streak 2: current arena endpoint and accessor attribution
 
 A fresh matched Rust-to-Rust run at `610deea2` reverses the earlier result. The

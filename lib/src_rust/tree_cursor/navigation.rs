@@ -16,14 +16,19 @@ use super::super::length::{
 };
 use super::super::node::node_new;
 use super::super::point::point_gt;
-use super::super::subtree::{Subtree, SubtreeArena, NULL_SUBTREE};
+use super::super::subtree::{Subtree, SubtreeArena};
 use super::{TreeCursor, TreeCursorEntry, TreeCursorStep};
 
 /// Child iterator that maintains cursor-specific position and alias state.
 pub(super) struct CursorChildIterator {
     pub(super) arena: *mut SubtreeArena,
-    /// Parent whose children are being scanned.
-    pub(super) parent: Subtree,
+    /// Resolved child storage for the parent being scanned.
+    ///
+    /// Published tree arenas do not move, and this pointer is retained only
+    /// for the lifetime of one cursor operation. Caching it avoids resolving
+    /// the same parent arena index for every child and padding lookup.
+    pub(super) children: *const Subtree,
+    pub(super) child_count: u32,
     /// Start position of the next child.
     pub(super) position: Length,
     /// Raw child index of the next child.
@@ -73,10 +78,13 @@ pub(super) unsafe fn tree_cursor_is_entry_visible(self_: &TreeCursor, index: u32
 pub(super) unsafe fn tree_cursor_iterate_children(self_: &TreeCursor) -> CursorChildIterator {
     let arena = self_.arena();
     let last_entry = self_.stack.as_slice().last().unwrap_unchecked();
-    if (*last_entry.subtree).child_count(arena) == 0 {
+    let parent = *last_entry.subtree;
+    let child_count = parent.child_count(arena);
+    if child_count == 0 {
         return CursorChildIterator {
             arena,
-            parent: NULL_SUBTREE,
+            children: ptr::null(),
+            child_count: 0,
             position: length_zero(),
             child_index: 0,
             structural_child_index: 0,
@@ -84,14 +92,10 @@ pub(super) unsafe fn tree_cursor_iterate_children(self_: &TreeCursor) -> CursorC
             alias_sequence: &[],
         };
     }
+    let children = parent.children(arena);
     let alias_sequence = language_alias_sequence_slice(
         (*self_.tree).language,
-        u32::from(
-            (*last_entry.subtree)
-                .heap_data(arena)
-                .children()
-                .production_id,
-        ),
+        u32::from(parent.heap_data(arena).children().production_id),
     );
 
     let mut descendant_index = last_entry.descendant_index;
@@ -101,7 +105,8 @@ pub(super) unsafe fn tree_cursor_iterate_children(self_: &TreeCursor) -> CursorC
 
     CursorChildIterator {
         arena,
-        parent: *last_entry.subtree,
+        children: children.as_ptr(),
+        child_count,
         position: last_entry.position,
         child_index: 0,
         structural_child_index: 0,
@@ -113,12 +118,10 @@ pub(super) unsafe fn tree_cursor_iterate_children(self_: &TreeCursor) -> CursorC
 pub(super) unsafe fn tree_cursor_child_iterator_next(
     self_: &mut CursorChildIterator,
 ) -> Option<CursorChild> {
-    if self_.parent.is_null()
-        || self_.child_index == self_.parent.heap_data(self_.arena).child_count
-    {
+    if self_.child_index == self_.child_count {
         return None;
     }
-    let child = (self_.parent).child(self_.arena, self_.child_index);
+    let child = self_.children.add(self_.child_index as usize);
     let entry = TreeCursorEntry {
         subtree: child,
         position: self_.position,
@@ -144,8 +147,8 @@ pub(super) unsafe fn tree_cursor_child_iterator_next(
     self_.position = length_add(self_.position, (*child).size(self_.arena));
     self_.child_index += 1;
 
-    if self_.child_index < self_.parent.heap_data(self_.arena).child_count {
-        let next_child = *(self_.parent).child(self_.arena, self_.child_index);
+    if self_.child_index < self_.child_count {
+        let next_child = *self_.children.add(self_.child_index as usize);
         self_.position = length_add(self_.position, next_child.padding(self_.arena));
     }
 
@@ -175,10 +178,10 @@ const fn length_backtrack(a: Length, b: Length) -> Length {
 pub(super) unsafe fn tree_cursor_child_iterator_previous(
     self_: &mut CursorChildIterator,
 ) -> Option<CursorChild> {
-    if self_.parent.is_null() || self_.child_index == u32::MAX {
+    if self_.children.is_null() || self_.child_index == u32::MAX {
         return None;
     }
-    let child = (self_.parent).child(self_.arena, self_.child_index);
+    let child = self_.children.add(self_.child_index as usize);
     let entry = TreeCursorEntry {
         subtree: child,
         position: self_.position,
@@ -203,8 +206,8 @@ pub(super) unsafe fn tree_cursor_child_iterator_previous(
     }
 
     // unsigned can underflow so compare it to child_count
-    if self_.child_index < self_.parent.heap_data(self_.arena).child_count {
-        let previous_child = *(self_.parent).child(self_.arena, self_.child_index);
+    if self_.child_index < self_.child_count {
+        let previous_child = *self_.children.add(self_.child_index as usize);
         let size = previous_child.size(self_.arena);
         self_.position = length_backtrack(self_.position, size);
     }
@@ -330,7 +333,7 @@ pub(super) unsafe fn tree_cursor_goto_first_child(cursor: &mut TreeCursor) -> bo
 }
 unsafe fn tree_cursor_goto_last_child_internal(cursor: &mut TreeCursor) -> TreeCursorStep {
     let mut iterator = tree_cursor_iterate_children(cursor);
-    if iterator.parent.is_null() || iterator.parent.heap_data(iterator.arena).child_count == 0 {
+    if iterator.child_count == 0 {
         return TreeCursorStep::None;
     }
 
