@@ -14,9 +14,9 @@ use crate::ffi::TSStateId;
 
 use super::super::error_costs::{ERROR_COST_PER_SKIPPED_TREE, ERROR_STATE};
 use super::super::language::{
-    language_full, language_is_reserved_word, language_table_entry, TSLexerMode, TSParseAction,
-    TableEntry, TSPARSE_ACTION_TYPE_ACCEPT, TSPARSE_ACTION_TYPE_RECOVER,
-    TSPARSE_ACTION_TYPE_REDUCE, TSPARSE_ACTION_TYPE_SHIFT,
+    language_full, language_is_reserved_word, TSLexerMode, TSParseAction, TableEntry,
+    TSPARSE_ACTION_TYPE_ACCEPT, TSPARSE_ACTION_TYPE_RECOVER, TSPARSE_ACTION_TYPE_REDUCE,
+    TSPARSE_ACTION_TYPE_SHIFT,
 };
 use super::super::reduce_action::ReduceAction;
 use super::super::stack::{
@@ -32,8 +32,8 @@ use super::logging::{
 };
 use super::recovery::{parser_handle_error, parser_recover};
 use super::{
-    ErrorComparison, ErrorStatus, TSParser, MAX_COST_DIFFERENCE, MAX_VERSION_COUNT,
-    OP_COUNT_PER_PARSER_CALLBACK_CHECK,
+    parser_table_entry, ErrorComparison, ErrorStatus, TSParser, MAX_COST_DIFFERENCE,
+    MAX_VERSION_COUNT, OP_COUNT_PER_PARSER_CALLBACK_CHECK,
 };
 
 // ---------------------------------------------------------------------------
@@ -379,8 +379,8 @@ unsafe fn parser_continue_after_reduction(
     if lookahead.is_null() {
         true
     } else {
-        language_table_entry(
-            self_.language,
+        parser_table_entry(
+            self_,
             *state,
             lookahead.symbol(self_.tree_pool.arena()),
             table_entry,
@@ -415,7 +415,7 @@ unsafe fn parser_try_keyword_fallback(
         return false;
     }
 
-    language_table_entry(self_.language, state, keyword_capture_token, table_entry);
+    parser_table_entry(self_, state, keyword_capture_token, table_entry);
     if table_entry.action_count == 0 {
         return false;
     }

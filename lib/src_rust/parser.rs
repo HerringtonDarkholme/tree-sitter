@@ -31,7 +31,9 @@ use crate::ffi::{
 
 use super::alloc::{free, malloc};
 use super::error_costs::ERROR_COST_PER_SKIPPED_TREE;
-use super::language::language_full;
+use super::language::{
+    language_full, language_table_entry, language_table_entry_from_index, TableEntry,
+};
 use super::length::length_zero;
 use super::lexer::{
     lexer_delete, lexer_included_ranges, lexer_included_ranges_slice, lexer_new, lexer_reset,
@@ -103,6 +105,137 @@ struct GotoRow {
 struct GotoEntry {
     symbol: TSSymbol,
     state: TSStateId,
+}
+
+#[derive(Clone, Copy)]
+struct ActionEntry {
+    symbol: TSSymbol,
+    action_index: u16,
+}
+
+/// Parser-owned projection of terminal actions in compressed small states.
+///
+/// The generated representation groups symbols that share an action index.
+/// That is compact, but every lookup scans group headers and symbols. This
+/// projection expands each real terminal mapping once when a language is
+/// installed, then searches only the selected state's sorted terminal row.
+struct ActionTable {
+    rows: Array<GotoRow>,
+    entries: Array<ActionEntry>,
+    large_state_count: u32,
+    token_count: u32,
+}
+
+impl ActionTable {
+    const fn new() -> Self {
+        Self {
+            rows: Array::new(),
+            entries: Array::new(),
+            large_state_count: 0,
+            token_count: 0,
+        }
+    }
+
+    unsafe fn clear(&mut self) {
+        self.rows.clear();
+        self.entries.clear();
+        self.large_state_count = 0;
+        self.token_count = 0;
+    }
+
+    unsafe fn delete(&mut self) {
+        if !self.rows.contents.is_null() {
+            self.rows.delete();
+        }
+        if !self.entries.contents.is_null() {
+            self.entries.delete();
+        }
+    }
+
+    unsafe fn rebuild(&mut self, language: *const TSLanguage) {
+        self.clear();
+        if language.is_null() {
+            return;
+        }
+
+        let language = language_full(language);
+        self.large_state_count = language.large_state_count;
+        self.token_count = language.token_count;
+        self.rows
+            .reserve(language.state_count - language.large_state_count);
+
+        for state in language.large_state_count..language.state_count {
+            let table_index = *language
+                .small_parse_table_map
+                .add((state - language.large_state_count) as usize);
+            self.append_small_row(language.small_parse_table.add(table_index as usize));
+        }
+    }
+
+    unsafe fn append_small_row(&mut self, mut data: *const u16) {
+        let row_start = self.entries.size;
+        let group_count = u32::from(*data);
+        data = data.add(1);
+
+        for _ in 0..group_count {
+            let action_index = *data;
+            let group_symbol_count = u32::from(*data.add(1));
+            data = data.add(2);
+            for _ in 0..group_symbol_count {
+                let symbol = *data;
+                if u32::from(symbol) < self.token_count {
+                    self.entries.push(ActionEntry {
+                        symbol,
+                        action_index,
+                    });
+                }
+                data = data.add(1);
+            }
+        }
+
+        let row_length = self.entries.size - row_start;
+        let row =
+            &mut self.entries.as_mut_slice()[row_start as usize..(row_start + row_length) as usize];
+        for i in 1..row.len() {
+            let entry = row[i];
+            let mut j = i;
+            while j > 0 && row[j - 1].symbol > entry.symbol {
+                row[j] = row[j - 1];
+                j -= 1;
+            }
+            row[j] = entry;
+        }
+        self.rows.push(GotoRow {
+            start: row_start,
+            length: row_length,
+        });
+    }
+
+    #[inline]
+    unsafe fn lookup(&self, state: TSStateId, symbol: TSSymbol) -> Option<u16> {
+        if u32::from(state) < self.large_state_count || u32::from(symbol) >= self.token_count {
+            return None;
+        }
+        let row_index = u32::from(state) - self.large_state_count;
+        let row = self.rows.get_unchecked(row_index);
+        let entries =
+            &self.entries.as_slice()[row.start as usize..(row.start + row.length) as usize];
+
+        if entries.len() <= 8 {
+            return Some(
+                entries
+                    .iter()
+                    .find(|entry| entry.symbol == symbol)
+                    .map_or(0, |entry| entry.action_index),
+            );
+        }
+
+        Some(
+            entries
+                .binary_search_by_key(&symbol, |entry| entry.symbol)
+                .map_or(0, |index| entries[index].action_index),
+        )
+    }
 }
 
 /// Parser-owned projection of compressed small-state nonterminal transitions.
@@ -237,7 +370,27 @@ impl GotoTable {
 
 #[cfg(test)]
 mod goto_table_tests {
-    use super::GotoTable;
+    use super::{ActionTable, GotoTable};
+
+    #[test]
+    fn projects_and_sorts_terminal_action_entries() {
+        unsafe {
+            let compressed_row = [4, 7, 2, 1, 2, 42, 3, 12, 9, 10, 99, 2, 15, 11, 77, 1, 3];
+            let mut table = ActionTable::new();
+            table.large_state_count = 4;
+            table.token_count = 10;
+            table.append_small_row(compressed_row.as_ptr());
+
+            assert_eq!(table.lookup(3, 1), None);
+            assert_eq!(table.lookup(4, 1), Some(7));
+            assert_eq!(table.lookup(4, 2), Some(7));
+            assert_eq!(table.lookup(4, 3), Some(77));
+            assert_eq!(table.lookup(4, 9), Some(42));
+            assert_eq!(table.lookup(4, 4), Some(0));
+            assert_eq!(table.lookup(4, 10), None);
+            table.delete();
+        }
+    }
 
     #[test]
     fn projects_and_sorts_nonterminal_entries() {
@@ -331,6 +484,8 @@ pub struct TSParser {
     token_cache: TokenCache,
     /// Sparse nonterminal transitions for compressed small parse states.
     goto_table: GotoTable,
+    /// Sparse terminal actions for compressed small parse states.
+    action_table: ActionTable,
     /// Language-owned external scanner payload.
     external_scanner_payload: *mut c_void,
     /// Optional parse debug graph output.
@@ -388,6 +543,23 @@ unsafe extern "C" fn ts_string_input_read(
 
 mod logging;
 use logging::{parser_log, parser_log_stack, parser_log_tree};
+
+/// Resolve one terminal parse-table entry through the parser-private sparse
+/// projection when the state uses a compressed row. Dense large states and
+/// nonterminal/error symbols retain the language's canonical lookup path.
+#[inline]
+unsafe fn parser_table_entry(
+    self_: &TSParser,
+    state: TSStateId,
+    symbol: TSSymbol,
+    result: &mut TableEntry,
+) {
+    if let Some(action_index) = self_.action_table.lookup(state, symbol) {
+        language_table_entry_from_index(self_.language, action_index, result);
+    } else {
+        language_table_entry(self_.language, state, symbol, result);
+    }
+}
 
 mod advance;
 use advance::{parser_advance, parser_condense_stack};
@@ -448,6 +620,7 @@ pub unsafe extern "C" fn ts_parser_new() -> *mut TSParser {
                 byte_index: 0,
             },
             goto_table: GotoTable::new(),
+            action_table: ActionTable::new(),
             external_scanner_payload: ptr::null_mut(),
             dot_graph_file: ptr::null_mut(),
             accept_count: 0,
@@ -484,6 +657,7 @@ pub unsafe extern "C" fn ts_parser_delete(self_: *mut TSParser) {
     parser.trailing_extras2.delete();
     parser.scratch_trees.delete();
     parser.goto_table.delete();
+    parser.action_table.delete();
     free(self_.cast::<c_void>());
 }
 
@@ -506,6 +680,7 @@ pub unsafe extern "C" fn ts_parser_set_language(
     let parser = ptr_mut(self_);
     parser.language = ptr::null();
     parser.goto_table.clear();
+    parser.action_table.clear();
     if !language.is_null() {
         let language_data = language_full(language);
         if language_data.abi_version > TREE_SITTER_LANGUAGE_VERSION
@@ -517,6 +692,7 @@ pub unsafe extern "C" fn ts_parser_set_language(
 
     parser.language = language;
     parser.goto_table.rebuild(language);
+    parser.action_table.rebuild(language);
     true
 }
 

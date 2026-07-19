@@ -119,6 +119,7 @@ cargo xtask perf-gate --min-sample-time-ms 1000 --offline
 | Conservative UTF-8 ASCII lexer advance | +2.70% current-Rust throughput across 40 fixtures; all seven languages positive; RSS neutral | Keep the guarded in-chunk/in-range fast path |
 | Single-action parser dispatch | +2.78% current-Rust throughput across 40 fixtures; all seven languages positive; maximum CV 4.04%; RSS neutral | Keep the direct one-action interpreter and outline generalized action iteration |
 | Sparse parser-private goto index | +2.18% confirmed current-Rust throughput; all seven languages positive, Go +7.09%; maximum CV 2.85%; at most +0.19 MiB peak RSS | Keep a sorted four-byte entry per actual small-state nonterminal transition; leave terminal/action lookup unchanged |
+| Sparse parser-private terminal/action index | +1.42% confirmed current-Rust throughput with all seven languages positive; parser-cached opencode outline used about 5.0% less user CPU; application RSS +5.88 MiB | Keep a sorted four-byte entry per actual small-state terminal mapping; preserve generated tables and large-state lookup |
 | Pressure-triggered arena child-array reuse | Reduced one-worker ast-grep TypeScript-baseline peak RSS from 492.2 MiB after retired-generation removal to 91.2 MiB; current-Rust parse throughput -1.10% | Keep the 16 MiB pressure gate and exact-size small-buffer bins as an explicit memory-for-throughput tradeoff |
 
 The `Subtree` result is the strongest representation lesson. A readable API

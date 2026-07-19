@@ -457,14 +457,29 @@ pub unsafe fn language_table_entry(
         result.is_reusable = false;
         result.actions = ptr::null();
     } else {
-        let language = l;
-        debug_assert!(u32::from(symbol) < language.token_count);
-        let action_index = language_lookup(self_, state, symbol) as usize;
-        let entry = parse_action_entry(language, action_index);
-        result.action_count = u32::from(entry.entry.count);
-        result.is_reusable = entry.entry.reusable;
-        result.actions = parse_action_at(language, action_index + 1);
+        debug_assert!(u32::from(symbol) < l.token_count);
+        let action_index = language_lookup(self_, state, symbol);
+        language_table_entry_from_index(self_, action_index, result);
     }
+}
+
+/// Decode a known parse-action index into its action slice and reuse flag.
+///
+/// Parser-private table projections use this after bypassing the generated
+/// small-row scan. The index still names the language-owned action table, so
+/// action storage and interpretation remain unchanged.
+#[inline]
+pub unsafe fn language_table_entry_from_index(
+    self_: *const TSLanguage,
+    action_index: u16,
+    result: &mut TableEntry,
+) {
+    let language = lang(self_);
+    let action_index = action_index as usize;
+    let entry = parse_action_entry(language, action_index);
+    result.action_count = u32::from(entry.entry.count);
+    result.is_reusable = entry.entry.reusable;
+    result.actions = parse_action_at(language, action_index + 1);
 }
 
 pub const unsafe fn language_lex_mode_for_state(

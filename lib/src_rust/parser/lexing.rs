@@ -17,8 +17,7 @@ use crate::ffi::{TSStateId, TSSymbol};
 use super::super::error_costs::ERROR_STATE;
 use super::super::language::{
     language_enabled_external_tokens, language_full, language_has_actions,
-    language_is_reserved_word, language_lex_mode_for_state, language_table_entry,
-    ts_language_next_state, TableEntry,
+    language_is_reserved_word, language_lex_mode_for_state, ts_language_next_state, TableEntry,
 };
 use super::super::length::{length_sub, length_zero, Length};
 use super::super::lexer::{
@@ -33,7 +32,7 @@ use super::super::subtree::{
 use super::super::utils::ptr_ref;
 use super::advance::{parser_call_keyword_lex_fn, parser_call_main_lex_fn};
 use super::logging::{parser_log, parser_log_lookahead, parser_symbol_name, DisplayCStr};
-use super::TSParser;
+use super::{parser_table_entry, TSParser};
 
 // ---------------------------------------------------------------------------
 // External scanner lifecycle and state
@@ -459,12 +458,7 @@ unsafe fn parser_get_cached_token(
         )
     {
         let mut table_entry = TableEntry::empty();
-        language_table_entry(
-            self_.language,
-            state,
-            cache.token.symbol(arena),
-            &mut table_entry,
-        );
+        parser_table_entry(self_, state, cache.token.symbol(arena), &mut table_entry);
         if parser_can_reuse_token(self_, state, cache.token, &table_entry) {
             cache.token.retain(arena);
             return Some((cache.token, table_entry));
@@ -539,14 +533,14 @@ pub(super) unsafe fn parser_lex_lookahead(
 
     if !lookahead.is_null() {
         parser_set_cached_token(self_, position, last_external_token, *lookahead);
-        language_table_entry(
-            self_.language,
+        parser_table_entry(
+            self_,
             state,
             (*lookahead).symbol(self_.tree_pool.arena()),
             table_entry,
         );
     } else {
-        language_table_entry(self_.language, state, TS_BUILTIN_SYM_END, table_entry);
+        parser_table_entry(self_, state, TS_BUILTIN_SYM_END, table_entry);
     }
 }
 

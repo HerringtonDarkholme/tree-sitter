@@ -16,8 +16,8 @@ use super::super::error_costs::{
 };
 use super::super::language::{
     language_actions, language_full, language_has_actions, language_has_reduce_action,
-    language_table_entry, ts_language_next_state, TableEntry, TSPARSE_ACTION_TYPE_RECOVER,
-    TSPARSE_ACTION_TYPE_REDUCE, TSPARSE_ACTION_TYPE_SHIFT,
+    ts_language_next_state, TableEntry, TSPARSE_ACTION_TYPE_RECOVER, TSPARSE_ACTION_TYPE_REDUCE,
+    TSPARSE_ACTION_TYPE_SHIFT,
 };
 use super::super::length::{length_sub, Length};
 use super::super::lexer::{lexer_mark_end, lexer_reset};
@@ -36,7 +36,7 @@ use super::super::utils::{ptr_mut, ptr_ref};
 use super::actions::{parser_accept, parser_new_node, parser_reduce};
 use super::advance::{parser_better_version_exists, parser_version_status};
 use super::logging::{parser_log, parser_log_stack, parser_symbol_name, DisplayCStr};
-use super::{TSParser, MAX_SUMMARY_DEPTH, MAX_VERSION_COUNT};
+use super::{parser_table_entry, TSParser, MAX_SUMMARY_DEPTH, MAX_VERSION_COUNT};
 
 // ---------------------------------------------------------------------------
 // Internal helpers — error recovery
@@ -85,7 +85,7 @@ unsafe fn parser_do_all_potential_reductions(
         let mut symbol = first_symbol;
         while symbol < end_symbol {
             let mut entry = TableEntry::empty();
-            language_table_entry(self_.language, state, symbol, &mut entry);
+            parser_table_entry(self_, state, symbol, &mut entry);
             for j in 0..entry.action_count {
                 let action = *entry.actions.add(j as usize);
                 match action.type_ {

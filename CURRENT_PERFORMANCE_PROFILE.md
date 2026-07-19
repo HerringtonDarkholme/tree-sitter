@@ -314,7 +314,7 @@ former 15.8% to 0.11%, exposing the steady-state parser and consumer costs:
 
 | Exclusive area | CPU | Ledger cross-check | Decision |
 | --- | ---: | --- | --- |
-| Parser action interpreter | 17.5% | The retained sparse goto index removes only **nonterminal** scans; terminal/action lookup remains unchanged | Explore a sparse parser-private terminal/action index, not another direct-mapped cache |
+| Parser action interpreter | 17.5% | The sparse goto index removed only **nonterminal** scans; the new terminal/action projection removes the corresponding compressed-row scans | Retain the sparse parser-private terminal/action index: +1.42% parse throughput and about 5.0% less opencode outline user CPU |
 | Lexing | 15.7% | The conservative runtime ASCII advance is already retained; direct inlining into generated C lexers changes generated artifacts and was explicitly deferred | Keep generated-lexer work deferred; require a distinct runtime-only mechanism before another lexer trial |
 | Subtree construction | 13.6% | Kind-specialized headers and lazy column summaries are retained; accumulator-based summary fusion regressed all seven languages; equivalent balancing reuse regressed | Only the still-distinct preallocated-final-parent summary writer remains open, behind action lookup |
 | Tree-cursor traversal | 11.6% | The fresh generic traversal streak is +1.71% versus the pre-arena Rust control, so the old indexed-handle traversal regression is no longer present | Optimize ast-grep's amount of outline work or design a deliberately narrower consumer API; do not reopen a representation split from this profile alone |
@@ -322,17 +322,12 @@ former 15.8% to 0.11%, exposing the steady-state parser and consumer costs:
 | Reduction functions | 5.2% | Same deterministic-reducer and summary-fusion families above | Do not count this as an independent untouched pool |
 | Arena allocation | 0.58% direct | Arena/index changes are retained for layout and RSS; allocator tuning is repeatedly below the throughput threshold | Keep allocator work out of the throughput queue |
 
-The clearest new core experiment is therefore a **sparse terminal/action
+The clearest new core experiment was therefore a **sparse terminal/action
 index**. It differs from the rejected 128-entry goto cache in both domain and
 mechanism: it expands each real small-state terminal mapping once during
 `set_language`, then performs a row-local lookup without replacement or
 history-dependent misses. Large states keep the generated dense table. The
-existing sparse goto index proves parser-private projection can amortize when
-the parser is reused, but it does not prove the terminal projection will win:
-terminal rows may be wider, and binary/linear row search plus extra memory can
-still cost more than the compressed grouping. Acceptance therefore requires
-the seven-language current-Rust gate **and** the parser-cached opencode outline
-gate; a TypeScript-only improvement is insufficient.
+implementation is retained; detailed measurements are recorded below.
 
 The suggested parser-local `(state, symbol)` cache is not ranked first because
 the corresponding nonterminal direct-map experiment already demonstrated the
@@ -357,6 +352,7 @@ the experiment ledger in `PERFORMANCE.md` and `SUBTREE_ARENA_PLAN.md`.
 | Rejected | Small parse-table group rejection | Scans of terminal groups during goto lookup and nonterminal groups during token lookup | +0.56% longer confirmation; JavaScript -2.51%, TypeScript -1.22% | The safe kind branch helps reduction-heavy languages but hurts other lookup distributions |
 | Rejected | Parser-private nonterminal goto cache | Repeated compressed-row scans for identical `(state, symbol)` reductions | -0.22% overall; JavaScript -2.65%, Rust -1.34% | Cache probes and direct-map replacement cost more than the avoided scans on the mixed corpus |
 | Retained | Sparse parser-private goto index | All compressed-row scans for small-state nonterminal transitions | +2.18% confirmed overall; all seven languages positive, Go +7.09% | One-time language installation work and a small sparse allocation per parser |
+| Retained | Sparse parser-private terminal/action index | Compressed group and symbol scans for small-state token dispatch | +1.42% confirmed parse throughput; all seven languages positive; about 5.0% less opencode outline user CPU | Parser-cached opencode RSS +5.88 MiB from expanded terminal mappings |
 | Rejected | Outline materialized `stack_push` | Shared code footprint between deterministic-window and graph-stack pushes | -0.18% overall; Go -1.29% | The extra call on materialized pushes costs more than isolating the deterministic path saves |
 | Rejected | Commit subtree summaries after the child loop | Repeated parent-header writes during reduction summarization | Counter-only retry -0.02% overall; Python -1.42%, TypeScript -2.31% | Even controlled scalar aggregation changes the mixed-workload dependency chain unfavorably |
 | 1 | Versioned external-scanner snapshot ABI | Repeated deserialize and grammar-owned malloc/free | Python external scanner is 5.7%, allocation 4.8% | ABI and grammar complexity; identity cache already had low reuse |
@@ -811,6 +807,50 @@ This is only justified after a Python-specific prototype proves that scanner
 snapshot creation is cheaper than deserialize plus malloc/free and that memory
 does not grow with abandoned GLR versions.
 
+### 12. Sparse parser-private terminal/action index
+
+The parser-cached ast-grep profile showed that terminal action lookup remained
+hot after the nonterminal goto index was retained. The new projection uses the
+same ownership boundary but a separate table: every real terminal mapping in a
+compressed small-state row becomes one sorted four-byte
+`{symbol, action_index}` entry. A row of at most eight entries uses a linear
+search and a wider row uses binary search. Missing terminals resolve to action
+index zero. Large states, error symbols, public language lookups, and generated
+parser tables remain unchanged.
+
+This is not another cache. Lookup cost does not depend on prior access,
+collisions, replacement, or a corpus-trained working set. The projection is
+built and cleared with `ts_parser_set_language`, is owned by the opaque parser,
+and requires no generated-language or public ABI change.
+
+The decisive five-sample, 500 ms A/B/A confirmation against `84c30558` was:
+
+| Language | Fixtures | Throughput change |
+| --- | ---: | ---: |
+| C++ | 4 | +1.26% |
+| Go | 5 | +1.04% |
+| Java | 4 | +0.61% |
+| JavaScript | 2 | +3.02% |
+| Python | 12 | +2.59% |
+| Rust | 2 | +0.56% |
+| TypeScript | 11 | +0.86% |
+| **Equal-language geometric mean** | **40** | **+1.42%** |
+
+All fixture bytes and hashes matched. The largest peak-RSS increase in the
+parse gate was about 0.39 MiB. Full core parity passed 123 TypeScript/TSX
+samples, the ABI tripwire passed, and the seven-package ast-grep gate passed.
+
+The parser-cached application gate used local ast-grep `outline`, one worker,
+and opencode. Across three interleaved `B, C, C, B` cycles, baseline and
+candidate user CPU averaged 1.233 s and 1.172 s respectively: about **5.0%
+less user CPU**. Both produced the same 253,174-byte output with SHA-256
+`91dd98a31a6263396ce56b658ce3c641aa6eb3b11f92942a0c6961d5206a2872`.
+The deliberate cost is parser-owned index memory: paired peak RSS averaged
+38.48 MiB for the control and 44.36 MiB for the candidate, a **5.88 MiB**
+increase. The endpoint is retained because the absolute footprint remains
+small and the application workload confirms the CPU benefit that motivated
+the index.
+
 ## Deferred axis: generated lexer layout
 
 The instruction-delivery diagnosis remains valid: C++'s 92 KiB `ts_lex` and
@@ -868,9 +908,10 @@ to existing parser artifacts.
 6. Keep small parse-table group rejection rejected.
 7. Keep parser-private nonterminal goto caching rejected.
 8. Retain the sparse parser-private nonterminal goto index.
-9. Keep simple `stack_push` hot/cold outlining rejected.
-10. Keep broad deferred subtree-summary commits rejected.
-11. Continue from the accepted-head runtime profile; leave the external-scanner
+9. Retain the sparse parser-private terminal/action index.
+10. Keep simple `stack_push` hot/cold outlining rejected.
+11. Keep broad deferred subtree-summary commits rejected.
+12. Continue from the accepted-head runtime profile; leave the external-scanner
    ABI unscheduled until its ecosystem cost is explicitly approved.
 
 This order records the retained low-complexity win and the rejected reducer
