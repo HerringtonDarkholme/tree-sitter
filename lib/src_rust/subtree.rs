@@ -1,25 +1,49 @@
-#[cfg(not(feature = "std"))]
-use alloc::vec::Vec;
-use core::ffi::c_void;
+//! Internal syntax-tree representation and subtree construction.
+//!
+//! A [`Subtree`] is the value carried by lexer results and parse-stack edges.
+//! Leaves represent tokens; internal subtrees represent completed grammar
+//! productions. This module builds those values and computes the cached sizes,
+//! child counts, error costs, precedence, scanner state, and visibility data
+//! needed by parsing and public tree navigation.
+//!
+//! The implementation is split along ownership boundaries:
+//!
+//! - `data` defines the inline and heap layouts;
+//! - `handle` contains the compact immutable and mutable handles and all union
+//!   access;
+//! - `storage` allocates, retains, releases, and pools subtree memory;
+//! - `edit` updates geometry and change flags after an input edit; and
+//! - `debug` renders S-expressions and DOT graphs.
+//!
+//! Shared heap subtrees are immutable. Mutation first obtains a uniquely owned
+//! [`MutableSubtree`], cloning the allocation when necessary.
+
 use core::{
-    ptr,
-    sync::atomic::{AtomicU32, Ordering},
+    cell::Cell,
+    ptr::NonNull,
+    sync::atomic::{AtomicBool, AtomicU32, AtomicUsize},
 };
 
-use crate::ffi::{TSInputEdit, TSLanguage, TSPoint, TSStateId, TSSymbol};
+use crate::ffi::{TSLanguage, TSPoint, TSStateId, TSSymbol};
 
-use super::alloc::{calloc, free, malloc, realloc};
 use super::error_costs::{
     ERROR_COST_PER_MISSING_TREE, ERROR_COST_PER_RECOVERY, ERROR_COST_PER_SKIPPED_CHAR,
     ERROR_COST_PER_SKIPPED_LINE, ERROR_COST_PER_SKIPPED_TREE,
 };
-use super::language::{
-    language_alias_sequence, language_field_map, language_full,
-    language_write_symbol_as_dot_string, ts_language_symbol_metadata, ts_language_symbol_name,
+use super::language::{language_alias_sequence_slice, ts_language_symbol_metadata};
+use super::length::{length_add, length_zero, Length};
+use super::utils::Array;
+
+mod data;
+use data::{
+    ExternalScannerState, ExternalScannerStateData, SubtreeChildrenData, SubtreeHeapData,
+    SubtreeInlineData, SubtreeInternalData, SubtreeLeafData, SubtreeLeafDataContent,
+    EXTERNAL_SCANNER_STATE_INLINE_SIZE, INLINE_EXTRA, INLINE_IS_INLINE, INLINE_IS_KEYWORD,
+    INLINE_NAMED, INLINE_VISIBLE,
 };
-use super::length::{length_add, length_saturating_sub, length_sub, length_zero, Length};
-use super::utils::{array_delete, array_new, array_pop, array_push, array_reserve, Array};
-use super::utils::{ptr_mut, ptr_ref};
+
+mod handle;
+pub use handle::{MutableSubtree, Subtree, NULL_SUBTREE};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -27,7 +51,12 @@ use super::utils::{ptr_mut, ptr_ref};
 
 pub const TS_TREE_STATE_NONE: TSStateId = u16::MAX;
 const TS_MAX_INLINE_TREE_LENGTH: u8 = u8::MAX;
-const TS_MAX_TREE_POOL_SIZE: u32 = 32;
+/// Maximum byte offset representable by one subtree arena's indexed handles.
+/// The malloc-backed payload starts small and grows on demand up to this bound.
+#[cfg(target_pointer_width = "64")]
+const TS_SUBTREE_SLAB_CAPACITY: usize = 1usize << 32;
+#[cfg(target_pointer_width = "32")]
+const TS_SUBTREE_SLAB_CAPACITY: usize = 512 * 1024 * 1024;
 
 pub const TS_BUILTIN_SYM_ERROR: TSSymbol = u16::MAX;
 pub const TS_BUILTIN_SYM_END: TSSymbol = 0;
@@ -69,488 +98,76 @@ pub struct TSMapSlice {
 }
 
 // ---------------------------------------------------------------------------
-// ExternalScannerState
-// ---------------------------------------------------------------------------
 
-const EXTERNAL_SCANNER_STATE_INLINE_SIZE: usize = 24;
-
-#[repr(C)]
-pub struct ExternalScannerState {
-    /// Inline or heap state bytes, selected by `length`.
-    data: ExternalScannerStateData,
-    /// Serialized byte count.
-    pub length: u32,
-}
-
-// SAFETY: Only used in a read-only static (EMPTY_EXTERNAL_SCANNER_STATE).
-unsafe impl Sync for ExternalScannerState {}
-
-#[repr(C)]
-pub union ExternalScannerStateData {
-    /// Heap storage when serialized state exceeds inline capacity.
-    pub long_data: *mut u8,
-    /// Inline storage for the common small scanner-state case.
-    pub short_data: [u8; EXTERNAL_SCANNER_STATE_INLINE_SIZE],
-}
-
-// ---------------------------------------------------------------------------
-// SubtreeInlineData — bitfield-packed inline node
-// ---------------------------------------------------------------------------
-
-/// Compact inline representation of a subtree (fits in a pointer-sized word).
-///
-/// The C runtime stores this as bitfields inside one arm of the `Subtree`
-/// union. Rust has no C-compatible bitfields, so this mirrors the byte layout
-/// explicitly and exposes accessors for the individual flags. The `is_inline`
-/// bit overlaps with the LSB of a pointer, distinguishing inline nodes from
-/// heap-allocated ones.
-///
-/// Little-endian layout (matches the C struct bitfields):
-///   byte 0: `is_inline:1`, `visible:1`, `named:1`, `extra:1`,
-///   `has_changes:1`, `is_missing:1`, `is_keyword:1`, `unused:1`
-///   byte 1: `symbol`
-///   bytes 2-3: `parse_state` (u16 LE)
-///   byte 4: `padding_columns`
-///   byte 5: `padding_rows:4` (low), `lookahead_bytes:4` (high)
-///   byte 6: `padding_bytes`
-///   byte 7: `size_bytes`
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct SubtreeInlineData {
-    /// Byte 0: packed bitfields (`is_inline`, `visible`, `named`, `extra`,
-    /// `has_changes`, `is_missing`, `is_keyword`)
-    pub flags: u8,
-    pub symbol: u8,
-    pub parse_state: u16,
-    pub padding_columns: u8,
-    /// Low 4 bits = `padding_rows`, high 4 bits = `lookahead_bytes`
-    pub rows_and_lookahead: u8,
-    pub padding_bytes: u8,
-    pub size_bytes: u8,
-}
-
-// Bit positions in SubtreeInlineData.flags
-const INLINE_IS_INLINE: u8 = 1 << 0;
-const INLINE_VISIBLE: u8 = 1 << 1;
-const INLINE_NAMED: u8 = 1 << 2;
-const INLINE_EXTRA: u8 = 1 << 3;
-const INLINE_HAS_CHANGES: u8 = 1 << 4;
-const INLINE_IS_MISSING: u8 = 1 << 5;
-const INLINE_IS_KEYWORD: u8 = 1 << 6;
-
-impl SubtreeInlineData {
-    #[inline(always)]
-    pub const fn is_inline(self) -> bool {
-        self.flags & INLINE_IS_INLINE != 0
-    }
-    #[inline(always)]
-    pub const fn visible(self) -> bool {
-        self.flags & INLINE_VISIBLE != 0
-    }
-    #[inline(always)]
-    pub const fn named(self) -> bool {
-        self.flags & INLINE_NAMED != 0
-    }
-    #[inline(always)]
-    pub const fn extra(self) -> bool {
-        self.flags & INLINE_EXTRA != 0
-    }
-    #[inline(always)]
-    pub const fn has_changes(self) -> bool {
-        self.flags & INLINE_HAS_CHANGES != 0
-    }
-    #[inline(always)]
-    pub const fn is_missing(self) -> bool {
-        self.flags & INLINE_IS_MISSING != 0
-    }
-    #[inline(always)]
-    pub const fn is_keyword(self) -> bool {
-        self.flags & INLINE_IS_KEYWORD != 0
-    }
-    #[inline(always)]
-    pub const fn padding_rows(self) -> u8 {
-        self.rows_and_lookahead & 0x0F
-    }
-    #[inline(always)]
-    pub const fn lookahead_bytes(self) -> u8 {
-        (self.rows_and_lookahead >> 4) & 0x0F
-    }
-
-    #[inline(always)]
-    pub fn set_visible(&mut self, v: bool) {
-        if v {
-            self.flags |= INLINE_VISIBLE;
-        } else {
-            self.flags &= !INLINE_VISIBLE;
-        }
-    }
-    #[inline(always)]
-    pub fn set_named(&mut self, v: bool) {
-        if v {
-            self.flags |= INLINE_NAMED;
-        } else {
-            self.flags &= !INLINE_NAMED;
-        }
-    }
-    #[inline(always)]
-    pub fn set_extra(&mut self, v: bool) {
-        if v {
-            self.flags |= INLINE_EXTRA;
-        } else {
-            self.flags &= !INLINE_EXTRA;
-        }
-    }
-    #[inline(always)]
-    pub fn set_has_changes(&mut self, v: bool) {
-        if v {
-            self.flags |= INLINE_HAS_CHANGES;
-        } else {
-            self.flags &= !INLINE_HAS_CHANGES;
-        }
-    }
-    #[inline(always)]
-    pub fn set_is_missing(&mut self, v: bool) {
-        if v {
-            self.flags |= INLINE_IS_MISSING;
-        } else {
-            self.flags &= !INLINE_IS_MISSING;
-        }
-    }
-    #[inline(always)]
-    pub fn set_padding_rows(&mut self, v: u8) {
-        self.rows_and_lookahead = (self.rows_and_lookahead & 0xF0) | (v & 0x0F);
-    }
-}
-
-// ---------------------------------------------------------------------------
-// SubtreeHeapData — heap-allocated node
-// ---------------------------------------------------------------------------
-
-#[repr(C)]
-pub struct SubtreeHeapData {
-    /// Intrusive reference count for heap-owned subtrees.
-    pub ref_count: u32, // volatile / atomic
-    /// Leading padding before this subtree's content.
-    pub padding: Length,
-    /// Content size excluding padding and lookahead bytes.
-    pub size: Length,
-    /// Bytes scanned past token end to recognize this subtree.
-    pub lookahead_bytes: u32,
-    /// Accumulated error cost for recovery comparison.
-    pub error_cost: u32,
-    /// Number of direct children. Zero means leaf payload in `data`.
-    pub child_count: u32,
-    /// Grammar symbol for this subtree.
-    pub symbol: TSSymbol,
-    /// Parse state recorded on this subtree.
-    pub parse_state: TSStateId,
-
-    /// Packed bitfield flags.
-    ///
-    /// The C runtime stores these as bitfields immediately before the anonymous
-    /// union. Rust has no C-compatible bitfields, so this field mirrors their
-    /// little-endian storage as one `u16`.
-    /// bit 0: `visible`, bit 1: `named`, bit 2: `extra`, bits 3-4: unused,
-    /// bit 5: `has_changes`, bit 6: `has_external_tokens`,
-    /// bit 7: `has_external_scanner_state_change`, bit 8: `depends_on_column`,
-    /// bit 9: `is_missing`, bit 10: `is_keyword`, bit 11: `arena_owned`
-    pub flags: u16,
-    // 2 bytes padding here for 4-byte alignment of the union (inserted by repr(C))
-
-    // Anonymous union: children-info / external_scanner_state / lookahead_char
-    pub data: SubtreeHeapDataContent,
-}
-
-// Bit positions in SubtreeHeapData.flags
-const HEAP_VISIBLE: u16 = 1 << 0;
-const HEAP_NAMED: u16 = 1 << 1;
-const HEAP_EXTRA: u16 = 1 << 2;
-const HEAP_HAS_CHANGES: u16 = 1 << 5;
-const HEAP_HAS_EXTERNAL_TOKENS: u16 = 1 << 6;
-const HEAP_HAS_EXTERNAL_SCANNER_STATE_CHANGE: u16 = 1 << 7;
-const HEAP_DEPENDS_ON_COLUMN: u16 = 1 << 8;
-const HEAP_IS_MISSING: u16 = 1 << 9;
-const HEAP_IS_KEYWORD: u16 = 1 << 10;
-const HEAP_ARENA_OWNED: u16 = 1 << 11;
-
-impl SubtreeHeapData {
-    #[inline(always)]
-    pub const fn visible(&self) -> bool {
-        self.flags & HEAP_VISIBLE != 0
-    }
-    #[inline(always)]
-    pub const fn named(&self) -> bool {
-        self.flags & HEAP_NAMED != 0
-    }
-    #[inline(always)]
-    pub const fn extra(&self) -> bool {
-        self.flags & HEAP_EXTRA != 0
-    }
-    #[inline(always)]
-    pub const fn has_changes(&self) -> bool {
-        self.flags & HEAP_HAS_CHANGES != 0
-    }
-    #[inline(always)]
-    pub const fn has_external_tokens(&self) -> bool {
-        self.flags & HEAP_HAS_EXTERNAL_TOKENS != 0
-    }
-    #[inline(always)]
-    pub const fn has_external_scanner_state_change(&self) -> bool {
-        self.flags & HEAP_HAS_EXTERNAL_SCANNER_STATE_CHANGE != 0
-    }
-    #[inline(always)]
-    pub const fn depends_on_column(&self) -> bool {
-        self.flags & HEAP_DEPENDS_ON_COLUMN != 0
-    }
-    #[inline(always)]
-    pub const fn is_missing(&self) -> bool {
-        self.flags & HEAP_IS_MISSING != 0
-    }
-    #[inline(always)]
-    pub const fn is_keyword(&self) -> bool {
-        self.flags & HEAP_IS_KEYWORD != 0
-    }
-    #[inline(always)]
-    pub const fn arena_owned(&self) -> bool {
-        self.flags & HEAP_ARENA_OWNED != 0
-    }
-
-    #[inline(always)]
-    pub fn set_visible(&mut self, v: bool) {
-        if v {
-            self.flags |= HEAP_VISIBLE;
-        } else {
-            self.flags &= !HEAP_VISIBLE;
-        }
-    }
-    #[inline(always)]
-    pub fn set_named(&mut self, v: bool) {
-        if v {
-            self.flags |= HEAP_NAMED;
-        } else {
-            self.flags &= !HEAP_NAMED;
-        }
-    }
-    #[inline(always)]
-    pub fn set_extra(&mut self, v: bool) {
-        if v {
-            self.flags |= HEAP_EXTRA;
-        } else {
-            self.flags &= !HEAP_EXTRA;
-        }
-    }
-    #[inline(always)]
-    pub fn set_has_changes(&mut self, v: bool) {
-        if v {
-            self.flags |= HEAP_HAS_CHANGES;
-        } else {
-            self.flags &= !HEAP_HAS_CHANGES;
-        }
-    }
-    #[inline(always)]
-    pub fn set_has_external_tokens(&mut self, v: bool) {
-        if v {
-            self.flags |= HEAP_HAS_EXTERNAL_TOKENS;
-        } else {
-            self.flags &= !HEAP_HAS_EXTERNAL_TOKENS;
-        }
-    }
-    #[inline(always)]
-    pub fn set_has_external_scanner_state_change(&mut self, v: bool) {
-        if v {
-            self.flags |= HEAP_HAS_EXTERNAL_SCANNER_STATE_CHANGE;
-        } else {
-            self.flags &= !HEAP_HAS_EXTERNAL_SCANNER_STATE_CHANGE;
-        }
-    }
-    #[inline(always)]
-    pub fn set_depends_on_column(&mut self, v: bool) {
-        if v {
-            self.flags |= HEAP_DEPENDS_ON_COLUMN;
-        } else {
-            self.flags &= !HEAP_DEPENDS_ON_COLUMN;
-        }
-    }
-    #[inline(always)]
-    pub fn set_is_missing(&mut self, v: bool) {
-        if v {
-            self.flags |= HEAP_IS_MISSING;
-        } else {
-            self.flags &= !HEAP_IS_MISSING;
-        }
-    }
-    #[inline(always)]
-    pub fn set_arena_owned(&mut self, v: bool) {
-        if v {
-            self.flags |= HEAP_ARENA_OWNED;
-        } else {
-            self.flags &= !HEAP_ARENA_OWNED;
-        }
-    }
-
-    /// Build flags from individual booleans (for struct initialization)
-    #[allow(clippy::too_many_arguments)]
-    #[inline]
-    pub fn make_flags(
-        visible: bool,
-        named: bool,
-        extra: bool,
-        has_changes: bool,
-        has_external_tokens: bool,
-        has_external_scanner_state_change: bool,
-        depends_on_column: bool,
-        is_missing: bool,
-        is_keyword: bool,
-    ) -> u16 {
-        u16::from(visible)
-            | u16::from(named) << 1
-            | u16::from(extra) << 2
-            | u16::from(has_changes) << 5
-            | u16::from(has_external_tokens) << 6
-            | u16::from(has_external_scanner_state_change) << 7
-            | u16::from(depends_on_column) << 8
-            | u16::from(is_missing) << 9
-            | u16::from(is_keyword) << 10
-    }
-}
-
-#[repr(C)]
-pub union SubtreeHeapDataContent {
-    /// Aggregate child metadata for internal nodes.
-    pub children: SubtreeChildrenData,
-    /// Serialized scanner state for external-token leaves.
-    pub external_scanner_state: core::mem::ManuallyDrop<ExternalScannerState>,
-    /// First skipped character for error leaves.
-    pub lookahead_char: i32,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct SubtreeChildrenData {
-    /// Number of direct visible children.
-    pub visible_child_count: u32,
-    /// Number of direct named children.
-    pub named_child_count: u32,
-    /// Number of visible descendants below this node.
-    pub visible_descendant_count: u32,
-    /// Dynamic precedence accumulated from children.
-    pub dynamic_precedence: i32,
-    /// Repetition nesting depth for balancing repeated nodes.
-    pub repeat_depth: u16,
-    /// Production id used for fields and aliases.
-    pub production_id: u16,
-}
-
-// ---------------------------------------------------------------------------
-// Subtree / MutableSubtree — the core union types
-// ---------------------------------------------------------------------------
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub union Subtree {
-    /// Inline representation when `data.is_inline()` is set.
-    pub data: SubtreeInlineData,
-    /// Heap representation otherwise.
-    pub ptr: *const SubtreeHeapData,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub union MutableSubtree {
-    /// Inline representation when `data.is_inline()` is set.
-    pub data: SubtreeInlineData,
-    /// Mutable heap representation otherwise.
-    pub ptr: *mut SubtreeHeapData,
-}
-
-pub const NULL_SUBTREE: Subtree = Subtree { ptr: ptr::null() };
-
-// Compile-time layout assertions. `Subtree` and `MutableSubtree` are real Rust
-// unions because the C ABI depends on their pointer/inline-data overlap. The
-// inline and heap data structs manually mirror C bitfields, so assert both size
-// and field offsets instead of trusting comments.
-const _: () = assert!(core::mem::size_of::<SubtreeInlineData>() == 8);
-const _: () = assert!(core::mem::offset_of!(SubtreeInlineData, flags) == 0);
-const _: () = assert!(core::mem::offset_of!(SubtreeInlineData, symbol) == 1);
-const _: () = assert!(core::mem::offset_of!(SubtreeInlineData, parse_state) == 2);
-const _: () = assert!(core::mem::offset_of!(SubtreeInlineData, padding_columns) == 4);
-const _: () = assert!(core::mem::offset_of!(SubtreeInlineData, rows_and_lookahead) == 5);
-const _: () = assert!(core::mem::offset_of!(SubtreeInlineData, padding_bytes) == 6);
-const _: () = assert!(core::mem::offset_of!(SubtreeInlineData, size_bytes) == 7);
-const _: () = assert!(core::mem::size_of::<Subtree>() == 8);
-const _: () = assert!(core::mem::size_of::<MutableSubtree>() == 8);
-const _: () = assert!(core::mem::offset_of!(SubtreeHeapData, ref_count) == 0);
-const _: () = assert!(core::mem::offset_of!(SubtreeHeapData, padding) == 4);
-const _: () = assert!(core::mem::offset_of!(SubtreeHeapData, size) == 16);
-const _: () = assert!(core::mem::offset_of!(SubtreeHeapData, lookahead_bytes) == 28);
-const _: () = assert!(core::mem::offset_of!(SubtreeHeapData, error_cost) == 32);
-const _: () = assert!(core::mem::offset_of!(SubtreeHeapData, child_count) == 36);
-const _: () = assert!(core::mem::offset_of!(SubtreeHeapData, symbol) == 40);
-const _: () = assert!(core::mem::offset_of!(SubtreeHeapData, parse_state) == 42);
-const _: () = assert!(core::mem::offset_of!(SubtreeHeapData, flags) == 44);
-const _: () = assert!(core::mem::offset_of!(SubtreeHeapData, data) == 48);
-#[cfg(target_pointer_width = "64")]
-const _: () = assert!(core::mem::size_of::<SubtreeHeapData>() == 80);
-#[cfg(target_pointer_width = "64")]
-const _: () = assert!(core::mem::align_of::<SubtreeHeapData>() == 8);
-#[cfg(target_pointer_width = "64")]
-const _: () = assert!(core::mem::size_of::<ExternalScannerState>() == 32);
-#[cfg(target_pointer_width = "64")]
-const _: () = assert!(core::mem::offset_of!(ExternalScannerState, length) == 24);
-const _: () = assert!(core::mem::offset_of!(SubtreeChildrenData, visible_child_count) == 0);
-const _: () = assert!(core::mem::offset_of!(SubtreeChildrenData, named_child_count) == 4);
-const _: () = assert!(core::mem::offset_of!(SubtreeChildrenData, visible_descendant_count) == 8);
-const _: () = assert!(core::mem::offset_of!(SubtreeChildrenData, dynamic_precedence) == 12);
-const _: () = assert!(core::mem::offset_of!(SubtreeChildrenData, repeat_depth) == 16);
-const _: () = assert!(core::mem::offset_of!(SubtreeChildrenData, production_id) == 18);
-const _: () = assert!(core::mem::size_of::<SubtreeChildrenData>() == 20);
-
-pub type SubtreeArray = Array<Subtree>;
 pub type MutableSubtreeArray = Array<MutableSubtree>;
+
+/// Contiguous child-handle buffer.
+///
+/// A null `pool` uses the ordinary allocator and stores a raw pointer in
+/// `contents`. A non-null `pool` stores an arena-relative byte offset instead;
+/// this lets the parser's private arena move when it grows.
+pub struct SubtreeArray {
+    /// Heap allocation for ordinary scratch arrays. Always null for
+    /// arena-backed arrays.
+    pub contents: *mut Subtree,
+    pub size: u32,
+    pub capacity: u32,
+    /// Byte offset from the current arena payload base. Zero means no arena
+    /// capacity has been allocated yet.
+    arena_offset: u32,
+    /// Stable owner slot used for arena-backed capacity growth.
+    pool: *mut SubtreePool,
+    /// Arena rewind epoch in which `contents` was allocated. Persistent parser
+    /// scratch arrays lazily discard stale capacity after a completed tree is
+    /// deleted and the arena is rewound for the next parse.
+    arena_generation: u32,
+}
 
 // ---------------------------------------------------------------------------
 // SubtreePool
 // ---------------------------------------------------------------------------
 
-#[repr(C)]
-pub struct SubtreePool {
-    /// Free list of heap subtree allocations.
-    pub free_trees: MutableSubtreeArray,
-    /// Scratch stack used by iterative release/compress operations.
-    pub tree_stack: MutableSubtreeArray,
-}
-
-/// Arena for tree-owned internal nodes.
-///
-/// Parser reductions can allocate accepted internal nodes in this arena. The
-/// returned `TSTree` retains the arena, so copying a tree only bumps the arena
-/// refcount instead of cloning every internal node.
-#[repr(C)]
-pub struct TreeArena {
-    /// Shared ownership count across copied trees.
+pub struct SubtreeArena {
+    /// Parser/tree-family owners of this allocation.
     ref_count: AtomicU32,
-    /// Singly linked list of allocated pages.
-    pages: *mut TreeArenaPage,
-    /// Page currently used for bump allocation.
-    current_page: *mut TreeArenaPage,
+    /// Next unused payload byte. Allocations may occur from copied trees on
+    /// different threads, so bumping is atomic even though parsing itself is
+    /// single-threaded.
+    offset: AtomicUsize,
+    /// Usable payload bytes following this header.
+    capacity: usize,
+    /// Incremented whenever the bump cursor is rewound. This invalidates
+    /// cached scratch-array pointers without touching published tree records.
+    generation: AtomicU32,
+    /// False while subtree ownership is parser-private; true after accepted
+    /// counts have been rebuilt for publication.
+    published: bool,
+    /// Heads of exact-size reusable child-array blocks, classified in internal
+    /// record-alignment units. Each freed block stores the next arena offset in
+    /// its first four bytes.
+    free_lists: [u32; storage::ARENA_FREE_LIST_COUNT],
 }
 
-#[repr(C)]
-struct TreeArenaPage {
-    /// Next older page in the arena list.
-    next: *mut Self,
-    /// Bump allocation buffer.
-    contents: *mut u8,
-    /// Bytes currently used in `contents`.
-    size: usize,
-    /// Allocated byte capacity.
-    capacity: usize,
+pub struct SubtreePool {
+    /// Current slab. The parser retains this after publishing a tree so it can
+    /// reuse the allocation when that tree is deleted before the next parse.
+    arena: *mut SubtreeArena,
+    /// Scratch stack used by iterative release/compress operations.
+    pub(super) tree_stack: MutableSubtreeArray,
+}
+
+impl SubtreePool {
+    /// Storage domain used to resolve arena-relative heap indexes.
+    pub(super) const fn arena(&self) -> *mut SubtreeArena {
+        self.arena
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Internal helper: Edit (local to subtree edit logic)
 // ---------------------------------------------------------------------------
 
+#[derive(Clone, Copy)]
 struct Edit {
     /// Edited range start in old coordinates.
     start: Length,
@@ -560,636 +177,72 @@ struct Edit {
     new_end: Length,
 }
 
+struct EditEntry {
+    tree: NonNull<Subtree>,
+    edit: Edit,
+}
+
 // ---------------------------------------------------------------------------
 // Static data
 // ---------------------------------------------------------------------------
 
 static EMPTY_EXTERNAL_SCANNER_STATE: ExternalScannerState = ExternalScannerState {
-    data: ExternalScannerStateData {
-        short_data: [0; EXTERNAL_SCANNER_STATE_INLINE_SIZE],
-    },
+    data: ExternalScannerStateData::Inline([0; EXTERNAL_SCANNER_STATE_INLINE_SIZE]),
     length: 0,
 };
 
-// ===========================================================================
-// ExternalScannerState functions
-// ===========================================================================
+mod storage;
+pub(super) use storage::subtree_array_prepare_scratch;
+pub(super) use storage::{
+    subtree_arena_release, subtree_arena_retain, subtree_pool_clone_arena, subtree_pool_from_arena,
+    subtree_pool_prepare_for_parse, subtree_pool_retain_arena,
+};
+pub use storage::{
+    subtree_array_clear, subtree_array_copy, subtree_array_delete, subtree_array_new,
+    subtree_array_remove_trailing_extras, subtree_array_reverse, subtree_pool_delete,
+    subtree_pool_new,
+};
+use storage::{
+    subtree_pool_allocate, subtree_pool_allocate_inline, subtree_reuse_children,
+    subtree_take_children,
+};
 
-pub unsafe fn external_scanner_state_init(
-    self_: &mut ExternalScannerState,
-    data: *const u8,
-    length: u32,
-) {
-    self_.length = length;
-    if length > EXTERNAL_SCANNER_STATE_INLINE_SIZE as u32 {
-        self_.data.long_data = malloc(length as usize).cast::<u8>();
-        ptr::copy_nonoverlapping(data, self_.data.long_data, length as usize);
-    } else {
-        ptr::copy_nonoverlapping(data, self_.data.short_data.as_mut_ptr(), length as usize);
-    }
-}
-
-pub unsafe fn external_scanner_state_copy(self_: &ExternalScannerState) -> ExternalScannerState {
-    let mut result = ExternalScannerState {
-        data: ExternalScannerStateData {
-            short_data: self_.data.short_data,
-        },
-        length: self_.length,
-    };
-    if self_.length > EXTERNAL_SCANNER_STATE_INLINE_SIZE as u32 {
-        result.data.long_data = malloc(self_.length as usize).cast::<u8>();
-        ptr::copy_nonoverlapping(
-            self_.data.long_data,
-            result.data.long_data,
-            self_.length as usize,
-        );
-    }
-    result
-}
-
-pub unsafe fn external_scanner_state_delete(self_: &mut ExternalScannerState) {
-    if self_.length > EXTERNAL_SCANNER_STATE_INLINE_SIZE as u32 {
-        free(self_.data.long_data.cast::<c_void>());
-    }
-}
-
-pub const unsafe fn external_scanner_state_data(self_: &ExternalScannerState) -> *const u8 {
-    if self_.length > EXTERNAL_SCANNER_STATE_INLINE_SIZE as u32 {
-        self_.data.long_data
-    } else {
-        self_.data.short_data.as_ptr()
-    }
-}
-
-pub unsafe fn external_scanner_state_eq(
-    self_: &ExternalScannerState,
-    buffer: *const u8,
-    length: u32,
-) -> bool {
-    if self_.length != length {
-        return false;
-    }
-    if length == 0 {
-        return true;
-    }
-    let length = length as usize;
-    core::slice::from_raw_parts(external_scanner_state_data(self_), length)
-        == core::slice::from_raw_parts(buffer, length)
-}
-
-// ===========================================================================
-// SubtreeArray functions
-// ===========================================================================
-
-pub unsafe fn subtree_array_copy(self_: &SubtreeArray, dest: &mut SubtreeArray) {
-    dest.size = self_.size;
-    dest.capacity = self_.capacity;
-    dest.contents = self_.contents;
-    if self_.capacity > 0 {
-        dest.contents =
-            calloc(self_.capacity as usize, core::mem::size_of::<Subtree>()).cast::<Subtree>();
-        if self_.size > 0 {
-            let source = core::slice::from_raw_parts(self_.contents, self_.size as usize);
-            let destination = core::slice::from_raw_parts_mut(dest.contents, self_.size as usize);
-            destination.copy_from_slice(source);
-            for tree in destination {
-                subtree_retain(*tree);
-            }
-        }
-    }
-}
-
-pub unsafe fn subtree_array_clear(pool: &mut SubtreePool, self_: &mut SubtreeArray) {
-    if self_.size > 0 {
-        let trees = core::slice::from_raw_parts(self_.contents, self_.size as usize);
-        for tree in trees {
-            subtree_release(pool, *tree);
-        }
-    }
-    self_.size = 0;
-}
-
-pub unsafe fn subtree_array_delete(pool: &mut SubtreePool, self_: &mut SubtreeArray) {
-    subtree_array_clear(pool, self_);
-    if !self_.contents.is_null() {
-        free(self_.contents.cast::<c_void>());
-    }
-    self_.contents = ptr::null_mut();
-    self_.size = 0;
-    self_.capacity = 0;
-}
-
-pub unsafe fn subtree_array_remove_trailing_extras(
-    self_: &mut SubtreeArray,
-    destination: &mut SubtreeArray,
-) {
-    destination.size = 0;
-    while self_.size > 0 {
-        let last = *self_.contents.add(self_.size as usize - 1);
-        if subtree_extra(last) {
-            self_.size -= 1;
-            array_push(destination, last);
-        } else {
-            break;
-        }
-    }
-    subtree_array_reverse(destination);
-}
-
-pub unsafe fn subtree_array_reverse(self_: &mut SubtreeArray) {
-    if self_.size > 0 {
-        let trees = core::slice::from_raw_parts_mut(self_.contents, self_.size as usize);
-        trees.reverse();
-    }
-}
-
-// ===========================================================================
-// TreeArena functions
-// ===========================================================================
-
-const TREE_ARENA_PAGE_SIZE: usize = 16 * 1024;
-
-const fn align_up(value: usize, alignment: usize) -> usize {
-    debug_assert!(alignment.is_power_of_two());
-    (value + alignment - 1) & !(alignment - 1)
-}
-
-pub unsafe fn tree_arena_new() -> *mut TreeArena {
-    let arena = malloc(core::mem::size_of::<TreeArena>()).cast::<TreeArena>();
-    ptr::write(
-        arena,
-        TreeArena {
-            ref_count: AtomicU32::new(1),
-            pages: ptr::null_mut(),
-            current_page: ptr::null_mut(),
-        },
-    );
-    arena
-}
-
-pub unsafe fn tree_arena_retain(arena: *mut TreeArena) {
-    if !arena.is_null() {
-        let prev = (*arena).ref_count.fetch_add(1, Ordering::SeqCst);
-        debug_assert!(prev.wrapping_add(1) != 0);
-    }
-}
-
-pub unsafe fn tree_arena_release(arena: *mut TreeArena) {
-    if arena.is_null() {
-        return;
-    }
-
-    if (*arena).ref_count.fetch_sub(1, Ordering::SeqCst) != 1 {
-        return;
-    }
-
-    let mut page = (*arena).pages;
-    while !page.is_null() {
-        let next = (*page).next;
-        free((*page).contents.cast::<c_void>());
-        free(page.cast::<c_void>());
-        page = next;
-    }
-    free(arena.cast::<c_void>());
-}
-
-/// Try to satisfy an arena allocation from the current bump page.
-unsafe fn tree_arena_try_current_page(
-    arena: &mut TreeArena,
-    size: usize,
-    alignment: usize,
-) -> *mut c_void {
-    if !arena.current_page.is_null() {
-        let page = ptr_mut(arena.current_page);
-        let offset = align_up(page.size, alignment);
-        if offset + size <= page.capacity {
-            page.size = offset + size;
-            return page.contents.add(offset).cast::<c_void>();
-        }
-    }
-    ptr::null_mut()
-}
-
-/// Allocate a new arena page and return the first allocation from it.
-unsafe fn tree_arena_alloc_new_page(
-    arena: &mut TreeArena,
-    size: usize,
-    alignment: usize,
-) -> *mut c_void {
-    let capacity = TREE_ARENA_PAGE_SIZE.max(size + alignment);
-    let page = malloc(core::mem::size_of::<TreeArenaPage>()).cast::<TreeArenaPage>();
-    let contents = malloc(capacity).cast::<u8>();
-    ptr::write(
-        page,
-        TreeArenaPage {
-            next: arena.pages,
-            contents,
-            size,
-            capacity,
-        },
-    );
-    arena.pages = page;
-    arena.current_page = page;
-    contents.cast::<c_void>()
-}
-
-/// Allocate bytes from the tree arena.
-///
-/// Internal nodes are stored as `[Subtree children...][SubtreeHeapData]`. The
-/// arena uses page-sized bump allocation because accepted trees free all arena
-/// nodes together when the last copied `TSTree` is deleted.
-unsafe fn tree_arena_alloc(arena: *mut TreeArena, size: usize, alignment: usize) -> *mut c_void {
-    debug_assert!(!arena.is_null());
-    let arena = ptr_mut(arena);
-
-    let result = tree_arena_try_current_page(arena, size, alignment);
-    if !result.is_null() {
-        return result;
-    }
-
-    tree_arena_alloc_new_page(arena, size, alignment)
-}
-
-// ===========================================================================
-// SubtreePool functions
-// ===========================================================================
-
-pub unsafe fn subtree_pool_new(capacity: u32) -> SubtreePool {
-    let mut pool = SubtreePool {
-        free_trees: array_new(),
-        tree_stack: array_new(),
-    };
-    array_reserve(&mut pool.free_trees, capacity);
-    pool
-}
-
-pub unsafe fn subtree_pool_delete(self_: &mut SubtreePool) {
-    if !self_.free_trees.contents.is_null() {
-        for i in 0..self_.free_trees.size {
-            let tree = *self_.free_trees.contents.add(i as usize);
-            free(tree.ptr.cast::<c_void>());
-        }
-        array_delete(&mut self_.free_trees);
-    }
-    if !self_.tree_stack.contents.is_null() {
-        array_delete(&mut self_.tree_stack);
-    }
-}
-
-unsafe fn subtree_pool_allocate(self_: &mut SubtreePool) -> *mut SubtreeHeapData {
-    if self_.free_trees.size > 0 {
-        array_pop(&mut self_.free_trees).ptr
-    } else {
-        malloc(core::mem::size_of::<SubtreeHeapData>()).cast::<SubtreeHeapData>()
-    }
-}
-
-unsafe fn subtree_pool_free(self_: &mut SubtreePool, tree: MutableSubtree) {
-    if self_.free_trees.capacity > 0 && self_.free_trees.size < TS_MAX_TREE_POOL_SIZE {
-        array_push(&mut self_.free_trees, tree);
-    } else {
-        free(tree.ptr.cast::<c_void>());
-    }
-}
-
-// ===========================================================================
-// Subtree inline helpers (from subtree.h static inline functions)
-// ===========================================================================
+// Compatibility accessors still used by the legacy query implementation.
 
 #[inline]
-pub unsafe fn subtree_symbol(self_: Subtree) -> TSSymbol {
-    if self_.data.is_inline() {
-        TSSymbol::from(self_.data.symbol)
-    } else {
-        (*self_.ptr).symbol
-    }
+pub unsafe fn subtree_symbol(self_: Subtree, arena: *mut SubtreeArena) -> TSSymbol {
+    self_.symbol(arena)
 }
 
-#[inline]
-pub const unsafe fn subtree_visible(self_: Subtree) -> bool {
-    if self_.data.is_inline() {
-        self_.data.visible()
-    } else {
-        (*self_.ptr).visible()
-    }
-}
-
-#[inline]
-pub const unsafe fn subtree_named(self_: Subtree) -> bool {
-    if self_.data.is_inline() {
-        self_.data.named()
-    } else {
-        (*self_.ptr).named()
-    }
-}
-
-#[inline]
-pub const unsafe fn subtree_extra(self_: Subtree) -> bool {
-    if self_.data.is_inline() {
-        self_.data.extra()
-    } else {
-        (*self_.ptr).extra()
-    }
-}
-
-#[inline]
-pub const unsafe fn subtree_has_changes(self_: Subtree) -> bool {
-    if self_.data.is_inline() {
-        self_.data.has_changes()
-    } else {
-        (*self_.ptr).has_changes()
-    }
-}
-
-#[inline]
-pub const unsafe fn subtree_missing(self_: Subtree) -> bool {
-    if self_.data.is_inline() {
-        self_.data.is_missing()
-    } else {
-        (*self_.ptr).is_missing()
-    }
-}
-
-#[inline]
-pub const unsafe fn subtree_is_keyword(self_: Subtree) -> bool {
-    if self_.data.is_inline() {
-        self_.data.is_keyword()
-    } else {
-        (*self_.ptr).is_keyword()
-    }
-}
-
-#[inline]
-pub const unsafe fn subtree_parse_state(self_: Subtree) -> TSStateId {
-    if self_.data.is_inline() {
-        self_.data.parse_state
-    } else {
-        (*self_.ptr).parse_state
-    }
-}
-
-#[inline]
-pub unsafe fn subtree_lookahead_bytes(self_: Subtree) -> u32 {
-    if self_.data.is_inline() {
-        u32::from(self_.data.lookahead_bytes())
-    } else {
-        (*self_.ptr).lookahead_bytes
-    }
-}
-
+/// Allocation size for a heap subtree with `child_count` preceding children.
 #[inline]
 pub const fn subtree_alloc_size(child_count: u32) -> usize {
-    child_count as usize * core::mem::size_of::<Subtree>() + core::mem::size_of::<SubtreeHeapData>()
+    subtree_child_storage_size(child_count) + core::mem::size_of::<SubtreeInternalData>()
+}
+
+/// Bytes occupied by the child prefix, including any padding required to keep
+/// the following heap header naturally aligned.
+#[inline]
+pub const fn subtree_child_storage_size(child_count: u32) -> usize {
+    let bytes = child_count as usize * core::mem::size_of::<Subtree>();
+    let alignment = core::mem::align_of::<SubtreeInternalData>();
+    (bytes + alignment - 1) & !(alignment - 1)
 }
 
 #[inline]
-pub const unsafe fn subtree_children(self_: Subtree) -> *mut Subtree {
-    if self_.data.is_inline() {
-        ptr::null_mut()
-    } else {
-        self_
-            .ptr
-            .cast_mut()
-            .cast::<Subtree>()
-            .sub((*self_.ptr).child_count as usize)
-    }
-}
-
-#[inline]
-pub unsafe fn subtree_child<'a>(self_: Subtree, index: u32) -> &'a Subtree {
-    subtree_children_slice(self_).get_unchecked(index as usize)
-}
-
-pub const unsafe fn subtree_children_slice<'a>(self_: Subtree) -> &'a [Subtree] {
-    let count = subtree_child_count(self_) as usize;
-    if count == 0 {
-        &[]
-    } else {
-        core::slice::from_raw_parts(subtree_children(self_), count)
-    }
-}
-
-#[inline]
-unsafe fn mutable_subtree_children<'a>(self_: MutableSubtree) -> &'a mut [Subtree] {
-    let count = (*self_.ptr).child_count as usize;
-    if count == 0 {
-        &mut []
-    } else {
-        core::slice::from_raw_parts_mut(subtree_children(subtree_from_mut(self_)), count)
-    }
-}
-
-#[inline]
-unsafe fn mutable_subtree_data_mut<'a>(self_: MutableSubtree) -> &'a mut SubtreeHeapData {
-    ptr_mut(self_.ptr)
-}
-
-#[inline]
-unsafe fn subtree_data_ref<'a>(self_: Subtree) -> &'a SubtreeHeapData {
-    ptr_ref(self_.ptr)
-}
-
-#[inline]
-unsafe fn mutable_subtree_child(self_: MutableSubtree, index: usize) -> Subtree {
-    *mutable_subtree_children(self_).get_unchecked(index)
-}
-
-#[inline]
-unsafe fn mutable_subtree_child_mut<'a>(self_: MutableSubtree, index: usize) -> &'a mut Subtree {
-    mutable_subtree_children(self_).get_unchecked_mut(index)
-}
-
-#[inline]
-pub unsafe fn subtree_set_extra(self_: &mut MutableSubtree, is_extra: bool) {
-    if self_.data.is_inline() {
-        self_.data.set_extra(is_extra);
-    } else {
-        (*self_.ptr).set_extra(is_extra);
-    }
-}
-
-// --- #25: padding, size, total_size, total_bytes ---
-
-#[inline]
-pub unsafe fn subtree_padding(self_: Subtree) -> Length {
-    if self_.data.is_inline() {
-        Length {
-            bytes: u32::from(self_.data.padding_bytes),
-            extent: TSPoint {
-                row: u32::from(self_.data.padding_rows()),
-                column: u32::from(self_.data.padding_columns),
-            },
-        }
-    } else {
-        (*self_.ptr).padding
-    }
-}
-
-#[inline]
-pub unsafe fn subtree_size(self_: Subtree) -> Length {
-    if self_.data.is_inline() {
-        Length {
-            bytes: u32::from(self_.data.size_bytes),
-            extent: TSPoint {
-                row: 0,
-                column: u32::from(self_.data.size_bytes),
-            },
-        }
-    } else {
-        (*self_.ptr).size
-    }
-}
-
-#[inline]
-pub unsafe fn subtree_total_size(self_: Subtree) -> Length {
-    length_add(subtree_padding(self_), subtree_size(self_))
-}
-
-#[inline]
-pub unsafe fn subtree_total_bytes(self_: Subtree) -> u32 {
-    subtree_total_size(self_).bytes
-}
-
-// --- #27: child_count, repeat_depth, is_repetition ---
-
-#[inline]
-pub const unsafe fn subtree_child_count(self_: Subtree) -> u32 {
-    if self_.data.is_inline() {
+pub unsafe fn subtree_is_repetition(self_: Subtree, arena: *mut SubtreeArena) -> u32 {
+    if self_.is_inline() || self_.is_null() {
         0
     } else {
-        (*self_.ptr).child_count
+        u32::from(
+            !self_.heap_data(arena).named()
+                && !self_.heap_data(arena).visible()
+                && self_.heap_data(arena).child_count != 0,
+        )
     }
 }
 
-#[inline]
-pub unsafe fn subtree_repeat_depth(self_: Subtree) -> u32 {
-    if self_.data.is_inline() {
-        0
-    } else {
-        u32::from((*self_.ptr).data.children.repeat_depth)
-    }
-}
-
-#[inline]
-pub unsafe fn subtree_is_repetition(self_: Subtree) -> u32 {
-    if self_.data.is_inline() {
-        0
-    } else {
-        u32::from(!(*self_.ptr).named() && !(*self_.ptr).visible() && (*self_.ptr).child_count != 0)
-    }
-}
-
-// --- #28: visible_descendant_count, visible_child_count ---
-
-#[inline]
-pub const unsafe fn subtree_visible_descendant_count(self_: Subtree) -> u32 {
-    if self_.data.is_inline() || (*self_.ptr).child_count == 0 {
-        0
-    } else {
-        (*self_.ptr).data.children.visible_descendant_count
-    }
-}
-
-#[inline]
-pub const unsafe fn subtree_visible_child_count(self_: Subtree) -> u32 {
-    if subtree_child_count(self_) > 0 {
-        (*self_.ptr).data.children.visible_child_count
-    } else {
-        0
-    }
-}
-
-// --- #29: error_cost ---
-
-#[inline]
-pub const unsafe fn subtree_error_cost(self_: Subtree) -> u32 {
-    if subtree_missing(self_) {
-        ERROR_COST_PER_MISSING_TREE + ERROR_COST_PER_RECOVERY
-    } else if self_.data.is_inline() {
-        0
-    } else {
-        (*self_.ptr).error_cost
-    }
-}
-
-// --- #30: dynamic_precedence, production_id ---
-
-#[inline]
-pub const unsafe fn subtree_dynamic_precedence(self_: Subtree) -> i32 {
-    if self_.data.is_inline() || (*self_.ptr).child_count == 0 {
-        0
-    } else {
-        (*self_.ptr).data.children.dynamic_precedence
-    }
-}
-
-#[inline]
-pub const unsafe fn subtree_production_id(self_: Subtree) -> u16 {
-    if subtree_child_count(self_) > 0 {
-        (*self_.ptr).data.children.production_id
-    } else {
-        0
-    }
-}
-
-#[inline]
-pub const unsafe fn subtree_has_external_tokens(self_: Subtree) -> bool {
-    if self_.data.is_inline() {
-        false
-    } else {
-        (*self_.ptr).has_external_tokens()
-    }
-}
-
-#[inline]
-pub const unsafe fn subtree_has_external_scanner_state_change(self_: Subtree) -> bool {
-    if self_.data.is_inline() {
-        false
-    } else {
-        (*self_.ptr).has_external_scanner_state_change()
-    }
-}
-
-#[inline]
-pub const unsafe fn subtree_depends_on_column(self_: Subtree) -> bool {
-    if self_.data.is_inline() {
-        false
-    } else {
-        (*self_.ptr).depends_on_column()
-    }
-}
-
-#[inline]
-pub unsafe fn subtree_is_error(self_: Subtree) -> bool {
-    subtree_symbol(self_) == TS_BUILTIN_SYM_ERROR
-}
-
-#[inline]
-pub unsafe fn subtree_is_eof(self_: Subtree) -> bool {
-    subtree_symbol(self_) == TS_BUILTIN_SYM_END
-}
-
-// --- #32: from_mut, to_mut_unsafe ---
-
-#[inline]
-pub const fn subtree_from_mut(self_: MutableSubtree) -> Subtree {
-    Subtree {
-        data: unsafe { self_.data },
-    }
-}
-
-#[inline]
-pub const fn subtree_to_mut_unsafe(self_: Subtree) -> MutableSubtree {
-    MutableSubtree {
-        data: unsafe { self_.data },
-    }
-}
-
-// ===========================================================================
 // Subtree private helpers
-// ===========================================================================
-
-// --- #33: can_inline, set_has_changes ---
 
 #[inline]
 fn subtree_can_inline(padding: Length, size: Length, lookahead_bytes: u32) -> bool {
@@ -1202,27 +255,127 @@ fn subtree_can_inline(padding: Length, size: Length, lookahead_bytes: u32) -> bo
         && lookahead_bytes < 16
 }
 
-unsafe fn subtree_set_has_changes(self_: &mut MutableSubtree) {
-    if self_.data.is_inline() {
-        self_.data.set_has_changes(true);
+/// Reduction-facing snapshot of one child subtree's hot metadata.
+///
+/// Heap handles are resolved once while constructing this value. The
+/// summarization loop can then update the new parent without repeatedly
+/// reconstructing `arena_base + index` or forcing the compiler to reason about
+/// aliasing between parent writes and child-header reads.
+#[derive(Clone, Copy)]
+struct ReductionSubtreeSummary {
+    padding: Length,
+    size: Length,
+    lookahead_bytes: u32,
+    error_cost: u32,
+    child_count: u32,
+    visible_child_count: u32,
+    named_child_count: u32,
+    visible_descendant_count: u32,
+    dynamic_precedence: i32,
+    symbol: TSSymbol,
+    visible: bool,
+    named: bool,
+    extra: bool,
+    has_external_tokens: bool,
+    has_external_scanner_state_change: bool,
+}
+
+#[inline]
+unsafe fn subtree_resolve_for_reduction(
+    tree: Subtree,
+    arena: *mut SubtreeArena,
+) -> ReductionSubtreeSummary {
+    debug_assert!(!tree.is_null());
+    if let Some(data) = tree.inline_data(arena) {
+        let size_bytes = u32::from(data.size_bytes);
+        ReductionSubtreeSummary {
+            padding: Length {
+                bytes: u32::from(data.padding_bytes),
+                extent: TSPoint {
+                    row: u32::from(data.padding_rows()),
+                    column: u32::from(data.padding_columns),
+                },
+            },
+            size: Length {
+                bytes: size_bytes,
+                extent: TSPoint {
+                    row: 0,
+                    column: size_bytes,
+                },
+            },
+            lookahead_bytes: u32::from(data.lookahead_bytes()),
+            error_cost: if data.is_missing() {
+                ERROR_COST_PER_MISSING_TREE + ERROR_COST_PER_RECOVERY
+            } else {
+                0
+            },
+            child_count: 0,
+            visible_child_count: 0,
+            named_child_count: 0,
+            visible_descendant_count: 0,
+            dynamic_precedence: 0,
+            symbol: TSSymbol::from(data.symbol),
+            visible: data.visible(),
+            named: data.named(),
+            extra: data.extra(),
+            has_external_tokens: false,
+            has_external_scanner_state_change: false,
+        }
     } else {
-        (*self_.ptr).set_has_changes(true);
+        let data = tree.heap_data(arena);
+        let (visible_child_count, named_child_count, visible_descendant_count, dynamic_precedence) =
+            if data.child_count == 0 {
+                (0, 0, 0, 0)
+            } else {
+                let children = data.children();
+                (
+                    children.visible_child_count,
+                    children.named_child_count,
+                    children.visible_descendant_count,
+                    children.dynamic_precedence,
+                )
+            };
+        ReductionSubtreeSummary {
+            padding: data.padding,
+            size: data.size,
+            lookahead_bytes: data.lookahead_bytes,
+            error_cost: if data.is_missing() {
+                ERROR_COST_PER_MISSING_TREE + ERROR_COST_PER_RECOVERY
+            } else {
+                data.error_cost
+            },
+            child_count: data.child_count,
+            visible_child_count,
+            named_child_count,
+            visible_descendant_count,
+            dynamic_precedence,
+            symbol: data.symbol,
+            visible: data.visible(),
+            named: data.named(),
+            extra: data.extra(),
+            has_external_tokens: data.has_external_tokens(),
+            has_external_scanner_state_change: data.has_external_scanner_state_change(),
+        }
     }
 }
 
-// ===========================================================================
-// Subtree construction functions (from subtree.c)
-// ===========================================================================
+unsafe fn subtree_set_has_changes(self_: &mut MutableSubtree, arena: *mut SubtreeArena) {
+    if let Some(data) = self_.inline_data_mut(arena) {
+        data.set_has_changes(true);
+    } else {
+        self_.heap_data_mut(arena).set_has_changes(true);
+    }
+}
 
-// --- #34: new_leaf ---
+// Subtree construction
 
 #[allow(clippy::too_many_arguments)]
 /// Create a leaf subtree.
 ///
-/// Small leaves are packed directly into the `Subtree` word when the symbol,
-/// padding, size, and lookahead byte counts fit the inline limits. Larger leaves
+/// Small leaves use an eight-byte compact arena record when the symbol,
+/// padding, size, and lookahead byte counts fit its packed limits. Larger leaves
 /// or leaves carrying external scanner state use `SubtreeHeapData` from the
-/// parser's subtree pool.
+/// parser's subtree pool. Both forms are addressed by a four-byte `Subtree`.
 pub unsafe fn subtree_new_leaf(
     pool: &mut SubtreePool,
     symbol: TSSymbol,
@@ -1243,68 +396,67 @@ pub unsafe fn subtree_new_leaf(
         && subtree_can_inline(padding, size, lookahead_bytes);
 
     if is_inline {
-        Subtree {
-            data: SubtreeInlineData {
-                flags: INLINE_IS_INLINE
-                    | if metadata.visible { INLINE_VISIBLE } else { 0 }
-                    | if metadata.named { INLINE_NAMED } else { 0 }
-                    | if extra { INLINE_EXTRA } else { 0 }
-                    | if is_keyword { INLINE_IS_KEYWORD } else { 0 },
-                symbol: u8::try_from(symbol).expect("inline subtree symbol fits in u8"),
-                parse_state,
-                padding_columns: u8::try_from(padding.extent.column)
-                    .expect("inline subtree padding column fits in u8"),
-                rows_and_lookahead: (u8::try_from(padding.extent.row)
-                    .expect("inline subtree padding row fits in u8")
+        let data = subtree_pool_allocate_inline(pool);
+        data.as_ptr().write(SubtreeInlineData {
+            flags: INLINE_IS_INLINE
+                | if metadata.visible { INLINE_VISIBLE } else { 0 }
+                | if metadata.named { INLINE_NAMED } else { 0 }
+                | if extra { INLINE_EXTRA } else { 0 }
+                | if is_keyword { INLINE_IS_KEYWORD } else { 0 },
+            symbol: u8::try_from(symbol).expect("inline subtree symbol fits in u8"),
+            parse_state,
+            padding_columns: u8::try_from(padding.extent.column)
+                .expect("inline subtree padding column fits in u8"),
+            rows_and_lookahead: (u8::try_from(padding.extent.row)
+                .expect("inline subtree padding row fits in u8")
+                & 0x0F)
+                | ((u8::try_from(lookahead_bytes)
+                    .expect("inline subtree lookahead byte count fits in u8")
                     & 0x0F)
-                    | ((u8::try_from(lookahead_bytes)
-                        .expect("inline subtree lookahead byte count fits in u8")
-                        & 0x0F)
-                        << 4),
-                padding_bytes: u8::try_from(padding.bytes)
-                    .expect("inline subtree padding byte count fits in u8"),
-                size_bytes: u8::try_from(size.bytes)
-                    .expect("inline subtree size byte count fits in u8"),
-            },
-        }
+                    << 4),
+            padding_bytes: u8::try_from(padding.bytes)
+                .expect("inline subtree padding byte count fits in u8"),
+            size_bytes: u8::try_from(size.bytes)
+                .expect("inline subtree size byte count fits in u8"),
+        });
+        Subtree::from_inline(pool.arena(), data)
     } else {
         let data = subtree_pool_allocate(pool);
-        *data = SubtreeHeapData {
-            ref_count: 1,
-            padding,
-            size,
-            lookahead_bytes,
-            error_cost: 0,
-            child_count: 0,
-            symbol,
-            parse_state,
-            flags: SubtreeHeapData::make_flags(
-                metadata.visible,
-                metadata.named,
-                extra,
-                false,
-                has_external_tokens,
-                false,
-                depends_on_column,
-                false,
-                is_keyword,
-            ),
-            data: SubtreeHeapDataContent {
-                children: SubtreeChildrenData {
-                    visible_child_count: 0,
-                    named_child_count: 0,
-                    visible_descendant_count: 0,
-                    dynamic_precedence: 0,
-                    repeat_depth: 0,
-                    production_id: 0,
-                },
+        let mut leaf_data = SubtreeLeafData {
+            header: SubtreeHeapData {
+                parser_shared: Cell::new(false),
+                published_shared: AtomicBool::new(false),
+                parser_visited: Cell::new(false),
+                padding,
+                size,
+                lookahead_bytes,
+                error_cost: 0,
+                child_count: 0,
+                symbol,
+                parse_state,
+                flags: 0,
+            },
+            content: if has_external_tokens {
+                SubtreeLeafDataContent::ExternalScannerState(ExternalScannerState {
+                    data: ExternalScannerStateData::Inline([0; EXTERNAL_SCANNER_STATE_INLINE_SIZE]),
+                    length: 0,
+                })
+            } else {
+                SubtreeLeafDataContent::LookaheadChar(0)
             },
         };
-        Subtree { ptr: data }
+        leaf_data.header.set_visible(metadata.visible);
+        leaf_data.header.set_named(metadata.named);
+        leaf_data.header.set_extra(extra);
+        leaf_data
+            .header
+            .set_has_external_tokens(has_external_tokens);
+        leaf_data.header.set_depends_on_column(depends_on_column);
+        leaf_data.header.set_is_keyword(is_keyword);
+        data.cast::<SubtreeLeafData>().as_ptr().write(leaf_data);
+        Subtree::from_heap(pool.arena(), data)
     }
 }
-
-// --- #35: new_error ---
 
 /// Create an error leaf for skipped input.
 ///
@@ -1329,161 +481,100 @@ pub unsafe fn subtree_new_error(
         false,
         language,
     );
-    let data = result.ptr.cast_mut();
-    (*data).data.lookahead_char = lookahead_char;
+    result
+        .into_mut()
+        .heap_data_mut(pool.arena())
+        .set_leaf_content(SubtreeLeafDataContent::LookaheadChar(lookahead_char));
     result
 }
-
-// --- #36: clone ---
-
-pub unsafe fn subtree_clone(self_: Subtree) -> MutableSubtree {
-    let data = subtree_data_ref(self_);
-    let alloc_size = subtree_alloc_size(data.child_count);
-    let new_children = malloc(alloc_size).cast::<Subtree>();
-    let old_children = subtree_children(self_);
-    ptr::copy_nonoverlapping(
-        old_children.cast::<u8>(),
-        new_children.cast::<u8>(),
-        alloc_size,
-    );
-    let result = new_children
-        .add(data.child_count as usize)
-        .cast::<SubtreeHeapData>();
-    if data.child_count > 0 {
-        for i in 0..data.child_count {
-            subtree_retain(*new_children.add(i as usize));
-        }
-    } else if data.has_external_tokens() {
-        (*result).data.external_scanner_state = core::mem::ManuallyDrop::new(
-            external_scanner_state_copy(&data.data.external_scanner_state),
-        );
-    }
-    (*result).ref_count = 1;
-    (*result).set_arena_owned(false);
-    MutableSubtree { ptr: result }
-}
-
-// --- #37: new_node ---
 
 unsafe fn subtree_init_node_data(
-    data: *mut SubtreeHeapData,
+    arena: *mut SubtreeArena,
+    data: NonNull<SubtreeHeapData>,
     symbol: TSSymbol,
     child_count: u32,
     production_id: u32,
     language: *const TSLanguage,
-    extra_flags: u16,
 ) -> MutableSubtree {
     let metadata = ts_language_symbol_metadata(language, symbol);
-    *data = SubtreeHeapData {
-        ref_count: 1,
-        padding: length_zero(),
-        size: length_zero(),
-        lookahead_bytes: 0,
-        error_cost: 0,
-        child_count,
-        symbol,
-        parse_state: 0,
-        flags: SubtreeHeapData::make_flags(
-            metadata.visible,
-            metadata.named,
-            false,
-            false,
-            false,
-            false,
-            false,
-            false,
-            false,
-        ) | extra_flags,
-        data: SubtreeHeapDataContent {
-            children: SubtreeChildrenData {
-                visible_child_count: 0,
-                named_child_count: 0,
-                visible_descendant_count: 0,
-                dynamic_precedence: 0,
-                repeat_depth: 0,
-                production_id: production_id as u16,
-            },
+    let mut internal_data = SubtreeInternalData {
+        header: SubtreeHeapData {
+            parser_shared: Cell::new(false),
+            published_shared: AtomicBool::new(false),
+            parser_visited: Cell::new(false),
+            padding: length_zero(),
+            size: length_zero(),
+            lookahead_bytes: 0,
+            error_cost: 0,
+            child_count,
+            symbol,
+            parse_state: 0,
+            flags: 0,
+        },
+        children: SubtreeChildrenData {
+            visible_child_count: 0,
+            named_child_count: 0,
+            visible_descendant_count: 0,
+            dynamic_precedence: 0,
+            repeat_depth: 0,
+            production_id: production_id as u16,
         },
     };
-    MutableSubtree { ptr: data }
+    internal_data.header.set_visible(metadata.visible);
+    internal_data.header.set_named(metadata.named);
+    internal_data.header.set_internal(true);
+    data.cast::<SubtreeInternalData>()
+        .as_ptr()
+        .write(internal_data);
+    MutableSubtree::from_heap(arena, data)
 }
 
-/// Create a heap internal node by moving child storage into the node allocation.
+/// Create a heap internal node by taking ownership of its child array.
 ///
 /// The child array is resized so the `SubtreeHeapData` header can live directly
-/// after the child slice, matching the C memory layout:
+/// after the child slice in one compact allocation:
 /// `[child_0, child_1, ... child_n][SubtreeHeapData]`.
 pub unsafe fn subtree_new_node(
+    pool: &mut SubtreePool,
     symbol: TSSymbol,
-    children: *mut SubtreeArray,
+    children: SubtreeArray,
     production_id: u32,
     language: *const TSLanguage,
 ) -> MutableSubtree {
-    // Allocate the node's data at the end of the array of children.
-    let new_byte_size = subtree_alloc_size((*children).size);
-    if ((*children).capacity as usize) * core::mem::size_of::<Subtree>() < new_byte_size {
-        (*children).contents =
-            realloc((*children).contents.cast::<c_void>(), new_byte_size).cast::<Subtree>();
-        (*children).capacity = (new_byte_size / core::mem::size_of::<Subtree>()) as u32;
-    }
-    let data = (*children)
-        .contents
-        .add((*children).size as usize)
-        .cast::<SubtreeHeapData>();
+    let (data, child_count) = subtree_take_children(pool, children);
 
-    let result = subtree_init_node_data(data, symbol, (*children).size, production_id, language, 0);
-    subtree_summarize_children(result, language);
+    let arena = pool.arena();
+    let result = subtree_init_node_data(arena, data, symbol, child_count, production_id, language);
+    subtree_summarize_children(result, arena, language);
     result
 }
 
-/// Create an arena-owned internal node.
+/// Build a temporary internal node in parser-owned reusable storage.
 ///
-/// This has the same memory layout as `subtree_new_node`, but allocation
-/// comes from the returned tree's arena instead of the transient subtree pool.
-pub unsafe fn subtree_new_node_in_arena(
-    arena: *mut TreeArena,
+/// The returned subtree borrows `children`'s allocation and must not be
+/// retained or released. It becomes invalid as soon as `children` is changed.
+pub(super) unsafe fn subtree_new_scratch_node(
+    arena: *mut SubtreeArena,
     symbol: TSSymbol,
-    children: *const Subtree,
-    child_count: u32,
-    production_id: u32,
+    children: &mut SubtreeArray,
     language: *const TSLanguage,
-) -> MutableSubtree {
-    let byte_size = subtree_alloc_size(child_count);
-    let allocation = tree_arena_alloc(arena, byte_size, core::mem::align_of::<SubtreeHeapData>())
-        .cast::<Subtree>();
-
-    if child_count > 0 {
-        ptr::copy_nonoverlapping(children, allocation, child_count as usize);
-    }
-
-    let data = allocation
-        .add(child_count as usize)
-        .cast::<SubtreeHeapData>();
-    let result = subtree_init_node_data(
-        data,
-        symbol,
-        child_count,
-        production_id,
-        language,
-        HEAP_ARENA_OWNED,
-    );
-    subtree_summarize_children(result, language);
-    result
+) -> Subtree {
+    let data = subtree_reuse_children(children);
+    let result = subtree_init_node_data(arena, data, symbol, children.size, 0, language);
+    subtree_summarize_children(result, arena, language);
+    result.into_immutable()
 }
-
-// --- #38: new_error_node ---
 
 pub unsafe fn subtree_new_error_node(
-    children: *mut SubtreeArray,
+    pool: &mut SubtreePool,
+    children: SubtreeArray,
     extra: bool,
     language: *const TSLanguage,
 ) -> Subtree {
-    let result = subtree_new_node(TS_BUILTIN_SYM_ERROR, children, 0, language);
-    (*result.ptr).set_extra(extra);
-    subtree_from_mut(result)
+    let mut result = subtree_new_node(pool, TS_BUILTIN_SYM_ERROR, children, 0, language);
+    result.heap_data_mut(pool.arena()).set_extra(extra);
+    result.into_immutable()
 }
-
-// --- #39: new_missing_leaf ---
 
 pub unsafe fn subtree_new_missing_leaf(
     pool: &mut SubtreePool,
@@ -1492,7 +583,7 @@ pub unsafe fn subtree_new_missing_leaf(
     lookahead_bytes: u32,
     language: *const TSLanguage,
 ) -> Subtree {
-    let mut result = subtree_new_leaf(
+    let result = subtree_new_leaf(
         pool,
         symbol,
         padding,
@@ -1504,117 +595,55 @@ pub unsafe fn subtree_new_missing_leaf(
         false,
         language,
     );
-    if result.data.is_inline() {
-        result.data.set_is_missing(true);
+    let mut result = result.into_mut();
+    if let Some(data) = result.inline_data_mut(pool.arena()) {
+        data.set_is_missing(true);
     } else {
-        (*result.ptr.cast_mut()).set_is_missing(true);
+        result.heap_data_mut(pool.arena()).set_is_missing(true);
     }
-    result
+    result.into_immutable()
 }
 
-// ===========================================================================
-// Subtree mutation / ownership functions
-// ===========================================================================
+// Subtree mutation and ownership
 
-// --- #40: set_symbol ---
+// Subtree balancing and summarization
 
-pub unsafe fn subtree_set_symbol(
-    self_: &mut MutableSubtree,
-    symbol: TSSymbol,
-    language: *const TSLanguage,
+/// Replace conservative parse-time sharing marks with exact accepted-DAG
+/// sharing before final balancing.
+pub(super) unsafe fn subtree_prepare_for_balancing(
+    root: Subtree,
+    arena: *mut SubtreeArena,
+    stack: &mut MutableSubtreeArray,
 ) {
-    let metadata = ts_language_symbol_metadata(language, symbol);
-    if self_.data.is_inline() {
-        debug_assert!(symbol < TSSymbol::from(u8::MAX));
-        self_.data.symbol = symbol as u8;
-        self_.data.set_named(metadata.named);
-        self_.data.set_visible(metadata.visible);
-    } else {
-        let data = mutable_subtree_data_mut(*self_);
-        data.symbol = symbol;
-        data.set_named(metadata.named);
-        data.set_visible(metadata.visible);
-    }
-}
+    debug_assert!(!storage::subtree_arena_is_published(arena));
 
-// --- #41: make_mut ---
-
-pub unsafe fn subtree_make_mut(pool: &mut SubtreePool, self_: Subtree) -> MutableSubtree {
-    if self_.data.is_inline() {
-        return MutableSubtree { data: self_.data };
-    }
-    if (*self_.ptr).ref_count == 1 {
-        return subtree_to_mut_unsafe(self_);
-    }
-    let result = subtree_clone(self_);
-    subtree_release(pool, self_);
-    result
-}
-
-// --- #42: retain ---
-
-pub unsafe fn subtree_retain(self_: Subtree) {
-    if self_.data.is_inline() {
-        return;
-    }
-    debug_assert!((*self_.ptr).ref_count > 0);
-    let ref_count = ptr::addr_of!((*self_.ptr).ref_count).cast::<AtomicU32>();
-    let prev = (*ref_count).fetch_add(1, Ordering::SeqCst);
-    debug_assert!(prev.wrapping_add(1) != 0);
-}
-
-// --- #43: release ---
-
-pub unsafe fn subtree_release(pool: &mut SubtreePool, self_: Subtree) {
-    if self_.data.is_inline() {
-        return;
-    }
-    pool.tree_stack.size = 0;
-
-    debug_assert!((*self_.ptr).ref_count > 0);
-    let ref_count = ptr::addr_of!((*self_.ptr).ref_count).cast::<AtomicU32>();
-    if (*ref_count).fetch_sub(1, Ordering::SeqCst) == 1 {
-        array_push(&mut pool.tree_stack, subtree_to_mut_unsafe(self_));
-    }
-
-    while pool.tree_stack.size > 0 {
-        let tree = array_pop(&mut pool.tree_stack);
-        if (*tree.ptr).child_count > 0 {
-            let children = subtree_children_slice(subtree_from_mut(tree));
-            for child in children {
-                let child = *child;
-                if child.data.is_inline() {
-                    continue;
-                }
-                debug_assert!((*child.ptr).ref_count > 0);
-                let child_ref = ptr::addr_of!((*child.ptr).ref_count).cast::<AtomicU32>();
-                if (*child_ref).fetch_sub(1, Ordering::SeqCst) == 1 {
-                    array_push(&mut pool.tree_stack, subtree_to_mut_unsafe(child));
-                }
-            }
-            if !(*tree.ptr).arena_owned() {
-                free(children.as_ptr().cast_mut().cast::<c_void>());
-            }
-        } else {
-            if (*tree.ptr).has_external_tokens() {
-                let external_scanner_state =
-                    ptr::addr_of_mut!((*tree.ptr).data.external_scanner_state)
-                        .cast::<ExternalScannerState>();
-                external_scanner_state_delete(ptr_mut(external_scanner_state));
-            }
-            if !(*tree.ptr).arena_owned() {
-                subtree_pool_free(pool, tree);
-            }
+    stack.clear();
+    stack.push(root.into_mut());
+    while !stack.is_empty() {
+        let tree = stack.pop().into_immutable();
+        if tree.is_null() || tree.is_inline() {
+            continue;
+        }
+        let data = tree.heap_data(arena);
+        if data.parser_visited() {
+            data.mark_parser_shared();
+            continue;
+        }
+        data.set_parser_visited(true);
+        data.parser_shared.set(false);
+        for &child in tree.children(arena) {
+            stack.push(child.into_mut());
         }
     }
 }
 
-// ===========================================================================
-// Subtree tree-balancing / summarization
-// ===========================================================================
+pub(super) unsafe fn subtree_publish(arena: *mut SubtreeArena) {
+    storage::subtree_arena_publish(arena);
+}
 
 pub unsafe fn subtree_compress(
     self_: MutableSubtree,
+    arena: *mut SubtreeArena,
     count: u32,
     language: *const TSLanguage,
     stack: &mut MutableSubtreeArray,
@@ -1622,149 +651,144 @@ pub unsafe fn subtree_compress(
     let initial_stack_size = stack.size;
 
     let mut tree = self_;
-    let symbol = (*tree.ptr).symbol;
+    let symbol = tree.heap_data(arena).symbol;
     for _ in 0..count {
-        if (*tree.ptr).ref_count > 1 || (*tree.ptr).child_count < 2 {
+        if tree.into_immutable().shared(arena) || tree.heap_data(arena).child_count < 2 {
             break;
         }
 
-        let child = subtree_to_mut_unsafe(mutable_subtree_child(tree, 0));
-        if child.data.is_inline()
-            || (*child.ptr).child_count < 2
-            || (*child.ptr).ref_count > 1
-            || (*child.ptr).symbol != symbol
+        let mut child = tree.child(arena, 0).into_mut();
+        if child.is_inline()
+            || child.heap_data(arena).child_count < 2
+            || child.into_immutable().shared(arena)
+            || child.heap_data(arena).symbol != symbol
         {
             break;
         }
 
-        let grandchild = subtree_to_mut_unsafe(mutable_subtree_child(child, 0));
-        if grandchild.data.is_inline()
-            || (*grandchild.ptr).child_count < 2
-            || (*grandchild.ptr).ref_count > 1
-            || (*grandchild.ptr).symbol != symbol
+        let mut grandchild = child.child(arena, 0).into_mut();
+        if grandchild.is_inline()
+            || grandchild.heap_data(arena).child_count < 2
+            || grandchild.into_immutable().shared(arena)
+            || grandchild.heap_data(arena).symbol != symbol
         {
             break;
         }
 
         // Rotate: tree[0] = grandchild, child[0] = grandchild[last], grandchild[last] = child
-        let gc_last = (*grandchild.ptr).child_count as usize - 1;
-        *mutable_subtree_child_mut(tree, 0) = subtree_from_mut(grandchild);
-        *mutable_subtree_child_mut(child, 0) = mutable_subtree_child(grandchild, gc_last);
-        *mutable_subtree_child_mut(grandchild, gc_last) = subtree_from_mut(child);
-        array_push(stack, tree);
+        let gc_last = grandchild.heap_data(arena).child_count as usize - 1;
+        *tree.child_mut(arena, 0) = grandchild.into_immutable();
+        *child.child_mut(arena, 0) = grandchild.child(arena, gc_last);
+        *grandchild.child_mut(arena, gc_last) = child.into_immutable();
+        stack.push(tree);
         tree = grandchild;
     }
 
     while stack.size > initial_stack_size {
-        tree = array_pop(stack);
-        let child = subtree_to_mut_unsafe(mutable_subtree_child(tree, 0));
-        let grandchild = subtree_to_mut_unsafe(mutable_subtree_child(
-            child,
-            (*child.ptr).child_count as usize - 1,
-        ));
-        subtree_summarize_children(grandchild, language);
-        subtree_summarize_children(child, language);
-        subtree_summarize_children(tree, language);
+        tree = stack.pop();
+        let child = tree.child(arena, 0).into_mut();
+        let grandchild = child
+            .child(arena, child.heap_data(arena).child_count as usize - 1)
+            .into_mut();
+        subtree_summarize_children(grandchild, arena, language);
+        subtree_summarize_children(child, arena, language);
+        subtree_summarize_children(tree, arena, language);
     }
 }
 
-pub unsafe fn subtree_summarize_children(self_: MutableSubtree, language: *const TSLanguage) {
-    debug_assert!(!self_.data.is_inline());
+pub unsafe fn subtree_summarize_children(
+    mut self_: MutableSubtree,
+    arena: *mut SubtreeArena,
+    language: *const TSLanguage,
+) {
+    debug_assert!(!self_.is_inline());
 
-    let data = mutable_subtree_data_mut(self_);
-    data.data.children.named_child_count = 0;
-    data.data.children.visible_child_count = 0;
+    let immutable_tree = self_.into_immutable();
+    let children = immutable_tree.children(arena);
+    let data = self_.heap_data_mut(arena);
+    data.children_mut().named_child_count = 0;
+    data.children_mut().visible_child_count = 0;
     data.error_cost = 0;
-    data.data.children.repeat_depth = 0;
-    data.data.children.visible_descendant_count = 0;
+    data.children_mut().repeat_depth = 0;
+    data.children_mut().visible_descendant_count = 0;
     data.set_has_external_tokens(false);
-    data.set_depends_on_column(false);
     data.set_has_external_scanner_state_change(false);
-    data.data.children.dynamic_precedence = 0;
+    data.children_mut().dynamic_precedence = 0;
 
     let mut structural_index: u32 = 0;
     let alias_sequence =
-        language_alias_sequence(language, u32::from(data.data.children.production_id));
+        language_alias_sequence_slice(language, u32::from(data.children().production_id));
     let mut lookahead_end_byte: u32 = 0;
 
-    let children = subtree_children_slice(subtree_from_mut(self_));
     for (i, child) in children.iter().copied().enumerate() {
         let i = i as u32;
+        let child = subtree_resolve_for_reduction(child, arena);
 
-        if data.size.extent.row == 0 && subtree_depends_on_column(child) {
-            data.set_depends_on_column(true);
-        }
-
-        if subtree_has_external_scanner_state_change(child) {
+        if child.has_external_scanner_state_change {
             data.set_has_external_scanner_state_change(true);
         }
 
         if i == 0 {
-            data.padding = subtree_padding(child);
-            data.size = subtree_size(child);
+            data.padding = child.padding;
+            data.size = child.size;
         } else {
-            data.size = length_add(data.size, subtree_total_size(child));
+            data.size = length_add(data.size, length_add(child.padding, child.size));
         }
 
-        let child_lookahead_end_byte =
-            data.padding.bytes + data.size.bytes + subtree_lookahead_bytes(child);
+        let child_lookahead_end_byte = data.padding.bytes + data.size.bytes + child.lookahead_bytes;
         if child_lookahead_end_byte > lookahead_end_byte {
             lookahead_end_byte = child_lookahead_end_byte;
         }
 
-        if subtree_symbol(child) != TS_BUILTIN_SYM_ERROR_REPEAT {
-            data.error_cost += subtree_error_cost(child);
+        if child.symbol != TS_BUILTIN_SYM_ERROR_REPEAT {
+            data.error_cost += child.error_cost;
         }
 
-        let grandchild_count = subtree_child_count(child);
+        let grandchild_count = child.child_count;
         if (data.symbol == TS_BUILTIN_SYM_ERROR || data.symbol == TS_BUILTIN_SYM_ERROR_REPEAT)
-            && !subtree_extra(child)
-            && !(subtree_is_error(child) && grandchild_count == 0)
+            && !child.extra
+            && !(child.symbol == TS_BUILTIN_SYM_ERROR && grandchild_count == 0)
         {
-            if subtree_visible(child) {
+            if child.visible {
                 data.error_cost += ERROR_COST_PER_SKIPPED_TREE;
             } else if grandchild_count > 0 {
-                data.error_cost +=
-                    ERROR_COST_PER_SKIPPED_TREE * (*child.ptr).data.children.visible_child_count;
+                data.error_cost += ERROR_COST_PER_SKIPPED_TREE * child.visible_child_count;
             }
         }
 
-        data.data.children.dynamic_precedence += subtree_dynamic_precedence(child);
-        data.data.children.visible_descendant_count += subtree_visible_descendant_count(child);
+        data.children_mut().dynamic_precedence += child.dynamic_precedence;
+        data.children_mut().visible_descendant_count += child.visible_descendant_count;
 
-        if !subtree_extra(child)
-            && subtree_symbol(child) != 0
-            && !alias_sequence.is_null()
-            && *alias_sequence.add(structural_index as usize) != 0
-        {
-            data.data.children.visible_descendant_count += 1;
-            data.data.children.visible_child_count += 1;
-            if ts_language_symbol_metadata(language, *alias_sequence.add(structural_index as usize))
-                .named
-            {
-                data.data.children.named_child_count += 1;
+        let alias_symbol = alias_sequence
+            .get(structural_index as usize)
+            .copied()
+            .unwrap_or(0);
+        if !child.extra && child.symbol != 0 && alias_symbol != 0 {
+            data.children_mut().visible_descendant_count += 1;
+            data.children_mut().visible_child_count += 1;
+            if ts_language_symbol_metadata(language, alias_symbol).named {
+                data.children_mut().named_child_count += 1;
             }
-        } else if subtree_visible(child) {
-            data.data.children.visible_descendant_count += 1;
-            data.data.children.visible_child_count += 1;
-            if subtree_named(child) {
-                data.data.children.named_child_count += 1;
+        } else if child.visible {
+            data.children_mut().visible_descendant_count += 1;
+            data.children_mut().visible_child_count += 1;
+            if child.named {
+                data.children_mut().named_child_count += 1;
             }
         } else if grandchild_count > 0 {
-            data.data.children.visible_child_count +=
-                (*child.ptr).data.children.visible_child_count;
-            data.data.children.named_child_count += (*child.ptr).data.children.named_child_count;
+            data.children_mut().visible_child_count += child.visible_child_count;
+            data.children_mut().named_child_count += child.named_child_count;
         }
 
-        if subtree_has_external_tokens(child) {
+        if child.has_external_tokens {
             data.set_has_external_tokens(true);
         }
 
-        if subtree_is_error(child) {
+        if child.symbol == TS_BUILTIN_SYM_ERROR {
             data.parse_state = TS_TREE_STATE_NONE;
         }
 
-        if !subtree_extra(child) {
+        if !child.extra {
             structural_index += 1;
         }
     }
@@ -1784,33 +808,32 @@ pub unsafe fn subtree_summarize_children(self_: MutableSubtree, language: *const
         if data.child_count >= 2
             && !data.visible()
             && !data.named()
-            && subtree_symbol(first_child) == data.symbol
+            && first_child.symbol(arena) == data.symbol
         {
-            if subtree_repeat_depth(first_child) > subtree_repeat_depth(last_child) {
-                data.data.children.repeat_depth = (subtree_repeat_depth(first_child) + 1) as u16;
+            if first_child.repeat_depth(arena) > last_child.repeat_depth(arena) {
+                data.children_mut().repeat_depth = (first_child.repeat_depth(arena) + 1) as u16;
             } else {
-                data.data.children.repeat_depth = (subtree_repeat_depth(last_child) + 1) as u16;
+                data.children_mut().repeat_depth = (last_child.repeat_depth(arena) + 1) as u16;
             }
         }
     }
 }
 
-// ===========================================================================
-// Subtree comparison / query
-// ===========================================================================
+// Subtree comparison and editing
 
 pub unsafe fn subtree_compare(left: Subtree, right: Subtree, pool: &mut SubtreePool) -> i32 {
-    array_push(&mut pool.tree_stack, subtree_to_mut_unsafe(left));
-    array_push(&mut pool.tree_stack, subtree_to_mut_unsafe(right));
+    let arena = pool.arena();
+    pool.tree_stack.push(left.into_mut());
+    pool.tree_stack.push(right.into_mut());
 
     while pool.tree_stack.size > 0 {
-        let right = subtree_from_mut(array_pop(&mut pool.tree_stack));
-        let left = subtree_from_mut(array_pop(&mut pool.tree_stack));
+        let right = pool.tree_stack.pop().into_immutable();
+        let left = pool.tree_stack.pop().into_immutable();
 
-        let left_symbol = subtree_symbol(left);
-        let right_symbol = subtree_symbol(right);
-        let left_child_count = subtree_child_count(left);
-        let right_child_count = subtree_child_count(right);
+        let left_symbol = left.symbol(arena);
+        let right_symbol = right.symbol(arena);
+        let left_child_count = left.child_count(arena);
+        let right_child_count = right.child_count(arena);
 
         let mut result = 0i32;
         if left_symbol < right_symbol {
@@ -1827,569 +850,142 @@ pub unsafe fn subtree_compare(left: Subtree, right: Subtree, pool: &mut SubtreeP
             return result;
         }
 
-        let left_children = subtree_children_slice(left);
-        let right_children = subtree_children_slice(right);
+        let left_children = left.children(arena);
+        let right_children = right.children(arena);
         let mut i = left_child_count;
         while i > 0 {
             i -= 1;
             let left_child = *left_children.get_unchecked(i as usize);
             let right_child = *right_children.get_unchecked(i as usize);
-            array_push(&mut pool.tree_stack, subtree_to_mut_unsafe(left_child));
-            array_push(&mut pool.tree_stack, subtree_to_mut_unsafe(right_child));
+            pool.tree_stack.push(left_child.into_mut());
+            pool.tree_stack.push(right_child.into_mut());
         }
     }
 
     0
 }
 
-pub unsafe fn subtree_edit(
-    mut self_: Subtree,
-    input_edit: &TSInputEdit,
-    pool: &mut SubtreePool,
-) -> Subtree {
-    struct EditEntry {
-        tree: *mut Subtree,
-        edit: Edit,
-    }
+mod edit;
+pub use edit::subtree_edit;
 
-    let mut stack: Vec<EditEntry> = Vec::new();
-    stack.push(EditEntry {
-        tree: core::ptr::addr_of_mut!(self_),
-        edit: Edit {
-            start: Length {
-                bytes: input_edit.start_byte,
-                extent: input_edit.start_point,
-            },
-            old_end: Length {
-                bytes: input_edit.old_end_byte,
-                extent: input_edit.old_end_point,
-            },
-            new_end: Length {
-                bytes: input_edit.new_end_byte,
-                extent: input_edit.new_end_point,
-            },
-        },
-    });
-
-    while let Some(entry) = stack.pop() {
-        let mut edit = entry.edit;
-        let is_noop =
-            edit.old_end.bytes == edit.start.bytes && edit.new_end.bytes == edit.start.bytes;
-        let is_pure_insertion = edit.old_end.bytes == edit.start.bytes;
-        let parent_depends_on_column = subtree_depends_on_column(*entry.tree);
-        let column_shifted = edit.new_end.extent.column != edit.old_end.extent.column;
-
-        let mut size = subtree_size(*entry.tree);
-        let mut padding = subtree_padding(*entry.tree);
-        let total_size = length_add(padding, size);
-        let lookahead_bytes = subtree_lookahead_bytes(*entry.tree);
-        let end_byte = total_size.bytes + lookahead_bytes;
-        if edit.start.bytes > end_byte || (is_noop && edit.start.bytes == end_byte) {
-            continue;
-        }
-
-        // Edit is entirely within the space before this subtree
-        if edit.old_end.bytes <= padding.bytes {
-            padding = length_add(edit.new_end, length_sub(padding, edit.old_end));
-        }
-        // Edit starts before and extends into this subtree
-        else if edit.start.bytes < padding.bytes {
-            size = length_saturating_sub(size, length_sub(edit.old_end, padding));
-            padding = edit.new_end;
-        }
-        // Edit is within this subtree
-        else if edit.start.bytes < total_size.bytes
-            || (edit.start.bytes == total_size.bytes && is_pure_insertion)
-        {
-            size = length_add(
-                length_sub(edit.new_end, padding),
-                length_saturating_sub(total_size, edit.old_end),
-            );
-        }
-
-        let mut result = subtree_make_mut(pool, *entry.tree);
-
-        if result.data.is_inline() {
-            if subtree_can_inline(padding, size, lookahead_bytes) {
-                result.data.padding_bytes = padding.bytes as u8;
-                result.data.set_padding_rows(padding.extent.row as u8);
-                result.data.padding_columns = padding.extent.column as u8;
-                result.data.size_bytes = size.bytes as u8;
-            } else {
-                // Promote inline node to heap
-                let data = subtree_pool_allocate(pool);
-                *data = SubtreeHeapData {
-                    ref_count: 1,
-                    padding,
-                    size,
-                    lookahead_bytes,
-                    error_cost: 0,
-                    child_count: 0,
-                    symbol: TSSymbol::from(result.data.symbol),
-                    parse_state: result.data.parse_state,
-                    flags: SubtreeHeapData::make_flags(
-                        result.data.visible(),
-                        result.data.named(),
-                        result.data.extra(),
-                        false,
-                        false,
-                        false,
-                        false,
-                        result.data.is_missing(),
-                        result.data.is_keyword(),
-                    ),
-                    data: SubtreeHeapDataContent { lookahead_char: 0 },
-                };
-                result.ptr = data;
-            }
-        } else {
-            (*result.ptr).padding = padding;
-            (*result.ptr).size = size;
-        }
-
-        subtree_set_has_changes(&mut result);
-        *entry.tree = subtree_from_mut(result);
-
-        let mut child_right = length_zero();
-        let n = subtree_child_count(*entry.tree);
-        let children = subtree_children_slice(*entry.tree);
-        for i in 0..n {
-            let child = children.get_unchecked(i as usize);
-            let child_size = subtree_total_size(*child);
-            let child_left = child_right;
-            child_right = length_add(child_left, child_size);
-
-            // If this child ends before the edit, it is not affected.
-            if child_right.bytes + subtree_lookahead_bytes(*child) < edit.start.bytes {
-                continue;
-            }
-
-            // Keep editing child nodes until a node is reached that starts after the edit.
-            if ((child_left.bytes > edit.old_end.bytes)
-                || (child_left.bytes == edit.old_end.bytes && child_size.bytes > 0 && i > 0))
-                && (!parent_depends_on_column || child_left.extent.row > padding.extent.row)
-                && (!subtree_depends_on_column(*child)
-                    || !column_shifted
-                    || child_left.extent.row > edit.old_end.extent.row)
-            {
-                break;
-            }
-
-            // Transform edit into the child's coordinate space.
-            let mut child_edit = Edit {
-                start: length_saturating_sub(edit.start, child_left),
-                old_end: length_saturating_sub(edit.old_end, child_left),
-                new_end: length_saturating_sub(edit.new_end, child_left),
-            };
-
-            // Interpret all inserted text as applying to the *first* child that touches the edit.
-            if child_right.bytes > edit.start.bytes
-                || (child_right.bytes == edit.start.bytes && is_pure_insertion)
-            {
-                edit.new_end = edit.start;
-            } else {
-                child_edit.old_end = child_edit.start;
-                child_edit.new_end = child_edit.start;
-            }
-
-            stack.push(EditEntry {
-                tree: ptr::from_ref(child).cast_mut(),
-                edit: child_edit,
-            });
-        }
-    }
-
-    self_
-}
-
-pub unsafe fn subtree_last_external_token(mut tree: Subtree) -> Subtree {
-    if !subtree_has_external_tokens(tree) {
-        return NULL_SUBTREE;
-    }
-    loop {
-        let data = subtree_data_ref(tree);
-        if data.child_count == 0 {
-            break;
-        }
-        let children = subtree_children_slice(tree);
-        let mut i = data.child_count as usize;
-        while i > 0 {
-            i -= 1;
-            let child = *children.get_unchecked(i);
-            if subtree_has_external_tokens(child) {
-                tree = child;
-                break;
-            }
-        }
-    }
-    tree
-}
-
-pub unsafe fn subtree_external_scanner_state(self_: &Subtree) -> &ExternalScannerState {
-    if self_.ptr.is_null() || self_.data.is_inline() {
-        return &EMPTY_EXTERNAL_SCANNER_STATE;
-    }
-
-    let data = subtree_data_ref(*self_);
-    if data.has_external_tokens() && data.child_count == 0 {
-        &data.data.external_scanner_state
-    } else {
-        &EMPTY_EXTERNAL_SCANNER_STATE
-    }
-}
-
-pub unsafe fn subtree_external_scanner_state_eq(self_: &Subtree, other: &Subtree) -> bool {
-    let state_self = subtree_external_scanner_state(self_);
-    let state_other = subtree_external_scanner_state(other);
-    external_scanner_state_eq(
-        state_self,
-        external_scanner_state_data(state_other),
-        state_other.length,
-    )
-}
-
-// ===========================================================================
-// Subtree string / debug output
-// ===========================================================================
-
-extern "C" {
-    fn snprintf(s: *mut i8, n: usize, format: *const i8, ...) -> i32;
-    fn fprintf(f: *mut c_void, format: *const i8, ...) -> i32;
-}
-
-static ROOT_FIELD: &[u8; 9] = b"__ROOT__\0";
-
-unsafe fn subtree_write_char_to_string(s: *mut i8, n: usize, chr: i32) -> usize {
-    if chr == -1 {
-        snprintf(s, n, c"INVALID".as_ptr().cast::<i8>()) as usize
-    } else if chr == 0 {
-        snprintf(s, n, c"'\\0'".as_ptr().cast::<i8>()) as usize
-    } else if chr == i32::from(b'\n') {
-        snprintf(s, n, c"'\\n'".as_ptr().cast::<i8>()) as usize
-    } else if chr == i32::from(b'\t') {
-        snprintf(s, n, c"'\\t'".as_ptr().cast::<i8>()) as usize
-    } else if chr == i32::from(b'\r') {
-        snprintf(s, n, c"'\\r'".as_ptr().cast::<i8>()) as usize
-    } else if (0x20..0x7F).contains(&chr) {
-        snprintf(s, n, c"'%c'".as_ptr().cast::<i8>(), chr) as usize
-    } else {
-        snprintf(s, n, c"%d".as_ptr().cast::<i8>(), chr) as usize
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-unsafe fn subtree_write_to_string(
-    self_: Subtree,
-    string: *mut i8,
-    limit: usize,
-    language: *const TSLanguage,
-    include_all: bool,
-    alias_symbol: TSSymbol,
-    alias_is_named: bool,
-    field_name: *const i8,
-) -> usize {
-    if self_.ptr.is_null() {
-        return snprintf(string, limit, c"(NULL)".as_ptr().cast::<i8>()) as usize;
-    }
-
-    let mut cursor = string;
-    let mut string_measuring = string;
-    let writer: *mut *mut i8 = if limit > 1 {
-        &mut cursor
-    } else {
-        &mut string_measuring
-    };
-    let is_root = field_name == ROOT_FIELD.as_ptr().cast::<i8>();
-    let is_visible = include_all
-        || subtree_missing(self_)
-        || (if alias_symbol != 0 {
-            alias_is_named
-        } else {
-            subtree_visible(self_) && subtree_named(self_)
-        });
-
-    if is_visible {
-        if !is_root {
-            cursor = cursor.add(snprintf(*writer, limit, c" ".as_ptr().cast::<i8>()) as usize);
-            if !field_name.is_null() {
-                cursor =
-                    cursor.add(
-                        snprintf(*writer, limit, c"%s: ".as_ptr().cast::<i8>(), field_name)
-                            as usize,
-                    );
-            }
-        }
-
-        if subtree_is_error(self_) && subtree_child_count(self_) == 0 && (*self_.ptr).size.bytes > 0
-        {
-            cursor = cursor
-                .add(snprintf(*writer, limit, c"(UNEXPECTED ".as_ptr().cast::<i8>()) as usize);
-            cursor = cursor.add(subtree_write_char_to_string(
-                *writer,
-                limit,
-                (*self_.ptr).data.lookahead_char,
-            ));
-        } else {
-            let symbol = if alias_symbol != 0 {
-                alias_symbol
-            } else {
-                subtree_symbol(self_)
-            };
-            let symbol_name = ts_language_symbol_name(language, symbol);
-            if subtree_missing(self_) {
-                cursor = cursor
-                    .add(snprintf(*writer, limit, c"(MISSING ".as_ptr().cast::<i8>()) as usize);
-                if alias_is_named || subtree_named(self_) {
-                    cursor = cursor.add(snprintf(
-                        *writer,
-                        limit,
-                        c"%s".as_ptr().cast::<i8>(),
-                        symbol_name,
-                    ) as usize);
-                } else {
-                    cursor = cursor.add(snprintf(
-                        *writer,
-                        limit,
-                        c"\"%s\"".as_ptr().cast::<i8>(),
-                        symbol_name,
-                    ) as usize);
-                }
-            } else {
-                cursor =
-                    cursor.add(
-                        snprintf(*writer, limit, c"(%s".as_ptr().cast::<i8>(), symbol_name)
-                            as usize,
-                    );
-            }
-        }
-    } else if is_root {
-        let symbol = if alias_symbol != 0 {
-            alias_symbol
-        } else {
-            subtree_symbol(self_)
-        };
-        let symbol_name = ts_language_symbol_name(language, symbol);
-        if subtree_child_count(self_) > 0 {
-            cursor = cursor
-                .add(snprintf(*writer, limit, c"(%s".as_ptr().cast::<i8>(), symbol_name) as usize);
-        } else if subtree_named(self_) {
-            cursor = cursor
-                .add(snprintf(*writer, limit, c"(%s)".as_ptr().cast::<i8>(), symbol_name) as usize);
-        } else {
-            cursor = cursor.add(snprintf(
-                *writer,
-                limit,
-                c"(\"%s\")".as_ptr().cast::<i8>(),
-                symbol_name,
-            ) as usize);
-        }
-    }
-
-    if subtree_child_count(self_) > 0 {
-        let alias_sequence = language_alias_sequence(
-            language,
-            u32::from((*self_.ptr).data.children.production_id),
-        );
-        let mut field_map: *const TSFieldMapEntry = ptr::null();
-        let mut field_map_end: *const TSFieldMapEntry = ptr::null();
-        language_field_map(
-            language,
-            u32::from((*self_.ptr).data.children.production_id),
-            &mut field_map,
-            &mut field_map_end,
-        );
-
-        let mut structural_child_index: u32 = 0;
-        for child in subtree_children_slice(self_) {
-            let child = *child;
-            if subtree_extra(child) {
-                cursor = cursor.add(subtree_write_to_string(
-                    child,
-                    *writer,
-                    limit,
-                    language,
-                    include_all,
-                    0,
-                    false,
-                    ptr::null(),
-                ));
-            } else {
-                let subtree_alias_symbol = if !alias_sequence.is_null() {
-                    *alias_sequence.add(structural_child_index as usize)
-                } else {
-                    0
-                };
-                let subtree_alias_is_named = if subtree_alias_symbol != 0 {
-                    ts_language_symbol_metadata(language, subtree_alias_symbol).named
-                } else {
-                    false
-                };
-
-                let mut child_field_name: *const i8 =
-                    if is_visible { ptr::null() } else { field_name };
-                let mut map = field_map;
-                while map < field_map_end {
-                    if !(*map).inherited && (*map).child_index == structural_child_index as u8 {
-                        let lang = language_full(language);
-                        child_field_name = *lang.field_names.add((*map).field_id as usize);
-                        break;
-                    }
-                    map = map.add(1);
-                }
-
-                cursor = cursor.add(subtree_write_to_string(
-                    child,
-                    *writer,
-                    limit,
-                    language,
-                    include_all,
-                    subtree_alias_symbol,
-                    subtree_alias_is_named,
-                    child_field_name,
-                ));
-                structural_child_index += 1;
-            }
-        }
-    }
-
-    if is_visible {
-        cursor = cursor.add(snprintf(*writer, limit, c")".as_ptr().cast::<i8>()) as usize);
-    }
-
-    cursor as usize - string as usize
-}
-
-pub unsafe fn subtree_string(
-    self_: Subtree,
-    alias_symbol: TSSymbol,
-    alias_is_named: bool,
-    language: *const TSLanguage,
-    include_all: bool,
-) -> *mut i8 {
-    let mut scratch_string: [i8; 1] = [0];
-    let size = subtree_write_to_string(
-        self_,
-        scratch_string.as_mut_ptr(),
-        1,
-        language,
-        include_all,
-        alias_symbol,
-        alias_is_named,
-        ROOT_FIELD.as_ptr().cast::<i8>(),
-    ) + 1;
-    let result = malloc(size).cast::<i8>();
-    subtree_write_to_string(
-        self_,
-        result,
-        size,
-        language,
-        include_all,
-        alias_symbol,
-        alias_is_named,
-        ROOT_FIELD.as_ptr().cast::<i8>(),
-    );
-    result
-}
-
-unsafe fn subtree_print_dot_graph_recursive(
-    self_: *const Subtree,
-    start_offset: u32,
-    language: *const TSLanguage,
-    alias_symbol: TSSymbol,
-    f: *mut c_void,
-) {
-    let tree = *self_;
-    let subtree_symbol = subtree_symbol(tree);
-    let symbol = if alias_symbol != 0 {
-        alias_symbol
-    } else {
-        subtree_symbol
-    };
-    let end_offset = start_offset + subtree_total_bytes(tree);
-    fprintf(
-        f,
-        c"tree_%p [label=\"".as_ptr().cast::<i8>(),
-        self_.cast::<c_void>(),
-    );
-    language_write_symbol_as_dot_string(language, f, symbol);
-    fprintf(f, c"\"".as_ptr().cast::<i8>());
-
-    if subtree_child_count(tree) == 0 {
-        fprintf(f, c", shape=plaintext".as_ptr().cast::<i8>());
-    }
-    if subtree_extra(tree) {
-        fprintf(f, c", fontcolor=gray".as_ptr().cast::<i8>());
-    }
-    if subtree_has_changes(tree) {
-        fprintf(f, c", color=green, penwidth=2".as_ptr().cast::<i8>());
-    }
-
-    fprintf(
-        f,
-        c", tooltip=\"range: %u - %u\nstate: %d\nerror-cost: %u\nhas-changes: %u\ndepends-on-column: %u\ndescendant-count: %u\nrepeat-depth: %u\nlookahead-bytes: %u".as_ptr().cast::<i8>(),
-        start_offset,
-        end_offset,
-        i32::from(subtree_parse_state(tree)),
-        subtree_error_cost(tree),
-        u32::from(subtree_has_changes(tree)),
-        u32::from(subtree_depends_on_column(tree)),
-        subtree_visible_descendant_count(tree),
-        subtree_repeat_depth(tree),
-        subtree_lookahead_bytes(tree),
-    );
-
-    if subtree_is_error(tree)
-        && subtree_child_count(tree) == 0
-        && (*tree.ptr).data.lookahead_char != 0
-    {
-        fprintf(
-            f,
-            c"\ncharacter: '%c'".as_ptr().cast::<i8>(),
-            (*tree.ptr).data.lookahead_char,
-        );
-    }
-
-    fprintf(f, c"\"]\n".as_ptr().cast::<i8>());
-
-    let mut child_start_offset = start_offset;
-    let lang = language_full(language);
-    let mut child_info_offset =
-        u32::from(lang.max_alias_sequence_length) * u32::from(subtree_production_id(tree));
-    for (i, child) in subtree_children_slice(tree).iter().enumerate() {
-        let child_ptr = ptr::from_ref(child);
-        let mut subtree_alias_symbol: TSSymbol = 0;
-        if !subtree_extra(*child) && child_info_offset != 0 {
-            subtree_alias_symbol = *lang.alias_sequences.add(child_info_offset as usize);
-            child_info_offset += 1;
-        }
-        subtree_print_dot_graph_recursive(
-            child_ptr,
-            child_start_offset,
-            language,
-            subtree_alias_symbol,
-            f,
-        );
-        fprintf(
-            f,
-            c"tree_%p -> tree_%p [tooltip=%u]\n".as_ptr().cast::<i8>(),
-            self_.cast::<c_void>(),
-            child_ptr.cast::<c_void>(),
-            i,
-        );
-        child_start_offset += subtree_total_bytes(*child);
-    }
-}
-
-pub unsafe fn subtree_print_dot_graph(self_: Subtree, language: *const TSLanguage, f: *mut c_void) {
-    fprintf(f, c"digraph tree {\n".as_ptr().cast::<i8>());
-    fprintf(f, c"edge [arrowhead=none]\n".as_ptr().cast::<i8>());
-    subtree_print_dot_graph_recursive(core::ptr::addr_of!(self_), 0, language, 0, f);
-    fprintf(f, c"}\n".as_ptr().cast::<i8>());
-}
+mod debug;
+pub use debug::{subtree_print_dot_graph, subtree_string};
 
 #[cfg(test)]
 mod tests {
+    use core::ptr;
+
     use super::*;
+    use crate::ffi::{TSInputEdit, TSPoint};
+
+    unsafe fn inline_leaf(pool: &mut SubtreePool, size: u8) -> Subtree {
+        let data = subtree_pool_allocate_inline(pool);
+        data.as_ptr().write(SubtreeInlineData {
+            flags: INLINE_IS_INLINE | INLINE_VISIBLE | INLINE_NAMED,
+            symbol: 1,
+            parse_state: 1,
+            padding_columns: 0,
+            rows_and_lookahead: 0,
+            padding_bytes: 0,
+            size_bytes: size,
+        });
+        Subtree::from_inline(pool.arena(), data)
+    }
+
+    fn insertion(at: u32, size: u32) -> TSInputEdit {
+        TSInputEdit {
+            start_byte: at,
+            old_end_byte: at,
+            new_end_byte: at + size,
+            start_point: TSPoint { row: 0, column: at },
+            old_end_point: TSPoint { row: 0, column: at },
+            new_end_point: TSPoint {
+                row: 0,
+                column: at + size,
+            },
+        }
+    }
+
+    #[test]
+    fn edit_keeps_small_leaf_inline() {
+        unsafe {
+            let mut pool = subtree_pool_new(4);
+            let leaf = inline_leaf(&mut pool, 5);
+            let tree = subtree_edit(leaf, &insertion(2, 1), &mut pool);
+            let arena = pool.arena();
+
+            assert!(tree.is_inline());
+            assert_eq!(tree.size(arena).bytes, 6);
+            assert!(tree.has_changes(arena));
+
+            subtree_pool_delete(&mut pool);
+        }
+    }
+
+    #[test]
+    fn edit_promotes_leaf_that_no_longer_fits_inline() {
+        unsafe {
+            let mut pool = subtree_pool_new(4);
+            let leaf = inline_leaf(&mut pool, 250);
+            let tree = subtree_edit(leaf, &insertion(2, 10), &mut pool);
+            let arena = pool.arena();
+
+            assert!(!tree.is_inline());
+            assert_eq!(tree.size(arena).bytes, 260);
+            assert!(tree.has_changes(arena));
+
+            tree.release(&mut pool);
+            subtree_pool_delete(&mut pool);
+        }
+    }
+
+    #[test]
+    fn edit_marks_the_affected_child() {
+        unsafe {
+            let mut pool = subtree_pool_new(4);
+            let mut children = SubtreeArray::new();
+            children.push(inline_leaf(&mut pool, 5));
+            children.push(inline_leaf(&mut pool, 5));
+            let parent =
+                subtree_new_node(&mut pool, TS_BUILTIN_SYM_ERROR, children, 0, ptr::null())
+                    .into_immutable();
+
+            let tree = subtree_edit(parent, &insertion(2, 1), &mut pool);
+            let arena = pool.arena();
+            assert!(tree.has_changes(arena));
+            assert!((*tree.child(arena, 0)).has_changes(arena));
+            assert!(!(*tree.child(arena, 1)).has_changes(arena));
+
+            tree.release(&mut pool);
+            subtree_pool_delete(&mut pool);
+        }
+    }
+
+    #[test]
+    fn scratch_node_borrows_reusable_child_storage() {
+        unsafe {
+            let mut pool = subtree_pool_new(0);
+            let mut children = subtree_array_new(&mut pool);
+            children.push(inline_leaf(&mut pool, 2));
+            children.push(inline_leaf(&mut pool, 3));
+
+            let arena = pool.arena();
+            let first =
+                subtree_new_scratch_node(arena, TS_BUILTIN_SYM_ERROR, &mut children, ptr::null());
+            assert_eq!(first.child_count(arena), 2);
+
+            children.clear();
+            children.push(inline_leaf(&mut pool, 4));
+            let arena = pool.arena();
+            let second =
+                subtree_new_scratch_node(arena, TS_BUILTIN_SYM_ERROR, &mut children, ptr::null());
+            assert_eq!(second.child_count(arena), 1);
+            assert_eq!(second.child(arena, 0).size(arena).bytes, 4);
+
+            children.delete();
+            subtree_pool_delete(&mut pool);
+        }
+    }
 
     #[test]
     fn new_node_owns_child_array_until_release() {
@@ -2414,26 +1010,235 @@ mod tests {
                 ptr::null(),
             );
 
-            let mut children = array_new();
-            array_push(&mut children, child1);
-            array_push(&mut children, child2);
+            let mut children = SubtreeArray::new();
+            children.push(child1);
+            children.push(child2);
 
-            let parent =
-                subtree_new_node(TS_BUILTIN_SYM_ERROR_REPEAT, &mut children, 0, ptr::null());
-            let parent_tree = subtree_from_mut(parent);
+            let parent = subtree_new_node(
+                &mut pool,
+                TS_BUILTIN_SYM_ERROR_REPEAT,
+                children,
+                0,
+                ptr::null(),
+            );
+            let parent_tree = parent.into_immutable();
+            let arena = pool.arena();
 
-            assert_eq!(subtree_child_count(parent_tree), 2);
-            assert_eq!(subtree_children_slice(parent_tree).len(), 2);
+            assert_eq!(parent_tree.child_count(arena), 2);
+            assert_eq!(parent_tree.children(arena).len(), 2);
             assert_eq!(
-                subtree_symbol(subtree_children_slice(parent_tree)[0]),
+                parent_tree.children(arena)[0].symbol(arena),
                 TS_BUILTIN_SYM_ERROR
             );
             assert_eq!(
-                subtree_symbol(subtree_children_slice(parent_tree)[1]),
+                parent_tree.children(arena)[1].symbol(arena),
                 TS_BUILTIN_SYM_ERROR
             );
 
-            subtree_release(&mut pool, parent_tree);
+            parent_tree.release(&mut pool);
+            subtree_pool_delete(&mut pool);
+        }
+    }
+
+    #[test]
+    fn arena_indexes_and_arrays_survive_relocation_and_growth() {
+        unsafe {
+            let mut pool = subtree_pool_new(0);
+            let first = inline_leaf(&mut pool, 7);
+            let scanner_bytes = [0x5a; 96];
+            let scanner_state = ExternalScannerState::from_bytes(&mut pool, &scanner_bytes);
+
+            let mut children = subtree_array_new(&mut pool);
+            children.push(first);
+            children.push(inline_leaf(&mut pool, 9));
+
+            // Heap-backed parser scratch may be spliced into an arena-backed
+            // transferable child array. Source detection must not perform
+            // arena-relative arithmetic for this ordinary pointer.
+            let mut heap_source = SubtreeArray::new();
+            heap_source.push(first);
+            children.splice(1, 0, 1, heap_source.as_slice().as_ptr());
+            assert!(children.as_slice()[1] == first);
+            heap_source.delete();
+
+            let original_arena = pool.arena();
+            storage::subtree_arena_force_relocation(&mut pool);
+            assert_ne!(pool.arena(), original_arena);
+            let arena = pool.arena();
+            assert_eq!(first.size(arena).bytes, 7);
+            assert_eq!(scanner_state.as_bytes(arena), scanner_bytes);
+            assert_eq!(children.as_slice()[2].size(arena).bytes, 9);
+
+            // Cross at least one geometric capacity boundary after all three
+            // persistent references above have been created. Derive the
+            // count from the configured initial capacity so this remains a
+            // growth test when that allocation quantum changes.
+            let allocation_count =
+                2 * storage::ARENA_INITIAL_CAPACITY / core::mem::size_of::<SubtreeInlineData>();
+            for size in 0..allocation_count {
+                let _ = inline_leaf(&mut pool, (size % 200) as u8);
+            }
+
+            let arena = pool.arena();
+            assert!((*arena).capacity > storage::ARENA_INITIAL_CAPACITY);
+            assert_eq!(first.size(arena).bytes, 7);
+            assert_eq!(scanner_state.as_bytes(arena), scanner_bytes);
+            assert!(children.as_slice()[0] == first);
+            assert_eq!(children.as_slice()[2].size(arena).bytes, 9);
+
+            children.delete();
+            subtree_pool_delete(&mut pool);
+        }
+    }
+
+    #[test]
+    fn exact_sharing_does_not_imply_shared_descendants() {
+        unsafe {
+            let mut pool = subtree_pool_new(0);
+            let mut descendant_children = SubtreeArray::new();
+            descendant_children.push(inline_leaf(&mut pool, 2));
+            let descendant = subtree_new_node(
+                &mut pool,
+                TS_BUILTIN_SYM_ERROR_REPEAT,
+                descendant_children,
+                0,
+                ptr::null(),
+            )
+            .into_immutable();
+
+            let mut shared_children = SubtreeArray::new();
+            shared_children.push(descendant);
+            let shared = subtree_new_node(
+                &mut pool,
+                TS_BUILTIN_SYM_ERROR_REPEAT,
+                shared_children,
+                0,
+                ptr::null(),
+            )
+            .into_immutable();
+            shared.retain(pool.arena());
+
+            let mut root_children = SubtreeArray::new();
+            root_children.push(shared);
+            root_children.push(shared);
+            let root = subtree_new_node(
+                &mut pool,
+                TS_BUILTIN_SYM_ERROR_REPEAT,
+                root_children,
+                0,
+                ptr::null(),
+            )
+            .into_immutable();
+
+            let mut traversal = MutableSubtreeArray::new();
+            subtree_prepare_for_balancing(root, pool.arena(), &mut traversal);
+
+            // The shared parent owns one physical child edge even though the
+            // parent itself is reachable twice. Balancing must therefore skip
+            // the whole shared subgraph instead of treating this child's own
+            // exact-sharing flag as permission to mutate it.
+            assert!(shared.shared(pool.arena()));
+            assert!(!descendant.shared(pool.arena()));
+
+            traversal.delete();
+            root.release(&mut pool);
+            subtree_pool_delete(&mut pool);
+        }
+    }
+
+    #[test]
+    fn released_heap_nodes_remain_in_the_slab_until_rewind() {
+        unsafe {
+            let mut pool = subtree_pool_new(0);
+            let first = subtree_new_error(
+                &mut pool,
+                b'a' as i32,
+                length_zero(),
+                length_zero(),
+                0,
+                0,
+                ptr::null(),
+            );
+            let arena = pool.arena();
+            let first_address = core::ptr::from_ref(first.heap_data(arena)).cast::<u8>();
+            assert!(storage::subtree_pool_contains(&pool, first_address));
+            let used_after_first = storage::subtree_pool_used_bytes(&pool);
+
+            first.release(&mut pool);
+            assert_eq!(storage::subtree_pool_used_bytes(&pool), used_after_first);
+
+            let second = subtree_new_error(
+                &mut pool,
+                b'b' as i32,
+                length_zero(),
+                length_zero(),
+                0,
+                0,
+                ptr::null(),
+            );
+            let second_address = core::ptr::from_ref(second.heap_data(arena)).cast::<u8>();
+            assert!(storage::subtree_pool_contains(&pool, second_address));
+            assert_ne!(first_address, second_address);
+            assert!(storage::subtree_pool_used_bytes(&pool) > used_after_first);
+
+            second.release(&mut pool);
+            subtree_pool_prepare_for_parse(&mut pool);
+            assert_eq!(storage::subtree_pool_used_bytes(&pool), 0);
+            subtree_pool_delete(&mut pool);
+        }
+    }
+
+    #[test]
+    fn arena_child_arrays_reuse_superseded_capacity() {
+        unsafe {
+            let mut pool = subtree_pool_new(0);
+            let mut first = subtree_array_new(&mut pool);
+            first.reserve(8);
+            let used_after_first = storage::subtree_pool_used_bytes(&pool);
+
+            first
+                .reserve((storage::ARENA_REUSE_THRESHOLD / core::mem::size_of::<Subtree>()) as u32);
+            let used_after_growth = storage::subtree_pool_used_bytes(&pool);
+            assert!(used_after_growth > used_after_first);
+
+            let mut second = subtree_array_new(&mut pool);
+            second.reserve(8);
+            assert_eq!(storage::subtree_pool_used_bytes(&pool), used_after_growth);
+
+            second.delete();
+            let mut third = subtree_array_new(&mut pool);
+            third.reserve(8);
+            assert_eq!(storage::subtree_pool_used_bytes(&pool), used_after_growth);
+
+            first.delete();
+            third.delete();
+            subtree_pool_delete(&mut pool);
+        }
+    }
+
+    #[test]
+    fn arena_child_array_self_splice_defers_block_reuse() {
+        unsafe {
+            let mut pool = subtree_pool_new(0);
+            let mut pressure = subtree_array_new(&mut pool);
+            pressure
+                .reserve((storage::ARENA_REUSE_THRESHOLD / core::mem::size_of::<Subtree>()) as u32);
+
+            let mut children = subtree_array_new(&mut pool);
+            for size in 1..=8 {
+                children.push(inline_leaf(&mut pool, size));
+            }
+            let source = children.as_slice().as_ptr();
+            children.splice(0, 0, 8, source);
+
+            let arena = pool.arena();
+            let expected = [1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8];
+            for (child, expected_size) in children.as_slice().iter().zip(expected) {
+                assert_eq!(child.size(arena).bytes, expected_size);
+            }
+
+            pressure.delete();
+            children.delete();
             subtree_pool_delete(&mut pool);
         }
     }

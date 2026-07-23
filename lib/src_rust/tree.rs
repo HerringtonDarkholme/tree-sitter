@@ -1,26 +1,39 @@
+//! Ownership and public operations for a complete syntax tree.
+//!
+//! [`TSTree`] owns one retained root [`Subtree`], the generated language that
+//! interprets its symbols, and the included ranges used to parse it. Deleting a
+//! tree releases the root hierarchy; lightweight [`TSNode`] and tree-cursor
+//! values borrow that storage and must not outlive it.
+//!
+//! This module implements tree lifecycle, copying, editing, root-node access,
+//! changed-range entry points, included-range access, and diagnostic DOT
+//! output. Tree navigation itself lives in `node` and `tree_cursor`, while the
+//! structural comparison algorithm lives in `get_changed_ranges`.
+
 use core::ffi::c_void;
 
 use crate::ffi::{TSLanguage, TSNode, TSPoint, TSRange};
 
 use super::alloc::{calloc, free, malloc};
 use super::get_changed_ranges::{
-    range_array_get_changed_ranges_ref, range_edit_ref, range_slice, subtree_get_changed_ranges_ref,
+    range_array_get_changed_ranges_ref, range_edit_ref, subtree_get_changed_ranges_ref,
 };
 use super::length::{length_add, Length};
 use super::node::node_new;
 use super::subtree::{
-    subtree_edit, subtree_padding, subtree_pool_delete, subtree_pool_new, subtree_release,
-    subtree_retain, tree_arena_release, tree_arena_retain, Subtree, TreeArena,
+    subtree_arena_release, subtree_arena_retain, subtree_edit, subtree_pool_clone_arena,
+    subtree_pool_delete, subtree_pool_from_arena, subtree_pool_retain_arena, subtree_publish,
+    Subtree, SubtreeArena,
 };
-// Only used by `tree_print_dot_graph_ref`, which is unavailable on wasm.
+// Only used by `TSTree::print_dot_graph`, which is unavailable on wasm.
 #[cfg(not(target_family = "wasm"))]
 use super::subtree::subtree_print_dot_graph;
 use super::tree_cursor::{tree_cursor_init_ref, TreeCursor};
-use super::utils::array_new;
+use super::utils::Array;
 use super::utils::{ptr_mut, ptr_ref};
 
 // ---------------------------------------------------------------------------
-// Extern C functions (still in C or other Rust modules)
+// Platform C-library functions used for DOT output.
 // ---------------------------------------------------------------------------
 
 #[cfg(not(target_family = "wasm"))]
@@ -45,170 +58,159 @@ use crate::ffi::TSInputEdit;
 
 /// Owned parse tree returned by the parser.
 ///
-/// The tree retains the root subtree, a copied language reference, the included
-/// ranges used for parsing, and optionally the arena that owns internal nodes
-/// created during the Rust parser's normal parse path.
-#[repr(C)]
+/// The tree retains the root subtree, a copied language reference, and the
+/// included ranges used for parsing. Public APIs expose only opaque pointers to
+/// trees, so this structure uses Rust layout.
 pub struct TSTree {
     /// Root syntax subtree, retained by the tree.
-    pub root: Subtree,
+    pub(super) root: Subtree,
+    /// Pointer-stable allocation containing all heap records reachable from
+    /// `root`. Tree copies retain this arena independently.
+    pub(super) arena: *mut SubtreeArena,
     /// Language used to parse this tree.
-    pub language: *const TSLanguage,
+    pub(super) language: *const TSLanguage,
     /// Copied included ranges for tree comparison and public APIs.
-    pub included_ranges: *mut TSRange,
-    /// Number of entries in `included_ranges`.
-    pub included_range_count: u32,
-    /// Shared arena for arena-owned internal nodes.
-    pub arena: *mut TreeArena,
+    pub(super) included_ranges: Array<TSRange>,
 }
 
-unsafe fn tree_init_ref(
-    tree: &mut TSTree,
-    root: Subtree,
-    language: *const TSLanguage,
-    included_ranges: &[TSRange],
-    arena: *mut TreeArena,
-) {
-    tree.root = root;
-    tree.language = language;
-    tree.included_range_count = included_ranges.len() as u32;
-    tree.arena = arena;
-    tree.included_ranges =
-        calloc(included_ranges.len(), core::mem::size_of::<TSRange>()).cast::<TSRange>();
+unsafe fn copy_ranges(included_ranges: &[TSRange]) -> Array<TSRange> {
+    let mut result = Array::new();
+    let count = u32::try_from(included_ranges.len()).unwrap();
+    result.reserve(count);
     if !included_ranges.is_empty() {
         core::ptr::copy_nonoverlapping(
             included_ranges.as_ptr(),
-            tree.included_ranges,
+            result.contents,
             included_ranges.len(),
         );
     }
-}
-
-/// Copy a tree by retaining shared immutable storage.
-///
-/// Subtrees and arenas are reference counted, so copying a tree is cheap and
-/// does not clone the entire syntax graph.
-unsafe fn tree_copy_ref(tree: &TSTree) -> *mut TSTree {
-    subtree_retain(tree.root);
-    tree_arena_retain(tree.arena);
-    tree_new_with_arena(
-        tree.root,
-        tree.language,
-        tree.included_ranges,
-        tree.included_range_count,
-        tree.arena,
-    )
-}
-
-/// Release all owned references and buffers for a tree.
-unsafe fn tree_delete_ref(tree: &mut TSTree) {
-    let mut pool = subtree_pool_new(0);
-    subtree_release(&mut pool, tree.root);
-    subtree_pool_delete(&mut pool);
-    tree_arena_release(tree.arena);
-    free(tree.included_ranges.cast::<c_void>());
-}
-
-pub unsafe fn tree_root_node_ref(tree_ptr: *const TSTree, tree: &TSTree) -> TSNode {
-    node_new(tree_ptr, &tree.root, subtree_padding(tree.root), 0)
-}
-
-unsafe fn tree_root_node_with_offset_ref(
-    tree_ptr: *const TSTree,
-    tree: &TSTree,
-    offset_bytes: u32,
-    offset_extent: TSPoint,
-) -> TSNode {
-    let offset = Length {
-        bytes: offset_bytes,
-        extent: offset_extent,
-    };
-    node_new(
-        tree_ptr,
-        &tree.root,
-        length_add(offset, subtree_padding(tree.root)),
-        0,
-    )
-}
-
-unsafe fn tree_included_ranges_ref(tree: &TSTree, length: &mut u32) -> *mut TSRange {
-    *length = tree.included_range_count;
-    let ranges = calloc(
-        tree.included_range_count as usize,
-        core::mem::size_of::<TSRange>(),
-    )
-    .cast::<TSRange>();
-    if tree.included_range_count > 0 {
-        core::ptr::copy_nonoverlapping(
-            tree.included_ranges,
-            ranges,
-            tree.included_range_count as usize,
-        );
-    }
-    ranges
+    result.size = count;
+    result
 }
 
 const fn tree_cursor_empty() -> TreeCursor {
     TreeCursor {
         tree: core::ptr::null(),
-        stack: array_new(),
+        stack: super::tree_cursor::TreeCursorStack::new(),
         root_alias_symbol: 0,
     }
 }
 
-/// Apply an edit to the tree's ranges and root subtree.
-///
-/// The edit rewrites byte/point positions in-place where possible and marks
-/// affected subtrees as changed for later tree comparison.
-unsafe fn tree_edit_ref(tree: &mut TSTree, edit: &TSInputEdit) {
-    let included_ranges = if tree.included_range_count == 0 {
-        &mut []
-    } else {
-        core::slice::from_raw_parts_mut(tree.included_ranges, tree.included_range_count as usize)
-    };
-    for range in included_ranges {
-        range_edit_ref(range, edit);
+// ---------------------------------------------------------------------------
+// Lifecycle
+// ---------------------------------------------------------------------------
+
+impl TSTree {
+    pub(super) unsafe fn new(
+        root: Subtree,
+        arena: *mut SubtreeArena,
+        language: *const TSLanguage,
+        included_ranges: &[TSRange],
+    ) -> *mut Self {
+        let result = malloc(core::mem::size_of::<Self>()).cast::<Self>();
+        core::ptr::write(
+            result,
+            Self {
+                root,
+                arena,
+                language,
+                included_ranges: copy_ranges(included_ranges),
+            },
+        );
+        result
     }
-    let mut pool = subtree_pool_new(0);
-    tree.root = subtree_edit(tree.root, edit, &mut pool);
-    subtree_pool_delete(&mut pool);
-}
 
-#[cfg(not(target_family = "wasm"))]
-unsafe fn tree_print_dot_graph_ref(tree: &TSTree, file_descriptor: i32) {
-    // On Windows `_ts_dup` takes the OS handle behind the fd (mirroring
-    // lib/src/tree.c); elsewhere it duplicates the fd directly.
-    #[cfg(target_os = "windows")]
-    let dup_fd = _ts_dup(win_dot_graph::_get_osfhandle(file_descriptor) as win_dot_graph::Handle);
-    #[cfg(not(target_os = "windows"))]
-    let dup_fd = _ts_dup(file_descriptor);
-    let file = fdopen(dup_fd, c"a".as_ptr().cast::<i8>());
-    subtree_print_dot_graph(tree.root, tree.language, file);
-    fclose(file);
-}
+    pub const unsafe fn included_ranges(&self) -> &[TSRange] {
+        self.included_ranges.as_slice()
+    }
 
-// ---------------------------------------------------------------------------
-// Lifecycle: tree_new, ts_tree_copy, ts_tree_delete
-// ---------------------------------------------------------------------------
+    unsafe fn included_ranges_mut(&mut self) -> &mut [TSRange] {
+        self.included_ranges.as_mut_slice()
+    }
 
-pub unsafe fn tree_new_with_arena(
-    root: Subtree,
-    language: *const TSLanguage,
-    included_ranges: *const TSRange,
-    included_range_count: u32,
-    arena: *mut TreeArena,
-) -> *mut TSTree {
-    let result = malloc(core::mem::size_of::<TSTree>()).cast::<TSTree>();
-    let tree = ptr_mut(result);
-    let included_ranges = range_slice(included_ranges, included_range_count);
-    tree_init_ref(tree, root, language, included_ranges, arena);
-    result
+    /// Copy a tree by retaining its shared immutable subtree storage.
+    unsafe fn copy(&self) -> *mut Self {
+        self.root.retain(self.arena);
+        subtree_arena_retain(self.arena);
+        Self::new(self.root, self.arena, self.language, self.included_ranges())
+    }
+
+    /// Release all references and buffers owned by this tree.
+    unsafe fn delete(&mut self) {
+        let mut pool = subtree_pool_from_arena(self.arena);
+        self.root.release(&mut pool);
+        subtree_pool_delete(&mut pool);
+        self.included_ranges.delete();
+        subtree_arena_release(self.arena);
+        self.arena = core::ptr::null_mut();
+    }
+
+    pub unsafe fn root_node(&self, tree_ptr: *const Self) -> TSNode {
+        node_new(tree_ptr, &self.root, self.root.padding(self.arena), 0)
+    }
+
+    unsafe fn root_node_with_offset(
+        &self,
+        tree_ptr: *const Self,
+        offset_bytes: u32,
+        offset_extent: TSPoint,
+    ) -> TSNode {
+        let offset = Length {
+            bytes: offset_bytes,
+            extent: offset_extent,
+        };
+        node_new(
+            tree_ptr,
+            &self.root,
+            length_add(offset, self.root.padding(self.arena)),
+            0,
+        )
+    }
+
+    unsafe fn copy_included_ranges(&self, length: &mut u32) -> *mut TSRange {
+        let included_ranges = self.included_ranges();
+        *length = u32::try_from(included_ranges.len()).unwrap();
+        let ranges =
+            calloc(included_ranges.len(), core::mem::size_of::<TSRange>()).cast::<TSRange>();
+        if !included_ranges.is_empty() {
+            core::ptr::copy_nonoverlapping(included_ranges.as_ptr(), ranges, included_ranges.len());
+        }
+        ranges
+    }
+
+    /// Apply an edit to this tree's ranges and root subtree.
+    unsafe fn edit(&mut self, edit: &TSInputEdit) {
+        for range in self.included_ranges_mut() {
+            range_edit_ref(range, edit);
+        }
+        let old_arena = self.arena;
+        let mut pool = subtree_pool_clone_arena(old_arena);
+        self.root = subtree_edit(self.root, edit, &mut pool);
+        subtree_publish(pool.arena());
+        self.arena = subtree_pool_retain_arena(&mut pool);
+        subtree_pool_delete(&mut pool);
+        subtree_arena_release(old_arena);
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    unsafe fn print_dot_graph(&self, file_descriptor: i32) {
+        // On Windows `_ts_dup` takes the OS handle behind the fd (mirroring
+        // lib/src/tree.c); elsewhere it duplicates the fd directly.
+        #[cfg(target_os = "windows")]
+        let dup_fd =
+            _ts_dup(win_dot_graph::_get_osfhandle(file_descriptor) as win_dot_graph::Handle);
+        #[cfg(not(target_os = "windows"))]
+        let dup_fd = _ts_dup(file_descriptor);
+        let file = fdopen(dup_fd, c"a".as_ptr().cast::<i8>());
+        subtree_print_dot_graph(self.root, self.arena, self.language, file);
+        fclose(file);
+    }
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn ts_tree_copy(self_: *const TSTree) -> *mut TSTree {
     let tree = ptr_ref(self_);
-    tree_copy_ref(tree)
+    tree.copy()
 }
 
 #[no_mangle]
@@ -217,7 +219,7 @@ pub unsafe extern "C" fn ts_tree_delete(self_: *mut TSTree) {
         return;
     }
     let tree = ptr_mut(self_);
-    tree_delete_ref(tree);
+    tree.delete();
     free(self_.cast::<c_void>());
 }
 
@@ -229,7 +231,7 @@ pub unsafe extern "C" fn ts_tree_delete(self_: *mut TSTree) {
 #[no_mangle]
 pub unsafe extern "C" fn ts_tree_root_node(self_: *const TSTree) -> TSNode {
     let tree = ptr_ref(self_);
-    tree_root_node_ref(self_, tree)
+    tree.root_node(self_)
 }
 
 #[no_mangle]
@@ -239,7 +241,7 @@ pub unsafe extern "C" fn ts_tree_root_node_with_offset(
     offset_extent: TSPoint,
 ) -> TSNode {
     let tree = ptr_ref(self_);
-    tree_root_node_with_offset_ref(self_, tree, offset_bytes, offset_extent)
+    tree.root_node_with_offset(self_, offset_bytes, offset_extent)
 }
 
 #[no_mangle]
@@ -255,7 +257,7 @@ pub unsafe extern "C" fn ts_tree_included_ranges(
 ) -> *mut TSRange {
     let tree = ptr_ref(self_);
     let length = ptr_mut(length);
-    tree_included_ranges_ref(tree, length)
+    tree.copy_included_ranges(length)
 }
 
 // ---------------------------------------------------------------------------
@@ -267,7 +269,7 @@ pub unsafe extern "C" fn ts_tree_included_ranges(
 pub unsafe extern "C" fn ts_tree_edit(self_: *mut TSTree, edit: *const TSInputEdit) {
     let tree = ptr_mut(self_);
     let edit = ptr_ref(edit);
-    tree_edit_ref(tree, edit);
+    tree.edit(edit);
 }
 
 #[no_mangle]
@@ -281,18 +283,12 @@ pub unsafe extern "C" fn ts_tree_get_changed_ranges(
     let length = ptr_mut(length);
     let mut cursor1 = tree_cursor_empty();
     let mut cursor2 = tree_cursor_empty();
-    tree_cursor_init_ref(&mut cursor1, tree_root_node_ref(old_tree, old_tree_ref));
-    tree_cursor_init_ref(&mut cursor2, tree_root_node_ref(new_tree, new_tree_ref));
+    tree_cursor_init_ref(&mut cursor1, old_tree_ref.root_node(old_tree));
+    tree_cursor_init_ref(&mut cursor2, new_tree_ref.root_node(new_tree));
 
-    let mut included_range_differences = array_new();
-    let old_included_ranges = range_slice(
-        old_tree_ref.included_ranges,
-        old_tree_ref.included_range_count,
-    );
-    let new_included_ranges = range_slice(
-        new_tree_ref.included_ranges,
-        new_tree_ref.included_range_count,
-    );
+    let mut included_range_differences = Array::new();
+    let old_included_ranges = old_tree_ref.included_ranges();
+    let new_included_ranges = new_tree_ref.included_ranges();
     range_array_get_changed_ranges_ref(
         old_included_ranges,
         new_included_ranges,
@@ -310,17 +306,9 @@ pub unsafe extern "C" fn ts_tree_get_changed_ranges(
         &mut result,
     );
 
-    // array_delete for included_range_differences
-    if !included_range_differences.contents.is_null() {
-        free(included_range_differences.contents.cast::<c_void>());
-    }
-    // array_delete for cursor stacks
-    if !cursor1.stack.contents.is_null() {
-        free(cursor1.stack.contents.cast::<c_void>());
-    }
-    if !cursor2.stack.contents.is_null() {
-        free(cursor2.stack.contents.cast::<c_void>());
-    }
+    included_range_differences.delete();
+    cursor1.stack.delete();
+    cursor2.stack.delete();
 
     result
 }
@@ -382,7 +370,7 @@ pub unsafe extern "C" fn _ts_dup(handle: win_dot_graph::Handle) -> i32 {
 #[no_mangle]
 pub unsafe extern "C" fn ts_tree_print_dot_graph(self_: *const TSTree, file_descriptor: i32) {
     let tree = ptr_ref(self_);
-    tree_print_dot_graph_ref(tree, file_descriptor);
+    tree.print_dot_graph(file_descriptor);
 }
 
 #[cfg(target_family = "wasm")]
@@ -399,12 +387,11 @@ mod tests {
     use super::*;
     use crate::core_impl::length::length_zero;
     use crate::core_impl::subtree::{
-        subtree_child_count, subtree_from_mut, subtree_new_error, subtree_new_node_in_arena,
-        tree_arena_new, TS_BUILTIN_SYM_ERROR_REPEAT,
+        subtree_new_error, subtree_new_node, subtree_pool_new, TS_BUILTIN_SYM_ERROR_REPEAT,
     };
 
     #[test]
-    fn arena_tree_copy_delete_uses_tree_arena_lifetime() {
+    fn copied_tree_retains_its_root() {
         unsafe {
             let mut pool = subtree_pool_new(0);
             let child1 = subtree_new_error(
@@ -425,25 +412,25 @@ mod tests {
                 0,
                 ptr::null(),
             );
-            let children = [child1, child2];
-
-            let arena = tree_arena_new();
-            let root = subtree_from_mut(subtree_new_node_in_arena(
-                arena,
+            let mut children = super::super::subtree::SubtreeArray::new();
+            children.push(child1);
+            children.push(child2);
+            let root = subtree_new_node(
+                &mut pool,
                 TS_BUILTIN_SYM_ERROR_REPEAT,
-                children.as_ptr(),
-                children.len() as u32,
+                children,
                 0,
                 ptr::null(),
-            ));
+            )
+            .into_immutable();
 
-            assert_eq!(subtree_child_count(root), 2);
-            let tree = tree_new_with_arena(root, ptr::null(), ptr::null(), 0, arena);
+            let arena = subtree_pool_retain_arena(&mut pool);
+            assert_eq!(root.child_count(arena), 2);
+            let tree = TSTree::new(root, arena, ptr::null(), &[]);
             let copy = ts_tree_copy(tree);
 
-            assert_eq!((*tree).arena, arena);
-            assert_eq!((*copy).arena, arena);
             ts_tree_delete(tree);
+            assert_eq!((*copy).root.child_count((*copy).arena), 2);
             ts_tree_delete(copy);
             subtree_pool_delete(&mut pool);
         }

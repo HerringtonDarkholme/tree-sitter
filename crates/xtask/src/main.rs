@@ -68,10 +68,14 @@ struct Benchmark {
     /// The example file to run the benchmarks for.
     #[arg(long, short)]
     example_file_name: Option<String>,
-    /// The number of times to parse each sample (default is 5).
+    /// The number of measured samples (default is 5).
     #[arg(long, short, default_value = "5")]
     repetition_count: u32,
-    /// Benchmark case kind to run: query, normal, error, or all.
+    /// Calibrate each sample to at least this duration.
+    #[arg(long, default_value = "0")]
+    min_sample_time_ms: u64,
+    /// Benchmark case kind to run: query, normal, error, traversal,
+    /// traversal-attribution, or all.
     #[arg(long, default_value = "all")]
     kind: String,
     /// Whether to run the benchmarks in debug mode.
@@ -232,27 +236,15 @@ struct PerfGate {
     /// The number of times to parse each sample.
     #[arg(long, default_value = "10")]
     repetitions: usize,
-    /// Benchmark case kind to compare: normal, error, or all.
-    #[arg(long, default_value = "normal")]
-    kind: String,
-    /// Maximum number of mismatched-language error samples per other language.
-    #[arg(long, default_value = "8")]
-    error_limit: usize,
-    /// TypeScript repository path. Defaults to ../typescript when present.
-    #[arg(long)]
-    typescript_path: Option<std::path::PathBuf>,
+    /// Calibrate each sample to at least this duration.
+    #[arg(long, default_value = "500")]
+    min_sample_time_ms: u64,
     /// Git revision whose lib/src directory contains the original C core.
     #[arg(long, default_value = "c9f80282ad355a88a389d75173d918de84ef3e79")]
     c_core_rev: String,
-    /// Maximum allowed per-case Rust slowdown versus C before strict mode fails.
+    /// Maximum allowed coefficient of variation for one case.
     #[arg(long, default_value = "5.0")]
-    max_regression_percent: f64,
-    /// Required weighted overall Rust speedup over C before strict mode passes.
-    #[arg(long, default_value = "0.0")]
-    min_overall_speedup_percent: f64,
-    /// Print results without failing on regressions.
-    #[arg(long)]
-    report_only: bool,
+    max_cv_percent: f64,
     /// Pass `--offline` to Cargo benchmark commands.
     #[arg(long)]
     offline: bool,
