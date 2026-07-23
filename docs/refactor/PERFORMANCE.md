@@ -12,16 +12,10 @@ clearly marked when the measured implementation is no longer present.
 
 ## Latest Rust-versus-C checkpoint
 
-Measured on 2026-07-16 at `325ece7b`. The Rust runtime is based on
-`fe2605c1`; the comparison C core is
-`c9f80282ad355a88a389d75173d918de84ef3e79`.
-
-This table predates the retained deterministic-window and subtree-arena work
-on the current branch. It is the latest complete cross-core checkpoint, not a
-measurement of current HEAD. Use same-session Rust control/candidate pairs to
-attribute the later representation changes; see
-[CURRENT_PERFORMANCE_PROFILE.md](CURRENT_PERFORMANCE_PROFILE.md) for the exact
-current-runtime profile.
+Measured on 2026-07-19 at `907dc794`; the comparison C core is
+`c9f80282ad355a88a389d75173d918de84ef3e79`. This is a measurement of the
+current retained Rust endpoint, including the deterministic window, arena,
+parser-table indexes, lexer fast path, and cursor work.
 
 ```sh
 cargo xtask perf-gate --offline
@@ -32,40 +26,92 @@ throughput ratios. Positive values favor Rust.
 
 | Language | Fixtures | Rust vs C | Rust wins |
 | --- | ---: | ---: | ---: |
-| C++ | 4 | +0.36% | 3/4 |
-| Go | 5 | +1.01% | 4/5 |
-| Java | 4 | +1.61% | 4/4 |
-| JavaScript | 2 | +0.64% | 2/2 |
-| Python | 12 | **-2.87%** | 0/12 |
-| Rust | 2 | +0.29% | 1/2 |
-| TypeScript | 11 | **-1.35%** | 1/11 |
+| C++ | 4 | +24.06% | 4/4 |
+| Go | 5 | +27.56% | 5/5 |
+| Java | 4 | +22.92% | 4/4 |
+| JavaScript | 2 | +30.38% | 2/2 |
+| Python | 12 | +38.90% | 12/12 |
+| Rust | 2 | +31.95% | 2/2 |
+| TypeScript | 11 | +33.15% | 11/11 |
 
 Two summaries are useful:
 
-- Equal weight per language: **Rust -0.05%**. This is practical parity.
-- Equal weight per fixture: **Rust -0.87%** across 40 fixtures. Python and
-  TypeScript have more fixtures, so they dominate this number.
+- Equal weight per language: **Rust +29.74%**.
+- Equal weight per fixture: **Rust +31.92%** across 40 fixtures. Python and
+  TypeScript have more fixtures, so they receive more weight in this number.
 
-Peak RSS is also effectively tied:
+Peak RSS remains small in the parser gate, although Rust uses more memory in
+most languages:
 
 | Language | Rust | C |
 | --- | ---: | ---: |
-| C++ | 11.00 MiB | 10.70 MiB |
-| Go | 12.67 MiB | 13.17 MiB |
-| Java | 8.36 MiB | 8.53 MiB |
-| JavaScript | 21.53 MiB | 21.11 MiB |
-| Python | 11.00 MiB | 10.73 MiB |
-| Rust | 12.70 MiB | 12.59 MiB |
-| TypeScript | 21.64 MiB | 21.34 MiB |
+| C++ | 11.91 MiB | 11.22 MiB |
+| Go | 15.80 MiB | 14.09 MiB |
+| Java | 8.42 MiB | 8.48 MiB |
+| JavaScript | 25.70 MiB | 21.41 MiB |
+| Python | 12.72 MiB | 10.78 MiB |
+| Rust | 13.53 MiB | 12.75 MiB |
+| TypeScript | 21.42 MiB | 20.48 MiB |
 
 ### Interpretation
 
-- The Rust core does **not** currently have a 20% throughput advantage.
-- C++, Go, Java, JavaScript, and Rust are tied or modestly favor Rust.
-- Python is the clearest regression: C wins every fixture.
-- TypeScript also favors C on nearly every fixture, though by a smaller amount.
-- Optimize Python and TypeScript first. Improvements elsewhere are unlikely to
-  move the overall result materially.
+- The Rust core is faster in every measured language and every fixture.
+- The smallest language-level advantage is Java at +22.92%; the largest is
+  Python at +38.90%.
+- This cross-core checkpoint describes the retained endpoint. Individual later
+  design claims must still use same-session Rust control/candidate pairs rather
+  than attributing the entire Rust-versus-C gap to one change.
+- The first full run had one noisy C measurement at 5.08% CV on
+  `python/trailing-whitespace.py`. Repeating all Python fixtures with 1 second
+  minimum samples kept every CV below 2.6%; the table uses that stable rerun.
+
+## Current Rust-versus-C traversal checkpoint
+
+The same retained Rust endpoint and C revision were compared with the committed
+traversal benchmark. Each fixture was parsed once, then repeatedly walked in
+preorder while reading kind ID, byte range, named-node status, and error-node
+status. Five measured samples targeted at least 500 ms each. All source hashes
+and tree node counts matched.
+
+| Language | Fixtures | Rust vs C traversal |
+| --- | ---: | ---: |
+| C++ | 4 | +6.73% |
+| Go | 5 | +8.24% |
+| Java | 4 | +7.82% |
+| JavaScript | 2 | +11.06% |
+| Python | 12 | +14.65% |
+| Rust | 2 | +11.82% |
+| TypeScript | 11 | +11.00% |
+
+Equal weighting per language gives **Rust +10.16%**; equal weighting across all
+40 fixtures gives **Rust +11.02%**. Every language and every fixture favored
+Rust. Peak RSS for the complete traversal process was 22.20 MiB for Rust and
+20.38 MiB for C.
+
+## Current ast-grep outline checkpoint
+
+The application checkpoint used the local ast-grep source at `63e94c48`,
+including its current working-tree outline-rule changes. Both release binaries
+were built from the same copied source: one linked the current Rust core through
+the 0.26.11 compatibility crate, and the other linked normal Tree-sitter
+0.26.11. Both produced identical output on opencode with SHA-256
+`665a25942436afc41abab4caa015a9122717c408cfd571c863c92de71f4dcb18`.
+
+Three interleaved `normal, Rust, Rust, normal` cycles ran:
+
+```sh
+ast-grep outline --lang ts --threads 1 .
+```
+
+| Measurement | Current Rust core | Normal Tree-sitter | Change |
+| --- | ---: | ---: | ---: |
+| User CPU | 0.960 s | 1.233 s | **22.2% less** |
+| Wall time | 1.115 s | 1.422 s | **21.6% less** |
+| Peak RSS | 34.43 MiB | 26.52 MiB | **+7.92 MiB** |
+
+This is the current complete application result for that one TypeScript
+repository. It does not replace the seven-language parser gate or the isolated
+traversal benchmark.
 
 ## Benchmark method
 
@@ -78,7 +124,8 @@ For each fixture and core:
 
 1. warm the parser;
 2. calibrate the number of parses;
-3. record 10 samples of at least 500 ms each;
+3. record 10 samples of at least 500 ms each (the stable Python rerun used
+   1 second samples);
 4. use process CPU time on Unix, avoiding scheduler-pause noise;
 5. report median throughput plus sample mean, standard deviation, and
    coefficient of variation (CV); and
@@ -87,9 +134,8 @@ For each fixture and core:
 There are deliberately no retries, rejected samples, pooled processes,
 checked-in throughput baselines, or Rust-versus-C pass/fail threshold.
 
-The latest complete run passed the 5% stability limit. Most fixture CVs were
-between 0.5% and 2%. Two consecutive Go runs had all CVs below 2.6%, and their
-fixture medians differed by at most 1.5%.
+The combined current checkpoint passed the 5% stability limit after the Python
+rerun. Most fixture CVs were between 0.5% and 2%.
 
 Useful commands:
 

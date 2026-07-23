@@ -1,5 +1,33 @@
 # Tree traversal and node-read performance streak
 
+## Current Rust-versus-C endpoint checkpoint
+
+The latest retained Rust core at `907dc794` was compared directly with C core
+`c9f80282ad355a88a389d75173d918de84ef3e79`. This is the cross-core result for
+the current endpoint, not an attribution claim for one cursor or arena change.
+
+The committed traversal kernel parsed each fixture once, then repeatedly
+performed the preorder navigation and metadata reads used by an ast-grep-like
+consumer: kind ID, byte range, named-node status, and error-node status. Five
+samples targeted at least 500 ms. All source hashes and node counts matched.
+
+| Language | Fixtures | Latest Rust vs C |
+| --- | ---: | ---: |
+| C++ | 4 | +6.73% |
+| Go | 5 | +8.24% |
+| Java | 4 | +7.82% |
+| JavaScript | 2 | +11.06% |
+| Python | 12 | +14.65% |
+| Rust | 2 | +11.82% |
+| TypeScript | 11 | +11.00% |
+| **Equal-language geometric mean** | **40** | **+10.16%** |
+
+The equal-fixture geometric mean is **+11.02%**. Every fixture favored Rust.
+Peak RSS for the complete process was 22.20 MiB for Rust and 20.38 MiB for C.
+The older streaks below remain Rust-to-Rust attribution experiments: they
+explain which representation and cursor changes helped, while this checkpoint
+answers whether the latest published-tree reader is faster than C.
+
 ## Streak 5: narrow parent setup snapshot is rejected
 
 A narrower follow-up kept the retained operation-local child pointer but tried
