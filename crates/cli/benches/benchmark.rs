@@ -1,16 +1,21 @@
 use std::{
     collections::BTreeMap,
     env, fs,
+    hint::black_box,
+    mem::MaybeUninit,
     path::{Path, PathBuf},
     str,
     sync::LazyLock,
-    time::Instant,
+    time::Duration,
 };
+
+#[cfg(not(unix))]
+use std::time::Instant;
 
 use anyhow::Context;
 use log::info;
 use serde_json::json;
-use tree_sitter::{Language, Parser, Query};
+use tree_sitter::{Language, Node, Parser, Query, Tree};
 use tree_sitter_loader::{CompileConfig, Loader};
 
 include!("../src/tests/helpers/dirs.rs");
@@ -34,19 +39,16 @@ static KIND_FILTER: LazyLock<Option<Vec<String>>> = LazyLock::new(|| {
 static REPETITION_COUNT: LazyLock<usize> = LazyLock::new(|| {
     env::var("TREE_SITTER_BENCHMARK_REPETITION_COUNT").map_or(5, |s| s.parse::<usize>().unwrap())
 });
+static MIN_SAMPLE_TIME: LazyLock<std::time::Duration> = LazyLock::new(|| {
+    std::time::Duration::from_millis(
+        env::var("TREE_SITTER_BENCHMARK_MIN_SAMPLE_TIME_MS")
+            .map_or(0, |s| s.parse::<u64>().unwrap()),
+    )
+});
 static ERROR_CASE_LIMIT: LazyLock<Option<usize>> = LazyLock::new(|| {
     env::var("TREE_SITTER_BENCHMARK_ERROR_LIMIT")
         .ok()
         .and_then(|s| s.parse().ok())
-});
-static TYPESCRIPT_PATH: LazyLock<Option<PathBuf>> = LazyLock::new(|| {
-    env::var("TREE_SITTER_BENCHMARK_TYPESCRIPT_PATH")
-        .ok()
-        .map(PathBuf::from)
-        .or_else(|| {
-            let path = ROOT_DIR.parent().unwrap().join("typescript");
-            path.is_dir().then_some(path)
-        })
 });
 static TEST_LOADER: LazyLock<Loader> =
     LazyLock::new(|| Loader::with_parser_lib_path(SCRATCH_DIR.clone()));
@@ -97,12 +99,11 @@ static EXAMPLE_AND_QUERY_PATHS_BY_LANGUAGE_DIR: LazyLock<
             let relative_path = dir.strip_prefix(GRAMMARS_DIR.as_path()).unwrap();
             let (example_paths, query_paths) = result.entry(relative_path.to_owned()).or_default();
 
-            example_paths.extend(collect_local_and_parent_files(dir, "examples"));
+            // Performance inputs are repository-owned snapshots. Do not make
+            // benchmark results depend on ignored grammar examples or sibling
+            // repositories that happen to exist on one developer's machine.
             example_paths.extend(collect_benchmark_examples(relative_path));
             query_paths.extend(collect_local_and_parent_files(dir, "queries"));
-            if relative_path == Path::new("typescript/typescript") {
-                example_paths.extend(typescript_repo_examples());
-            }
             example_paths.sort();
             example_paths.dedup();
             query_paths.sort();
@@ -122,27 +123,10 @@ static EXAMPLE_AND_QUERY_PATHS_BY_LANGUAGE_DIR: LazyLock<
     result
 });
 
-fn typescript_repo_examples() -> Vec<PathBuf> {
-    let Some(typescript_path) = TYPESCRIPT_PATH.as_ref() else {
-        return Vec::new();
-    };
-
-    [
-        "src/compiler/builderStatePublic.ts",
-        "src/services/transform.ts",
-        "src/compiler/corePublic.ts",
-        "src/services/refactorProvider.ts",
-        "src/server/types.ts",
-        "src/server/packageJsonCache.ts",
-        "src/compiler/performanceCore.ts",
-        "src/server/utilities.ts",
-        "src/services/codeFixProvider.ts",
-        "src/compiler/performance.ts",
-    ]
-    .into_iter()
-    .map(|path| typescript_path.join(path))
-    .filter(|path| path.is_file())
-    .collect()
+fn should_run_example(path: &Path) -> bool {
+    EXAMPLE_FILTER
+        .as_ref()
+        .is_none_or(|filter| path.to_string_lossy().contains(filter))
 }
 
 fn main() {
@@ -163,6 +147,7 @@ fn main() {
     let mut parser = Parser::new();
     let mut all_normal_speeds = Vec::new();
     let mut all_error_speeds = Vec::new();
+    let mut all_traversal_speeds: BTreeMap<&'static str, Vec<usize>> = BTreeMap::new();
 
     for (language_path, (example_paths, query_paths)) in
         EXAMPLE_AND_QUERY_PATHS_BY_LANGUAGE_DIR.iter()
@@ -182,10 +167,8 @@ fn main() {
         if should_run_kind("query") {
             info!("  Constructing Queries");
             for path in query_paths {
-                if let Some(filter) = EXAMPLE_FILTER.as_ref() {
-                    if !path.to_str().unwrap().contains(filter.as_str()) {
-                        continue;
-                    }
+                if !should_run_example(path) {
+                    continue;
                 }
 
                 parse(language_name, "query", path, max_path_length, |source| {
@@ -200,11 +183,20 @@ fn main() {
         if should_run_kind("normal") {
             info!("  Parsing Valid Code:");
             for example_path in example_paths {
-                if let Some(filter) = EXAMPLE_FILTER.as_ref() {
-                    if !example_path.to_str().unwrap().contains(filter.as_str()) {
-                        continue;
-                    }
+                if !should_run_example(example_path) {
+                    continue;
                 }
+
+                let source = fs::read(example_path)
+                    .with_context(|| format!("Failed to read {}", example_path.display()))
+                    .unwrap();
+                let tree = parser.parse(&source, None).expect("Failed to parse");
+                assert!(
+                    !tree.root_node().has_error(),
+                    "normal benchmark fixture has parse errors: {}\n{}",
+                    example_path.display(),
+                    tree.root_node().to_sexp()
+                );
 
                 normal_speeds.push(parse(
                     language_name,
@@ -215,6 +207,42 @@ fn main() {
                         parser.parse(code, None).expect("Failed to parse");
                     },
                 ));
+            }
+        }
+
+        let mut traversal_speeds: BTreeMap<&'static str, Vec<usize>> = BTreeMap::new();
+        let traversal_modes = requested_traversal_modes();
+        if !traversal_modes.is_empty() {
+            info!("  Traversing Trees:");
+            for example_path in example_paths {
+                if !should_run_example(example_path) {
+                    continue;
+                }
+
+                let source = fs::read(example_path)
+                    .with_context(|| format!("Failed to read {}", example_path.display()))
+                    .unwrap();
+                let tree = parser.parse(&source, None).expect("Failed to parse");
+                assert!(
+                    !tree.root_node().has_error(),
+                    "traversal benchmark fixture has parse errors: {}\n{}",
+                    example_path.display(),
+                    tree.root_node().to_sexp()
+                );
+
+                for &mode in &traversal_modes {
+                    traversal_speeds
+                        .entry(mode.kind())
+                        .or_default()
+                        .push(traverse(
+                            language_name,
+                            example_path,
+                            max_path_length,
+                            &source,
+                            &tree,
+                            mode,
+                        ));
+                }
             }
         }
 
@@ -229,10 +257,8 @@ fn main() {
                         .iter()
                         .take((*ERROR_CASE_LIMIT).unwrap_or(usize::MAX))
                     {
-                        if let Some(filter) = EXAMPLE_FILTER.as_ref() {
-                            if !example_path.to_str().unwrap().contains(filter.as_str()) {
-                                continue;
-                            }
+                        if !should_run_example(example_path) {
+                            continue;
                         }
 
                         error_speeds.push(parse(
@@ -259,8 +285,18 @@ fn main() {
             info!("  Worst Speed (errors):   {worst_error} bytes/ms");
         }
 
+        for (kind, speeds) in &traversal_speeds {
+            if let Some((average_traversal, worst_traversal)) = aggregate(speeds) {
+                info!("  Average Speed ({kind}): {average_traversal} nodes/ms");
+                info!("  Worst Speed ({kind}):   {worst_traversal} nodes/ms");
+            }
+        }
+
         all_normal_speeds.extend(normal_speeds);
         all_error_speeds.extend(error_speeds);
+        for (kind, speeds) in traversal_speeds {
+            all_traversal_speeds.entry(kind).or_default().extend(speeds);
+        }
     }
 
     info!("\n  Overall");
@@ -273,6 +309,12 @@ fn main() {
         info!("  Average Speed (errors): {average_error} bytes/ms");
         info!("  Worst Speed (errors):   {worst_error} bytes/ms");
     }
+    for (kind, speeds) in &all_traversal_speeds {
+        if let Some((average_traversal, worst_traversal)) = aggregate(speeds) {
+            info!("  Average Speed ({kind}): {average_traversal} nodes/ms");
+            info!("  Worst Speed ({kind}):   {worst_traversal} nodes/ms");
+        }
+    }
     info!("");
 }
 
@@ -281,6 +323,26 @@ fn should_run_kind(kind: &str) -> bool {
         Some(filter) => filter.iter().any(|item| item == kind || item == "all"),
         None => true,
     }
+}
+
+fn requested_traversal_modes() -> Vec<TraversalMode> {
+    let run_full = should_run_kind("traversal");
+    let run_attribution = KIND_FILTER
+        .as_ref()
+        .is_some_and(|filter| filter.iter().any(|item| item == "traversal-attribution"));
+    let mut result = Vec::new();
+    if run_attribution {
+        result.extend([
+            TraversalMode::Navigation,
+            TraversalMode::Kind,
+            TraversalMode::Range,
+            TraversalMode::Flags,
+        ]);
+    }
+    if run_full || run_attribution {
+        result.push(TraversalMode::Full);
+    }
+    result
 }
 
 fn aggregate(speeds: &[usize]) -> Option<(usize, usize)> {
@@ -308,15 +370,26 @@ fn parse(
     let source_code = fs::read(path)
         .with_context(|| format!("Failed to read {}", path.display()))
         .unwrap();
-    let time = Instant::now();
+    let source_hash = source_hash(&source_code);
+    let parses_per_repetition =
+        calibrated_parses_per_repetition(&source_code, *MIN_SAMPLE_TIME, &mut action);
+    let mut sample_duration_ns = Vec::with_capacity(*REPETITION_COUNT);
     for _ in 0..*REPETITION_COUNT {
-        action(&source_code);
+        let time = BenchmarkTimer::start();
+        for _ in 0..parses_per_repetition {
+            action(&source_code);
+        }
+        sample_duration_ns.push(
+            u64::try_from(time.elapsed().as_nanos())
+                .unwrap_or(u64::MAX)
+                .max(1),
+        );
     }
-    let duration = time.elapsed() / (*REPETITION_COUNT as u32);
-    let duration_ns = u64::try_from(duration.as_nanos())
-        .unwrap_or(u64::MAX)
-        .max(1);
-    let speed = (source_code.len() as u64 * 1_000_000) / duration_ns;
+    let duration_ns =
+        sample_duration_ns.iter().sum::<u64>() / u64::try_from(sample_duration_ns.len()).unwrap();
+    let measured_bytes = source_code.len() as u64 * parses_per_repetition as u64;
+    let speed = (measured_bytes * 1_000_000) / duration_ns;
+    let peak_rss_bytes = peak_rss_bytes();
     info!(
         "    {:max_path_length$}\ttime {:>7.2} ms\t\tspeed {speed:>6} bytes/ms",
         path.file_name().unwrap().to_str().unwrap(),
@@ -328,12 +401,279 @@ fn parse(
             "language": language,
             "kind": kind,
             "path": path.display().to_string(),
-            "bytes": source_code.len() as u64,
+            "source_bytes": source_code.len() as u64,
+            "source_hash": source_hash,
+            "bytes": measured_bytes,
             "duration_ns": duration_ns,
+            "sample_duration_ns": sample_duration_ns,
+            "peak_rss_bytes": peak_rss_bytes,
             "speed_bytes_per_ms": speed,
         })
     );
     speed as usize
+}
+
+#[derive(Clone, Copy)]
+enum TraversalMode {
+    Navigation,
+    Kind,
+    Range,
+    Flags,
+    Full,
+}
+
+impl TraversalMode {
+    const fn kind(self) -> &'static str {
+        match self {
+            Self::Navigation => "traversal-navigation",
+            Self::Kind => "traversal-kind",
+            Self::Range => "traversal-range",
+            Self::Flags => "traversal-flags",
+            Self::Full => "traversal",
+        }
+    }
+}
+
+fn traverse(
+    language: &str,
+    path: &Path,
+    max_path_length: usize,
+    source: &[u8],
+    tree: &Tree,
+    mode: TraversalMode,
+) -> usize {
+    let source_hash = source_hash(source);
+    let (nodes_per_traversal, warmup_checksum) = traverse_and_read(tree, mode);
+    assert_ne!(nodes_per_traversal, 0, "tree must contain its root node");
+    black_box(warmup_checksum);
+
+    let traversals_per_repetition =
+        calibrated_traversals_per_repetition(tree, mode, *MIN_SAMPLE_TIME);
+    let mut sample_duration_ns = Vec::with_capacity(*REPETITION_COUNT);
+    let mut checksum = 0_u64;
+    for _ in 0..*REPETITION_COUNT {
+        let time = BenchmarkTimer::start();
+        for _ in 0..traversals_per_repetition {
+            let (node_count, traversal_checksum) = traverse_and_read(tree, mode);
+            debug_assert_eq!(node_count, nodes_per_traversal);
+            checksum = checksum.wrapping_add(traversal_checksum);
+        }
+        sample_duration_ns.push(
+            u64::try_from(time.elapsed().as_nanos())
+                .unwrap_or(u64::MAX)
+                .max(1),
+        );
+    }
+    black_box(checksum);
+
+    let duration_ns =
+        sample_duration_ns.iter().sum::<u64>() / u64::try_from(sample_duration_ns.len()).unwrap();
+    let visited_nodes = nodes_per_traversal * traversals_per_repetition as u64;
+    let measured_bytes = source.len() as u64 * traversals_per_repetition as u64;
+    let speed = (visited_nodes * 1_000_000) / duration_ns;
+    let ns_per_node = duration_ns as f64 / visited_nodes as f64;
+    let peak_rss_bytes = peak_rss_bytes();
+    info!(
+        "    {:max_path_length$}\ttime {:>7.2} ms\t\tspeed {speed:>6} nodes/ms",
+        path.file_name().unwrap().to_str().unwrap(),
+        (duration_ns as f64) / 1e6,
+    );
+    println!(
+        "BENCHMARK_RESULT {}",
+        json!({
+            "language": language,
+            "kind": mode.kind(),
+            "path": path.display().to_string(),
+            "source_bytes": source.len() as u64,
+            "source_hash": source_hash,
+            "bytes": measured_bytes,
+            "nodes_per_traversal": nodes_per_traversal,
+            "traversals": traversals_per_repetition as u64,
+            "nodes": visited_nodes,
+            "duration_ns": duration_ns,
+            "sample_duration_ns": sample_duration_ns,
+            "peak_rss_bytes": peak_rss_bytes,
+            "speed_nodes_per_ms": speed,
+            "ns_per_node": ns_per_node,
+        })
+    );
+    speed as usize
+}
+
+/// Match ast-grep's preorder cursor walk and consume common node metadata.
+/// Parsing, file I/O, and tree construction remain outside the timed region.
+fn traverse_and_read(tree: &Tree, mode: TraversalMode) -> (u64, u64) {
+    match mode {
+        TraversalMode::Navigation => traverse_with_read(tree, |_| 0),
+        TraversalMode::Kind => {
+            traverse_with_read(tree, |node| u64::from(black_box(node.kind_id())))
+        }
+        TraversalMode::Range => traverse_with_read(tree, |node| {
+            (black_box(node.start_byte()) as u64).wrapping_add(black_box(node.end_byte()) as u64)
+        }),
+        TraversalMode::Flags => traverse_with_read(tree, |node| {
+            (black_box(node.is_named()) as u64).wrapping_add(black_box(node.is_error()) as u64)
+        }),
+        TraversalMode::Full => traverse_with_read(tree, |node| {
+            u64::from(black_box(node.kind_id()))
+                .wrapping_add(black_box(node.start_byte()) as u64)
+                .wrapping_add(black_box(node.end_byte()) as u64)
+                .wrapping_add(black_box(node.is_named()) as u64)
+                .wrapping_add(black_box(node.is_error()) as u64)
+        }),
+    }
+}
+
+fn traverse_with_read(tree: &Tree, mut read: impl FnMut(Node<'_>) -> u64) -> (u64, u64) {
+    let root = tree.root_node();
+    let root_id = root.id();
+    let mut cursor = root.walk();
+    let mut node_count = 0_u64;
+    let mut checksum = 0_u64;
+
+    loop {
+        let node = cursor.node();
+        node_count += 1;
+        checksum = checksum.wrapping_add(read(node));
+
+        if cursor.goto_first_child() {
+            continue;
+        }
+
+        loop {
+            if cursor.node().id() == root_id {
+                return (node_count, checksum);
+            }
+            if cursor.goto_next_sibling() {
+                break;
+            }
+            assert!(cursor.goto_parent(), "tree cursor must return to its root");
+        }
+    }
+}
+
+fn calibrated_traversals_per_repetition(
+    tree: &Tree,
+    mode: TraversalMode,
+    minimum_sample_time: Duration,
+) -> usize {
+    if minimum_sample_time.is_zero() {
+        return 1;
+    }
+
+    const WARMUP_TRAVERSALS: usize = 3;
+    for _ in 0..WARMUP_TRAVERSALS {
+        black_box(traverse_and_read(tree, mode));
+    }
+
+    const CALIBRATION_TRAVERSALS: usize = 3;
+    let started = BenchmarkTimer::start();
+    for _ in 0..CALIBRATION_TRAVERSALS {
+        black_box(traverse_and_read(tree, mode));
+    }
+    let nanos_per_traversal = started.elapsed().as_nanos().max(1) / CALIBRATION_TRAVERSALS as u128;
+    minimum_sample_time
+        .as_nanos()
+        .div_ceil(nanos_per_traversal)
+        .min(usize::MAX as u128) as usize
+}
+
+/// Stable FNV-1a fingerprint used to reject stale performance baselines.
+fn source_hash(source: &[u8]) -> u64 {
+    source.iter().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
+        (hash ^ u64::from(*byte)).wrapping_mul(0x0100_0000_01b3)
+    })
+}
+
+/// Calibrate samples to a useful duration before recording them.
+/// Three untimed parses warm allocator and parser state and make the estimate
+/// less sensitive to one cold call.
+fn calibrated_parses_per_repetition(
+    source: &[u8],
+    minimum_sample_time: std::time::Duration,
+    action: &mut impl FnMut(&[u8]),
+) -> usize {
+    if minimum_sample_time.is_zero() {
+        return 1;
+    }
+
+    const WARMUP_PARSES: usize = 3;
+    for _ in 0..WARMUP_PARSES {
+        action(source);
+    }
+
+    const CALIBRATION_PARSES: usize = 3;
+    let started = BenchmarkTimer::start();
+    for _ in 0..CALIBRATION_PARSES {
+        action(source);
+    }
+    let nanos_per_parse = started.elapsed().as_nanos().max(1) / CALIBRATION_PARSES as u128;
+    let time_floor = minimum_sample_time
+        .as_nanos()
+        .div_ceil(nanos_per_parse)
+        .min(usize::MAX as u128) as usize;
+    time_floor.max(1)
+}
+
+/// Process CPU time excludes pauses caused by other work scheduled on the
+/// machine. The parser is single-threaded, so this is the least noisy clock
+/// for throughput measurements.
+#[cfg(unix)]
+struct BenchmarkTimer(Duration);
+
+#[cfg(unix)]
+impl BenchmarkTimer {
+    fn start() -> Self {
+        Self(process_cpu_time())
+    }
+
+    fn elapsed(&self) -> Duration {
+        process_cpu_time().saturating_sub(self.0)
+    }
+}
+
+#[cfg(unix)]
+fn process_cpu_time() -> Duration {
+    let mut time = MaybeUninit::<libc::timespec>::zeroed();
+    let result = unsafe { libc::clock_gettime(libc::CLOCK_PROCESS_CPUTIME_ID, time.as_mut_ptr()) };
+    assert_eq!(result, 0, "failed to read process CPU time");
+    let time = unsafe { time.assume_init() };
+    Duration::new(time.tv_sec as u64, time.tv_nsec as u32)
+}
+
+#[cfg(not(unix))]
+struct BenchmarkTimer(Instant);
+
+#[cfg(not(unix))]
+impl BenchmarkTimer {
+    fn start() -> Self {
+        Self(Instant::now())
+    }
+
+    fn elapsed(&self) -> Duration {
+        self.0.elapsed()
+    }
+}
+
+#[cfg(unix)]
+fn peak_rss_bytes() -> u64 {
+    let mut usage = MaybeUninit::<libc::rusage>::zeroed();
+    let result = unsafe { libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr()) };
+    if result != 0 {
+        return 0;
+    }
+
+    let raw = unsafe { usage.assume_init() }.ru_maxrss.max(0) as u64;
+    if cfg!(any(target_os = "linux", target_os = "android")) {
+        raw.saturating_mul(1024)
+    } else {
+        raw
+    }
+}
+
+#[cfg(not(unix))]
+const fn peak_rss_bytes() -> u64 {
+    0
 }
 
 fn get_language(path: &Path) -> Language {

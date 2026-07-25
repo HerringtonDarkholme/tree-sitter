@@ -30,6 +30,7 @@ include = [
   "/src/unicode/*",
   "/src/wasm/*",
   "/src_rust/*.rs",
+  "/src_rust/**/*.rs",
   "/include/tree_sitter/api.h",
   "/LICENSE",
 ]

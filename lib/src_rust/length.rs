@@ -8,7 +8,6 @@ use super::point::{point_add, point_sub};
 /// A `Length` represents a span in both coordinate systems so callers can
 /// update source positions without rescanning text.
 #[derive(Clone, Copy, Debug)]
-#[repr(C)]
 pub struct Length {
     /// Byte distance.
     pub bytes: u32,

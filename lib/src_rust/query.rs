@@ -3699,11 +3699,12 @@ unsafe fn ts_query_cursor_should_descend(
     // patterns within them.
     if !(*self_).on_visible_node {
         let subtree = cursor_current_subtree(&(*self_).cursor);
-        if subtree_is_repetition(subtree) != 0 {
+        let arena = (*self_).cursor.arena();
+        if subtree_is_repetition(subtree, arena) != 0 {
             let (_index, exists) = array_search_sorted_by_u16(
                 &(*(*self_).query).repeat_symbols_with_rootless_patterns,
                 |x| *x,
-                subtree_symbol(subtree),
+                subtree_symbol(subtree, arena),
             );
             return exists;
         }

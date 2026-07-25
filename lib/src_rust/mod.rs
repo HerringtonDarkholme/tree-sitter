@@ -1,15 +1,20 @@
-// Core Rust implementation of the tree-sitter library.
-//
-// This module is the Rust rewrite of lib/src/*.c.
-// During the transition, both C and Rust implementations coexist:
-// - C code is compiled via remaining_lib.c (through the cc crate in build.rs)
-// - Rust modules here start as stubs and are activated one by one
-// - As each module is activated, its corresponding #include is removed
-//   from remaining_lib.c
-//
-// Module structure mirrors the C source files.
+//! Core runtime implementation for the tree-sitter library.
+//!
+//! A normal parse flows through these modules in one direction: [`parser`]
+//! asks [`lexer`] for a token using tables exposed by [`language`], interprets
+//! parse actions while storing alternatives in [`stack`], and builds values
+//! owned by [`subtree`]. The accepted root becomes a [`tree`]; [`node`] and
+//! [`tree_cursor`] provide public views over it, while [`get_changed_ranges`]
+//! compares completed trees.
+//!
+//! Modules at this level correspond to the runtime's established components.
+//! Their exported functions preserve the C API, but internal parser, stack,
+//! and storage types use Rust layout unless a module documents an ABI boundary.
+//!
+//! The only C source retained by the Rust core is the variadic lexer logging
+//! shim, because stable Rust cannot define C-variadic functions.
 
-// Tier 0 — Pure leaf utilities
+// Leaf utilities.
 pub mod alloc;
 pub mod error_costs;
 pub mod length;
@@ -17,26 +22,24 @@ pub mod point;
 pub mod unicode;
 pub mod utils;
 
-// Tier 1 — Core data structure
+// Core syntax-tree storage.
 pub mod subtree;
 
-// Tier 2 — Components depending on subtree
+// Parsing components.
 pub mod language;
 pub mod lexer;
 pub mod stack;
 
-// Tier 3 — Tree navigation
+// Tree navigation and change tracking.
 pub mod get_changed_ranges;
 pub mod node;
 pub mod tree;
 pub mod tree_cursor;
 
-// Tier 4 — Active engine runtime
+// Parser engine.
 pub mod parser;
 
-// Legacy/inactive query port. The live query implementation still comes from
-// the C runtime, so this module is kept compiling but is not part of current
-// readability work.
+// Kept separate from the active-runtime readability work.
 pub mod query;
 
 // Internal helpers for the active Rust runtime (no corresponding .c file).

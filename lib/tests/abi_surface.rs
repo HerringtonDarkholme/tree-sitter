@@ -1,7 +1,7 @@
 //! Freezes the C-ABI surface exported by the Rust core in `lib/src_rust`.
 //!
-//! Every `#[no_mangle]` function in `src_rust` is a symbol that the remaining C
-//! shim and external consumers link against through `tree_sitter/api.h`.
+//! Every `#[no_mangle]` function in `src_rust` is a symbol that external
+//! consumers link against through `tree_sitter/api.h`.
 //! Because C has no name mangling, a silently-changed
 //! signature still links and then corrupts at runtime — the linker will not
 //! catch it. This test extracts every export's normalized signature and compares
@@ -27,6 +27,20 @@ fn src_rust_dir() -> PathBuf {
 
 fn golden_path() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/abi_surface.golden")
+}
+
+fn collect_rs_files(dir: &Path, files: &mut Vec<PathBuf>) {
+    for entry in fs::read_dir(dir).unwrap_or_else(|error| {
+        panic!("cannot read {}: {error}", dir.display());
+    }) {
+        let entry = entry.unwrap();
+        let path = entry.path();
+        if entry.file_type().unwrap().is_dir() {
+            collect_rs_files(&path, files);
+        } else if path.extension().is_some_and(|extension| extension == "rs") {
+            files.push(path);
+        }
+    }
 }
 
 /// Collapse all runs of ASCII whitespace to a single space and trim.
@@ -79,11 +93,8 @@ fn extract_exports(src: &str) -> Vec<(String, String)> {
 /// Build the full snapshot: one `name\tsignature` line per export, sorted.
 fn build_snapshot() -> String {
     let dir = src_rust_dir();
-    let mut files: Vec<PathBuf> = fs::read_dir(&dir)
-        .unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display()))
-        .map(|e| e.unwrap().path())
-        .filter(|p| p.extension().is_some_and(|x| x == "rs"))
-        .collect();
+    let mut files = Vec::new();
+    collect_rs_files(&dir, &mut files);
     files.sort();
 
     let mut lines = Vec::new();

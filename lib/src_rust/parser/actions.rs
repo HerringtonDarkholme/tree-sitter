@@ -1,0 +1,407 @@
+//! Stack and tree mutations for successful parse actions.
+//!
+//! `advance` interprets generated action lists; this module executes their
+//! successful shift, reduce, and accept operations. A shift pushes one token
+//! subtree. A reduction asks the graph-structured stack for every path matching
+//! the production's child count, builds one parent for each path, and pushes
+//! the parents onto their resulting versions. Compatible results are merged
+//! where possible. Accept compares complete roots by error cost, dynamic
+//! precedence, and structural preference so the parser retains one best tree.
+
+use core::{fmt::Write, ptr};
+
+use crate::ffi::{TSStateId, TSSymbol};
+
+use super::super::language::{language_full, language_lookup, ts_language_next_state};
+use super::super::reduce_action::ReduceAction;
+use super::super::stack::{
+    stack_materialize, stack_merge, stack_pop_all, stack_pop_count, stack_pop_count_from_window,
+    stack_push, stack_remove_version, StackVersion, STACK_VERSION_NONE,
+};
+use super::super::subtree::{
+    subtree_array_clear, subtree_array_delete, subtree_array_prepare_scratch,
+    subtree_array_remove_trailing_extras, subtree_compare, subtree_new_node,
+    subtree_new_scratch_node, MutableSubtree, Subtree, SubtreeArray, NULL_SUBTREE,
+    TS_BUILTIN_SYM_ERROR, TS_BUILTIN_SYM_ERROR_REPEAT, TS_TREE_STATE_NONE,
+};
+use super::super::utils::{ptr_mut, ptr_ref};
+use super::logging::{parser_log, parser_symbol_name, DisplayCStr};
+use super::{TSParser, MAX_VERSION_COUNT, MAX_VERSION_COUNT_OVERFLOW};
+
+pub(super) unsafe fn parser_select_tree(
+    parser: &mut TSParser,
+    left: Subtree,
+    right: Subtree,
+) -> bool {
+    let arena = parser.tree_pool.arena();
+    if left.is_null() {
+        return true;
+    }
+    if right.is_null() {
+        return false;
+    }
+
+    let left_error_cost = left.error_cost(arena);
+    let right_error_cost = right.error_cost(arena);
+    if right_error_cost < left_error_cost {
+        parser_log(parser, |context, log| {
+            write!(
+                log,
+                "select_smaller_error symbol:{}, over_symbol:{}",
+                DisplayCStr(parser_symbol_name(context.language, right.symbol(arena))),
+                DisplayCStr(parser_symbol_name(context.language, left.symbol(arena)))
+            )
+        });
+        return true;
+    }
+    if left_error_cost < right_error_cost {
+        parser_log(parser, |context, log| {
+            write!(
+                log,
+                "select_smaller_error symbol:{}, over_symbol:{}",
+                DisplayCStr(parser_symbol_name(context.language, left.symbol(arena))),
+                DisplayCStr(parser_symbol_name(context.language, right.symbol(arena)))
+            )
+        });
+        return false;
+    }
+
+    let left_precedence = left.dynamic_precedence(arena);
+    let right_precedence = right.dynamic_precedence(arena);
+    if right_precedence != left_precedence {
+        let select_right = right_precedence > left_precedence;
+        let (selected, rejected, precedence, other_precedence) = if select_right {
+            (right, left, right_precedence, left_precedence)
+        } else {
+            (left, right, left_precedence, right_precedence)
+        };
+        parser_log(parser, |context, log| {
+            write!(
+                log,
+                "select_higher_precedence symbol:{}, prec:{precedence}, over_symbol:{}, other_prec:{other_precedence}",
+                DisplayCStr(parser_symbol_name(context.language, selected.symbol(arena))),
+                DisplayCStr(parser_symbol_name(context.language, rejected.symbol(arena)))
+            )
+        });
+        return select_right;
+    }
+
+    if left_error_cost > 0 {
+        return true;
+    }
+
+    match subtree_compare(left, right, &mut parser.tree_pool) {
+        -1 => {
+            parser_log(parser, |context, log| {
+                write!(
+                    log,
+                    "select_earlier symbol:{}, over_symbol:{}",
+                    DisplayCStr(parser_symbol_name(context.language, left.symbol(arena))),
+                    DisplayCStr(parser_symbol_name(context.language, right.symbol(arena)))
+                )
+            });
+            false
+        }
+        1 => {
+            parser_log(parser, |context, log| {
+                write!(
+                    log,
+                    "select_earlier symbol:{}, over_symbol:{}",
+                    DisplayCStr(parser_symbol_name(context.language, right.symbol(arena))),
+                    DisplayCStr(parser_symbol_name(context.language, left.symbol(arena)))
+                )
+            });
+            true
+        }
+        _ => {
+            parser_log(parser, |context, log| {
+                write!(
+                    log,
+                    "select_existing symbol:{}, over_symbol:{}",
+                    DisplayCStr(parser_symbol_name(context.language, left.symbol(arena))),
+                    DisplayCStr(parser_symbol_name(context.language, right.symbol(arena)))
+                )
+            });
+            false
+        }
+    }
+}
+
+unsafe fn parser_select_children(
+    parser: &mut TSParser,
+    left: Subtree,
+    children: &SubtreeArray,
+) -> bool {
+    subtree_array_prepare_scratch(&mut parser.tree_pool, &mut parser.scratch_trees);
+    parser.scratch_trees.assign(children);
+    let arena = parser.tree_pool.arena();
+    let scratch_tree = subtree_new_scratch_node(
+        arena,
+        left.symbol(arena),
+        &mut parser.scratch_trees,
+        parser.language,
+    );
+    parser_select_tree(parser, left, scratch_tree)
+}
+
+pub(super) unsafe fn parser_new_node(
+    parser: &mut TSParser,
+    symbol: TSSymbol,
+    children: SubtreeArray,
+    production_id: u32,
+) -> MutableSubtree {
+    subtree_new_node(
+        &mut parser.tree_pool,
+        symbol,
+        children,
+        production_id,
+        parser.language,
+    )
+}
+
+pub(super) unsafe fn parser_shift(
+    parser: &mut TSParser,
+    version: StackVersion,
+    state: TSStateId,
+    lookahead: Subtree,
+    extra: bool,
+) {
+    let mut arena = parser.tree_pool.arena();
+    let is_leaf = lookahead.child_count(arena) == 0;
+    let subtree_to_push = if extra != lookahead.extra(arena) && is_leaf {
+        let mut result = lookahead.make_mut(&mut parser.tree_pool);
+        arena = parser.tree_pool.arena();
+        result.set_extra(arena, extra);
+        result.into_immutable()
+    } else {
+        lookahead
+    };
+
+    let stack = ptr_mut(parser.stack);
+    stack_push(stack, version, subtree_to_push, state);
+    if subtree_to_push.has_external_tokens(arena) {
+        stack.set_last_external_token(version, subtree_to_push.last_external_token(arena));
+    }
+}
+
+unsafe fn parser_finish_reduction(
+    parser: &mut TSParser,
+    version: StackVersion,
+    mut parent: MutableSubtree,
+    state: TSStateId,
+    action: ReduceAction,
+    end_of_non_terminal_extra: bool,
+    parse_state: TSStateId,
+) {
+    let arena = parser.tree_pool.arena();
+    let next_state = if action.symbol != TS_BUILTIN_SYM_ERROR
+        && action.symbol != TS_BUILTIN_SYM_ERROR_REPEAT
+        && u32::from(action.symbol) >= language_full(parser.language).token_count
+    {
+        parser
+            .goto_table
+            .lookup(state, action.symbol)
+            .unwrap_or_else(|| language_lookup(parser.language, state, action.symbol))
+    } else {
+        ts_language_next_state(parser.language, state, action.symbol)
+    };
+
+    if end_of_non_terminal_extra && next_state == state {
+        parent.heap_data_mut(arena).set_extra(true);
+    }
+    parent.heap_data_mut(arena).parse_state = parse_state;
+    parent
+        .heap_data_mut(arena)
+        .children_mut()
+        .dynamic_precedence += action.dynamic_precedence;
+
+    let stack = ptr_mut(parser.stack);
+    stack_push(stack, version, parent.into_immutable(), next_state);
+    for &extra in parser.trailing_extras.as_slice() {
+        stack_push(stack, version, extra, next_state);
+    }
+}
+
+/// Build and push one parent for every distinct path produced by a GLR pop.
+///
+/// Equivalent child lists are resolved before the parent is pushed, and the
+/// resulting version is merged back into an earlier compatible version.
+pub(super) unsafe fn parser_reduce(
+    parser: &mut TSParser,
+    version: StackVersion,
+    action: ReduceAction,
+    invalidate_parse_state: bool,
+    end_of_non_terminal_extra: bool,
+) -> StackVersion {
+    let mut arena = parser.tree_pool.arena();
+    let initial_version_count = ptr_ref(parser.stack).version_count();
+    if initial_version_count == 1 && !invalidate_parse_state && !end_of_non_terminal_extra {
+        if let Some(mut children) =
+            stack_pop_count_from_window(ptr_mut(parser.stack), version, action.count)
+        {
+            subtree_array_remove_trailing_extras(&mut children, &mut parser.trailing_extras, arena);
+            let parent = parser_new_node(
+                parser,
+                action.symbol,
+                children,
+                u32::from(action.production_id),
+            );
+            let state = ptr_ref(parser.stack).head(version).state();
+            parser_finish_reduction(parser, version, parent, state, action, false, state);
+            return version;
+        }
+    }
+
+    stack_materialize(ptr_mut(parser.stack));
+    let pop = stack_pop_count(ptr_mut(parser.stack), version, action.count);
+    let stack = ptr_mut(parser.stack);
+    let halted_version_count = stack.halted_version_count();
+    let mut removed_version_count = 0;
+    let mut i = 0;
+    while i < pop.size {
+        let mut slice = ptr::read(pop.get_unchecked(i));
+        let slice_version = slice.version - removed_version_count;
+
+        if slice_version > MAX_VERSION_COUNT + MAX_VERSION_COUNT_OVERFLOW + halted_version_count {
+            stack_remove_version(stack, slice_version);
+            subtree_array_delete(&mut parser.tree_pool, &mut slice.subtrees);
+            removed_version_count += 1;
+            while i + 1 < pop.size {
+                parser_log(parser, |_, log| {
+                    log.write_str("aborting reduce with too many versions")
+                });
+                let mut next_slice = ptr::read(pop.get_unchecked(i + 1));
+                if next_slice.version != slice.version {
+                    break;
+                }
+                subtree_array_delete(&mut parser.tree_pool, &mut next_slice.subtrees);
+                i += 1;
+            }
+            i += 1;
+            continue;
+        }
+
+        let mut children = slice.subtrees;
+        subtree_array_remove_trailing_extras(&mut children, &mut parser.trailing_extras, arena);
+        let mut parent = parser_new_node(
+            parser,
+            action.symbol,
+            children,
+            u32::from(action.production_id),
+        );
+        arena = parser.tree_pool.arena();
+
+        while i + 1 < pop.size {
+            let next_slice = ptr::read(pop.get_unchecked(i + 1));
+            if next_slice.version != slice.version {
+                break;
+            }
+            i += 1;
+            let mut next_children = next_slice.subtrees;
+            subtree_array_remove_trailing_extras(
+                &mut next_children,
+                &mut parser.trailing_extras2,
+                arena,
+            );
+
+            if parser_select_children(parser, parent.into_immutable(), &next_children) {
+                subtree_array_clear(&mut parser.tree_pool, &mut parser.trailing_extras);
+                parent.into_immutable().release(&mut parser.tree_pool);
+                core::mem::swap(&mut parser.trailing_extras, &mut parser.trailing_extras2);
+                parent = parser_new_node(
+                    parser,
+                    action.symbol,
+                    next_children,
+                    u32::from(action.production_id),
+                );
+                arena = parser.tree_pool.arena();
+            } else {
+                arena = parser.tree_pool.arena();
+                subtree_array_clear(&mut parser.tree_pool, &mut parser.trailing_extras2);
+                subtree_array_delete(&mut parser.tree_pool, &mut next_children);
+            }
+        }
+
+        let state = stack.head(slice_version).state();
+        let parse_state = if invalidate_parse_state || pop.size > 1 || initial_version_count > 1 {
+            TS_TREE_STATE_NONE
+        } else {
+            state
+        };
+        parser_finish_reduction(
+            parser,
+            slice_version,
+            parent,
+            state,
+            action,
+            end_of_non_terminal_extra,
+            parse_state,
+        );
+
+        for candidate in 0..slice_version {
+            if candidate != version && stack_merge(stack, candidate, slice_version) {
+                removed_version_count += 1;
+                break;
+            }
+        }
+        i += 1;
+    }
+
+    if stack.version_count() > initial_version_count {
+        initial_version_count
+    } else {
+        STACK_VERSION_NONE
+    }
+}
+
+/// Finish a successful version and select its best complete syntax tree.
+pub(super) unsafe fn parser_accept(
+    parser: &mut TSParser,
+    version: StackVersion,
+    lookahead: Subtree,
+) {
+    let mut arena = parser.tree_pool.arena();
+    debug_assert!(lookahead.is_eof(arena));
+    let stack = ptr_mut(parser.stack);
+    stack_push(stack, version, lookahead, 1);
+
+    let pop = stack_pop_all(stack, version);
+    for slice in pop.as_slice() {
+        let mut trees = ptr::read(&slice.subtrees);
+        let mut root = NULL_SUBTREE;
+        let mut index = trees.len();
+        while index > 0 {
+            index -= 1;
+            let tree = trees.as_slice()[index];
+            if !tree.extra(arena) {
+                debug_assert!(!tree.is_inline());
+                let children = tree.children(arena);
+                for &child in children {
+                    child.retain(arena);
+                }
+                trees.splice(index as u32, 1, children.len() as u32, children.as_ptr());
+                arena = parser.tree_pool.arena();
+                let symbol = tree.symbol(arena);
+                let production_id = u32::from(tree.heap_data(arena).children().production_id);
+                root = parser_new_node(parser, symbol, trees, production_id).into_immutable();
+                tree.release(&mut parser.tree_pool);
+                break;
+            }
+        }
+
+        debug_assert!(!root.is_null());
+        parser.accept_count += 1;
+        if parser.finished_tree.is_null() || parser_select_tree(parser, parser.finished_tree, root)
+        {
+            if !parser.finished_tree.is_null() {
+                parser.finished_tree.release(&mut parser.tree_pool);
+            }
+            parser.finished_tree = root;
+        } else {
+            root.release(&mut parser.tree_pool);
+        }
+    }
+
+    stack_remove_version(stack, pop.as_slice()[0].version);
+    stack.halt(version);
+}

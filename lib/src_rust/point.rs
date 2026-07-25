@@ -76,7 +76,7 @@ pub fn point_edit(point: &mut TSPoint, byte: &mut u32, edit: &TSInputEdit) {
     }
 }
 
-/// C-compatible `ts_point_edit` — exported for use by remaining C code (node.c).
+/// C-compatible entry point for editing a byte/point pair.
 ///
 /// # Safety
 /// `point`, `byte`, and `edit` must be valid, non-null pointers.

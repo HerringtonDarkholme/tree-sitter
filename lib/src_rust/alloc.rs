@@ -25,7 +25,7 @@ unsafe fn realloc_default(buffer: *mut c_void, size: usize) -> *mut c_void {
     result
 }
 
-fn alloc_failed(action: &str, size: usize) -> ! {
+pub fn alloc_failed(action: &str, size: usize) -> ! {
     #[cfg(feature = "std")]
     std::eprintln!("tree-sitter failed to {action} {size} bytes");
     #[cfg(not(feature = "std"))]
@@ -50,9 +50,8 @@ extern "C" {
 
 // Global allocation hooks.
 //
-// These symbols match the C core's allocator variables. Remaining C code and
-// Rust runtime code both go through this indirection, so `ts_set_allocator`
-// changes allocation behavior consistently across the mixed runtime.
+// These symbols preserve the public allocator ABI. Rust runtime allocations
+// go through this indirection so `ts_set_allocator` changes them consistently.
 #[no_mangle]
 pub static mut ts_current_malloc: unsafe extern "C" fn(usize) -> *mut c_void = ts_malloc_default_c;
 #[no_mangle]
