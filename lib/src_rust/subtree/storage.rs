@@ -640,8 +640,23 @@ pub unsafe fn subtree_array_remove_trailing_extras(
     destination: &mut SubtreeArray,
     arena: *mut SubtreeArena,
 ) {
+    // `arena` is only a snapshot the caller happened to have on hand; by the
+    // time this function runs (or partway through its own loop, via
+    // `destination.push` below needing to grow arena-backed storage) the
+    // shared subtree arena may already have been moved by `realloc` in
+    // `subtree_arena_grow`, leaving the snapshot dangling. Every caller of
+    // this function reduces from an arena-backed `trees`/`destination`, so on
+    // each iteration re-resolve the *current* arena straight from the array's
+    // own pool rather than trusting the possibly-stale parameter -- the same
+    // way `as_slice()`/`resolved_contents()` already re-resolve their own
+    // storage address from the live pool instead of caching it. The
+    // parameter is kept only as a fallback for the (currently unused) case of
+    // a non-arena-backed array, where no pool exists to re-resolve from and
+    // the snapshot cannot have been invalidated by anything in this loop.
     destination.size = 0;
     while let Some(&last) = trees.as_slice().last() {
+        let live_arena = trees.current_arena();
+        let arena = if live_arena.is_null() { arena } else { live_arena };
         if last.extra(arena) {
             trees.size -= 1;
             destination.push(last);
