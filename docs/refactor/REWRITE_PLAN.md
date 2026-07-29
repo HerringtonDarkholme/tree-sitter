@@ -66,9 +66,9 @@ Useful focused checks while iterating:
 
 ```bash
 cargo fmt --check --all
-cargo clippy -p tree-sitter --lib --tests -- -D warnings
-cargo test -p tree-sitter --test abi_surface
-cargo test -p tree-sitter --lib
+cargo clippy -p tree-sitter-sg --lib --tests -- -D warnings
+cargo test -p tree-sitter-sg --test abi_surface
+cargo test -p tree-sitter-sg --lib
 ```
 
 If `cargo test --all` fails for an unrelated workspace fixture/setup reason,

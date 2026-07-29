@@ -27,9 +27,9 @@ Additional focused gates:
 
 ```bash
 cargo fmt --check --all
-cargo clippy -p tree-sitter --lib --tests -- -D warnings
-cargo test -p tree-sitter --test abi_surface
-cargo test -p tree-sitter --lib
+cargo clippy -p tree-sitter-sg --lib --tests -- -D warnings
+cargo test -p tree-sitter-sg --test abi_surface
+cargo test -p tree-sitter-sg --lib
 ```
 
 When fixtures are available, broader migration checks should include:

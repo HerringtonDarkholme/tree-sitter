@@ -638,7 +638,7 @@ edition = "2021"
 publish = false
 
 [dependencies]
-tree-sitter = {{ path = "{}" }}
+tree-sitter = {{ package = "tree-sitter-sg", path = "{}" }}
 tree-sitter-typescript = {{ path = "{}" }}
 
 [patch.crates-io]

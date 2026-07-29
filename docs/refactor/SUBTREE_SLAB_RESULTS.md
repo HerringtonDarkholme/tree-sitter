@@ -117,8 +117,8 @@ the clear adverse memory case under either comparison.
 
 Passed:
 
-- `cargo clippy -p tree-sitter --lib --tests -- -D warnings`
-- `cargo test -p tree-sitter --test abi_surface`
+- `cargo clippy -p tree-sitter-sg --lib --tests -- -D warnings`
+- `cargo test -p tree-sitter-sg --test abi_surface`
 - full Bash corpus, including error recovery and missing-token paths
 - `cargo xtask core-parity` for all 15 configured TypeScript/TSX samples
 - `cargo xtask ast-grep-gate` for all 4 packages

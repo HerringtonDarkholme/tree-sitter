@@ -6,7 +6,7 @@ Tree-sitter's core is implemented in Rust (exposed through a C ABI), so the libr
 Tree-sitter directory, run:
 
 ```sh
-cargo build --release --package tree-sitter
+cargo build --release --package tree-sitter-sg
 ```
 
 This produces a static library (`libtree_sitter.a`) and a dynamic library in `target/release/`, both exposing the C

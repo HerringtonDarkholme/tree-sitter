@@ -15,7 +15,7 @@
 //! regenerate the snapshot:
 //!
 //! ```sh
-//! UPDATE_ABI_GOLDEN=1 cargo test -p tree-sitter --test abi_surface
+//! UPDATE_ABI_GOLDEN=1 cargo test -p tree-sitter-sg --test abi_surface
 //! ```
 
 use std::fs;
@@ -128,7 +128,7 @@ fn abi_surface_is_frozen() {
     let expected = fs::read_to_string(&golden).unwrap_or_else(|_| {
         panic!(
             "missing {}. Generate it with:\n  \
-             UPDATE_ABI_GOLDEN=1 cargo test -p tree-sitter --test abi_surface",
+             UPDATE_ABI_GOLDEN=1 cargo test -p tree-sitter-sg --test abi_surface",
             golden.display()
         )
     });
@@ -143,7 +143,7 @@ fn abi_surface_is_frozen() {
              {} exports added/changed:\n{}\n\
              {} exports removed/changed:\n{}\n\n\
              If this change is INTENTIONAL, regenerate the snapshot:\n  \
-             UPDATE_ABI_GOLDEN=1 cargo test -p tree-sitter --test abi_surface",
+             UPDATE_ABI_GOLDEN=1 cargo test -p tree-sitter-sg --test abi_surface",
             added.len(),
             added
                 .iter()

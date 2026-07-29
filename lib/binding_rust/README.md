@@ -2,8 +2,8 @@
 
 [![crates.io badge]][crates.io]
 
-[crates.io]: https://crates.io/crates/tree-sitter
-[crates.io badge]: https://img.shields.io/crates/v/tree-sitter.svg?color=%23B48723
+[crates.io]: https://crates.io/crates/tree-sitter-sg
+[crates.io badge]: https://img.shields.io/crates/v/tree-sitter-sg.svg?color=%23B48723
 
 Rust bindings to the [Tree-sitter][] parsing library.
 
@@ -21,7 +21,7 @@ Then, add a language as a dependency:
 
 ```toml
 [dependencies]
-tree-sitter = "0.24"
+tree-sitter-sg = "0.27"
 tree-sitter-rust = "0.23"
 ```
 
@@ -102,7 +102,7 @@ assert_eq!(
 
 ## Features
 
-- **std** - This feature is enabled by default and allows `tree-sitter` to use the standard library.
+- **std** - This feature is enabled by default and allows `tree-sitter-sg` to use the standard library.
   - Error types implement the `std::error:Error` trait.
   - `regex` performance optimizations are enabled.
   - The DOT graph methods are enabled.

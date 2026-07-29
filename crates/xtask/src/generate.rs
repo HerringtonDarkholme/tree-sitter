@@ -77,7 +77,7 @@ pub fn run_bindings() -> Result<()> {
         .and_then(|packages| packages.as_array())
         .and_then(|packages| {
             packages.iter().find_map(|package| {
-                if package["name"] == "tree-sitter" {
+                if package["name"] == "tree-sitter-sg" {
                     package.get("rust_version").and_then(|v| v.as_str())
                 } else {
                     None
@@ -85,7 +85,7 @@ pub fn run_bindings() -> Result<()> {
             })
         })
     else {
-        panic!("Failed to find tree-sitter package in cargo metadata");
+        panic!("Failed to find tree-sitter-sg package in cargo metadata");
     };
 
     let no_copy = [

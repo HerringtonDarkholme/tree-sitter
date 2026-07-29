@@ -154,7 +154,7 @@ walkdir = "2.5.0"
 wasmparser = "0.243.0"
 webbrowser = "1.0.5"
 
-tree-sitter = { version = "0.27.0", path = "./lib" }
+tree-sitter = { package = "tree-sitter-sg", version = "0.27.0", path = "./lib" }
 tree-sitter-generate = { version = "0.27.0", path = "./crates/generate" }
 tree-sitter-loader = { version = "0.27.0", path = "./crates/loader" }
 tree-sitter-config = { version = "0.27.0", path = "./crates/config" }

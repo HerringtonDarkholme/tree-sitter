@@ -1,5 +1,5 @@
 [package]
-name = "tree-sitter"
+name = "tree-sitter-sg"
 version.workspace = true
 description = "Rust bindings to the Tree-sitter parsing library"
 authors.workspace = true
@@ -8,7 +8,7 @@ rust-version = "1.77"
 readme = "binding_rust/README.md"
 homepage.workspace = true
 repository.workspace = true
-documentation = "https://docs.rs/tree-sitter"
+documentation = "https://docs.rs/tree-sitter-sg"
 license.workspace = true
 keywords.workspace = true
 categories = [
@@ -59,6 +59,7 @@ cc.workspace = true
 serde_json.workspace = true
 
 [lib]
+name = "tree_sitter"
 path = "binding_rust/lib.rs"
 # rlib only, like upstream: Rust consumers link the rlib. The standalone C
 # library (libtree-sitter) is produced on demand via

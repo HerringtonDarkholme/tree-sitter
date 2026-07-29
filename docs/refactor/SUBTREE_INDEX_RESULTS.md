@@ -840,9 +840,9 @@ than copying the entire live tree after every parse.
 Passed:
 
 - `cargo fmt --check --all`
-- `cargo clippy -p tree-sitter --lib --tests -- -D warnings`
-- `cargo test -p tree-sitter --lib` (26/26)
-- `cargo test -p tree-sitter --test abi_surface`
+- `cargo clippy -p tree-sitter-sg --lib --tests -- -D warnings`
+- `cargo test -p tree-sitter-sg --lib` (26/26)
+- `cargo test -p tree-sitter-sg --test abi_surface`
 - `CARGO_NET_OFFLINE=true cargo xtask core-parity` (15/15 samples)
 - `CARGO_NET_OFFLINE=true cargo xtask ast-grep-gate` (4/4 packages)
 - all parser, node, cursor, query, corpus, and tree tests reached by

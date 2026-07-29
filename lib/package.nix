@@ -5,7 +5,7 @@
   rustPlatform,
   stdenv,
 }:
-# The tree-sitter core now lives in Rust (lib/src_rust). The `tree-sitter` crate
+# The tree-sitter core now lives in Rust (lib/src_rust). The `tree-sitter-sg` crate
 # is rlib-only (like upstream); the standalone C library is produced by asking
 # cargo for the `cdylib` + `staticlib` crate-types explicitly, which emits
 # libtree_sitter.{a,so,dylib} (Rust core + the lexer logging shim). This
@@ -27,7 +27,7 @@ rustPlatform.buildRustPackage {
   buildPhase = ''
     runHook preBuild
     cargo rustc --release --offline -j $NIX_BUILD_CORES \
-      --package tree-sitter --crate-type cdylib --crate-type staticlib
+      --package tree-sitter-sg --crate-type cdylib --crate-type staticlib
     runHook postBuild
   '';
 

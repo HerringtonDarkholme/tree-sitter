@@ -151,7 +151,7 @@ fn update_crates(current_version: &Version, next_version: &Version) -> Result<()
     cmd.arg("--no-git-commit")
         .arg("--yes")
         .arg("--force")
-        .arg("tree-sitter{,-cli,-config,-generate,-loader,-highlight,-tags}")
+        .arg("tree-sitter{-sg,-cli,-config,-generate,-loader,-highlight,-tags}")
         .arg("--ignore-changes")
         .arg("crates/language/*");
 
