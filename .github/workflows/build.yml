@@ -148,7 +148,7 @@ jobs:
     - name: Build target
       run: cargo build --release --target='${{ matrix.target }}' $PACKAGE
       env:
-        PACKAGE: ${{ matrix.platform == 'wasm32' && '-p tree-sitter' || '' }}
+        PACKAGE: ${{ matrix.platform == 'wasm32' && '-p tree-sitter-sg' || '' }}
 
     - name: Build C library
       if: matrix.platform != 'wasm32'
@@ -156,7 +156,7 @@ jobs:
       # The crate is rlib-only (like upstream); the C core is now Rust, so request
       # the C-library crate-types explicitly here instead of compiling lib/src/*.c.
       # This replaces the retired per-platform make/CMake C-library builds.
-      run: cargo rustc -p tree-sitter --release --target='${{ matrix.target }}' --crate-type cdylib --crate-type staticlib
+      run: cargo rustc -p tree-sitter-sg --release --target='${{ matrix.target }}' --crate-type cdylib --crate-type staticlib
 
     - name: Cache fixtures
       id: cache
@@ -184,7 +184,7 @@ jobs:
       run: |
         config=()
         if [[ -n "${{ matrix.cross }}" ]]; then
-          config=(--config 'profile.dev.package."tree-sitter".opt-level=3')
+          config=(--config 'profile.dev.package."tree-sitter-sg".opt-level=3')
         fi
         cargo test --target='${{ matrix.target }}' "${config[@]}"
 
