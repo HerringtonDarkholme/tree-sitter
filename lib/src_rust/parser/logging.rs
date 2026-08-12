@@ -116,7 +116,7 @@ pub(super) unsafe fn parser_symbol_name(
     language: *const TSLanguage,
     symbol: TSSymbol,
 ) -> *const c_char {
-    ts_language_symbol_name(language, symbol)
+    ts_language_symbol_name(language, symbol).cast::<c_char>()
 }
 
 pub(super) unsafe fn parser_tree_name(
