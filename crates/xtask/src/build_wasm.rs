@@ -250,7 +250,7 @@ fn build_core_staticlib() -> Result<PathBuf> {
         "rustc",
         "--release",
         "--package",
-        "tree-sitter",
+        "tree-sitter-sg",
         "--target",
         "wasm32-unknown-emscripten",
         "--crate-type",

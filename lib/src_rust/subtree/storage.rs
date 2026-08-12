@@ -656,7 +656,11 @@ pub unsafe fn subtree_array_remove_trailing_extras(
     destination.size = 0;
     while let Some(&last) = trees.as_slice().last() {
         let live_arena = trees.current_arena();
-        let arena = if live_arena.is_null() { arena } else { live_arena };
+        let arena = if live_arena.is_null() {
+            arena
+        } else {
+            live_arena
+        };
         if last.extra(arena) {
             trees.size -= 1;
             destination.push(last);

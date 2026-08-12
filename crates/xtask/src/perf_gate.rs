@@ -366,7 +366,7 @@ impl Statistics {
         sorted.sort_by(f64::total_cmp);
         let middle = sorted.len() / 2;
         let median = if sorted.len() % 2 == 0 {
-            (sorted[middle - 1] + sorted[middle]) / 2.0
+            sorted[middle - 1].midpoint(sorted[middle])
         } else {
             sorted[middle]
         };
@@ -394,15 +394,15 @@ mod tests {
     #[test]
     fn statistics_report_median_and_sample_standard_deviation() {
         let statistics = Statistics::from_values(&[10.0, 12.0, 14.0]);
-        assert_eq!(statistics.median, 12.0);
-        assert_eq!(statistics.mean, 12.0);
-        assert_eq!(statistics.stddev, 2.0);
+        assert!((statistics.median - 12.0).abs() < f64::EPSILON);
+        assert!((statistics.mean - 12.0).abs() < f64::EPSILON);
+        assert!((statistics.stddev - 2.0).abs() < f64::EPSILON);
         assert!((statistics.cv_percent - 16.666_666_666_7).abs() < 1e-9);
     }
 
     #[test]
     fn even_sample_count_uses_middle_pair_for_median() {
         let statistics = Statistics::from_values(&[20.0, 10.0, 40.0, 30.0]);
-        assert_eq!(statistics.median, 25.0);
+        assert!((statistics.median - 25.0).abs() < f64::EPSILON);
     }
 }
